@@ -573,9 +573,9 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
 /// A new-session send (`new_session: true`, no thread) spawns a fresh session
 /// with the first prompt enqueued onto its `main` thread before the launch:
 /// Delta mints the session id up front, so the response carries the real,
-/// already-persisted session/thread/send ids. The `spawning` row stays out of
-/// the session list until its first hook activates it (so the list gains the
-/// row exactly when it used to: at registration).
+/// already-persisted session/thread/send ids — and the `spawning` row is listed
+/// straight away, so the browser can focus the new session the moment its first
+/// send is accepted rather than waiting for the launch's first hook.
 #[tokio::test]
 async fn new_session_send_spawns_and_persists_first_prompt() {
     let (app, tmux, transcript_path, _state) = build_app();
@@ -600,20 +600,41 @@ async fn new_session_send_spawns_and_persists_first_prompt() {
     let thread_id = body["send"]["thread_id"].as_i64().expect("thread id");
     assert!(thread_id > 0, "the send targets the real main thread");
 
-    // The eager row exists but stays out of the session list until its first
-    // hook activates it: a message-less `spawning` session is not listable
-    // (the browser could not open it, and the optimistic new-session chip
-    // would mis-bind to it).
+    // The eager row is listed immediately, before any hook, carrying its
+    // `spawning` status — that is what lets the browser focus the new session
+    // on acceptance. It is not yet `open`: no pane is bound to it, so nothing
+    // may attach to (or dispatch into) it until its first hook registers it.
     let (status, list) = get(&app, "/api/sessions").await;
     assert_eq!(status, StatusCode::OK);
     let sessions = list["sessions"].as_array().expect("sessions array");
-    assert!(
-        sessions.is_empty(),
-        "a message-less spawning session is not listed before its first hook"
+    assert_eq!(
+        sessions.len(),
+        1,
+        "the session is listed from the moment its first send is accepted"
     );
-    // The open-send list is queryable for the eager row even before it is
-    // listable: the browser keeps the first-send pending chip rendered from
-    // server state across the spawn window.
+    assert_eq!(sessions[0]["session"]["id"], session_id);
+    assert_eq!(sessions[0]["session"]["status"], "spawning");
+    assert_eq!(sessions[0]["open"], false);
+    assert!(
+        sessions[0]["last_activity_at"].is_null(),
+        "a session that has ingested nothing has no activity yet"
+    );
+
+    // Nothing can be dispatched into it while it is starting: no pane is bound
+    // and its transcript does not exist, so a second send is refused rather
+    // than resumed into a second agent.
+    let (status, refused) = post_json(
+        &app,
+        "/api/sends",
+        json!({ "thread_id": thread_id, "text": "too early" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(refused["code"], "session_spawning");
+
+    // The open-send list is queryable for the eager row: the browser keeps the
+    // first-send pending chip rendered from server state across the spawn
+    // window — and the refused send left nothing behind.
     let (status, body) = get(&app, &format!("/api/sessions/{session_id}/sends")).await;
     assert_eq!(status, StatusCode::OK);
     let sends = body["sends"].as_array().expect("sends array");

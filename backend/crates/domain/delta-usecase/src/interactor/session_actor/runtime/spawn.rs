@@ -164,6 +164,18 @@ impl SessionRuntime {
         true
     }
 
+    /// Whether a fresh spawn is still awaiting its first bind — the session row
+    /// exists (and is listed as `spawning`) but no pane is mapped to it yet.
+    ///
+    /// Read by the enqueue path: a send arriving in this window must not take
+    /// the `ensure_open()` → `open_session()` (`claude --resume <id>`) route,
+    /// which would launch a second agent against a transcript the first launch
+    /// has not written yet. Non-destructive, unlike
+    /// [`Self::take_unbound_pending`], so the spawn still binds normally.
+    pub fn has_pending_spawn(&self) -> bool {
+        self.pending_spawn.is_some()
+    }
+
     /// Take the still-pending (unbound) spawn, removing it.
     ///
     /// Used by the failure path (the `SessionEnd` hook): a launch that ended

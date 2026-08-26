@@ -105,8 +105,9 @@ pub(crate) async fn list_sessions(
 /// Used by cold start (an empty session list) and the "New" button. Returns the
 /// tmux/process lifecycle so the UI can show a "starting" indicator until the
 /// session is usable. The conversational session is still registered later by
-/// the first `UserPromptSubmit` hook, so a freshly created session has no
-/// `Session` row yet (it appears in `GET /api/sessions` once registered).
+/// the first `UserPromptSubmit` hook, but the row is written before the launch,
+/// so the session is listed by `GET /api/sessions` straight away with
+/// `status: "spawning"` and flips to `active` at registration.
 pub(crate) async fn create_session(
     State(state): State<AppState>,
 ) -> Result<Json<WireNewSessionResponse>, ApiError> {

@@ -121,6 +121,16 @@ const item: SessionListItem = {
   last_activity_at: '2026-01-01T00:00:00Z',
 };
 
+/**
+ * The same row before its launch registered: listed from the moment its first
+ * send was accepted, so `status: 'spawning'` and no live pane yet.
+ */
+const spawningItem: SessionListItem = {
+  ...item,
+  session: { ...item.session, status: 'spawning' },
+  open: false,
+};
+
 function renderNode(props: Partial<ComponentProps<typeof SessionNode>>) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -345,6 +355,30 @@ describe('SessionNode branch display', () => {
   });
 });
 
+describe('SessionNode status', () => {
+  it('reads Open for a live session and Closed for a torn-down one', () => {
+    const { unmount } = renderNode({});
+    expect(screen.getByRole('status', { name: 'Open' })).toBeInTheDocument();
+    unmount();
+
+    renderNode({ item: { ...item, open: false } });
+    expect(screen.getByRole('status', { name: 'Closed' })).toBeInTheDocument();
+  });
+
+  it('reads Starting while the session’s launch has not registered', () => {
+    // A starting session is listed from the moment its first send is accepted.
+    // It has no live pane, so it would otherwise read `Closed` — which invites
+    // a resume the server refuses. `Starting` is the third state: something to
+    // wait out, not to act on.
+    renderNode({ item: spawningItem });
+
+    expect(screen.getByRole('status', { name: 'Starting' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('status', { name: 'Closed' }),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe('SessionNode card styling', () => {
   it('applies no color transition to the card, so the hover highlight is instant', () => {
     // Hover feedback is a "respond now" affordance: a `transition-colors` on
@@ -437,6 +471,24 @@ describe('SessionNode kebab menu', () => {
     // The menu trigger must still be enabled for a closed session — copying the
     // id is useful regardless of whether the session is running.
     renderNode({ item: { ...item, open: false } });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Session actions for/ }),
+    );
+
+    expect(
+      screen.getByRole('menuitem', { name: 'Copy session ID' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('menuitem', { name: 'Close' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('offers no "Close" while the session is still starting', () => {
+    // A starting session is listed (and clickable) from the moment its first
+    // send is accepted, but nothing is bound to it yet: there is no pane to
+    // tear down, and closing it would leave the launch coming up orphaned.
+    renderNode({ item: spawningItem });
 
     fireEvent.click(
       screen.getByRole('button', { name: /Session actions for/ }),

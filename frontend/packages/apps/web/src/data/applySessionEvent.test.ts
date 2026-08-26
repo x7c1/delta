@@ -4,6 +4,7 @@ import { queryKeys } from '@delta/api-client';
 import type { Send } from '@delta/wire-gen';
 import { applySessionEvent } from './applySessionEvent';
 import { noticeOf, useLiveStore } from '../store/liveStore';
+import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
 
 const FOCUSED = 'sess-1';
 
@@ -30,10 +31,12 @@ describe('applySessionEvent', () => {
       localSends: {},
       spawns: [],
       runningThreads: {},
+      runningSubagents: {},
       notices: {},
       unread: {},
       streamingMessages: {},
     });
+    useNavStore.setState({ focusedSessionId: FOCUSED });
   });
 
   it('invalidates the focused active thread, its session threads, and its open sends on turn_started', () => {
@@ -162,6 +165,50 @@ describe('applySessionEvent', () => {
     });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['messages', 5] });
     expect(useLiveStore.getState().runningThreads).toEqual({});
+  });
+
+  it('refetches the open sends on a subagent start and finish', () => {
+    // Closes the race an in-flight open-sends envelope would otherwise win,
+    // wiping the subagent this event just recorded — see the
+    // `subagent_started` case in `applySessionEvent` for the mechanism.
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    applySessionEvent(
+      {
+        kind: 'subagent_started',
+        session_id: FOCUSED,
+        thread_id: 5,
+        tool_use_id: 'toolu_1',
+        subagent_type: 'general-purpose',
+        description: 'Probe the codebase',
+        background: false,
+      },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['session-sends', FOCUSED],
+    });
+    expect(useLiveStore.getState().runningSubagents[FOCUSED]).toHaveLength(1);
+
+    invalidate.mockClear();
+    applySessionEvent(
+      {
+        kind: 'subagent_finished',
+        session_id: FOCUSED,
+        thread_id: 5,
+        tool_use_id: 'toolu_1',
+      },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['session-sends', FOCUSED],
+    });
+    expect(useLiveStore.getState().runningSubagents[FOCUSED]).toBeUndefined();
   });
 
   it('refetches the open sends of a non-focused session on its turn events', () => {
@@ -456,8 +503,35 @@ describe('applySessionEvent', () => {
     expect(
       queryClient.getQueryData(queryKeys.sessionSends('sess-spawned')),
     ).toBeUndefined();
-    // The spawn never registered, so there is no session row to refetch.
-    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['sessions'] });
+    // The session WAS listed — from the moment its send was accepted — so the
+    // list must refetch to lose the reaped row.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions'] });
+    // The failure named a session other than the focused one, so focus stays.
+    expect(useNavStore.getState().focusedSessionId).toBe(FOCUSED);
+  });
+
+  it('moves focus back to the new-session screen when the focused spawn fails', () => {
+    // The workspace focuses a spawn as soon as its send is accepted, so a
+    // failure usually lands on the session the user is looking at.
+    const queryClient = new QueryClient();
+    useNavStore.setState({ focusedSessionId: 'sess-spawned' });
+    useLiveStore.getState().trackSpawn({
+      sessionId: 'sess-spawned',
+      threadId: 42,
+      text: 'new session',
+      workdir: null,
+      launchOptionIds: [],
+    });
+
+    applySessionEvent(
+      { kind: 'spawn_failed', session_id: 'sess-spawned', pane_token: 'pane-1' },
+      queryClient,
+      null,
+      'sess-spawned',
+    );
+
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    expect(useLiveStore.getState().spawns[0].status).toBe('failed');
   });
 
   it('routes a permission request to the store as a notice', () => {

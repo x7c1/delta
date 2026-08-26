@@ -107,6 +107,7 @@ export interface ApiClientOptions {
  */
 export type ApiErrorCode =
   | 'resume_unavailable'
+  | 'session_spawning'
   | 'permission_not_pending'
   | 'permission_decision_unsupported'
   | 'question_not_pending'
@@ -212,8 +213,9 @@ export class ApiClient {
   /**
    * `POST /api/sessions` — eagerly spawn a brand-new session.
    *
-   * The session does not appear in `GET /api/sessions` until its first hook
-   * binds it (announced via `session_registered`).
+   * The session is listed by `GET /api/sessions` right away with
+   * `status: "spawning"`; its first hook flips it to `active` (announced via
+   * `session_registered`).
    */
   newSession(): Promise<NewSessionResponse> {
     return this.request<NewSessionResponse>('/api/sessions', {

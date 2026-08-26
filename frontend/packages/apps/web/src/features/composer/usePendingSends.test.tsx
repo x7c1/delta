@@ -16,7 +16,11 @@ import { ApiClient, queryKeys } from '@delta/api-client';
 import type { SendsResponse, Turn } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
-import { usePendingSends, type PendingSurface } from './usePendingSends';
+import {
+  usePendingSends,
+  type PendingEntry,
+  type PendingSurface,
+} from './usePendingSends';
 
 const server = setupServer(...createHandlers());
 
@@ -46,6 +50,31 @@ function mount(
       </ApiProvider>
     </QueryClientProvider>,
   );
+}
+
+/**
+ * Mount the hook and keep the latest entries it returns in a plain box, so a
+ * test can assert on the merged rows themselves rather than on whatever a
+ * component happens to render from them.
+ */
+function captureEntries(surface: PendingSurface): { current: PendingEntry[] } {
+  const box: { current: PendingEntry[] } = { current: [] };
+  function Capture() {
+    box.current = usePendingSends(surface);
+    return null;
+  }
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const client = new ApiClient({ baseUrl: 'http://localhost' });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ApiProvider client={client}>
+        <Capture />
+      </ApiProvider>
+    </QueryClientProvider>,
+  );
+  return box;
 }
 
 function reset() {
@@ -115,5 +144,54 @@ describe('usePendingSends active-turn seeding', () => {
         [SESSION_ID]: { 1: true },
       });
     });
+  });
+});
+
+describe('usePendingSends on a starting session', () => {
+  beforeEach(reset);
+
+  it('renders the first prompt once, not twice', async () => {
+    // A session is focused the moment its first send is accepted, so its
+    // thread surface is on screen while the launch comes up. That one prompt
+    // has two client-side records — the server's open-send row (`dispatched`,
+    // from `GET /api/sessions/{id}/sends`) and the local send `useSubmitSend`
+    // tracked from the same POST response — and they carry the SAME send id.
+    // The strip must merge them into one row; a duplicate here would show the
+    // user their message twice for the whole spawn window.
+    const send = {
+      id: 77,
+      session_id: SESSION_ID,
+      thread_id: 1,
+      semantic_parent_uuid: null,
+      text: 'first message',
+      locator_quote: null,
+      status: 'dispatched' as const,
+      matched_uuid: null,
+      created_at: '2026-01-01T00:00:00Z',
+    };
+    server.use(
+      http.get('*/api/sessions/:id/sends', () =>
+        HttpResponse.json({
+          sends: [send],
+          turn: { state: 'idle' } satisfies Turn,
+          permission: null,
+          question: null,
+        } satisfies SendsResponse),
+      ),
+    );
+    useLiveStore.getState().recordLocalSend({
+      sendId: send.id,
+      sessionId: SESSION_ID,
+      threadId: 1,
+      text: send.text,
+      createdAt: 0,
+    });
+
+    const entries = captureEntries(THREAD_SURFACE);
+
+    // Wait for the server row to land (before it does, only the local twin is
+    // there), then assert it did not double up with the local one.
+    await waitFor(() => expect(entries.current[0]?.kind).toBe('server'));
+    expect(entries.current).toHaveLength(1);
   });
 });

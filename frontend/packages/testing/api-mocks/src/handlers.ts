@@ -150,7 +150,8 @@ export interface MockApi {
    * - `turn_started` matches the named send (terminal — it leaves the open list);
    * - `turn_completed` matches every open send of the session;
    * - `turn_interrupted` cancels every open send of the session;
-   * - `session_registered` activates a `spawning` row (it becomes listable, open);
+   * - `session_registered` activates a `spawning` row (already listed; it now
+   *   reads `active` and becomes open);
    * - `session_opened` / `session_closed` flip the live flag;
    * - `spawn_failed` deletes the spawned row and everything it owns, exactly as
    *   the server reaps a spawn that never bound.
@@ -215,18 +216,18 @@ export function createMockApi(): MockApi {
 
   const handlers: RequestHandler[] = [
     http.get('*/api/sessions', ({ request }) => {
-      // A still-`spawning` row stays out of the list, mirroring the real
-      // server: it becomes listable when `session_registered` activates it
-      // (see `applyEvent`). Mock spawns never hold messages before that, so
-      // the server's message-guard has no mock counterpart.
-      const items = store.sessions
-        .filter((entry) => !entry.spawning)
-        .map((entry) => ({
-          session: entry.session,
-          open: entry.open,
-          main_thread_id: entry.mainThreadId,
-          last_activity_at: lastActivityAt(entry.threads.map((t) => t.id)),
-        }));
+      // Every row is listed, a still-`spawning` one included, mirroring the
+      // real server: a session appears the moment its first send is accepted,
+      // reading `status: 'spawning'` (and `open: false` — no pane is bound to
+      // it yet) until `session_registered` activates it. A spawn that never
+      // binds is reaped, and `spawn_failed` deletes its row here too — see
+      // `applyEvent` for both transitions.
+      const items = store.sessions.map((entry) => ({
+        session: entry.session,
+        open: entry.open,
+        main_thread_id: entry.mainThreadId,
+        last_activity_at: lastActivityAt(entry.threads.map((t) => t.id)),
+      }));
       // Most-recently-active first, mirroring the backend: key on last activity,
       // falling back to the session's own created_at when it has no messages,
       // with a deterministic created_at-then-id tiebreaker. ISO-8601 UTC strings
@@ -506,9 +507,9 @@ export function createMockApi(): MockApi {
       }
 
       // New-session target: mirror the server's eager rows. The session row
-      // (`spawning`, unlisted until registered), its `main` thread, and the
-      // send are all created before the response, so the returned send carries
-      // real session/thread/send ids. `locator_quote` is ignored for this
+      // (`spawning`, listed but not open until registered), its `main` thread,
+      // and the send are all created before the response, so the returned send
+      // carries real session/thread/send ids. `locator_quote` is ignored for this
       // target (a brand-new session has no earlier passage to anchor).
       if (isNewSessionSend(payload)) {
         const sessionId = mockSpawnSessionId(store.nextSpawnOrdinal++);
@@ -574,6 +575,21 @@ export function createMockApi(): MockApi {
       const session = findSessionByThread(target.thread_id);
       if (!session) {
         return HttpResponse.json({ error: 'unknown thread' }, { status: 404 });
+      }
+      // A still-`spawning` session is listed, so its composer is reachable
+      // before its launch has registered — and there is nothing to dispatch
+      // into yet. The real server refuses such a send with `409`
+      // `session_spawning` rather than resuming a second agent; mirror it, or a
+      // frontend that stopped disabling the starting composer would sail
+      // through the suites.
+      if (session.spawning) {
+        return HttpResponse.json(
+          {
+            error: `session is still starting: ${session.session.id}`,
+            code: 'session_spawning',
+          },
+          { status: 409 },
+        );
       }
       // Sending to a closed session resumes it first; if that session can no
       // longer be resumed (transcript gone), the send is refused before any
@@ -1186,8 +1202,8 @@ export function createMockApi(): MockApi {
         clearSubagents(event.session_id);
         break;
       case 'session_registered': {
-        // The spawn bound: the row activates and becomes listable, with a
-        // live pane — exactly what the real registration implies.
+        // The spawn bound: the already-listed row activates and gains a live
+        // pane — exactly what the real registration implies.
         const entry = store.sessions.find(
           (s) => s.session.id === event.session_id,
         );

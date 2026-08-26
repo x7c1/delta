@@ -135,6 +135,11 @@ Response:
 - **409** — the target's session is closed and cannot be resumed because its
   transcript is gone (body `code: "resume_unavailable"`). No send is enqueued and
   the session stays closed.
+- **409** (body `code: "session_spawning"`) — the target's session is still
+  starting: it is listed from the moment its first send was accepted, but its
+  launch has not registered yet, so there is nothing to dispatch into. No send is
+  enqueued and no second agent is launched; the same request succeeds once the
+  session's first hook arrives (it is then `active`).
 
 ### `GET /api/sessions/{id}/sends`
 

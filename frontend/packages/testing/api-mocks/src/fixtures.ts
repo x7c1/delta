@@ -576,9 +576,11 @@ export interface MockStore {
     resumable?: boolean;
     /**
      * True for an eagerly-created new-session row whose spawn has not bound
-     * yet. Mirrors the real server's message-less `spawning` status: the row
-     * is addressable by id (its sends list works) but stays out of
-     * `GET /api/sessions` until a `session_registered` event activates it.
+     * yet. Mirrors the real server's `spawning` status: the row is listed and
+     * addressable by id from the moment its first send is accepted, but it is
+     * not open (no pane is bound to it) until a `session_registered` event
+     * activates it — or a `spawn_failed` deletes it. A send aimed at it while
+     * it is starting is refused with `409 session_spawning`, as on the server.
      */
     spawning?: boolean;
     /**

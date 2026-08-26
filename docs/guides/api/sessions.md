@@ -56,10 +56,21 @@ Response:
 
   `open` is `true` when the session currently has a live pane (resumable without
   `--resume`). `last_activity_at` is the ISO-8601 UTC timestamp of the session's
-  most recent message (`MAX(message.created_at)`), or `null` when the session
-  has no messages yet. `next_cursor` is an opaque token to fetch the following
-  page, or `null` on the last page. Returns an empty list until the first
-  session is registered.
+  most recent message (`MAX(message.created_at)`), or `null` when the session has
+  no messages yet. `next_cursor` is an opaque token to fetch the following page,
+  or `null` on the last page.
+
+  A session is listed from the moment its first send is accepted: the
+  `POST /api/sends` that spawns it writes the row before the launch, and that row
+  carries `status: "spawning"` until the session's first hook registers it — the
+  same row then reads `status: "active"` (announced as `session_registered`). A
+  spawning session is addressable like any other (its threads and open sends are
+  queryable, so the browser can focus it and show its first prompt right away),
+  but it is not open — no pane is bound to it yet, so it reports `open: false`
+  and nothing can be dispatched into it: a send to it is refused with
+  `409 session_spawning` (see [sends.md](sends.md)). A spawn that never binds is
+  reaped, so its row disappears from this list again and the client hears
+  `spawn_failed`.
 
 - **400** — a malformed `cursor`.
 
@@ -73,9 +84,10 @@ Claude Code's hooks point back at this server without touching any
 `.claude/settings.json` in the working directory.
 
 This drives only the tmux/process lifecycle; the conversational session is still
-registered later by the first `SessionStart`/`UserPromptSubmit` hook, so a
-freshly created session has no `Session` row yet (it appears in
-`GET /api/sessions` once registered). The call is idempotent while a spawn is
+registered later by the first `SessionStart`/`UserPromptSubmit` hook. The row
+itself is written before the launch, exactly as for a new-session send, so the
+session is listed by `GET /api/sessions` straight away with `status: "spawning"`
+and flips to `active` at registration. The call is idempotent while a spawn is
 still live: a second call with a session already coming up reuses it.
 
 Authentication is assumed: the server relies on a cached Claude Code token (or

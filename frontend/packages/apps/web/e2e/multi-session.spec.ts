@@ -187,7 +187,9 @@ test('closing an open session via its kebab menu clears its open dot', async ({
   ).toHaveCount(0);
 });
 
-test('starting a new session shows the optimistic send', async ({ page }) => {
+test('starting a new session focuses it before any hook registers it', async ({
+  page,
+}) => {
   await useManualEventControl(page);
   await page.goto('/');
 
@@ -198,12 +200,28 @@ test('starting a new session shows the optimistic send', async ({ page }) => {
   await page.getByTestId('new-session-tab-directory').click();
   await page.getByTestId('workdir-use-current').click();
   await expect(page.getByTestId('workdir-chip')).toBeVisible();
+  await expect(page.getByTestId('new-session-empty')).toBeVisible();
 
-  // The first Send is shown optimistically in the pending queue.
   await page.getByRole('textbox').fill('hello new session');
   await page.getByRole('button', { name: 'Send' }).click();
 
+  // The POST is the whole hand-off: the server wrote the session row before
+  // launching anything, so the workspace leaves the new-session screen for the
+  // spawned session immediately. No `session_registered` has been emitted here
+  // (events are under manual control), so this is the acceptance moment alone.
+  await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
+  const starting = page
+    .locator('li')
+    .filter({ has: page.getByRole('status', { name: 'Starting', exact: true }) });
+  await expect(starting).toHaveCount(1);
+
+  // Its first prompt rides along in the pending strip, exactly once, and the
+  // composer says the session is not ready for another one yet.
   const pending = page.getByTestId('pending-item');
   await expect(pending).toHaveCount(1);
   await expect(pending).toContainText('hello new session');
+  await expect(page.getByRole('textbox')).toHaveAttribute(
+    'placeholder',
+    'This session is starting…',
+  );
 });

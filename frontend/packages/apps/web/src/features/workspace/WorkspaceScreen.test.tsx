@@ -138,6 +138,26 @@ function threadRow(title: string): HTMLElement {
   return row;
 }
 
+/**
+ * A session id the mock backend never lists — the state a just-accepted spawn
+ * is in for the moment before its refetch lands. Using a listed id for that
+ * case would hide exactly the bug these tests guard: focus is handed over on
+ * the tracked spawn alone, never on the row being present.
+ */
+const UNLISTED_SPAWN_ID = 'sess-just-spawned';
+
+/** A tracked new-session spawn, as `useSubmitSend` records it from the POST. */
+function trackedSpawn(sessionId: string) {
+  return {
+    sessionId,
+    threadId: SESSION_2_MAIN_THREAD_ID,
+    text: 'first message',
+    workdir: null,
+    launchOptionIds: [],
+    status: 'spawning' as const,
+  };
+}
+
 describe('WorkspaceScreen multi-session', () => {
   beforeEach(() => {
     useNavStore.setState({
@@ -351,58 +371,105 @@ describe('WorkspaceScreen multi-session', () => {
     ).toBeUndefined();
   });
 
-  it('focuses a tracked spawn by its real id once it appears in the list', async () => {
+  it('focuses a tracked spawn by its real id before its row is listed', async () => {
     // The new-session POST returned real ids and the spawn was tracked; the
-    // user is still on the new-session screen. When the spawned session
-    // registers (here: it is simply present in the list), the workspace must
-    // focus exactly that id — not whatever happens to be at the head — and
-    // stop tracking the spawn.
+    // user is still on the new-session screen. The workspace switches to that
+    // exact id straight away — the server wrote the row before launching, so
+    // there is nothing left to wait for — even though the id is nowhere in the
+    // loaded session list (its refetch is still in flight). The tracked spawn
+    // stays: it is what marks this focus as legitimately not-yet-listed, so the
+    // list reconciliation must leave it standing rather than bouncing focus to
+    // the head of the list.
     useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
-    useLiveStore.setState({
-      spawns: [
-        {
-          sessionId: SESSION_ID_2,
-          threadId: SESSION_2_MAIN_THREAD_ID,
-          text: 'first message',
-          workdir: null,
-          status: 'spawning' as const,
-        },
-      ],
-    });
+    useLiveStore.setState({ spawns: [trackedSpawn(UNLISTED_SPAWN_ID)] });
 
     renderScreen();
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(UNLISTED_SPAWN_ID),
+    );
+    expect(useLiveStore.getState().spawns).toHaveLength(1);
+
+    // Let the list load and the reconciliation run: the focus survives it.
+    await waitFor(() =>
+      expect(screen.getAllByTestId('session-node').length).toBeGreaterThan(0),
+    );
+    expect(useNavStore.getState().focusedSessionId).toBe(UNLISTED_SPAWN_ID);
+
+    // And the centre pane says the session is on its way. "Select a session"
+    // here would read as if the user's Send had gone nowhere.
+    expect(screen.getByText('Starting the session…')).toBeInTheDocument();
+  });
+
+  it('releases the tracked spawn when the session registers', async () => {
+    // The launch bound: `session_registered` ends the spawn window, so the
+    // tracked entry is dropped there. Focus stays on the session, by then an
+    // ordinary listed row.
+    useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    useLiveStore.setState({ spawns: [trackedSpawn(SESSION_ID_2)] });
+
+    const { queryClient } = renderScreen();
 
     await waitFor(() =>
       expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID_2),
     );
-    expect(useLiveStore.getState().spawns).toHaveLength(0);
+
+    deliverEvent(queryClient, {
+      kind: 'session_registered',
+      session_id: SESSION_ID_2,
+    });
+
+    await waitFor(() => expect(useLiveStore.getState().spawns).toHaveLength(0));
+    expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID_2);
   });
 
-  it('does not steal focus for a registering spawn when the user moved on', async () => {
-    // The spawn registers while the user is viewing another session: the
-    // tracked spawn is released (its chip is over) but focus must stay put.
-    useNavStore.setState({ focusedSessionId: SESSION_ID });
-    useLiveStore.setState({
-      spawns: [
-        {
-          sessionId: SESSION_ID_2,
-          threadId: SESSION_2_MAIN_THREAD_ID,
-          text: 'first message',
-          workdir: null,
-          status: 'spawning' as const,
-        },
-      ],
+  it('returns to the new-session screen when the focused spawn fails', async () => {
+    // The launch never bound and the server reaped it. The focused session is
+    // about to stop existing, and the Retry / Dismiss card renders on the
+    // new-session surface — so focus goes back there, with the failed spawn
+    // still tracked for that card.
+    useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    useLiveStore.setState({ spawns: [trackedSpawn(UNLISTED_SPAWN_ID)] });
+
+    const { queryClient } = renderScreen();
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(UNLISTED_SPAWN_ID),
+    );
+
+    deliverEvent(queryClient, {
+      kind: 'spawn_failed',
+      session_id: UNLISTED_SPAWN_ID,
+      pane_token: 'delta-9',
     });
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS),
+    );
+    expect(useLiveStore.getState().spawns).toEqual([
+      expect.objectContaining({
+        sessionId: UNLISTED_SPAWN_ID,
+        status: 'failed',
+      }),
+    ]);
+  });
+
+  it('does not steal focus for a spawn when the user moved on', async () => {
+    // The POST was accepted while the user was already viewing another
+    // session: the spawn is tracked, but focus must stay where they put it.
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    useLiveStore.setState({ spawns: [trackedSpawn(UNLISTED_SPAWN_ID)] });
 
     renderScreen();
 
     await waitFor(() =>
-      expect(useLiveStore.getState().spawns).toHaveLength(0),
+      expect(screen.getAllByTestId('session-node').length).toBeGreaterThan(0),
     );
     expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID);
+    expect(useLiveStore.getState().spawns).toHaveLength(1);
   });
 
-  it('keeps the settings overlay open when a registering spawn takes focus', async () => {
+  it('keeps the settings overlay open when a spawn takes focus', async () => {
     // The user sent the first message and opened Settings while the spawn was
     // still registering. The handover that follows is the WORKSPACE resolving
     // focus on its own — not the user navigating — so it must leave the modal
@@ -414,17 +481,7 @@ describe('WorkspaceScreen multi-session', () => {
       focusedSessionId: NEW_SESSION_FOCUS,
       settingsOpen: true,
     });
-    useLiveStore.setState({
-      spawns: [
-        {
-          sessionId: SESSION_ID_2,
-          threadId: SESSION_2_MAIN_THREAD_ID,
-          text: 'first message',
-          workdir: null,
-          status: 'spawning' as const,
-        },
-      ],
-    });
+    useLiveStore.setState({ spawns: [trackedSpawn(SESSION_ID_2)] });
 
     renderScreen();
 

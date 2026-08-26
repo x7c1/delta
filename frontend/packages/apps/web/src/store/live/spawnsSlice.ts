@@ -40,7 +40,11 @@ export interface SpawnsSlice {
    * the spawn is registered as `failed` immediately.
    */
   trackSpawn: (spawn: Omit<SpawnItem, 'status'>) => void;
-  /** Drop a tracked spawn (it registered, or its failure was dismissed). */
+  /**
+   * Drop a tracked spawn. A spawn that comes up is released by its
+   * `session_registered` event (see {@link reduceSessionRegistered}), so this
+   * is the manual path: a failed spawn dismissed, or retried.
+   */
   clearSpawn: (sessionId: SessionId) => void;
 }
 
@@ -114,4 +118,31 @@ export const reduceSpawnFailed: EventReducer<SpawnsState, 'spawn_failed'> = (
     spawns,
     ...dropLocalSendsForSession(state, event.session_id),
   };
+};
+
+/**
+ * The spawn came up: its launch bound and the server activated the row. The
+ * tracked entry has done its job — the workspace focused the session when the
+ * POST accepted it, and the pending chip now renders from the session's own
+ * open-send list — so drop it here.
+ *
+ * This is the release point precisely because it is the LAST thing the entry
+ * is needed for: while a spawn is tracked the workspace refuses to reconcile
+ * focus away from its id (the row may not be in the loaded page yet), and
+ * `usePendingSends` shows its first prompt on the new-session surface for a
+ * user who navigated back there. Only a `spawning` entry is dropped: a
+ * `failed` one is a Retry/Dismiss card the user still has to answer, and a
+ * registration for a session this client never spawned matches nothing.
+ */
+export const reduceSessionRegistered: EventReducer<
+  SpawnsState,
+  'session_registered'
+> = (state, event) => {
+  const spawns = state.spawns.filter(
+    (spawn) =>
+      !(spawn.sessionId === event.session_id && spawn.status === 'spawning'),
+  );
+  // Nothing matched — a foreign id, or an entry already flipped to `failed`.
+  // Hand back the identity-stable state so subscribers are not notified.
+  return spawns.length === state.spawns.length ? state : { spawns };
 };
