@@ -180,7 +180,7 @@ where
                         thread_id: Some(thread_id),
                     });
                 }
-                Effect::LocalCommandTurnEnded => {
+                Effect::LocalCommandTurnEnded { send_id } => {
                     // A dispatched send was consumed by a client-side slash
                     // command, not by a model turn: either a KNOWN local command
                     // (e.g. `/review-pr`) or an UNKNOWN command Claude rejected
@@ -188,20 +188,20 @@ where
                     // entirely client-side: they fire no `UserPromptSubmit` echo
                     // and no `Stop` hook, so without this the turn machine stays
                     // in `AwaitingEcho` forever and every later send defers to
-                    // `queued` and never dispatches. The
-                    // `SendMatched` effect emitted alongside this one already
-                    // consumed the send (it left `dispatched`), so a
-                    // `TurnCompleted(Completed)` fact here (which maps to the
-                    // machine's `Stop` input) returns the machine to `Idle`
-                    // cleanly: its defensive requeue/sweep is a no-op against the
-                    // now-matched row. Reuse `TurnInterrupted` as the browser
-                    // signal — like an interrupt or an API-error abort, no `Stop`
-                    // hook fired, so the browser must clear the stuck pending
-                    // chip. The caller releases any queued send after this sync
-                    // returns (it keys on `TurnInterrupted`), so no keystrokes are
-                    // sent from inside the ingestion path.
+                    // `queued` and never dispatches. The `SendMatched` effect
+                    // emitted alongside this one already consumed the send (it
+                    // left `dispatched`), so the machine is told exactly that:
+                    // `TurnInput::CommandResolved` names the resolved send, and
+                    // `(AwaitingEcho { n }, CommandResolved { n })` returns to
+                    // `Idle` with nothing orphaned. Reuse `TurnInterrupted` as
+                    // the browser signal — like an interrupt or an API-error
+                    // abort, no `Stop` hook fired, so the browser must clear
+                    // the stuck pending chip. The caller releases any queued
+                    // send after this sync returns (it keys on
+                    // `TurnInterrupted`), so no keystrokes are sent from inside
+                    // the ingestion path.
                     let thread_id = self.store.in_progress_turn_thread(session_id).await?;
-                    self.apply_turn_end(crate::agent::TurnStatus::Completed)
+                    self.apply_turn_input(crate::turn::TurnInput::CommandResolved { send_id })
                         .await?;
                     events.push(SessionEvent::TurnInterrupted {
                         session_id: session_id.clone(),
@@ -211,7 +211,32 @@ where
                 Effect::SendMatched {
                     send_id,
                     matched_uuid,
+                    attributed,
                 } => {
+                    // `attributed` is a report, not a gate: the send is bound to
+                    // this line either way — a prompt echo by position, a
+                    // slash command's own command line or unknown-command
+                    // notice by position too. On the unrecognized path only,
+                    // re-read the send row so the warning can name both texts
+                    // — the shape Claude Code recorded is what makes it
+                    // actionable.
+                    if !attributed {
+                        let sent = self.store.send(send_id).await?;
+                        let recorded = messages
+                            .iter()
+                            .find(|message| message.uuid == matched_uuid)
+                            .and_then(|message| message.content_text.as_deref());
+                        tracing::warn!(
+                            session_id = %session_id,
+                            send_id,
+                            matched_uuid = %matched_uuid.as_str(),
+                            sent = %sent.as_ref().map(|s| s.text.trim()).unwrap_or("<send row gone>"),
+                            recorded = %recorded.unwrap_or("").trim(),
+                            "the transcript line consuming this send does not spell the \
+                             send's own text (Claude Code rewrote it, most likely); the \
+                             line is still attributed to the send's thread"
+                        );
+                    }
                     self.store.mark_send_matched(send_id, &matched_uuid).await?;
                 }
                 Effect::SubagentLaunched {

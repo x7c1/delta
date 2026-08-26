@@ -17,9 +17,9 @@ pub struct AttributionState {
     /// Seeded from the latest persisted user message (defaulting to `main`).
     pub carry_thread: ThreadId,
     /// The outstanding `dispatched` sends in dispatch (FIFO) order. Only the
-    /// head is ever compared — mirroring the store's `head_dispatched_send`,
-    /// which always returns the oldest `dispatched` row — and a match consumes
-    /// it, exposing the next.
+    /// head is ever correlated against — mirroring the store's
+    /// `head_dispatched_send`, which always returns the oldest `dispatched`
+    /// row — and the next human line consumes it, exposing the next send.
     ///
     /// Under the single-outstanding dispatch rule a live session seeds at most
     /// one element here. The queue form is what makes whole-history replay
@@ -60,10 +60,10 @@ pub struct AttributionState {
     /// command's `<local-command-stdout>`/`<local-command-stderr>` output.
     /// Recording the caveat's `promptId` here lets the later same-`promptId`
     /// lines be recognized as command machinery (folded to [`Role::Meta`]) and
-    /// the command-name line, when it equals an outstanding send, be resolved as
-    /// a degenerate completed turn — a local command fires no `UserPromptSubmit`
-    /// echo and no `Stop`, so without this its dispatched send would wedge the
-    /// turn machine in `AwaitingEcho` forever.
+    /// the command-name line, when the head outstanding send is itself a slash
+    /// command, be resolved as a degenerate completed turn — a local command
+    /// fires no `UserPromptSubmit` echo and no `Stop`, so without this its
+    /// dispatched send would wedge the turn machine in `AwaitingEcho` forever.
     ///
     /// Threaded through the fold state (like `launched_threads`) so a batch cut
     /// between the caveat and its trailing lines still groups them. It is NOT

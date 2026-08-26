@@ -24,6 +24,11 @@ const FAKE_CREATED_AT: &str = "2026-01-01T00:00:00Z";
 /// single test.
 const FAKE_UPDATED_AT: &str = "2026-01-02T00:00:00Z";
 
+/// The `held_at` stamp both hold producers write (the boot restore and the
+/// echo-deadline park). Fixed for the same reason as [`FAKE_CREATED_AT`]: a
+/// test asserts the marker's presence, never its value.
+const HELD_AT: &str = "2026-01-01T00:00:00Z";
+
 /// Derive a thread's `root_message_uuid` the way the SQL store does: the
 /// `semantic_parent_uuid` of the thread's first semantically parented message,
 /// falling back to its earliest semantically parented send.
@@ -557,7 +562,7 @@ impl SessionStore for FakeStore {
             status: SendStatus::Dispatched,
             matched_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
-            restored_at: None,
+            held_at: None,
         };
         g.sends.push(send.clone());
         Ok(send)
@@ -583,7 +588,7 @@ impl SessionStore for FakeStore {
             status: SendStatus::Queued,
             matched_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
-            restored_at: None,
+            held_at: None,
         };
         g.sends.push(send.clone());
         Ok(send)
@@ -601,9 +606,9 @@ impl SessionStore for FakeStore {
             .filter(|s| {
                 &s.session_id == session_id
                     && s.status == SendStatus::Queued
-                    // Restored rows never dispatch automatically; they wait
+                    // Held rows never dispatch automatically; they wait
                     // for an explicit release, mirroring the SQL filter.
-                    && s.restored_at.is_none()
+                    && s.held_at.is_none()
             })
             .min_by_key(|s| s.id)
             .cloned())
@@ -653,20 +658,35 @@ impl SessionStore for FakeStore {
             .filter(|s| s.status == SendStatus::Dispatched)
         {
             s.status = SendStatus::Queued;
-            s.restored_at = Some("2026-01-01T00:00:00Z".into());
+            s.held_at = Some(HELD_AT.into());
             restored += 1;
         }
         Ok(restored)
     }
 
-    async fn release_restored_send(&self, id: i64) -> Result<bool> {
+    async fn hold_send_for_release(&self, id: i64) -> Result<bool> {
         let mut g = self.inner.lock().unwrap();
         if let Some(s) = g
             .sends
             .iter_mut()
-            .find(|s| s.id == id && s.status == SendStatus::Queued && s.restored_at.is_some())
+            .find(|s| s.id == id && s.status == SendStatus::Dispatched)
         {
-            s.restored_at = None;
+            s.status = SendStatus::Queued;
+            s.held_at = Some(HELD_AT.into());
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    async fn release_held_send(&self, id: i64) -> Result<bool> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(s) = g
+            .sends
+            .iter_mut()
+            .find(|s| s.id == id && s.status == SendStatus::Queued && s.held_at.is_some())
+        {
+            s.held_at = None;
             Ok(true)
         } else {
             Ok(false)
@@ -701,6 +721,22 @@ impl SessionStore for FakeStore {
             s.matched_uuid = Some(matched_uuid.clone());
         }
         Ok(())
+    }
+
+    async fn settle_send_delivered(&self, id: i64) -> Result<bool> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(s) = g
+            .sends
+            .iter_mut()
+            .find(|s| s.id == id && s.status == SendStatus::Dispatched)
+        {
+            // Delivered, but no transcript line claimed it: `matched_uuid`
+            // stays `None`, exactly as the SQL leaves the column `NULL`.
+            s.status = SendStatus::Matched;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>> {

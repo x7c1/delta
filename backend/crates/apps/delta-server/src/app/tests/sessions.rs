@@ -84,8 +84,8 @@ async fn release_send_replies_conflict_with_the_stable_code_when_not_releasable(
     // The route exists and the SendNotReleasable error surfaces as a 409
     // carrying the stable `send_not_releasable` code the frontend
     // branches on. With a fresh store no send exists, which is one of the
-    // conflict cases (unknown / never-restored / already-released rows
-    // all take the same guarded-UPDATE path, pinned at the store and
+    // conflict cases (unknown / never-held / already-released rows all
+    // take the same guarded-UPDATE path, pinned at the store and
     // interactor levels).
     let response = router(test_state().await)
         .oneshot(

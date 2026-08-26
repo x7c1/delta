@@ -135,20 +135,28 @@ export interface ExternalInputNotice {
 
 /**
  * A composed message was never delivered: two dispatches in a row produced no
- * matching echo, so the server parked it (cancelled the row) rather than
- * re-typing it on every idle forever. The notice is what keeps that from being
- * a silent loss — it shows the text back to the user so they can copy or
- * re-send it.
+ * echo at all, so the server parked it — the row went back to `queued` held
+ * for an explicit release — rather than re-typing it on every idle forever.
+ *
+ * The message itself is server state (the held row is in the open-send list,
+ * where the pending strip renders it with Send and Cancel), so this notice
+ * carries no copy of the text: its whole job is to explain *why* that row is
+ * waiting, which nothing else in the UI can say.
  *
  * Session-scoped, not thread-scoped: an undelivered message matters wherever
  * the user is looking. Survives turn ends (see the lifecycle table below);
- * removed on dismiss or when the session closes.
+ * removed on dismiss and when the session closes.
+ *
+ * It also goes as soon as the row it points at stops being held, because the
+ * notice reads as an instruction about a row the user can still see: a release
+ * arrives as `send_dispatched` for the same {@link sendId} (see
+ * {@link reduceSendDispatched}), and a cancel, which the server announces not
+ * at all, is reported by the strip itself (see
+ * {@link NoticesSlice.forgetParkedSend}).
  */
 export interface SendParkedNotice {
   kind: 'send_parked';
   sendId: number;
-  /** The composed message that never reached the session. */
-  text: string;
   at: number;
 }
 
@@ -221,7 +229,9 @@ const NOTICE_LIFECYCLE: Record<
   external_input: ['turn_end', 'session_closed'],
   // An undelivered message stays undelivered when the turn ends — and the park
   // happens inside a turn that is about to end, so a `turn_end` sweep would
-  // erase the notice seconds after it appeared.
+  // erase the notice seconds after it appeared. What does end it early is the
+  // held row leaving that state, which is not a lifecycle moment at all: see
+  // `reduceSendDispatched` and `forgetParkedSend`.
   send_parked: ['session_closed'],
   // A resume-impossible session is closed and turn-less; only a successful
   // open proves the flag stale.
@@ -346,6 +356,14 @@ export interface NoticesSlice {
   dismissExternalInput: (sessionId: SessionId) => void;
   /** Dismiss the parked-send notice for a session. */
   dismissSendParked: (sessionId: SessionId) => void;
+  /**
+   * Drop the parked-send notice for `sendId`, if that is the one the session
+   * is showing. For the cancel the strip issues on a held row: the server
+   * broadcasts nothing for a cancel (it flips the row to `cancelled` and drops
+   * it from the open list), so this is the only signal that the row the notice
+   * points at has gone. A no-op when the notice names a different send.
+   */
+  forgetParkedSend: (sessionId: SessionId, sendId: number) => void;
 }
 
 export const createNoticesSlice: StateCreator<
@@ -507,6 +525,16 @@ export const createNoticesSlice: StateCreator<
         state.notices,
         sessionId,
         (notice) => notice.kind === 'send_parked',
+      );
+      return Object.keys(next).length > 0 ? next : state;
+    }),
+
+  forgetParkedSend: (sessionId, sendId) =>
+    set((state) => {
+      const next = removeNotices(
+        state.notices,
+        sessionId,
+        (notice) => notice.kind === 'send_parked' && notice.sendId === sendId,
       );
       return Object.keys(next).length > 0 ? next : state;
     }),
@@ -683,17 +711,40 @@ export const reduceExternalInput: EventReducer<
   'external_input'
 > = (state) => state;
 
+// A send was typed into the pane. Held rows have no automatic trigger, so a
+// dispatch of one the user was told about can only be a release someone
+// pressed Send for — here or in another client. The notice's whole job was to
+// explain why that row sat in the queue, and it no longer does: drop it, or
+// the card keeps pointing at a row that is now on its way (and, once the turn
+// matches it, gone from the strip entirely).
+//
+// Every other send dispatches with no parked notice to match, which is exactly
+// the identity-stable no-op `removeNotices` returns.
+export const reduceSendDispatched: EventReducer<
+  NoticesState,
+  'send_dispatched'
+> = (state, event) => {
+  const next = removeNotices(
+    state.notices,
+    event.session_id,
+    (notice) =>
+      notice.kind === 'send_parked' && notice.sendId === event.send_id,
+  );
+  return Object.keys(next).length > 0 ? next : state;
+};
+
 // A send the server gave up delivering. Unlike external input this is
 // recorded for EVERY session, focused or not: the user's own message
 // was dropped, and they must find out when they come back to that
 // session, not only if they happened to be watching it.
 //
-// The park is also terminal for the send itself, so its tracked local twin is
+// The park also ends the send's in-progress life, so its tracked local twin is
 // dropped here — the same reconciliation the cancel mutation does with
 // `forgetLocalSend`. Without it the twin would render as an in-progress chip
-// forever: the server row is gone from the open list (so nothing overrides the
-// twin), and a park needs no turn to end — the echo-deadline watchdog parks a
-// send whose turn NEVER started — so no turn-end sweep would ever drain it.
+// forever: a park needs no turn to end — the echo-deadline watchdog parks a
+// send whose turn NEVER started — so no turn-end sweep would ever drain it. The
+// held server row the park puts back in the open list is what the strip renders
+// instead, with its Send and Cancel actions.
 export const reduceSendParked: EventReducer<
   NoticesState & Pick<SendsSlice, 'localSends'>,
   'send_parked'
@@ -701,7 +752,6 @@ export const reduceSendParked: EventReducer<
   const notices = withNotice(state.notices, event.session_id, {
     kind: 'send_parked',
     sendId: event.send_id,
-    text: event.text,
     at: Date.now(),
   });
   if (!(event.send_id in state.localSends)) {

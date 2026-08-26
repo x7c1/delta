@@ -17,20 +17,23 @@
 //! ## Turn-start / send-row model (the C3e-2 decision)
 //!
 //! An adapter-backed turn does **not** use Claude's `Dispatch → AwaitingEcho →
-//! EchoMatched` correlation: the adapter's `send` (Codex: `turn/start`) returns
-//! synchronously and is the authoritative confirmation that the turn started,
-//! so there is no echo to match. Routing such a send through the Claude path
-//! would leave it `AwaitingEcho` and then `CancelIfUnmatched` at turn end —
-//! cancelling a *successful* send, because the adapter never calls
-//! `mark_send_matched` from an echo.
+//! PromptSubmitted` correlation: the adapter's `send` (Codex: `turn/start`)
+//! returns synchronously and is the authoritative confirmation that the turn
+//! started, so there is no echo to match. Routing such a send through the
+//! Claude path would leave it `AwaitingEcho` for a `UserPromptSubmit` that
+//! never comes: nothing would consume it, so the turn end would requeue and
+//! re-type a message the provider has already accepted.
 //!
-//! So an adapter-backed turn is tracked **`ExternalPrompt`-style** ([`TurnInput::ExternalPrompt`]
-//! → `InFlight { send_id: None }`): the FSM never references the send id, so a
+//! So an adapter-backed turn is tracked as a prompt that consumed no send
+//! ([`TurnInput::PromptSubmitted`] with `send_id: None` →
+//! `InFlight { send_id: None }`): the FSM never references the send id, so a
 //! later `TurnCompleted → Stop` transitions straight to `Idle` and orphans
 //! nothing. The send **row** is completed out of band, at the `turn/start`
 //! acknowledgement, by marking it matched to the provider's turn id — so it
 //! leaves the open/`dispatched` set immediately rather than lingering. Claude's
 //! FSM table is untouched.
+//!
+//! [`TurnInput::PromptSubmitted`]: crate::turn::TurnInput::PromptSubmitted
 
 use std::sync::Arc;
 
@@ -285,11 +288,11 @@ where
     /// 2. `adapter.send` starts the turn synchronously; on error, cancel the
     ///    just-written row so it does not linger in the open list, then
     ///    propagate — the same rollback the opening turn used.
-    /// 3. Track the turn **`ExternalPrompt`-style** (`send_id: None`): the FSM
-    ///    never references this send id, so a later `TurnCompleted → Stop`
-    ///    transitions to `Idle` without cancelling the successful send. See the
-    ///    module docs for why an adapter-backed turn does not use Claude's echo
-    ///    correlation.
+    /// 3. Track the turn as a prompt that consumed no send (`send_id: None`):
+    ///    the FSM never references this send id, so a later `TurnCompleted →
+    ///    Stop` transitions to `Idle` without cancelling the successful send.
+    ///    See the module docs for why an adapter-backed turn does not use
+    ///    Claude's echo correlation.
     /// 4. Complete the `send` row at the `turn/start` acknowledgement, not by
     ///    echo: mark it matched to the provider's turn id (falling back to the
     ///    provider session id when the ack carried none), so it leaves the
@@ -329,7 +332,7 @@ where
                 return Err(err);
             }
         };
-        self.apply_turn_input(crate::turn::TurnInput::ExternalPrompt)
+        self.apply_turn_input(crate::turn::TurnInput::PromptSubmitted { send_id: None })
             .await?;
         let matched = receipt
             .provider_message_id

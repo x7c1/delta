@@ -12,8 +12,8 @@
 //!
 //! The echo deadline is the net underneath that: after a bounded wait the
 //! silence itself becomes a turn input. These tests pin both halves of it —
-//! the retry that self-heals, and the park that hands the text back and frees
-//! the queue.
+//! the retry that self-heals, and the park that frees the queue while keeping
+//! the message in it, held for the user's explicit release.
 
 use std::time::{Duration, Instant};
 
@@ -35,8 +35,9 @@ fn past_deadline(from: Instant) -> Instant {
 }
 
 /// A send swallowed twice: the first deadline re-types it behind an `Escape`,
-/// the second parks it with its text handed back — and the send queued behind
-/// it dispatches instead of waiting forever.
+/// the second parks it — held in the queue for an explicit release, with its
+/// text announced — and the send queued behind it dispatches past it instead of
+/// waiting forever.
 #[tokio::test]
 async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
     let (ix, mut events) = interactor_with_event_sink();
@@ -122,8 +123,8 @@ async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
     );
 
     // SECOND DEADLINE: the retry was swallowed too, so the budget is spent.
-    // The send is parked — cancelled, out of the open list, its text handed
-    // back — and the queue behind it moves.
+    // The send is parked — held in the queue for an explicit release, its text
+    // announced — and the queue behind it moves past it.
     let dispatched = ix
         .sweep_echo_deadlines(past_deadline(Instant::now()))
         .await
@@ -137,11 +138,20 @@ async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
     );
 
     let parked = ix.store().send(send.id).await.unwrap().unwrap();
-    assert_eq!(parked.status, SendStatus::Cancelled, "parked, not retried");
+    assert_eq!(
+        parked.status,
+        SendStatus::Queued,
+        "parked back into the queue, not cancelled and not retried",
+    );
+    assert!(
+        parked.held_at.is_some(),
+        "the hold marker is what keeps the parked row out of every automatic \
+         dispatch until the user releases it",
+    );
     let open = ix.store().open_sends(&session).await.unwrap();
     assert!(
-        !open.iter().any(|s| s.id == send.id),
-        "the parked send leaves the open list, so its pending chip clears",
+        open.iter().any(|s| s.id == send.id),
+        "the parked send stays in the open list, so the message survives a reload",
     );
     let mut drained = Vec::new();
     while let Ok(event) = events.try_recv() {
@@ -153,7 +163,7 @@ async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
             send_id: send.id,
             text: "swallowed by a dialog".to_owned(),
         }),
-        "the park hands the composed text back rather than dropping it; got {drained:?}"
+        "the park still announces why the row is waiting; got {drained:?}"
     );
 
     // Exactly one retry, and the queue is moving again: the text was typed
@@ -247,10 +257,11 @@ async fn a_retyped_send_still_matches_its_echo_and_self_heals() {
         .await
         .unwrap();
     assert!(dispatched.is_empty(), "got {dispatched:?}");
-    assert_ne!(
-        ix.store().send(send.id).await.unwrap().unwrap().status,
-        SendStatus::Cancelled,
-        "a healed send is never parked afterwards",
+    let healed = ix.store().send(send.id).await.unwrap().unwrap();
+    assert_eq!(healed.status, SendStatus::Matched);
+    assert!(
+        healed.held_at.is_none(),
+        "a healed send is never parked afterwards: no hold marker is set on it",
     );
 }
 
@@ -293,9 +304,10 @@ async fn echo_deadline_after_a_matched_echo_never_retypes() {
         ix.tmux_fake().keyed.lock().unwrap().is_empty(),
         "and no Escape is injected into a healthy in-flight turn",
     );
-    assert_ne!(
-        ix.store().send(send.id).await.unwrap().unwrap().status,
-        SendStatus::Cancelled,
+    let untouched = ix.store().send(send.id).await.unwrap().unwrap();
+    assert_eq!(untouched.status, SendStatus::Matched);
+    assert!(
+        untouched.held_at.is_none(),
         "a matched send is never parked by a racing deadline",
     );
     assert_eq!(

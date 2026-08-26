@@ -35,10 +35,12 @@
     {
       "kind": "send_matched",
       "send_id": 1,
-      "matched_uuid": "cmdname"
+      "matched_uuid": "cmdname",
+      "attributed": true
     },
     {
-      "kind": "local_command_turn_ended"
+      "kind": "local_command_turn_ended",
+      "send_id": 1
     }
   ]
 }

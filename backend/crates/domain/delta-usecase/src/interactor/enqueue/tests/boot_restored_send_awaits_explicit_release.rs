@@ -67,7 +67,7 @@ async fn boot_restored_send_stays_unsent_until_released_then_matches() {
     assert_eq!(ix.store().restore_all_dispatched().await.unwrap(), 1);
     let restored = ix.store().send(stale.id).await.unwrap().unwrap();
     assert_eq!(restored.status, SendStatus::Queued);
-    assert!(restored.restored_at.is_some());
+    assert!(restored.held_at.is_some());
 
     // The session reopens after the restart and its resume settles — the
     // trigger that used to auto-resend the row.
@@ -89,10 +89,7 @@ async fn boot_restored_send_stays_unsent_until_released_then_matches() {
     );
     let still = ix.store().send(stale.id).await.unwrap().unwrap();
     assert_eq!(still.status, SendStatus::Queued);
-    assert!(
-        still.restored_at.is_some(),
-        "the marker survives the settle"
-    );
+    assert!(still.held_at.is_some(), "the marker survives the settle");
 
     // The explicit release: the marker clears and — the session being open
     // and idle — the row dispatches immediately through the normal queued
@@ -181,7 +178,7 @@ async fn release_on_a_closed_session_resumes_it_then_dispatches_at_settle() {
     let released = ix.store().send(stale.id).await.unwrap().unwrap();
     assert_eq!(released.status, SendStatus::Queued);
     assert!(
-        released.restored_at.is_none(),
+        released.held_at.is_none(),
         "the release cleared the restored marker"
     );
 
@@ -252,7 +249,7 @@ async fn release_on_an_unresumable_session_fails_and_keeps_the_marker() {
     let row = ix.store().send(stale.id).await.unwrap().unwrap();
     assert_eq!(row.status, SendStatus::Queued);
     assert!(
-        row.restored_at.is_some(),
+        row.held_at.is_some(),
         "the failed release leaves the row restored, so it can be retried"
     );
 }

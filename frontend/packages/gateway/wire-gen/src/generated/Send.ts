@@ -28,10 +28,12 @@ matched_uuid: string | null,
  */
 created_at: string, 
 /**
- * ISO-8601 timestamp of the boot-time restore, when this `queued` row
- * was recovered from a `dispatched` state a dead server process left
- * behind. A restored send never auto-dispatches: the browser renders it
- * with explicit Send (`POST /api/sends/{id}/release`) and Cancel
- * actions. `null` on the normal send path.
+ * ISO-8601 timestamp marking this `queued` row as held in the queue until
+ * the user releases it — set either by the boot-time restore (a row a
+ * dead server process left `dispatched`) or by the echo-deadline park (a
+ * row whose keystrokes were swallowed without a trace twice running). A
+ * held send never auto-dispatches: the browser renders it with explicit
+ * Send (`POST /api/sends/{id}/release`) and Cancel actions. `null` on the
+ * normal send path.
  */
-restored_at: string | null, };
+held_at: string | null, };

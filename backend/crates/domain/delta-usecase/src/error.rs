@@ -81,10 +81,11 @@ pub enum Error {
     SendNotCancellable(i64),
 
     /// A release arrived for a send that is not awaiting one: the id is
-    /// unknown, the row was never restored by the boot-time reconcile, it was
-    /// already released, or it has since been cancelled. Surfaced as `409` so
-    /// the browser drops the Send control and reconciles its pending strip
-    /// from the next refetch.
+    /// unknown, the row was never held for one (neither the boot-time
+    /// reconcile nor the echo-deadline park marked it), it was already
+    /// released, or it has since been cancelled. Surfaced as `409` so the
+    /// browser drops the Send control and reconciles its pending strip from
+    /// the next refetch.
     #[error("send {0} is not awaiting a release")]
     SendNotReleasable(i64),
 

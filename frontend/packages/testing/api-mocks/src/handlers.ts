@@ -475,15 +475,15 @@ export function createMockApi(): MockApi {
       return new HttpResponse(null, { status: 204 });
     }),
 
-    // Release a restored send into the normal queued flow. The real server
-    // clears the restore marker only for a still-queued restored row (a
-    // guarded UPDATE) and 409s everything else with the stable
+    // Release a held send into the normal queued flow. The real server
+    // clears the hold marker only for a still-queued held row (a guarded
+    // UPDATE) and 409s everything else with the stable
     // `send_not_releasable` code; the mock mirrors that guard. It performs
     // no dispatch — mock turn progress is driven by scripted events.
     http.post('*/api/sends/:id/release', ({ params }) => {
       const id = Number(params.id);
       const send = store.sends.find((s) => s.id === id);
-      if (!send || send.status !== 'queued' || send.restored_at === null) {
+      if (!send || send.status !== 'queued' || send.held_at === null) {
         return HttpResponse.json(
           {
             error: `send ${id} is not awaiting a release`,
@@ -492,7 +492,7 @@ export function createMockApi(): MockApi {
           { status: 409 },
         );
       }
-      send.restored_at = null;
+      send.held_at = null;
       return new HttpResponse(null, { status: 204 });
     }),
 
@@ -562,7 +562,7 @@ export function createMockApi(): MockApi {
           status: 'dispatched',
           matched_uuid: null,
           created_at: createdAt,
-          restored_at: null,
+          held_at: null,
         };
         store.sends.push(send);
         const body: SendResponse = { send };
@@ -608,7 +608,7 @@ export function createMockApi(): MockApi {
         status: 'dispatched',
         matched_uuid: null,
         created_at: new Date().toISOString(),
-        restored_at: null,
+        held_at: null,
       };
       store.sends.push(send);
       const body: SendResponse = { send };

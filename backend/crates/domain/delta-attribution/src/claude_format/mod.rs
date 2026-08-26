@@ -88,23 +88,45 @@ fn bare_command_name(token: &str) -> &str {
     }
 }
 
-/// Whether a local-command command-name line correlates to a dispatched send,
-/// tolerating the namespace prefix Claude Code adds to the transcript.
+/// Whether a dispatched send is a slash command — i.e. its first
+/// whitespace-delimited token starts with `/`.
 ///
-/// When a user types a short command such as `/review-pr`, Delta dispatches the
-/// send with exactly that text, but Claude Code expands the short form to its
-/// fully-qualified namespaced form (e.g. `/example:review-pr`) in the
-/// transcript's bare command-name line. A raw `send.text == name_line` equality
-/// therefore never matches, leaving the outstanding send wedged in the
-/// single-outstanding queue and the turn stuck in `AwaitingEcho` forever. So the
-/// correlation must compare BARE command names, not raw text — that way it
-/// matches regardless of which side (send or transcript line) carries the
-/// namespace prefix, i.e. the comparison is symmetric.
+/// This is the guard the fold's two command branches consume a send by. A
+/// slash-command send produces no `UserPromptSubmit` echo and no `Stop`:
+/// Claude Code handles it client-side and records either a local-command
+/// group or an unknown-command notice, so one of those lines is the ONLY
+/// signal Delta gets that the send was consumed, whatever command NAME it
+/// ended up recording. A PLAIN-prompt send does echo, so a command line
+/// showing up while one is outstanding means something else was submitted
+/// into the pane, and consuming the send would silently drop the user's
+/// message.
+pub fn is_slash_command_send(text: &str) -> bool {
+    text.split_whitespace()
+        .next()
+        .is_some_and(|token| token.starts_with('/'))
+}
+
+/// Whether a local-command command-name line spells the SAME command as the
+/// dispatched send, tolerating the namespace prefix Claude Code adds to the
+/// transcript.
+///
+/// This reports; it does not gate. Consumption of the send is positional and
+/// guarded by [`is_slash_command_send`]; this verdict rides along as
+/// `Effect::SendMatched::attributed`, so a name Claude rewrote into a shape
+/// Delta has not catalogued shows up in the log the first time it happens.
+///
+/// The one rewrite already catalogued is the namespace prefix: when a user
+/// types a short command such as `/review-pr`, Delta dispatches the send with
+/// exactly that text, but Claude Code may expand it to its fully-qualified
+/// form (e.g. `/example:review-pr`) in the transcript's bare command-name
+/// line. Comparing raw text would call that an unattributed line, so the
+/// comparison is on BARE command names — which also makes it symmetric,
+/// matching regardless of which side carries the prefix.
 ///
 /// Only the FIRST whitespace-delimited token of each side is considered;
 /// trailing args are ignored. This is safe under the single-outstanding-send
 /// rule (there is at most one send to correlate against) and mirrors the
-/// unknown-command notice correlation, which likewise matches on the first
+/// unknown-command notice comparison, which likewise looks at the first
 /// token. Returns `false` when either side has no first token.
 pub fn local_command_name_line_matches_send(send_text: &str, name_line: &str) -> bool {
     match (
@@ -163,7 +185,8 @@ const ATTACHMENT_IMAGE_EXTENSIONS: [&str; 5] = [".png", ".jpg", ".jpeg", ".gif",
 ///
 /// A send with no attachment path line therefore takes exactly the old
 /// exact-match path. Slash commands are untouched as well: a local-command
-/// name line is correlated in its own branch at the call site, by
+/// name line is resolved in its own branch at the call site, guarded by
+/// [`is_slash_command_send`] and reported on by
 /// [`local_command_name_line_matches_send`].
 pub fn prompt_echoes_send(send_text: &str, prompt: &str) -> bool {
     send_text.trim() == prompt.trim() || attachment_echo_matches_send(send_text, prompt)
@@ -271,9 +294,13 @@ pub fn is_unknown_command_notice(trimmed_text: &str) -> bool {
 /// unknown-command notice or names no command after the prefix.
 ///
 /// The notice names just the command (no args), while the send Delta dispatched
-/// may carry args (`/review-pr 123`), so the caller correlates this token against
+/// may carry args (`/review-pr 123`), so the caller compares this token against
 /// the outstanding send's FIRST whitespace-delimited token rather than against
-/// the whole send text.
+/// the whole send text. That comparison only feeds
+/// `Effect::SendMatched::attributed`; consumption of the send is positional and
+/// guarded by [`is_slash_command_send`], so a `None` here (a notice naming no
+/// command at all) still consumes an outstanding slash-command send, reporting
+/// it unattributed.
 pub fn unknown_command_from_notice(trimmed_text: &str) -> Option<&str> {
     let rest = trimmed_text
         .strip_prefix(UNKNOWN_COMMAND_NOTICE_PREFIX)?
@@ -590,6 +617,29 @@ mod tests {
         assert_eq!(bare_command_name("/example:review-pr"), "review-pr");
         assert_eq!(bare_command_name("/review-pr"), "review-pr");
         assert_eq!(bare_command_name("review-pr"), "review-pr");
+    }
+
+    #[test]
+    fn is_slash_command_send_looks_at_the_first_token_only() {
+        // The plain shapes: a bare command, a command with args, and a
+        // namespaced command are all slash commands.
+        assert!(is_slash_command_send("/review-pr"));
+        assert!(is_slash_command_send("/review-pr 123"));
+        assert!(is_slash_command_send("/example:review-pr"));
+        // A typo is still a slash command — the whole point of the guard is
+        // that the NAME does not matter, only the kind.
+        assert!(is_slash_command_send("/revew-pr"));
+        // Leading whitespace is not significant.
+        assert!(is_slash_command_send("  \n/review-pr\n"));
+        // A plain prompt is not, even when it mentions a slash later on.
+        assert!(!is_slash_command_send("hello world"));
+        assert!(!is_slash_command_send("run /review-pr for me"));
+        // A path-looking prompt still counts: it starts with `/`, and Claude
+        // Code would reject it as an unknown command rather than echo it.
+        assert!(is_slash_command_send("/tmp/notes.txt"));
+        // No first token at all.
+        assert!(!is_slash_command_send(""));
+        assert!(!is_slash_command_send("   "));
     }
 
     #[test]

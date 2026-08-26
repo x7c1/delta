@@ -113,10 +113,16 @@ pub enum GoldenEffect {
     SendMatched {
         send_id: i64,
         matched_uuid: String,
+        /// Whether the consuming line still reads as the send's own text. The
+        /// consumption itself is positional, so this only pins which cases
+        /// carry a verbatim echo.
+        attributed: bool,
     },
     TurnInterrupted,
     TurnAborted,
-    LocalCommandTurnEnded,
+    LocalCommandTurnEnded {
+        send_id: i64,
+    },
     ResolvePermission {
         tool_use_id: String,
         allowed: bool,
@@ -169,13 +175,17 @@ pub fn golden_of(outcome: &Attributed) -> GoldenCase {
                 Effect::SendMatched {
                     send_id,
                     matched_uuid,
+                    attributed,
                 } => GoldenEffect::SendMatched {
                     send_id: *send_id,
                     matched_uuid: matched_uuid.as_str().to_owned(),
+                    attributed: *attributed,
                 },
                 Effect::TurnInterrupted => GoldenEffect::TurnInterrupted,
                 Effect::TurnAborted => GoldenEffect::TurnAborted,
-                Effect::LocalCommandTurnEnded => GoldenEffect::LocalCommandTurnEnded,
+                Effect::LocalCommandTurnEnded { send_id } => {
+                    GoldenEffect::LocalCommandTurnEnded { send_id: *send_id }
+                }
                 Effect::ResolvePermission {
                     tool_use_id,
                     allowed,

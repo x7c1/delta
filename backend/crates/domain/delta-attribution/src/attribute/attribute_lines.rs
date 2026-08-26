@@ -12,18 +12,22 @@ use super::{Attributed, AttributionState, Effect};
 
 /// Attribute a batch of parsed transcript lines to threads.
 ///
-/// Attribution is driven by comparing a user line's trimmed text against the
-/// head outstanding (`dispatched`) send — at most one exists under the
-/// single-outstanding dispatch rule. Lines are processed in order while
-/// maintaining `carry_thread`, the thread of the current turn:
+/// Attribution is driven by the head outstanding (`dispatched`) send — at most
+/// one exists under the single-outstanding dispatch rule. Lines are processed
+/// in order while maintaining `carry_thread`, the thread of the current turn:
 ///
-/// - A **human** user line (a user line carrying author-written text) that
-///   equals the head outstanding send's text is attributed to that send's
+/// - A **human** user line (a user line carrying author-written text) consumes
+///   the head outstanding send by POSITION: while a send is outstanding its
+///   keystrokes are already in the pane, so the next human line is its echo
+///   whatever text Claude Code ended up recording (the same rule the turn
+///   machine consumes the send by). The line is attributed to that send's
 ///   thread (the new child thread for a branch send), the send is consumed
-///   (reported via [`Effect::SendMatched`]), and `carry_thread` advances to
-///   it. A human user line matching no outstanding send is external input and
-///   lands on `main`, resetting `carry_thread` — unless it is an uncorrelated
-///   `queued_command`, a programmatic injection that inherits `carry_thread`.
+///   (reported via [`Effect::SendMatched`], whose `attributed` flag reports
+///   whether the text still reads as the send's own), and `carry_thread`
+///   advances to it. A human user line arriving with NO outstanding send is
+///   external input and lands on `main`, resetting `carry_thread` — unless it
+///   is a `queued_command`, a programmatic injection that inherits
+///   `carry_thread`.
 /// - Every other line follows `carry_thread` — the thread of the turn it
 ///   belongs to. This covers assistant/system lines AND tool-result lines,
 ///   which Claude delivers as `role: user` but which are part of the
@@ -107,8 +111,8 @@ pub fn attribute_lines(
         // auto- or manual `/compact` was running ends up sharing the compact
         // group's `promptId`. Excluding queued replays here keeps the replay
         // out of the group's Meta reclassification, so it flows through the
-        // normal `is_human_turn` branch (matches the head outstanding send by
-        // text, emits `SendMatched`, and attributes to the send's thread).
+        // normal `is_human_turn` branch (consumes the head outstanding send,
+        // emits `SendMatched`, and attributes to the send's thread).
         let in_local_command_group = !line.is_queued_replay
             && line
                 .prompt_id

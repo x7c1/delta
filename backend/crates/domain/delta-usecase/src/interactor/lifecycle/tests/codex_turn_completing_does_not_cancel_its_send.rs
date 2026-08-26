@@ -5,11 +5,12 @@ use crate::turn::{TurnInput, TurnState};
 use crate::SendTarget;
 
 /// The turn-start / send-row FSM decision, at the interactor level: a Codex turn
-/// is tracked `ExternalPrompt`-style (`InFlight { send_id: None }`), so when the
+/// is tracked as consuming no send (`InFlight { send_id: None }`), so when the
 /// turn completes — the transition the live event pump will drive from
 /// `TurnCompleted` in a later slice — it returns to `Idle` and does **not**
 /// cancel the send. Routing it through Claude's `AwaitingEcho` path would
-/// instead `CancelIfUnmatched` this successful send at turn end.
+/// instead leave this successful send waiting for an echo that never comes, so
+/// the turn end would requeue and re-type a message Codex has already accepted.
 #[tokio::test]
 async fn codex_turn_completing_does_not_cancel_its_send() {
     let factory = FakeAgentFactory::new("thr_fsm", Some("turn_fsm"));
@@ -52,6 +53,6 @@ async fn codex_turn_completing_does_not_cancel_its_send() {
     assert_eq!(
         ix.store().send(send.id).await.unwrap().unwrap().status,
         SendStatus::Matched,
-        "TurnCompleted → Stop must not cancel a Codex send (no EchoMatched correlation)"
+        "TurnCompleted → Stop must not cancel a Codex send (no echo correlation)"
     );
 }

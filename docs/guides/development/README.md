@@ -124,6 +124,16 @@ against, including every migration step this particular file has been through.
 at. For when a change needs a migration step and when it may ask for a reset,
 see the [compatibility policy](../compatibility.md).
 
+Pulling a change that adds a step migrates the file in place on the next server
+start — there is no command to run. A *destructive* step (the first is v6)
+additionally leaves `delta.db.bak-v<source version>` beside it, gitignored and
+removed only by `make reset`. That snapshot is also the way back: the ladder
+runs forward only, so an older checkout refuses to open a database a newer one
+migrated, and the error it prints offers `make reset` — which deletes the
+thread overlay and the send queue with it. To keep those, stop the server,
+remove `delta.db` with its `-wal`/`-shm` sidecars, and put the `.bak-v<n>` copy
+back in its place.
+
 ## Frontend (`frontend/`)
 
 The `frontend/` directory is the pnpm workspace root. pnpm is provided by

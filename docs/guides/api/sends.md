@@ -18,7 +18,13 @@ provider's adapter:
   through the transcript (and released by the
   [echo deadline](#when-no-echo-ever-arrives) when it never does). This is the
   path with a real `queued` stage: only one send may be outstanding per turn, so
-  anything composed mid-turn waits.
+  anything composed mid-turn waits. When Claude Code rewrites the prompt before
+  recording it (a folded slash command, an `[Image #N]` prefix), the first user
+  line of that turn still counts as the send's echo whatever it says: the send
+  is never typed a second time, and the row is matched to that line's uuid.
+  `matched_uuid` is left `null` only when no user line reaches the transcript
+  before the turn ends — the row still settles `matched` at that turn's end:
+  delivered, attributed to no message.
 - **Adapter-backed (Codex)** — no pane, no keystrokes: the text rides a
   turn-start request on the `codex app-server` connection and is matched to the
   turn id that request returns, so the row goes `dispatched` → `matched` within
@@ -200,12 +206,14 @@ disconnected: events fired during the gap are never replayed.
     `background` is `true` for a `run_in_background` launch and for every forked
     skill, either of which can outlive the turn that started it.
 
-  A `queued` send may carry `restored_at` (see `Send` in
-  [shapes.md](shapes.md#send)): it was recovered at boot from a dead
-  server process's `dispatched` state and never auto-dispatches — the browser
-  offers explicit Send
+  A `queued` send may carry `held_at` (see `Send` in
+  [shapes.md](shapes.md#send)): the row is **held in the queue until the user
+  releases it** and never auto-dispatches, so the browser offers explicit Send
   ([`POST /api/sends/{id}/release`](#post-apisendsidrelease)) and Cancel actions
-  on such a row instead of the waiting label.
+  on it instead of the waiting label. Two paths set the marker, and the row
+  looks the same either way: the boot reconcile (recovering a dead server
+  process's `dispatched` row) and the
+  [echo deadline's park](#when-no-echo-ever-arrives).
 
 - **404** — no session with that id, so a reaped spawn is distinguishable from
   "nothing pending".
@@ -238,36 +246,40 @@ No event is broadcast: the browser refetches
 
 ### `POST /api/sends/{id}/release`
 
-Send a *restored* row: one the boot-time reconcile recovered from a `dispatched`
-state a dead server process left behind. Such a row comes back as `queued` with
-`restored_at` set and never auto-dispatches — the message may be days old, so
-re-submitting it silently is deliberately not done.
+Send a *held* row: one that came back to `queued` with `held_at` set,
+whether the boot-time reconcile recovered it from a `dispatched` state a dead
+server process left behind or the
+[echo deadline parked it](#when-no-echo-ever-arrives). Such a row never
+auto-dispatches — the message may be days old, or its keystrokes may be
+disappearing into whatever swallowed them twice — so re-submitting it silently
+is deliberately not done. The user decides.
 
 The release first ensures the owning session is open (resuming it when closed —
-the normal state right after the restart that created the row), then clears the
-`restored_at` marker with a guarded update (so a race against a cancel is a clean
-conflict) and runs the session's ordinary queued dispatch. If the session was
-already open and idle the row types immediately and `send_dispatched` is
-broadcast; if the release resumed the session the row is typed by the
+the normal state right after the restart that created a restored row), then
+clears the `held_at` marker with a guarded update (so a race against a cancel
+is a clean conflict) and runs the session's ordinary queued dispatch. If the
+session was already open and idle the row types immediately and `send_dispatched`
+is broadcast; if the release resumed the session the row is typed by the
 resume-settle flush; otherwise (mid-turn) it waits as an ordinary queued send.
 
 The sibling Cancel action is
-[`POST /api/sends/{id}/cancel`](#post-apisendsidcancel) — a restored row's status
-is still `queued`, so the guarded queued cancel already covers it.
+[`POST /api/sends/{id}/cancel`](#post-apisendsidcancel) — a held row's status is
+still `queued`, so the guarded queued cancel already covers it.
 
 - **204 No Content** — the row was released.
 - **409** (body `code: "send_not_releasable"`) — the send is unknown, was never
-  restored, is already released, or has since been cancelled.
+  held, is already released, or has since been cancelled.
 - **409** (body `code: "resume_unavailable"`) — the session had to be resumed and
   its transcript is gone. The marker is untouched, so the release can be retried.
 
 ### When no echo ever arrives
 
 A pane-backed send is confirmed by its echo: the `UserPromptSubmit` hook coming
-back with the same text. Sometimes nothing comes back at all — Claude Code's TUI
-raises a dialog between turns and swallows the pasted text whole, answering
-itself with the trailing Enter, or someone presses `Escape` in the attached pane
-before the prompt submits. There is no signal to react to in any of those cases:
+back for it, whatever text it reports. Sometimes nothing comes back at all —
+Claude Code's TUI raises a dialog between turns and swallows the pasted text
+whole, answering itself with the trailing Enter, or someone presses `Escape` in
+the attached pane before the prompt submits. There is no signal to react to in
+any of those cases:
 no user message, no hook, no turn boundary. Left alone, the row would stay
 `dispatched` forever behind a permanent "in progress", with everything composed
 after it stuck `queued`.
@@ -279,14 +291,17 @@ So silence is bounded. A send that has been awaiting its echo for longer than
    returns to `queued`, then re-types immediately: a single `Escape` into the
    pane first (dismissing a lingering dialog and discarding any half-landed
    composer draft), then the same text. If whatever swallowed the keystrokes has
-   gone, the echo matches and the send completes normally — the user sees only a
+   gone, the echo arrives and the send completes normally — the user sees only a
    delayed answer.
 2. **Second deadline — parked.** A retry that is swallowed too spends the send's
-   retry budget (the same budget a mismatching echo spends). The row flips to
-   `cancelled` and leaves the open-send list, and `send_parked`
-   ([live-channels.md](live-channels.md)) carries the composed text back so the
-   browser can hand it to the user rather than dropping it silently. Anything
-   queued behind it dispatches on the spot.
+   retry budget. The row goes back to `queued` with `held_at` set — the same
+   held state the boot reconcile produces — so it stays in the open-send list
+   with explicit Send ([`POST /api/sends/{id}/release`](#post-apisendsidrelease))
+   and Cancel actions, and no automatic trigger ever re-types it. Anything queued
+   behind it dispatches on the spot, past the held row. `send_parked`
+   ([live-channels.md](live-channels.md)) goes out alongside, so the browser can
+   say *why* the row is waiting; the message itself is server state now, and
+   survives a reload or a session switch.
 
 The deadline is deliberately far longer than the echo loop ever legitimately
 takes, so a slow-but-healthy send is never disturbed; a send re-typed by the
@@ -295,6 +310,26 @@ overridable with `DELTA_ECHO_DEADLINE_MS` (milliseconds), which the fake
 end-to-end suite uses to exercise the retry-then-park path in seconds.
 Adapter-backed (Codex) sessions are unaffected: their sends are matched inside
 the turn-start call and never wait for an echo.
+
+A **slash-command** send is normally resolved before that deadline can matter,
+by a different route. A command Claude Code handles client-side (`/clear`, a
+project command, a name it does not recognise) fires **no `UserPromptSubmit` and
+no `Stop`** — the TUI answers it itself. What it does write is a line: the
+command's own name line, or an `Unknown command: …` notice. The transcript
+ingest consumes the outstanding send with that line positionally — whatever
+command name the line ended up recording — so the row goes `matched` and the
+degenerate turn it stood for ends there. Without that fold the session would sit
+in "awaiting echo" until the watchdog fired and every send behind it would
+defer; with it, the deadline never comes up.
+
+Unlike an ordinary echo, that fold is guarded by kind: a command line consumes
+the outstanding send only when that send is *itself* a slash command. A plain
+send is consumed by its `UserPromptSubmit` the moment it submits, so a command
+line arriving while one is outstanding means something else was typed into the
+pane — Delta leaves the plain send waiting for its own echo (and, failing that,
+for the echo deadline). A slash command whose keystrokes are swallowed outright
+(a built-in that opens a TUI dialog, say) writes no line at all, and falls back
+to the retry-then-park path above.
 
 ## Permissions
 

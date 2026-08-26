@@ -84,10 +84,9 @@ export interface ApiClientOptions {
  * let the pending strip reconcile from the next refetch.
  *
  * `send_not_releasable` means a send is not awaiting a release: it never
- * existed, was never restored by the server's boot-time reconcile, was
- * already released, or has since been cancelled. Callers surface the refusal
- * like a refused cancel and let the pending strip reconcile from the next
- * refetch.
+ * existed, never carried the `held_at` marker, was already released, or has
+ * since been cancelled. Callers surface the refusal like a refused cancel and
+ * let the pending strip reconcile from the next refetch.
  *
  * `clone_root_duplicate` means a clone root was registered twice with the same
  * path. The Settings dialog shows an inline "already registered" hint on this
@@ -249,9 +248,11 @@ export class ApiClient {
    * `GET /api/sessions/{id}/sends` — a session's open (non-terminal) sends,
    * oldest first: status `queued` (held until the session goes idle) or
    * `dispatched` (typed into the pane, awaiting transcript correlation). A
-   * queued row with a non-null `restored_at` was recovered at the server's
-   * boot from a dead process's `dispatched` state and never auto-dispatches
-   * — it waits for an explicit {@link releaseSend} or {@link cancelSend}.
+   * queued row with a non-null `held_at` is *held*: recovered either at
+   * the server's boot from a dead process's `dispatched` state, or by the
+   * echo deadline parking a send nothing was ever heard about. It never
+   * auto-dispatches — it waits for an explicit {@link releaseSend} or
+   * {@link cancelSend}.
    * The server-side truth behind the pending-send strip. An unknown id is a
    * `404` (e.g. a reaped spawn), surfaced as {@link ApiError}.
    */
@@ -301,19 +302,19 @@ export class ApiClient {
   }
 
   /**
-   * `POST /api/sends/{id}/release` — release a *restored* send into the
-   * normal queued flow (204). A restored send (its `restored_at` is
-   * non-null) was recovered at the server's boot from a `dispatched` state a
-   * dead process left behind, and never auto-dispatches; this is the
-   * explicit Send action on such a row. The server first ensures the owning
-   * session is open — resuming it when it is closed, the normal state right
-   * after the restart that created the row — so a release never strands the
+   * `POST /api/sends/{id}/release` — release a *held* send into the
+   * normal queued flow (204). A held send (its `held_at` is non-null)
+   * was recovered from a `dispatched` state — either at the server's boot,
+   * from a dead process, or by the echo deadline parking it — and never
+   * auto-dispatches; this is the explicit Send action on such a row. The
+   * server first ensures the owning session is open — resuming it when it is
+   * closed, the normal state right after a restart — so a release never strands the
    * send in a session nothing reopens. On success the marker clears and the
    * send dispatches through the normal queued path: immediately when the
    * session was already open and idle, or once the just-resumed session
    * settles (a `send_dispatched` event follows either way); mid-turn it
    * waits for the turn end. A `409` (`send_not_releasable`) fires when the
-   * send never existed, was never restored, is already released, or has
+   * send never existed, was never held, is already released, or has
    * since been cancelled; a failed resume surfaces its own error (e.g.
    * `409` `resume_unavailable`) with the marker untouched, so the release
    * can be retried — each surfaced as {@link ApiError} for the caller to

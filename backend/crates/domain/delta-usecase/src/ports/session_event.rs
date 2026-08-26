@@ -46,26 +46,34 @@ pub enum SessionEvent {
     /// each send as it arrives, so it has no queued→dispatched transition to
     /// announce (see `docs/guides/api/sends.md` for the two dispatch paths).
     SendDispatched { session_id: SessionId, send_id: i64 },
-    /// A dispatched send was abandoned after its echo failed to match twice.
+    /// A dispatched send was returned to the queue, held for an explicit
+    /// release, after nothing was ever heard about it twice running.
     ///
-    /// Delta correlates a send with the `UserPromptSubmit` it produces by
-    /// text; a mismatch returns the send to `queued` to be re-typed on the
-    /// next idle. The turn machine allows that retry once and then *parks* the
-    /// send: the row is cancelled (so it leaves the open-send list and the
-    /// pending chip stops spinning) and this event says so, carrying the
-    /// composed `text` back so the browser can show what was not delivered
-    /// instead of losing it silently.
+    /// A send's keystrokes go into the pane and Delta waits for the
+    /// `UserPromptSubmit` they produce. When no prompt submission arrives at
+    /// all — the paste was swallowed by a TUI modal, a human pressed Escape —
+    /// the echo deadline expires and returns the send to `queued` to be
+    /// re-typed on the next idle. The turn machine allows that retry once and
+    /// then *parks* the send: the row goes back to `queued` with the hold
+    /// marker (`SessionStore::hold_send_for_release`), so it stays in the
+    /// open-send list, is skipped by every automatic dispatch, and waits for
+    /// the user to release it (typed once more) or cancel it — the same state
+    /// the boot restore leaves an orphaned row in. The event is still sent
+    /// because the queue row alone says "waiting" and not *why*: it is how the
+    /// user learns the message was swallowed rather than merely slow.
     ///
-    /// Session-scoped, not thread-scoped: an undelivered message is the user's
-    /// problem wherever they happen to be looking.
+    /// A prompt that *does* arrive consumes the outstanding send whatever text
+    /// it reports, so a send Claude Code rewrote on echo is delivered, never
+    /// parked. This event means silence, not a mismatch.
     ///
-    /// Fire-and-forget, like every event here: it is not replayed on reconnect
-    /// and there is no queryable field a refetch could re-seed it from (the
-    /// parked row is `cancelled`, so it is out of the open-send list). A
-    /// browser that was disconnected when the park happened therefore learns
-    /// nothing; the text survives only on the cancelled row in the store.
-    /// Making it recoverable is a follow-up for the attribution redesign, not
-    /// something this seam can do on its own.
+    /// Session-scoped, not thread-scoped: a message that could not be
+    /// delivered is the user's problem wherever they happen to be looking.
+    ///
+    /// Fire-and-forget, like every event here: it is not replayed on
+    /// reconnect. A browser that was disconnected when the park happened
+    /// misses the explanation, but not the message — the held row is in the
+    /// open-send list, so the next `GET /api/sessions/{id}/sends` refetch shows
+    /// it with its Send and Cancel actions.
     ///
     /// Pane-backed sessions only: parking is the echo-correlation path's
     /// failure mode, and an adapter-backed session matches on the turn id its
@@ -73,7 +81,10 @@ pub enum SessionEvent {
     SendParked {
         session_id: SessionId,
         send_id: i64,
-        /// The composed message that was never delivered.
+        /// The composed message that could not be delivered, repeated here so
+        /// a client can name it without a refetch. It is no longer the only
+        /// copy — the held row carries it, and Delta's own browser renders
+        /// that one — so the field is a convenience, not the recovery path.
         text: String,
     },
     /// A queued send was confirmed as a turn start.
@@ -90,12 +101,16 @@ pub enum SessionEvent {
         thread_id: ThreadId,
         matched_uuid: MessageUuid,
     },
-    /// A prompt matched no outstanding send. Usually the user typed straight
-    /// into the pane, but a dispatched send whose echo came back mangled also
-    /// lands here.
+    /// A prompt **consumed** no outstanding send. Usually the user typed
+    /// straight into the pane; the other producer is the resume window, where
+    /// the outstanding send's keystrokes are still held and so cannot be what
+    /// submitted. A send whose echo came back mangled does NOT land here:
+    /// consumption is positional, so that prompt is still its send's — it is
+    /// simply announced by the turn end rather than by [`Self::TurnStarted`],
+    /// which needs the matched uuid only a verbatim echo can name this early.
     ///
     /// Pane-backed sessions only: an adapter-backed session has no pane to
-    /// type into and no echo to mismatch.
+    /// type into and no prompt hook to fire.
     ExternalInput {
         session_id: SessionId,
         prompt: String,

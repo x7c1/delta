@@ -45,10 +45,11 @@ where
     /// `dispatch_queued_send` is a no-op while the resuming entry exists (a
     /// keystroke typed into the not-yet-input-ready pane would be lost), so a
     /// genuinely `queued` row present at settle — e.g. one composed mid-turn
-    /// before the restart, or one requeued by a mismatched echo — is flushed
-    /// here. A *restored* row (recovered at boot from a dead process's
-    /// `dispatched` state) is NOT flushed: the queued selection skips it, so
-    /// it stays visible until the user explicitly releases or cancels it.
+    /// before the restart, or one requeued by an expired echo deadline — is flushed
+    /// here. A *held* row (one carrying `held_at`: recovered at boot from a
+    /// dead process's `dispatched` state, or parked by a second expired echo
+    /// deadline) is NOT flushed: the queued selection skips it, so it stays
+    /// visible until the user explicitly releases or cancels it.
     /// With a held first prompt the turn machine is already `AwaitingEcho`
     /// for that prompt, so the queued row waits its turn and follows via the
     /// turn-end trigger instead; without one the session is idle and the row
@@ -75,9 +76,10 @@ where
                 "resume settled with no held first prompt; flushing any queued send"
             );
             // The resuming entry is gone and the turn is idle, so a send that
-            // was deferred by the resume window dispatches now. Restored rows
-            // are excluded by the queued selection — a boot-restored send
-            // waits for its explicit release instead of auto-resending here.
+            // was deferred by the resume window dispatches now. Held rows are
+            // excluded by the queued selection — a boot-restored or parked
+            // send waits for its explicit release instead of auto-resending
+            // here.
             // A dispatch failure is logged rather than propagated, mirroring
             // the held-prompt path below: one pane's send failure must not
             // strand the other sessions' ticks (the failed row was already

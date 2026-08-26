@@ -46,12 +46,39 @@ pub enum Effect {
     /// send: feed the turn machine back to idle and notify the browser so the
     /// stuck send clears, exactly like [`Effect::TurnAborted`] does for an
     /// API-error turn-end.
-    LocalCommandTurnEnded,
-    /// A human user line matched the head outstanding send: mark the send row
-    /// matched to this transcript uuid.
+    ///
+    /// `send_id` names the send this command resolved — the same one the
+    /// paired [`Effect::SendMatched`] carries. The turn machine needs it to
+    /// tell this honest end of *that send's* degenerate turn apart from a
+    /// generic stop arriving while a send is still awaiting its echo (which
+    /// means the keystrokes were lost, and requeues them).
+    LocalCommandTurnEnded { send_id: i64 },
+    /// The head outstanding send was consumed by this transcript line: mark the
+    /// send row matched to this transcript uuid.
+    ///
+    /// For a human user line the consumption is POSITIONAL — under the
+    /// single-outstanding dispatch rule the first human line after a dispatch is
+    /// that send's echo whatever text it carries, exactly as the turn machine
+    /// already decides it. `attributed` reports the leftover text question:
+    /// `true` when the line still reads as the send's own text
+    /// ([`claude_format::prompt_echoes_send`]), `false` when Claude Code
+    /// rewrote it between the keystrokes and the transcript. It changes no
+    /// attribution — the line lands on the send's thread either way — and
+    /// exists so a new rewrite shape surfaces in the logs instead of silently.
+    /// The command branches (a local command's name line, an unknown-command
+    /// notice) are positional too, guarded by kind: they consume the head send
+    /// only when it is itself a slash command
+    /// ([`claude_format::is_slash_command_send`]). There `attributed` reports
+    /// the command-NAME question — `true` when the line spells the send's own
+    /// command, `false` when Claude recorded a name Delta cannot account for
+    /// (or, for an unknown-command notice, no name at all).
+    ///
+    /// [`claude_format::prompt_echoes_send`]: crate::claude_format::prompt_echoes_send
+    /// [`claude_format::is_slash_command_send`]: crate::claude_format::is_slash_command_send
     SendMatched {
         send_id: i64,
         matched_uuid: MessageUuid,
+        attributed: bool,
     },
     /// A background task was first seen launching: persist
     /// `(tool_use_id -> thread_id)` so its later `<task-notification>` — which

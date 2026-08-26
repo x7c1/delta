@@ -40,18 +40,24 @@ export interface PendingQueueProps {
  * already dispatched into an in-flight turn) the same refetch reconciles
  * the strip.
  *
- * A queued row with a non-null `restored_at` is a *restored* send: it was
- * composed before a server restart (possibly long ago) and recovered at
- * boot, and the server never auto-sends it — silently re-submitting stale
- * text into a conversation that has moved on was rejected in review. Such a
- * row renders with a distinct "Restored after restart" label and an explicit
- * Send action (the release endpoint) alongside the usual Cancel.
+ * A queued row with a non-null `held_at` is a *held* send: the server
+ * will not dispatch it on its own, so the user decides. Two paths produce
+ * one, and the row looks the same either way — it was composed before a
+ * server restart (possibly long ago) and recovered at boot, or its
+ * keystrokes vanished twice running and the echo deadline parked it (the
+ * `send_parked` notice explains that case). Silently re-sending either was
+ * rejected in review: stale text can land in a conversation that has moved
+ * on, and a swallowed message keeps being swallowed until the user clears
+ * whatever is eating it. Such a row renders with a neutral "Held — send or
+ * cancel" label and an explicit Send action (the release endpoint) alongside
+ * the usual Cancel.
  */
 export function PendingQueue({ entries }: PendingQueueProps) {
   const client = useApiClient();
   const removeSending = useLiveStore((state) => state.removeSending);
   const clearSpawn = useLiveStore((state) => state.clearSpawn);
   const forgetLocalSend = useLiveStore((state) => state.forgetLocalSend);
+  const forgetParkedSend = useLiveStore((state) => state.forgetParkedSend);
   const showError = useNotificationStore((state) => state.showError);
   const retrySpawn = useNewSessionSend();
   const cancelSend = useCancelSendMutation(client);
@@ -155,6 +161,19 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                         sessionId: entry.send.session_id,
                       },
                       {
+                        onSuccess: () => {
+                          // Same reconciliation for the parked-send notice,
+                          // which tells the user this row is waiting for
+                          // them: a cancel is broadcast as nothing at all, so
+                          // without this the card would keep pointing at a row
+                          // that just left the strip. Only once the server
+                          // accepted — a refused cancel leaves the held row in
+                          // place, and the card is the only thing saying why.
+                          forgetParkedSend(
+                            entry.send.session_id,
+                            entry.send.id,
+                          );
+                        },
                         onError: (err: unknown) => {
                           const title = 'Could not cancel the send';
                           if (
@@ -184,20 +203,20 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                   Cancel
                 </Button>
               );
-              // A restored send never auto-dispatches: the user decides.
+              // A held send never auto-dispatches: the user decides.
               // Alongside the shared Cancel, the row offers an explicit Send
               // that releases it into the normal queued flow. A refused
               // release surfaces through the same snackbar path as a refused
               // cancel, so the button never reads as silently dead.
               if (
                 entry.send.status === 'queued' &&
-                entry.send.restored_at !== null
+                entry.send.held_at !== null
               ) {
                 return sendRow(
                   entry.key,
                   entry.send.text,
                   <div className="flex shrink-0 items-center gap-1">
-                    <Badge tone="neutral">Restored after restart</Badge>
+                    <Badge tone="neutral">Held — send or cancel</Badge>
                     <Button
                       size="sm"
                       variant="secondary"
@@ -209,6 +228,24 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                             sessionId: entry.send.session_id,
                           },
                           {
+                            onSuccess: () => {
+                              // The notice asked the user to send or cancel;
+                              // they sent, and the server took it. The
+                              // `send_dispatched` that follows clears the
+                              // notice too (and is what clears it in other
+                              // clients), but that can be a whole turn away
+                              // when the release only queues the row — the
+                              // answer to the question is already in. A
+                              // refused release (`send_not_releasable`, or a
+                              // `resume_unavailable` that leaves the marker
+                              // untouched) keeps the row held, so the notice
+                              // has to stay: it is the only thing explaining
+                              // why the row is there.
+                              forgetParkedSend(
+                                entry.send.session_id,
+                                entry.send.id,
+                              );
+                            },
                             onError: (err: unknown) => {
                               const title = 'Could not send the message';
                               if (

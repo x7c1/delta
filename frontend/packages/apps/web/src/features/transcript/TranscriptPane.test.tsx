@@ -966,27 +966,22 @@ describe('TranscriptPane', () => {
     expect(useLiveStore.getState().notices).toEqual({});
   });
 
-  it('shows the parked-send notice with the undelivered text, and dismisses it', async () => {
+  it('explains a parked send without repeating its text, and dismisses the notice', async () => {
     useLiveStore.setState({
       notices: {
-        [SESSION_ID]: [
-          {
-            kind: 'send_parked',
-            sendId: 42,
-            text: 'read this\n/home/dev/pictures/shot.png',
-            at: 0,
-          },
-        ],
+        [SESSION_ID]: [{ kind: 'send_parked', sendId: 42, at: 0 }],
       },
     });
 
     renderPane();
 
     const notice = await screen.findByTestId('send-parked-notice');
-    // The text is handed back verbatim: this is the only copy the user has
-    // left of a message the session never received.
-    expect(notice).toHaveTextContent('read this');
-    expect(notice).toHaveTextContent('/home/dev/pictures/shot.png');
+    // The message itself is back in the queue (the pending strip renders it
+    // with Send and Cancel), so the notice only says why it is waiting — it
+    // must not tell the user to copy a text it no longer holds.
+    expect(notice).toHaveTextContent('never reached the session');
+    expect(notice).toHaveTextContent('waiting in the queue');
+    expect(notice).not.toHaveTextContent(/copy it/i);
 
     fireEvent.click(within(notice).getByRole('button', { name: 'Dismiss' }));
 

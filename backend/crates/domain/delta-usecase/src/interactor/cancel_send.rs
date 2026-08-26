@@ -14,12 +14,12 @@
 //! browser's open-send list. The store guards the transition with
 //! `WHERE status = 'queued'` ([`cancel_queued_send`](crate::ports::SessionStore::cancel_queued_send)),
 //! so a send that left `queued` the instant between the browser's click and
-//! this handler is a clean conflict rather than a clobber. A *restored* send
-//! (recovered at boot from a dead process's `dispatched` state, see
-//! [`SessionStore::restore_all_dispatched`]) is covered by this same queued
-//! path — its status is still `queued`, only its restore marker differs — so
-//! the UI keeps the cancel affordance on restored rows with no extra case
-//! here.
+//! this handler is a clean conflict rather than a clobber. A *held* send —
+//! recovered at boot from a dead process's `dispatched` state (see
+//! [`SessionStore::restore_all_dispatched`]), or parked by the echo deadline
+//! (see [`SessionStore::hold_send_for_release`]) — is covered by this same
+//! queued path: its status is still `queued`, only its hold marker differs, so
+//! the UI keeps the cancel affordance on held rows with no extra case here.
 //!
 //! ## Dispatched
 //!
@@ -68,8 +68,9 @@
 //! and dropped state back to Idle. The hook's
 //! [`head_dispatched_send`](crate::ports::SessionStore::head_dispatched_send)
 //! query returns `None` (the cancelled row is filtered), so the prompt
-//! classifies as [`TurnInput::ExternalPrompt`] — exactly the existing
-//! treatment for an untracked external prompt. No stuck state, no panic.
+//! classifies as [`TurnInput::PromptSubmitted`] consuming no send — exactly
+//! the existing treatment for an untracked external prompt. No stuck state, no
+//! panic.
 //!
 //! Routed through the owning session's actor (resolved from the send id in
 //! [`cancel_send`](crate::interactor::Interactor::cancel_send)) so the cancel
@@ -77,7 +78,7 @@
 //! send-state transition runs inside the actor.
 //!
 //! [`TurnInput::Cancel`]: crate::turn::TurnInput::Cancel
-//! [`TurnInput::ExternalPrompt`]: crate::turn::TurnInput::ExternalPrompt
+//! [`TurnInput::PromptSubmitted`]: crate::turn::TurnInput::PromptSubmitted
 //! [`TurnState::AwaitingEcho`]: crate::turn::TurnState::AwaitingEcho
 //! [`TurnState::Idle`]: crate::turn::TurnState::Idle
 //! [`TurnState::InFlight`]: crate::turn::TurnState::InFlight
