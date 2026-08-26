@@ -271,10 +271,15 @@ impl IntoResponse for ApiError {
                     Error::LaunchOptionIsBuiltin(_) => {
                         (StatusCode::CONFLICT, Some(LAUNCH_OPTION_BUILTIN_CODE))
                     }
-                    // Everything else is an internal failure.
+                    // Everything else is an internal failure. A launch
+                    // preparation timeout only lands here defensively: it
+                    // happens long after the send was accepted, so it reaches
+                    // the browser as a `spawn_failed` event, never as a
+                    // response body.
                     Error::Tmux(_)
                     | Error::Agent(_)
                     | Error::Git(_)
+                    | Error::LaunchPreparationTimedOut(_)
                     | Error::Gh(_)
                     | Error::Transcript(_)
                     | Error::Store(_)

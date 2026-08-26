@@ -698,6 +698,38 @@ describe('liveStore spawn tracking', () => {
     expect(useLiveStore.getState().localSends).toEqual({});
   });
 
+  it('carries the failure reason onto the tracked spawn', () => {
+    // The launch preparation runs after the send is accepted, so a git or tmux
+    // failure has no error response to travel in. The event's `reason` is the
+    // whole account of what went wrong, and the chip renders it.
+    trackOne();
+
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      reason: 'git error: invalid reference: origin/nope',
+    });
+
+    expect(useLiveStore.getState().spawns[0].reason).toBe(
+      'git error: invalid reference: origin/nope',
+    );
+  });
+
+  it('carries the reason through a failure that outran its POST response', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      reason: 'git error: worktree add failed',
+    });
+    trackOne();
+
+    const spawn = useLiveStore.getState().spawns[0];
+    expect(spawn.status).toBe('failed');
+    expect(spawn.reason).toBe('git error: worktree add failed');
+  });
+
   it('releases the tracked spawn when its session registers', () => {
     // The launch bound: the spawn window is over. The workspace focused the
     // session when its send was accepted and its row is listed by now, so the

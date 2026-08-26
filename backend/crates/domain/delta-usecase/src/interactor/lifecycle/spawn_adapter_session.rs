@@ -14,6 +14,14 @@
 //! so a new adapter-backed provider is a new registered factory, not a new
 //! spawn path.
 //!
+//! Unlike the Claude spawn, which splits into an *accept* phase (the request
+//! replies as soon as the rows are written) and a background *launch* phase
+//! (worktree build, trust seed, `tmux`), an adapter-backed launch still runs
+//! entirely inside the request: the worktree build and the adapter's
+//! `thread/start` complete before the `201` goes out, and a failure there is
+//! a synchronous `5xx` with no row left behind. Applying the same split here
+//! is a follow-up.
+//!
 //! ## Turn-start / send-row model (the C3e-2 decision)
 //!
 //! An adapter-backed turn does **not** use Claude's `Dispatch → AwaitingEcho →

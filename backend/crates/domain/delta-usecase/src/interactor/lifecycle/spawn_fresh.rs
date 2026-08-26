@@ -1,16 +1,18 @@
+use std::sync::Arc;
+use std::time::Instant;
+
 use delta_model::Send;
 
 use crate::agent::{AgentProvider, LaunchOptionSpec};
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::interactor::session_actor::runtime::PendingSpawn;
+use crate::interactor::session_actor::runtime::{LaunchingSpawn, PlannedWorktree};
 use crate::pane_token::PaneToken;
-use crate::ports::{
-    pane_for, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace, WorktreeStartPoint,
-};
-use crate::repository::{display_name, identity_key, worktree_dir_slug};
+use crate::ports::{pane_for, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::repository::{display_name, identity_key};
 use crate::send_target::WorktreeSpec;
 
+use super::launch_prep::spawn_launch_preparation;
 use super::{SESSION_ID_FLAG, SETTINGS_FLAG};
 
 /// The result of a fresh spawn: the launch's pane token and — when the spawn
@@ -29,14 +31,14 @@ pub(in crate::interactor) struct FreshSpawn {
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
-    T: TmuxDriver,
-    X: Transcript,
-    S: SessionStore,
-    W: Workspace,
-    G: GitWorktree,
+    T: TmuxDriver + 'static,
+    X: Transcript + 'static,
+    S: SessionStore + 'static,
+    W: Workspace + 'static,
+    G: GitWorktree + 'static,
 {
-    /// Spawn this freshly-minted session's pane, optionally dispatching a
-    /// first prompt.
+    /// **Accept** this freshly-minted session, optionally with a first prompt,
+    /// and hand its launch to a background task.
     ///
     /// The routing layer minted the session id (a time-ordered UUID v7) and
     /// spawned this actor for it; pinning the id up front via
@@ -44,45 +46,67 @@ where
     /// reports exactly this id, so the launch's hooks route straight back to
     /// this actor — correlation by id, never by working directory.
     ///
-    /// This **eagerly inserts the session row** (status `spawning`, transcript
-    /// path unknown until the first hook) with its `main` thread, enqueues the
-    /// first prompt's `send` row when one is given, and only then launches
-    /// `claude --settings <path> --session-id <uuid>` in the launch directory.
-    /// Because the row and the send exist before the launch, the REST response
-    /// for a composer-initiated New carries real ids instead of placeholders,
-    /// and the first `UserPromptSubmit` correlates through the normal
-    /// single-outstanding machinery with no bind-time row writing.
+    /// # What is synchronous, and why
     ///
-    /// A [`PendingSpawn`] is recorded on this actor's runtime state: the first
-    /// hook *activates* the eager row (`spawning` → `active`, filling the
-    /// transcript path) via [`SessionRuntime::bind_pending_spawn`].
+    /// This method runs inside the `POST /api/sends` request, so it holds only
+    /// the work that is cheap *and* the work whose failure the caller should
+    /// see as a `4xx`: validating a user-selected workdir
+    /// ([`Workspace::resolve_existing_dir`]), the worktree gate
+    /// (`WorktreeRequiresWorkdir` / `WorktreeNotAGitRepo`), resolving the
+    /// selected launch options, minting the pane token, and the local git
+    /// config reads (`repo_root`, `origin_url`) that name the repository. It
+    /// then computes the launch directory **without creating it** (see
+    /// [`InteractorCore::plan_worktree_launch_dir`]), writes the eager session
+    /// row (status `spawning`) with its `main` thread and the first prompt's
+    /// `send` row, moves the turn machine to `AwaitingEcho`, records a
+    /// [`LaunchingSpawn`], and returns.
     ///
-    /// When a `first_prompt` is present (a composer-initiated New), it is passed
-    /// to `claude` as a trailing positional argument on the launch command line
-    /// (`claude … <prompt>`) rather than typed into the pane after launch. An
-    /// interactive `claude` invoked with a positional prompt auto-submits it at
-    /// startup, which fires the `UserPromptSubmit` hook that binds this spawn.
-    /// Submitting at launch avoids the failure mode of injecting keystrokes
-    /// after a fixed settle delay: on a slow cold start the TUI input is not yet
-    /// ready when the keystrokes land, they are lost, the prompt is never
-    /// submitted, and the spawn sits pending forever. The command is forwarded
-    /// as an argv tail (no shell), so a multi-line or quoted prompt is already
-    /// safe.
+    /// Everything expensive is deliberately *not* here: the worktree build (a
+    /// `git fetch` plus a full checkout — seconds to tens of seconds on a large
+    /// repository), the trust seed (a rewrite of `~/.claude.json`), the
+    /// settings write and the tmux launch all run on the task
+    /// [`spawn_launch_preparation`] spawns, which reports back on this actor's
+    /// own mailbox ([`SessionInput::LaunchFinished`]). Because the row and the
+    /// send exist before that task starts, the REST response already carries
+    /// real ids: the browser can switch to the session and watch it start
+    /// instead of waiting on a spinner for the checkout.
     ///
-    /// The `PendingSpawn` is recorded *before* `create_session` launches
-    /// `claude`, so the `UserPromptSubmit` (or `SessionStart`) that the launch
-    /// triggers always finds a spawn to bind rather than racing ahead and being
-    /// misread as external input — those hooks land on this same mailbox,
-    /// strictly after this message. A failed `create_session` rolls back both
-    /// the just-recorded pending *and* the eager session row (the cascade
-    /// removes its send), so no dangling spawn or orphan row is left behind.
+    /// A launch failure therefore can no longer be a synchronous error. It
+    /// arrives as a [`SessionEvent::SpawnFailed`] carrying the git or tmux
+    /// message as its `reason`, and the eager row is deleted — see
+    /// [`Self::finish_launch`].
     ///
-    /// When `workdir` is `Some`, it is a user-selected path: it is validated and
-    /// canonicalized via [`Workspace::resolve_existing_dir`] *before* anything is
-    /// minted or launched, so an invalid path fails cleanly with no token, no
-    /// pane, and no pending spawn left behind (mirroring the resume gate in
-    /// [`Self::open_session`]). When `None`, the spawn falls back to its default
-    /// per-token `<base>/<token>` directory.
+    /// # Ordering
+    ///
+    /// The [`LaunchingSpawn`] is recorded *before* the launch task is spawned,
+    /// and the task's `LaunchFinished` — like the launch's own hooks — lands on
+    /// this same mailbox strictly after this message. So a send arriving
+    /// anywhere in the accept→launch window finds
+    /// [`SessionRuntime::is_launching_or_pending`] true and is refused with
+    /// `session_spawning` exactly as one arriving against a pending spawn is.
+    ///
+    /// The record the first `UserPromptSubmit` binds is the [`PendingSpawn`],
+    /// which `LaunchFinished` installs — so what keeps that hook from being
+    /// misread as external input is the launch task posting `LaunchFinished`
+    /// the instant `create_session` returns, with nothing awaited in between.
+    /// `tmux new-session` returns once the pane's command has been started, and
+    /// `claude` still has its whole startup ahead of it before it can submit
+    /// the launch prompt, so the pending record is always in place first. Do
+    /// not add work between those two steps.
+    ///
+    /// # The first prompt
+    ///
+    /// When a `first_prompt` is present (a composer-initiated New), it is
+    /// passed to `claude` as a trailing positional argument on the launch
+    /// command line (`claude … <prompt>`) rather than typed into the pane after
+    /// launch. An interactive `claude` invoked with a positional prompt
+    /// auto-submits it at startup, which fires the `UserPromptSubmit` hook that
+    /// binds this spawn. Submitting at launch avoids the failure mode of
+    /// injecting keystrokes after a fixed settle delay: on a slow cold start the
+    /// TUI input is not yet ready when the keystrokes land, they are lost, the
+    /// prompt is never submitted, and the spawn sits pending forever. The
+    /// command is forwarded as an argv tail (no shell), so a multi-line or
+    /// quoted prompt is already safe.
     ///
     /// `launch_option_ids` are the registered launch options the user selected
     /// for this session, in selection order. They are resolved to their
@@ -91,7 +115,11 @@ where
     /// positional prompt. A selected id no longer in the registry is skipped
     /// with a warning rather than aborting the launch.
     ///
-    /// [`SessionRuntime::bind_pending_spawn`]: crate::interactor::session_actor::runtime::SessionRuntime::bind_pending_spawn
+    /// [`InteractorCore::plan_worktree_launch_dir`]: crate::interactor::InteractorCore::plan_worktree_launch_dir
+    /// [`PendingSpawn`]: crate::interactor::session_actor::runtime::PendingSpawn
+    /// [`SessionInput::LaunchFinished`]: crate::interactor::session_actor::input::SessionInput::LaunchFinished
+    /// [`SessionEvent::SpawnFailed`]: crate::ports::SessionEvent::SpawnFailed
+    /// [`SessionRuntime::is_launching_or_pending`]: crate::interactor::session_actor::runtime::SessionRuntime::is_launching_or_pending
     pub(in crate::interactor) async fn spawn_fresh(
         &mut self,
         first_prompt: Option<String>,
@@ -115,9 +143,8 @@ where
         // repository: no workdir is `WorktreeRequiresWorkdir`, and a workdir that
         // is not a git repo is `WorktreeNotAGitRepo` — both `400`s. On success we
         // hold the repository root; the actual `git worktree add` (a real side
-        // effect) is deferred to just before the eager row write below, so a git
-        // failure also leaves no orphan. `repo_root` runs no fetch, so this gate
-        // stays lightweight.
+        // effect) is deferred to the launch task. `repo_root` runs no fetch, so
+        // this gate stays lightweight.
         let worktree_repo_root = match &worktree {
             Some(_) => {
                 let Some(dir) = requested_workdir.as_deref() else {
@@ -148,41 +175,12 @@ where
         let token = self.mint_free_token().await?;
         let pane = pane_for(token.as_str());
 
-        // Determine the effective launch directory. With no worktree request,
-        // it is the validated workdir (or the default `<base>/<token>`). With a
-        // worktree request, launch in a per-session worktree under the neutral
-        // `worktree_base` (outside any repo tree, so the worktree does not
-        // inherit a surrounding `CLAUDE.md`/settings) instead.
-        //
-        // For the new-branch start points (`Head`/`RemoteBranch`) the worktree
-        // gets its own `delta-<session-id>` branch (the Delta-minted
-        // conversation id, not the pane token): the session id is the stable,
-        // human-meaningful name a user can later find and clean up, and the
-        // frontend's `displayBranch()` shortens this shape on the navigator
-        // card. The worktree **directory** name embeds the repository
-        // identity (`<org>-<repo>-<session-id>`) so listing
-        // `$DELTA_WORKTREE_BASE` shows which clone each worktree belongs to
-        // at a glance — see the slug derivation in the match below.
-        //
-        // For `UseRemoteBranch` the user works on the named branch *itself*:
-        // since git forbids checking one branch out in two worktrees, the
-        // worktree already holding that branch is reused when one exists
-        // (including the main working tree), and otherwise a new worktree at
-        // `<base>/<org>-<repo>-<session-id>` that checks the branch out is
-        // created.
-        //
-        // The git work happens here — after workdir validation but *before* the
-        // eager session row — so a git failure leaves no orphan row to roll
-        // back; only the (side-effect-free) token has been minted. The reuse
-        // case has no new worktree at all, so there is nothing to roll back for
-        // it either.
-        //
         // `seed_trust` records whether the effective launch directory is a git
         // repository whose workspace-trust dialog must be pre-accepted before
-        // launching `claude` there (see the seed step below). A worktree is
-        // always a git working tree; a user-selected workdir is checked once
-        // here; the default `<base>/<token>` scratch dir is empty and never
-        // triggers the dialog, so it is never seeded (avoids bloating
+        // launching `claude` there (the launch task does the seeding). A
+        // worktree is always a git working tree; a user-selected workdir is
+        // checked once here; the default `<base>/<token>` scratch dir is empty
+        // and never triggers the dialog, so it is never seeded (avoids bloating
         // `~/.claude.json` for ordinary sessions).
         //
         // `launch_repo_root` is the repository root containing the effective
@@ -238,10 +236,10 @@ where
         // launch dir: `remote.origin.url` lives in the shared `.git/config`,
         // so the answer is the same from any path inside the same
         // repository, and reading against the (already-known) repo root lets
-        // us call `origin_url` exactly once even when the launch dir is
-        // resolved later (a worktree's path is not built until below).
-        // Unlike `repo_root`, which is the worktree path itself when
-        // launched from a linked worktree, this value is stable across
+        // us call `origin_url` exactly once even when the launch dir does not
+        // exist yet (a worktree's directory is not built until the launch
+        // task runs). Unlike `repo_root`, which is the worktree path itself
+        // when launched from a linked worktree, this value is stable across
         // worktrees of the same clone.
         let repository_display_name = match launch_repo_root.as_deref() {
             Some(root) => {
@@ -252,56 +250,68 @@ where
             None => None,
         };
 
-        let workdir = match worktree {
+        // Determine the effective launch directory and the branch the session
+        // will be on there — both **without doing any git work on the working
+        // tree**, so the eager row below can record them while the build is
+        // still ahead of us.
+        //
+        // With no worktree request the launch dir is the validated workdir (or
+        // the default `<base>/<token>`), and its branch is read straight off
+        // the directory (`None` for the scratch dir, which is never a repo).
+        // With a worktree request the session launches in a per-session
+        // worktree under the neutral `worktree_base` — outside any repo tree,
+        // so the worktree does not inherit a surrounding `CLAUDE.md`/settings —
+        // whose path and branch the planner derives; see
+        // [`InteractorCore::plan_worktree_launch_dir`] for the start-point
+        // rules and the directory-name slug.
+        //
+        // `branch_at_launch` is the navigator card's line-1 identifier — the
+        // branch the conversation was started on, never mutated on resume or a
+        // later `git checkout` inside the worktree (the per-message `git_branch`
+        // on `Message` carries the per-turn snapshot separately).
+        let (workdir, branch_at_launch, planned_worktree) = match &worktree {
             Some(spec) => {
                 let repo_root = worktree_repo_root
                     .expect("worktree_repo_root is Some whenever a worktree was requested");
-                // Build (or reuse) the per-session worktree and launch there.
-                // The directory-name and start-point handling is shared with
-                // the Codex launch path — see [`Self::resolve_worktree_launch_dir`].
-                self.resolve_worktree_launch_dir(
-                    &session_id,
-                    &repo_root,
-                    repository_display_name.as_deref(),
-                    spec,
+                let planned = self
+                    .plan_worktree_launch_dir(
+                        &session_id,
+                        &repo_root,
+                        repository_display_name.as_deref(),
+                        spec,
+                    )
+                    .await?;
+                (
+                    planned.path,
+                    Some(planned.branch),
+                    Some(PlannedWorktree {
+                        repo_root,
+                        repository_display_name: repository_display_name.clone(),
+                        spec: spec.clone(),
+                    }),
                 )
-                .await?
             }
             None => match requested_workdir {
-                Some(dir) => dir,
-                // The default per-token scratch dir is empty, so `claude` never
-                // shows the trust dialog there; skip the git check on the hot path.
-                None => self.workdir_for(&token),
+                Some(dir) => {
+                    let branch = self.git_worktree.current_branch(&dir).await?;
+                    (dir, branch, None)
+                }
+                // The default per-token scratch dir is created empty and is
+                // never a git repository, so there is no branch to read and no
+                // trust dialog to seed; skip both on the hot path.
+                None => (self.workdir_for(&token), None, None),
             },
         };
 
-        // Snapshot the launch-time local branch. This is the navigator card's
-        // line-1 identifier — the branch the conversation was started on, never
-        // mutated on resume or a later `git checkout` inside the worktree (the
-        // per-message `git_branch` on `Message` carries the per-turn snapshot
-        // separately). `None` when the launch dir is not a git repo or HEAD is
-        // detached; the frontend then falls back to the session label.
-        let branch_at_launch = self.git_worktree.current_branch(&workdir).await?;
-
-        // Pre-accept Claude Code's workspace-trust dialog for git-repo launch
-        // directories. A fresh directory containing files otherwise pops a
-        // blocking interactive dialog at startup, which means the first
-        // `UserPromptSubmit` hook never fires and the spawn is reaped after the
-        // pending deadline. Seed *before* `create_session` so a failure fails the
-        // spawn cleanly with no half-launched pane (mirroring the workdir/worktree
-        // validation ordering above, all of which run before any tmux side effect).
-        if seed_trust {
-            self.git_worktree.ensure_dir_trusted(&workdir).await?;
-        }
-
         // Eagerly create the session row and its `main` thread, then the first
         // prompt's send row bound to those real ids. Hooks cannot arrive before
-        // the launch below (and would queue behind this message anyway), so
-        // nothing races this write; if the launch fails the row is deleted
-        // again in the rollback. NOTE: the worktree (created above) is
-        // deliberately NOT removed on a later close — see `close_session` for
-        // the no-cleanup-on-close MVP decision; `session.cwd` stored here is the
-        // worktree path, so a resume reattaches to the existing worktree.
+        // the launch (and would queue behind this message anyway), so nothing
+        // races this write; if the launch fails the row is deleted again in the
+        // rollback (see [`Self::finish_launch`]). NOTE: the worktree the launch
+        // task builds is deliberately NOT removed on a later close — see
+        // `close_session` for the no-cleanup-on-close MVP decision; `session.cwd`
+        // stored here is the worktree path, so a resume reattaches to the
+        // existing worktree.
         // Record the dir the user picked, before any worktree resolution. For
         // a worktree spawn `cwd` (= `workdir` above) holds the auto-generated
         // worktree path under `$DELTA_WORKTREE_BASE`;
@@ -340,9 +350,6 @@ where
                 .await?;
         }
 
-        self.workspace
-            .write_session_settings(&self.session_settings_path, &self.session_settings_json)
-            .await?;
         let mut command = vec![
             self.launch.claude_bin.clone(),
             SETTINGS_FLAG.to_owned(),
@@ -360,132 +367,39 @@ where
         // injection (which is lost when the TUI input is not yet ready on a slow
         // cold start). The argv tail is forwarded without a shell, so a
         // multi-line or quoted prompt is safe.
-        if let Some(text) = first_prompt.clone() {
+        if let Some(text) = first_prompt {
             command.push(text);
         }
 
-        // Record the spawn *before* launching `claude`, so the `UserPromptSubmit`
-        // that the launch-submitted prompt triggers finds a pending spawn to bind
-        // instead of racing ahead and being misread as external input. With the
-        // prompt on the command line the hook fires very soon after launch, so
-        // this ordering — not any delay inside `create_session` — is what makes
-        // the spawn record reliably present when the hook arrives.
-        self.state.push_pending(PendingSpawn {
+        // Record the launch *before* the task that performs it is spawned: the
+        // task reports back on this same mailbox, so the entry it settles is
+        // always already there, and any send arriving meanwhile sees the
+        // session as starting rather than as idle-and-closed.
+        let launching = LaunchingSpawn {
             token: token.clone(),
-            pane: pane.clone(),
-            // Stamp the spawn for the watchdog deadline. From here the only thing
-            // that binds it is the first `UserPromptSubmit` hook; if that never
-            // arrives, the reaper uses this instant to reap the stuck spawn.
-            created_at: std::time::Instant::now(),
-        });
-
-        // Launch the session. If `create_session` fails, the spawn never starts,
-        // so roll back the just-recorded pending (otherwise a later, unrelated
-        // hook could mis-bind to this abandoned pane) and the eager session row
-        // (the cascade removes its main thread and first send), then surface
-        // the error. The REST caller gets the failure synchronously, so no
-        // `SpawnFailed` event is needed for this path.
-        if let Err(spawn_err) = self
-            .tmux
-            .create_session(token.as_str(), &workdir, &command)
-            .await
-        {
-            tracing::error!(
-                token = %token.as_str(),
-                session_id = %session_id,
-                error = %spawn_err,
-                "fresh spawn failed to launch; rolling back the pending spawn and \
-                 the eager session row"
-            );
-            self.state.remove_pending_for_token(&token);
-            // The session row (and its first send, by cascade) is deleted, so
-            // the turn entry is dropped without orphan handling.
-            self.state.forget_turn();
-            self.store.delete_session(&session_id).await?;
-            return Err(spawn_err);
-        }
+            pane,
+            workdir,
+            worktree: planned_worktree,
+            seed_trust,
+            command,
+            accepted_at: Instant::now(),
+        };
+        self.state.start_launching(launching.clone());
+        spawn_launch_preparation(
+            Arc::clone(self.core),
+            self.self_sender.clone(),
+            session_id.clone(),
+            launching,
+        );
         tracing::info!(
             token = %token.as_str(),
             session_id = %session_id,
-            workdir = %workdir,
             has_first_prompt = first_send.is_some(),
-            "fresh spawn launched; awaiting first UserPromptSubmit to bind"
+            "fresh session accepted; preparing its launch in the background"
         );
         Ok(FreshSpawn {
             token: Some(token),
             first_send,
         })
-    }
-
-    /// Build (or reuse) the git worktree for an opt-in worktree request and
-    /// return its path — the effective launch directory. Shared by the Claude
-    /// ([`Self::spawn_fresh`]) and adapter-backed
-    /// ([`spawn_adapter_session`](super::super::session_actor::actor::SessionContext::spawn_adapter_session))
-    /// launch paths, so a session started from a PR (which always arrives as a
-    /// [`WorktreeStartPoint::UseRemoteBranch`] request) lands in the same
-    /// worktree regardless of the chosen provider.
-    ///
-    /// `repo_root` is the repository containing the user-selected workdir — the
-    /// caller has already run the [`GitWorktree::repo_root`] gate — and
-    /// `repository_display_name` is that repo's short identity. Together they
-    /// shape the per-session worktree directory name from the repository
-    /// identity, so a listing of `$DELTA_WORKTREE_BASE` makes each worktree
-    /// distinguishable at a glance (instead of a wall of UUID-suffixed
-    /// `delta-<id>` entries). The slug is the display name with `/` rewritten to
-    /// `-` and any unsafe character replaced — see [`worktree_dir_slug`]. When
-    /// no display name is available (the path is somehow non-git, or slugifies
-    /// to an empty string) it falls back to the literal `delta` so the path is
-    /// never just `<base>/-<id>`.
-    ///
-    /// For the new-branch start points (`Head`/`RemoteBranch`) a per-session
-    /// `delta-<session-id>` branch is cut at `<base>/<slug>-<session-id>` — that
-    /// **branch** name is kept so the frontend's `displayBranch()` shortening
-    /// continues to recognise it. For `UseRemoteBranch` the user works on the
-    /// named branch itself: the worktree already holding it (incl. the main
-    /// tree) is reused when one exists (git forbids one branch in two
-    /// worktrees), otherwise a new worktree checking it out is created. The git
-    /// work is a real side effect, so callers invoke this only after their
-    /// side-effect-free validation has passed.
-    pub(in crate::interactor) async fn resolve_worktree_launch_dir(
-        &self,
-        session_id: &delta_model::SessionId,
-        repo_root: &str,
-        repository_display_name: Option<&str>,
-        spec: WorktreeSpec,
-    ) -> Result<String> {
-        let slug = repository_display_name
-            .map(worktree_dir_slug)
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "delta".to_owned());
-        let default_path = format!("{}/{}-{}", self.worktree_base, slug, session_id.as_str());
-        let effective_path = match spec.start_point {
-            // New-branch start points: cut `delta-<id>` at `default_path`.
-            start_point @ (WorktreeStartPoint::Head | WorktreeStartPoint::RemoteBranch(_)) => {
-                let branch = format!("delta-{}", session_id.as_str());
-                self.git_worktree
-                    .create_worktree(repo_root, &default_path, &branch, start_point)
-                    .await?;
-                default_path
-            }
-            // Use the branch itself: reuse the worktree already holding it
-            // (incl. the main tree) when one exists, else create one that checks
-            // it out at `default_path`.
-            WorktreeStartPoint::UseRemoteBranch(name) => {
-                match self
-                    .git_worktree
-                    .worktree_path_for_branch(repo_root, &name)
-                    .await?
-                {
-                    Some(existing) => existing,
-                    None => {
-                        self.git_worktree
-                            .add_worktree_checkout(repo_root, &default_path, &name)
-                            .await?;
-                        default_path
-                    }
-                }
-            }
-        };
-        Ok(effective_path)
     }
 }

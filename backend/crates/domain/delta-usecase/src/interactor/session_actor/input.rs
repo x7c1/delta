@@ -60,6 +60,27 @@ pub(in crate::interactor) enum SessionInput {
         provider: AgentProvider,
         reply: Reply<FreshSpawn>,
     },
+    /// The background launch preparation of a freshly-accepted session
+    /// finished, reported by the launch task through this actor's own mailbox.
+    ///
+    /// `SpawnFresh` above only *accepts* the session (validating, writing the
+    /// eager row and first send, and replying with real ids); the expensive
+    /// part — building the git worktree, seeding workspace trust, writing the
+    /// settings file and launching `claude` in a tmux pane — runs afterwards on
+    /// a `tokio::spawn`ed task holding a weak handle to this mailbox, exactly
+    /// like the Codex event pump. This is that task's single report back, and
+    /// it is fire-and-forget: the task has no caller to reply to.
+    ///
+    /// `token` identifies the launch the outcome belongs to, so a report that
+    /// arrives after its entry was already rolled back is discarded rather than
+    /// applied to an unrelated launch. What each outcome does to the session —
+    /// `Ok` installs the pending spawn, `Err` rolls the acceptance back and
+    /// reports it on the async event seam — is documented on the handler,
+    /// `SessionContext::finish_launch`.
+    LaunchFinished {
+        token: crate::pane_token::PaneToken,
+        outcome: Result<()>,
+    },
     /// Resume the (closed but known) session.
     OpenSession { reply: Reply<()> },
     /// Close the session: final sync, kill the pane, drop the binding. Replies

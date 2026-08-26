@@ -658,6 +658,28 @@ describe('PendingQueue failed spawn', () => {
     expect(
       screen.getByRole('button', { name: 'Dismiss' }),
     ).toBeInTheDocument();
+    // A failure the server could not explain shows the generic line alone.
+    expect(screen.queryByTestId('pending-fail-reason')).toBeNull();
+  });
+
+  // The launch preparation runs after the send is accepted, so a git or tmux
+  // failure has no response body to travel in: the reason the event carries is
+  // the only account the user gets of what actually went wrong.
+  it('shows the reported reason under the generic failure line', () => {
+    useLiveStore.setState({
+      spawns: [
+        {
+          ...failedSpawn,
+          reason: 'git error: invalid reference: origin/nope',
+        },
+      ],
+    });
+    renderStrip({ kind: 'new-session' });
+
+    expect(screen.getByText(/failed to start/i)).toBeInTheDocument();
+    expect(screen.getByTestId('pending-fail-reason')).toHaveTextContent(
+      'invalid reference: origin/nope',
+    );
   });
 
   it('Dismiss removes the failed chip', () => {

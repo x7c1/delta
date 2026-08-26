@@ -51,6 +51,8 @@ async fn composer_first_send_writes_real_rows_before_spawn() {
     let main = ix.store().main_thread_id(&session_id).await.unwrap();
     assert_eq!(returned.thread_id, main, "the send targets the main thread");
 
+    ix.await_launch().await;
+
     // The spawn created exactly one tmux session in its own workdir.
     let created = ix.tmux_fake().created.lock().unwrap().clone();
     assert_eq!(created.len(), 1);

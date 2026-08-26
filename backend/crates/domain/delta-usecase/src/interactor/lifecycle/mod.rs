@@ -5,12 +5,15 @@
 
 mod close_session;
 mod dispatch_ready_resumes;
+mod finish_launch;
+mod launch_prep;
 mod mint_free_token;
 mod open_session;
 mod reap_stale_spawns;
 mod spawn_adapter_session;
 mod spawn_fresh;
 mod workdir_for;
+mod worktree_launch_dir;
 
 pub(in crate::interactor) use spawn_fresh::FreshSpawn;
 

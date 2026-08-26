@@ -190,6 +190,15 @@ pub enum Error {
     #[error("git error: {0}")]
     Git(String),
 
+    /// A freshly-accepted session's launch preparation (worktree build, trust
+    /// seed, settings write, agent launch) outran its deadline — a `git fetch`
+    /// hanging on an unreachable remote or a credential prompt, say. Never
+    /// returned to a REST caller: the send was accepted long before this could
+    /// happen, so it reaches the browser as the `reason` of a
+    /// [`SessionEvent::SpawnFailed`](crate::ports::SessionEvent::SpawnFailed).
+    #[error("launch preparation timed out: {0}")]
+    LaunchPreparationTimedOut(String),
+
     /// A `gh` CLI invocation failed despite the gateway reporting gh as
     /// authenticated. Surfaced as `500`. Missing/unauthenticated gh is
     /// NOT routed here — it is reported via the use case's

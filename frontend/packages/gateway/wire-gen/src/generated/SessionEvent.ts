@@ -56,7 +56,17 @@ thread_id: number,
  * The raw `{"questions":[…]}` tool input, serialized as JSON text, so
  * the browser can render the question card.
  */
-tool_input: string, } | { "kind": "permission_resolved", session_id: string, request_id: number, } | { "kind": "spawn_failed", session_id: string, pane_token: string, } | { "kind": "assistant_streaming", session_id: string, thread_id: number, message_id: string, index: number, 
+tool_input: string, } | { "kind": "permission_resolved", session_id: string, request_id: number, } | { "kind": "spawn_failed", session_id: string, pane_token: string, 
+/**
+ * Why the launch failed, when Delta can name the cause — the
+ * background launch preparation's own error (a git or tmux message).
+ *
+ * Absent from the frame entirely for the two watchdog-shaped
+ * producers (a launch that exited, a spawn that never bound), which
+ * observe only silence. A client renders it under its "failed to
+ * start" text when present and shows that text alone otherwise.
+ */
+reason?: string, } | { "kind": "assistant_streaming", session_id: string, thread_id: number, message_id: string, index: number, 
 /**
  * `final` is a Rust keyword, so the field is `is_final` here while the
  * wire key stays `final` (the client accumulates until it is `true`).

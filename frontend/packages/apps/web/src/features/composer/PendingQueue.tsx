@@ -87,6 +87,10 @@ export function PendingQueue({ entries }: PendingQueueProps) {
     text: string,
     message: string,
     actions: ReactNode,
+    // What the server said went wrong, when it could name it (see
+    // `SpawnItem.reason`). Shown verbatim *under* the generic line rather than
+    // replacing it: that line says what to do, this says what happened.
+    reason?: string,
   ) => (
     <li
       key={key}
@@ -100,6 +104,11 @@ export function PendingQueue({ entries }: PendingQueueProps) {
         <span className="min-w-0 flex-1 truncate text-fg">{text}</span>
       </div>
       <p className="text-danger">{message}</p>
+      {reason && (
+        <p className="break-words text-muted" data-testid="pending-fail-reason">
+          {reason}
+        </p>
+      )}
       <div className="flex justify-end gap-2">{actions}</div>
     </li>
   );
@@ -377,6 +386,7 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                     Dismiss
                   </Button>
                 </>,
+                entry.spawn.reason,
               );
           }
         })}

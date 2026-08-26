@@ -175,6 +175,37 @@ pub(crate) fn interactor_with_failing_create_session() -> TestInteractor {
     )
 }
 
+/// Build a test interactor with a specific [`FakeGitWorktree`] **and** the
+/// async event seam, returning the receiver alongside it.
+///
+/// What the deferred-launch tests need: the launch preparation (including the
+/// worktree build the fake scripts) runs on a background task, so a failure
+/// reaches the browser on the seam rather than as an error response.
+pub(crate) fn interactor_with_git_and_event_sink(
+    git_worktree: FakeGitWorktree,
+) -> (TestInteractor, crate::ports::AsyncEventReceiver) {
+    let (sink, receiver) = crate::ports::AsyncEventSink::channel();
+    (
+        interactor_with_git(git_worktree).with_event_sink(sink),
+        receiver,
+    )
+}
+
+/// Build a failing-launch interactor with the async event seam wired,
+/// returning the receiver alongside it.
+///
+/// A launch failure is no longer synchronous — the send is accepted before the
+/// launch runs — so the `SpawnFailed` it produces leaves on the seam. A test
+/// that wants to observe the failure at all needs both halves.
+pub(crate) fn interactor_with_failing_create_session_and_event_sink(
+) -> (TestInteractor, crate::ports::AsyncEventReceiver) {
+    let (sink, receiver) = crate::ports::AsyncEventSink::channel();
+    (
+        interactor_with_failing_create_session().with_event_sink(sink),
+        receiver,
+    )
+}
+
 /// The transcript path the seed-session test hooks (`submit`/`session_start`)
 /// install on the session row. Tests that fire `PreToolUse` / `PostToolUse` /
 /// `PermissionRequest` against the seeded session use this same path so the

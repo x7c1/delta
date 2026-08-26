@@ -51,6 +51,8 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
         vec![SessionEvent::SpawnFailed {
             session_id: session_id.clone(),
             pane_token: "delta-1".to_owned(),
+            // The watchdog observes silence, so it names no cause.
+            reason: None,
         }],
     );
     // The pane was killed by token.
