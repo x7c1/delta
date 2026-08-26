@@ -56,10 +56,22 @@ Response:
 
   `open` is `true` when the session currently has a live pane (resumable without
   `--resume`). `last_activity_at` is the ISO-8601 UTC timestamp of the session's
-  most recent message (`MAX(message.created_at)`), or `null` when the session
-  has no messages yet. `next_cursor` is an opaque token to fetch the following
-  page, or `null` on the last page. Returns an empty list until the first
-  session is registered.
+  most recent message (`MAX(message.created_at)`), or `null` when the session has
+  no messages yet. `next_cursor` is an opaque token to fetch the following page,
+  or `null` on the last page.
+
+  A session is listed from the moment its first send is accepted: the
+  `POST /api/sends` that spawns it writes the row before the launch, and that row
+  carries `status: "spawning"` until the session's first hook registers it — the
+  same row then reads `status: "active"` (announced as `session_registered`). A
+  spawning session is addressable like any other (its threads and open sends are
+  queryable, so the browser can focus it and show its first prompt right away),
+  but it is not open — no pane is bound to it yet, so it reports `open: false`
+  and nothing can be dispatched into it: a send to it is refused with
+  `409 session_spawning` (see [sends.md](sends.md)). A launch that fails to
+  prepare, and a spawn that came up but never bound (reaped at its bind
+  deadline), both have their row deleted, so the session disappears from this
+  list again and the client hears `spawn_failed`.
 
 - **400** — a malformed `cursor`.
 
@@ -73,10 +85,16 @@ Claude Code's hooks point back at this server without touching any
 `.claude/settings.json` in the working directory.
 
 This drives only the tmux/process lifecycle; the conversational session is still
-registered later by the first `SessionStart`/`UserPromptSubmit` hook, so a
-freshly created session has no `Session` row yet (it appears in
-`GET /api/sessions` once registered). The call is idempotent while a spawn is
-still live: a second call with a session already coming up reuses it.
+registered later by the first `SessionStart`/`UserPromptSubmit` hook. The row
+itself is written before the launch, exactly as for a new-session send, so the
+session is listed by `GET /api/sessions` straight away with `status: "spawning"`
+and flips to `active` at registration. The response likewise returns before the
+launch preparation runs — the same split
+[`POST /api/sends`](sends.md#post-apisends) makes — so a preparation failure
+arrives as a `spawn_failed` event with a `reason` rather than as a `500`, and
+deletes the row. The call is idempotent across that whole window: a second call
+made while the first session's launch is still being prepared reuses it instead
+of starting a rival session.
 
 Authentication is assumed: the server relies on a cached Claude Code token (or
 `CLAUDE_CODE_OAUTH_TOKEN`) and does not perform interactive OAuth. If the session
@@ -91,7 +109,10 @@ never becomes usable, the user answers prompts in the embedded terminal (`/pty`)
   `status` is `ready` when an existing session was reused, or `starting` when the
   session was just created and may still be coming up.
 
-- **500** — preparing the working directory or starting the tmux session failed.
+- **500** — the synchronous part failed: probing tmux for a free session name,
+  or writing the session row. Writing the settings file and starting the tmux
+  session are no longer part of this response (see above); they fail as a
+  `spawn_failed` event instead.
 
 ### `POST /api/sessions/{id}/open`
 

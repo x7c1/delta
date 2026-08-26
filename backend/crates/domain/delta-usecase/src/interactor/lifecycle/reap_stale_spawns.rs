@@ -31,6 +31,15 @@ where
     ///   spawn sweep above does not cover it. The sweep removes a resuming entry
     ///   whose readiness deadline has elapsed, cancelling its held first prompt.
     ///
+    /// A third shape — a session that has only been *accepted*, with its launch
+    /// preparation still running — is deliberately outside this sweep: it holds
+    /// a `LaunchingSpawn`, not a pending one, so neither drain sees it. It has
+    /// no pane to kill, and its bind deadline only starts when the preparation
+    /// checks in (`LaunchPrepared`) a beat before the pane is created; a slow
+    /// `git fetch` must not eat that deadline. Its backstop is the launch task's
+    /// own [`LAUNCH_PREP_DEADLINE`], after which the launch fails itself and
+    /// reports the same `SpawnFailed` (with a `reason`).
+    ///
     /// For each stale launch it kills the tmux pane (best-effort, guarded by
     /// `has_session`) and produces a [`SessionEvent::SpawnFailed`] so the browser
     /// can surface the failure and clear the optimistic pending chip. The same
@@ -42,6 +51,8 @@ where
     /// `now` is injected (rather than read here) so the watchdog is deterministic
     /// under test. The usecase returns the events to broadcast — the server owns
     /// the periodic tick that fans this out and broadcasts the result.
+    ///
+    /// [`LAUNCH_PREP_DEADLINE`]: super::launch_prep::LAUNCH_PREP_DEADLINE
     pub(in crate::interactor) async fn reap_stale_launch(
         &mut self,
         now: Instant,
@@ -70,6 +81,9 @@ where
             events.push(SessionEvent::SpawnFailed {
                 session_id,
                 pane_token: spawn.token.as_str().to_owned(),
+                // The watchdog observes silence, not a cause: nothing said why
+                // the launch never bound.
+                reason: None,
             });
         }
         if let Some(resuming) = stale_resume {
@@ -89,6 +103,7 @@ where
             events.push(SessionEvent::SpawnFailed {
                 session_id: self.id.clone(),
                 pane_token: resuming.token.as_str().to_owned(),
+                reason: None,
             });
         }
         Ok(events)

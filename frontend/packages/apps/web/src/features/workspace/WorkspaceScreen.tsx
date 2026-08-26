@@ -178,7 +178,6 @@ export function WorkspaceScreen() {
   const terminalWidth = useNavStore((state) => state.terminalWidth);
   const clearUnread = useLiveStore((state) => state.clearUnread);
   const spawns = useLiveStore((state) => state.spawns);
-  const clearSpawn = useLiveStore((state) => state.clearSpawn);
 
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
 
@@ -190,46 +189,42 @@ export function WorkspaceScreen() {
 
   // The focused session's id for the thread query (null for new/none/unknown).
   const focusedRealSessionId = focusedItem?.session.id ?? null;
+  // A focused session whose launch has not registered yet. It is listed (and
+  // focused) from the moment its first send was accepted, so this is a state
+  // the user now sees: the conversation is empty, the first prompt sits in the
+  // pending strip, and the composer waits until the launch comes up.
+  const focusedSpawning = focusedItem?.session.status === 'spawning';
   const threadsQuery = useSessionThreadsQuery(client, focusedRealSessionId);
   const threads = useMemo(
     () => threadsQuery.data?.threads ?? [],
     [threadsQuery.data],
   );
 
-  // Hand a tracked spawn over to normal navigation once it registers. The
-  // `POST /api/sends` response named the spawned session's real id, so when
-  // that id appears in the refetched session list the spawn is over: focus it
-  // directly — but only when the user is still waiting on the new-session
-  // screen (they may have navigated elsewhere meanwhile) — and stop tracking
-  // it (the pending chip continues from the session's open-send list).
+  // Focus a spawned session the moment the server accepts its first send. The
+  // `POST /api/sends` response named the new session's real id, and the server
+  // wrote its row — listed as `spawning` — before launching anything, so there
+  // is nothing left to wait for: switch to it while the launch comes up, rather
+  // than parking the user on the new-session screen for the second or more it
+  // takes the first hook to arrive.
+  //
+  // Deliberately NOT gated on that id being present in the loaded session list:
+  // the refetch `useSubmitSend` fires is still in flight, and the
+  // reconciliation below is taught to leave a tracked spawn's focus alone until
+  // the row lands. Only while the user is still on the new-session screen,
+  // though — they may have navigated elsewhere during the POST, and a spawn is
+  // not worth stealing a session they chose.
+  //
+  // The entry is released by `session_registered` (see `spawnsSlice`), not
+  // here; a `spawn_failed` turns it into the Retry / Dismiss card instead.
   useEffect(() => {
-    if (!sessionsQuery.isSuccess) {
+    const spawning = spawns.filter((spawn) => spawn.status === 'spawning');
+    if (spawning.length === 0 || !isNewSessionFocus) {
       return;
     }
-    const listed = spawns.filter(
-      (spawn) =>
-        spawn.status === 'spawning' &&
-        sessions.some((item) => item.session.id === spawn.sessionId),
-    );
-    if (listed.length === 0) {
-      return;
-    }
-    if (isNewSessionFocus) {
-      // Several spawns can only pile up via quick Retry cycles; the newest is
-      // the one the user is waiting on.
-      reconcileFocusedSession(listed[listed.length - 1].sessionId);
-    }
-    for (const spawn of listed) {
-      clearSpawn(spawn.sessionId);
-    }
-  }, [
-    sessionsQuery.isSuccess,
-    sessions,
-    spawns,
-    isNewSessionFocus,
-    reconcileFocusedSession,
-    clearSpawn,
-  ]);
+    // Several spawns can only pile up via quick Retry cycles; the newest is
+    // the one the user is waiting on.
+    reconcileFocusedSession(spawning[spawning.length - 1].sessionId);
+  }, [spawns, isNewSessionFocus, reconcileFocusedSession]);
 
   // Resolve focus once the session list loads.
   useEffect(() => {
@@ -237,9 +232,19 @@ export function WorkspaceScreen() {
       return;
     }
     if (isNewSessionFocus) {
-      // The new-session screen keeps focus until its spawn registers (handled
+      // The new-session screen keeps focus until a spawn takes it (handled
       // above) or the user navigates away; the cold-start reconciliation below
       // must not stomp it.
+      return;
+    }
+    if (spawns.some((spawn) => spawn.sessionId === focusedSessionId)) {
+      // A just-spawned session, focused the instant its send was accepted. Its
+      // row exists server-side but has not reached the loaded pages yet (the
+      // refetch is in flight), so "absent from the list" here means "too early",
+      // not "gone" — reconciling would bounce focus to some other session for
+      // the split second before the row arrives. The tracked entry is dropped
+      // by `session_registered`, and by then the row is listed; a spawn that
+      // fails instead moves focus itself (see `applySessionEvent`).
       return;
     }
     const stillExists =
@@ -259,12 +264,23 @@ export function WorkspaceScreen() {
       if (focusedSessionId !== null && sessionsQuery.hasNextPage) {
         return;
       }
+      // Equally ambiguous while the list itself is being refreshed: the pages
+      // in hand are the PREVIOUS answer, and the session that just registered
+      // (which invalidated the list, and is very likely the focused one) is in
+      // the response still on the wire. Reconciling off the stale pages would
+      // bounce focus onto some other session in the instant before the row it
+      // is waiting for arrives — and nothing would bounce it back.
+      if (focusedSessionId !== null && sessionsQuery.isFetching) {
+        return;
+      }
       reconcileFocusedSession(pickInitialFocus(sessions));
     }
   }, [
     sessionsQuery.isSuccess,
     sessionsQuery.hasNextPage,
+    sessionsQuery.isFetching,
     sessions,
+    spawns,
     focusedSessionId,
     isNewSessionFocus,
     reconcileFocusedSession,
@@ -337,12 +353,21 @@ export function WorkspaceScreen() {
   // 3 s later — at which point everything lands at once. Invalidating on bind
   // forces an extra refetch right after the mount's initial fetch resolves, so
   // any DB state that caught up in the interim is picked up immediately.
+  //
+  // `focusedSpawning` is a dependency for the same reason, one step earlier in
+  // the session's life: the pane is now bound while the session is still
+  // STARTING, so its first fetch necessarily predates every line of the
+  // conversation, and the events that would re-invalidate it can land before
+  // the transcript is written (the first hook's `session_registered` is the
+  // whole of what the client hears until the turn ends). Flushing again when
+  // the session leaves `spawning` gives that empty first answer a second
+  // reading, taken once the launch is genuinely up.
   const queryClient = useQueryClient();
   useEffect(() => {
     if (activeThreadId !== null) {
       invalidateThreadMessages(queryClient, activeThreadId);
     }
-  }, [activeThreadId, queryClient]);
+  }, [activeThreadId, focusedSpawning, queryClient]);
 
   const activeThread =
     threads.find((thread) => thread.id === activeThreadId) ?? null;
@@ -370,6 +395,12 @@ export function WorkspaceScreen() {
   }
 
   const focusedOpen = focusedItem?.open ?? false;
+  // The same session in the beat before its row reaches the loaded pages: it
+  // was focused off the tracked spawn alone, so there is nothing to render yet
+  // — but it is arriving, not gone.
+  const focusedAwaitingItsRow =
+    focusedItem === null &&
+    spawns.some((spawn) => spawn.sessionId === focusedSessionId);
 
   // Whether the focused session's provider offers an attachable terminal, read
   // from its capability profile — never from `provider === 'claude'`. A provider
@@ -518,6 +549,7 @@ export function WorkspaceScreen() {
             threads={threads}
             activeThread={activeThread}
             readOnly={!focusedOpen}
+            spawning={focusedSpawning}
             paneToggleButton={paneToggleButton}
             // The raw capability, NOT `focusedHasTerminal`: that flag folds in a
             // fail-closed rule that exists only to keep the pane (and its `/pty`
@@ -537,7 +569,11 @@ export function WorkspaceScreen() {
           />
         ) : (
           <div className="flex h-full items-center justify-center text-secondary text-fg-subtle">
-            Select a session to view its conversation.
+            {/* Saying "select a session" while a just-accepted spawn is on its
+                way in would read as if the user's click had gone nowhere. */}
+            {focusedAwaitingItsRow
+              ? 'Starting the session…'
+              : 'Select a session to view its conversation.'}
           </div>
         )}
       </div>

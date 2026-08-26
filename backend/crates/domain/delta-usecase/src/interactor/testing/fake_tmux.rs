@@ -1,11 +1,74 @@
 //! In-memory [`TmuxDriver`] fake recording the calls the interactor makes.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use tokio::sync::Notify;
 
 use crate::error::Result;
 use crate::ports::TmuxDriver;
+
+/// A hold on the fake's `create_session`, so a test can act in the window in
+/// which a launch has been prepared but its pane does not exist yet.
+///
+/// That window is where the ordering a launch depends on is decided: the pending
+/// spawn must already be recorded when the pane comes up, because the hooks the
+/// launched agent fires bind *that* record. Holding `create_session` open lets a
+/// test stand exactly there — [`Self::await_entered`] waits until the launch is
+/// inside the call — and deliver a hook the way a fast agent would.
+///
+/// Mirrors [`WorktreeGate`](super::WorktreeGate), which holds the step before
+/// this one.
+#[derive(Clone)]
+pub(crate) struct TmuxGate(Arc<TmuxGateInner>);
+
+#[derive(Default)]
+struct TmuxGateInner {
+    open: Mutex<bool>,
+    opened: Notify,
+    /// How many `create_session` calls have reached the gate.
+    entered: Mutex<usize>,
+    entered_notify: Notify,
+}
+
+impl TmuxGate {
+    /// A gate that is closed: every `create_session` waits until [`Self::open`].
+    pub(crate) fn closed() -> Self {
+        Self(Arc::new(TmuxGateInner::default()))
+    }
+
+    /// Let the held (and every later) `create_session` through.
+    pub(crate) fn open(&self) {
+        *self.0.open.lock().unwrap() = true;
+        self.0.opened.notify_waiters();
+    }
+
+    /// Wait until a `create_session` has reached the gate — i.e. the launch has
+    /// finished preparing and is about to create its pane.
+    pub(crate) async fn await_entered(&self) {
+        loop {
+            // Register for the notification *before* re-reading the count, so an
+            // entry landing between the two is not missed.
+            let entered = self.0.entered_notify.notified();
+            if *self.0.entered.lock().unwrap() > 0 {
+                return;
+            }
+            entered.await;
+        }
+    }
+
+    async fn wait(&self) {
+        *self.0.entered.lock().unwrap() += 1;
+        self.0.entered_notify.notify_waiters();
+        loop {
+            let opened = self.0.opened.notified();
+            if *self.0.open.lock().unwrap() {
+                return;
+            }
+            opened.await;
+        }
+    }
+}
 
 /// One recorded input into a pane, in the order the interactor produced it.
 ///
@@ -55,6 +118,20 @@ pub(crate) struct FakeTmux {
     pub(crate) created: Mutex<Vec<CreatedSession>>,
     /// The session names `kill_session` was called with, in order.
     pub(crate) killed: Mutex<Vec<String>>,
+    /// When set, every `create_session` waits on this gate before recording (or
+    /// failing) anything — the seam a test holds open to act while a launch is
+    /// between "prepared" and "pane up". `None` (the default) means no wait at
+    /// all, so every other test is unaffected.
+    pub(crate) gate: Option<TmuxGate>,
+}
+
+impl FakeTmux {
+    /// Hold every `create_session` on `gate` until the test opens it, so the
+    /// prepared→pane window can be observed.
+    pub(crate) fn with_gate(mut self, gate: &TmuxGate) -> Self {
+        self.gate = Some(gate.clone());
+        self
+    }
 }
 
 #[async_trait]
@@ -64,6 +141,9 @@ impl TmuxDriver for FakeTmux {
     }
 
     async fn create_session(&self, name: &str, workdir: &str, command: &[String]) -> Result<()> {
+        if let Some(gate) = &self.gate {
+            gate.wait().await;
+        }
         if self.fail_create {
             return Err(crate::error::Error::Tmux("create failed".into()));
         }

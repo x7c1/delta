@@ -45,6 +45,8 @@ async fn new_session_with_launch_option_value_expands_leading_tilde() {
     .await
     .unwrap();
 
+    ix.await_launch().await;
+
     let created = ix.tmux_fake().created.lock().unwrap().clone();
     assert_eq!(created.len(), 1, "one session spawned");
     let minted = ix.pending_session_ids().await.remove(0);

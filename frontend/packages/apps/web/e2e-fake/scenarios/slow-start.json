@@ -1,0 +1,8 @@
+{
+  "session_start": { "delay_ms": 2500 },
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "up at last" },
+    { "type": "stop" }
+  ]
+}

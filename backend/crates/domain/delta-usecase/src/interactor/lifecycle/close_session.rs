@@ -20,6 +20,14 @@ where
     /// gives — so the browser can tell "already closed" apart from "no such
     /// session" rather than having a stale id silently succeed.
     ///
+    /// A session that is still *starting* is a no-op on the pane side too: one
+    /// whose launch preparation is running has no pane yet, and one whose pane
+    /// is up but unbound is not mapped, so there is nothing to kill either way
+    /// and the launch (or the watchdog behind it) settles the spawn on its own.
+    /// The navigator hides Close for a `spawning` row, so only a stale client
+    /// reaches this — and it stays inert rather than half-tearing-down a launch
+    /// in flight.
+    ///
     /// Once closed, a session loses its live pane and the background tail
     /// no longer polls it. But Claude Code may flush the turn's final
     /// assistant line to the JSONL just *after* its `Stop` hook fired, so

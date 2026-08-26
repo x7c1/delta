@@ -27,6 +27,15 @@ pub enum Error {
     #[error("session cannot be resumed (transcript missing): {0}")]
     ResumeUnavailable(String),
 
+    /// A send targeted a session whose launch has not bound yet: the row exists
+    /// (it is listed as `spawning` from the moment its first send was accepted)
+    /// but no pane is mapped to it, and its transcript does not exist yet — so
+    /// the resume path would launch a second agent against nothing. The send is
+    /// refused instead; the composer is disabled on a starting session, so this
+    /// only fires against a stale client. Surfaced as `409`.
+    #[error("session is still starting: {0}")]
+    SessionSpawning(String),
+
     /// A user-selected working directory is not a usable directory: it does not
     /// exist, is not a directory, or could not be resolved. Surfaced as `400`.
     #[error("invalid working directory: {0}")]
@@ -180,6 +189,15 @@ pub enum Error {
     /// errored.
     #[error("git error: {0}")]
     Git(String),
+
+    /// A freshly-accepted session's launch preparation (worktree build, trust
+    /// seed, settings write, agent launch) outran its deadline — a `git fetch`
+    /// hanging on an unreachable remote or a credential prompt, say. Never
+    /// returned to a REST caller: the send was accepted long before this could
+    /// happen, so it reaches the browser as the `reason` of a
+    /// [`SessionEvent::SpawnFailed`](crate::ports::SessionEvent::SpawnFailed).
+    #[error("launch preparation timed out: {0}")]
+    LaunchPreparationTimedOut(String),
 
     /// A `gh` CLI invocation failed despite the gateway reporting gh as
     /// authenticated. Surfaced as `500`. Missing/unauthenticated gh is

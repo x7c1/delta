@@ -135,7 +135,8 @@ Request:
   already surfaced to the browser (a `session.cwd`, `session.requested_workdir`,
   or `message.cwd`). The server checks that allowlist before invoking the
   opener, so a hand-crafted request cannot point the editor at an arbitrary
-  directory on disk.
+  directory on disk. A `spawning` session's `cwd` can be a worktree the launch
+  has not built yet; opening it then just gives an empty editor window.
 - `handler` (optional) — which tool to launch. Defaults to `vscode`, the only
   registered handler.
 

@@ -29,6 +29,8 @@ async fn new_session_with_git_repo_workdir_seeds_trust() {
     .await
     .unwrap();
 
+    ix.await_launch().await;
+
     let trusted = ix.git_worktree_fake().trusted.lock().unwrap().clone();
     assert_eq!(
         trusted,

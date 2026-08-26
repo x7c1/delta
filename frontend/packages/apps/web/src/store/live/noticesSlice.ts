@@ -183,6 +183,13 @@ export interface ResumeUnavailableNotice {
  */
 export interface SpawnFailureBufferedNotice {
   kind: 'spawn_failure_buffered';
+  /**
+   * Why the launch failed, when the event named a cause — carried across so the
+   * failed chip `trackSpawn` registers can show it, exactly as one flipped by a
+   * `spawn_failed` that arrived in order does. `undefined` for the
+   * watchdog-shaped failures, which name none.
+   */
+  reason?: string;
 }
 
 /** One per-session notice; at most one of each kind exists per session. */

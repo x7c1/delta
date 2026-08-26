@@ -20,6 +20,8 @@ async fn new_session_without_workdir_falls_back_to_base_token() {
     .await
     .unwrap();
 
+    ix.await_launch().await;
+
     let created = ix.tmux_fake().created.lock().unwrap().clone();
     assert_eq!(created.len(), 1);
     assert_eq!(created[0].workdir, "/work/delta-1", "<base>/<token>");

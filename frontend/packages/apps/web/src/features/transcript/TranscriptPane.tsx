@@ -138,6 +138,15 @@ export interface TranscriptPaneProps {
   activeThread: Thread | null;
   /** True when the focused session is closed (read-only viewing; a Send resumes it). */
   readOnly: boolean;
+  /**
+   * True while the focused session is still starting (`status: 'spawning'`): it
+   * is focusable from the moment its first send was accepted, but its launch
+   * has not registered yet. Such a session has no live pane either, so
+   * `readOnly` is true alongside this — this flag is what tells the two apart,
+   * keeping the "closed, send to resume" notice off a session that was never
+   * closed and telling the composer to wait instead (see {@link ComposerMode}).
+   */
+  spawning?: boolean;
   /** True for the new-session composer state (no session/thread exists yet). */
   newSession?: boolean;
   /**
@@ -195,6 +204,7 @@ export function TranscriptPane({
   threads,
   activeThread,
   readOnly,
+  spawning = false,
   newSession = false,
   workdirMandatory = false,
   paneToggleButton = null,
@@ -877,7 +887,7 @@ export function TranscriptPane({
   const composerMode: ComposerMode | undefined = newSession
     ? { kind: 'new-session' }
     : activeThread && !resumeUnavailable
-      ? { kind: 'thread', activeThread, readOnly }
+      ? { kind: 'thread', activeThread, readOnly, spawning }
       : undefined;
 
   // The floating layer over the scrolling transcript (see Panel's `overlay`):
@@ -974,14 +984,19 @@ export function TranscriptPane({
       </div>
     );
   } else if (composerMode) {
+    // A starting session is not open, so it arrives here `readOnly` — but it was
+    // never closed, and no send will resume it (the server refuses one until its
+    // launch registers). The composer's own "starting" placeholder is what says
+    // so; the closed notice would be a second, wrong explanation.
+    const showClosedNotice = readOnly && !newSession && !spawning;
     // Whether the upper (notices) card has anything to show. Each of these
-    // conditions matches exactly one child it gates — `readOnly` the closed
-    // notice, `showExternalInput` the external-input notice, and a non-empty
+    // conditions matches exactly one child it gates — `showClosedNotice` the
+    // closed notice, `showExternalInput` the external-input notice, and a non-empty
     // `pendingEntries` the pending strip (`PendingQueue` itself renders null when
     // empty) — so the card is omitted entirely rather than rendering an empty
     // box when none of them are present.
     const hasNotices =
-      (readOnly && !newSession) ||
+      showClosedNotice ||
       (showExternalInput && activeThread !== null) ||
       (showSendParked && activeThread !== null) ||
       pendingEntries.length > 0;
@@ -998,7 +1013,7 @@ export function TranscriptPane({
             className={`${FLOATING_CARD_CLASS} space-y-2 px-3 py-2`}
             data-testid="bottom-notices"
           >
-            {readOnly && !newSession && (
+            {showClosedNotice && (
               <div
                 className="flex items-center gap-2 rounded border border-border-default bg-surface-elevated px-2 py-1 text-caption text-fg-subtle"
                 data-testid="readonly-notice"

@@ -34,6 +34,14 @@ export type ComposerMode =
       kind: 'thread';
       activeThread: Thread;
       readOnly: boolean;
+      /**
+       * True while the session is still starting (`status: 'spawning'`). Its row
+       * exists — and is focusable — from the moment its first send was accepted,
+       * but its launch has not registered yet, so the server refuses any send to
+       * it (`409 session_spawning`). The composer says so and offers no send
+       * until the launch comes up, a beat later.
+       */
+      spawning: boolean;
     };
 
 export interface ComposerProps {
@@ -93,6 +101,7 @@ export function Composer({ mode }: ComposerProps) {
   const isNew = mode.kind === 'new-session';
   const activeThread = mode.kind === 'thread' ? mode.activeThread : null;
   const readOnly = mode.kind === 'thread' ? mode.readOnly : false;
+  const spawning = mode.kind === 'thread' ? mode.spawning : false;
   const draftKey: ThreadId = composerDraftKey(mode);
 
   const draft = useComposerStore((state) => state.drafts[draftKey] ?? '');
@@ -261,20 +270,28 @@ export function Composer({ mode }: ComposerProps) {
 
   const placeholder = isNew
     ? 'Message to start a new session…'
-    : branching
-      ? 'Ask a follow-up on the selected text…'
-      : readOnly
-        ? 'Send to resume this closed session…'
-        : // Prefix the thread title with `#` (Slack/Discord style) so it reads as
-          // an addressable target — "Message #main" / "Message #foobar" — rather
-          // than the verb running straight into a bare word.
-          `Message ${activeThread?.title ? `#${activeThread.title}` : ''}…`;
+    : // The starting state outranks every other wording, branching included:
+      // whatever the user meant to send, nothing can be sent yet.
+      spawning
+      ? 'This session is starting…'
+      : branching
+        ? 'Ask a follow-up on the selected text…'
+        : readOnly
+          ? 'Send to resume this closed session…'
+          : // Prefix the thread title with `#` (Slack/Discord style) so it reads as
+            // an addressable target — "Message #main" / "Message #foobar" — rather
+            // than the verb running straight into a bare word.
+            `Message ${activeThread?.title ? `#${activeThread.title}` : ''}…`;
 
   // Single source of truth for "Send is not ready" — used both on the Send
   // button's `disabled` and as the Cmd/Ctrl+Enter shortcut guard, so the
   // keyboard path cannot bypass gates the button enforces:
   //   - empty draft
   //   - a send is already in-flight
+  //   - the session is still starting: the server refuses a send to it
+  //     (`409 session_spawning`), which the composer has no special handling
+  //     for — it would leave a dead `failed` chip in the pending strip for the
+  //     user to clear, a second before the same send would have worked
   //   - a new session must start in a chosen directory (selection mandatory)
   //   - if the worktree toggle is on, the start-point must be a concrete
   //     value: `pending_remote_branch` means the Other-remote-branch picker
@@ -283,6 +300,7 @@ export function Composer({ mode }: ComposerProps) {
   const submitDisabled =
     draft.trim().length === 0 ||
     sendInFlight ||
+    spawning ||
     (isNew && !newSessionWorkdir) ||
     (isNew &&
       newSessionWorktreeEnabled &&

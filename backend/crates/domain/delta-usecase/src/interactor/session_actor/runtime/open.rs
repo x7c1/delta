@@ -55,13 +55,19 @@ impl std::fmt::Debug for OpenAgentSession {
 }
 
 impl SessionRuntime {
-    /// Whether a pane is live: bound to the session, or spawned and awaiting
-    /// its first `UserPromptSubmit`. Used to keep the single-session cold
-    /// start idempotent. A terminal-less agent session also counts as live so
-    /// the cold-start idempotence check does not spawn a second pane alongside
-    /// an open Codex session.
+    /// Whether a pane is live: bound to the session, spawned and awaiting its
+    /// first `UserPromptSubmit`, or accepted with its launch preparation still
+    /// running. Used to keep the single-session cold start idempotent — an
+    /// accepted-but-not-yet-launched session has to count, or a second
+    /// `POST /api/sessions` arriving while the first one's worktree is still
+    /// being checked out would start a rival session. A terminal-less agent
+    /// session also counts as live so the same check does not spawn a pane
+    /// alongside an open Codex session.
     pub fn has_live_pane(&self) -> bool {
-        self.open.is_some() || self.pending_spawn.is_some() || self.open_agent.is_some()
+        self.open.is_some()
+            || self.launching_spawn.is_some()
+            || self.pending_spawn.is_some()
+            || self.open_agent.is_some()
     }
 
     /// The open **pane** handle, if the session is currently open on a

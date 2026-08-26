@@ -698,6 +698,84 @@ describe('liveStore spawn tracking', () => {
     expect(useLiveStore.getState().localSends).toEqual({});
   });
 
+  it('carries the failure reason onto the tracked spawn', () => {
+    // The launch preparation runs after the send is accepted, so a git or tmux
+    // failure has no error response to travel in. The event's `reason` is the
+    // whole account of what went wrong, and the chip renders it.
+    trackOne();
+
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      reason: 'git error: invalid reference: origin/nope',
+    });
+
+    expect(useLiveStore.getState().spawns[0].reason).toBe(
+      'git error: invalid reference: origin/nope',
+    );
+  });
+
+  it('carries the reason through a failure that outran its POST response', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      reason: 'git error: worktree add failed',
+    });
+    trackOne();
+
+    const spawn = useLiveStore.getState().spawns[0];
+    expect(spawn.status).toBe('failed');
+    expect(spawn.reason).toBe('git error: worktree add failed');
+  });
+
+  it('releases the tracked spawn when its session registers', () => {
+    // The launch bound: the spawn window is over. The workspace focused the
+    // session when its send was accepted and its row is listed by now, so the
+    // tracked entry has nothing left to do. Only that one entry goes.
+    trackOne();
+    trackOne('sess-spawn-2');
+
+    useLiveStore.getState().applyEvent({
+      kind: 'session_registered',
+      session_id: 'sess-spawn-1',
+    });
+
+    expect(
+      useLiveStore.getState().spawns.map((spawn) => spawn.sessionId),
+    ).toEqual(['sess-spawn-2']);
+  });
+
+  it('keeps a failed spawn when a session_registered arrives for it', () => {
+    // A `failed` entry is the Retry / Dismiss card, and only the user's answer
+    // removes it — a registration for the same id must never take it away
+    // under them.
+    trackOne();
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'session_registered',
+      session_id: 'sess-spawn-1',
+    });
+
+    expect(useLiveStore.getState().spawns[0].status).toBe('failed');
+  });
+
+  it('leaves tracked spawns alone on session_registered for another session', () => {
+    trackOne();
+
+    useLiveStore.getState().applyEvent({
+      kind: 'session_registered',
+      session_id: 'sess-someone-elses',
+    });
+    expect(useLiveStore.getState().spawns).toHaveLength(1);
+  });
+
   it('leaves tracked spawns alone on spawn_failed for an unknown session', () => {
     trackOne();
 

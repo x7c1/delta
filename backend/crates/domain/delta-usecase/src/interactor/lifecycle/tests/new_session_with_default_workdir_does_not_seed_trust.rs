@@ -22,6 +22,8 @@ async fn new_session_with_default_workdir_does_not_seed_trust() {
     .await
     .unwrap();
 
+    ix.await_launch().await;
+
     assert!(
         ix.git_worktree_fake().trusted.lock().unwrap().is_empty(),
         "the default scratch dir is not seeded for trust"

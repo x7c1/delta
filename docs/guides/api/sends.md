@@ -123,6 +123,35 @@ Response:
   (see the field note above), so it is `null` on both the response and the
   persisted row.
 
+  For the default `provider: "claude"` the `201` is returned
+  **before the launch preparation**: the session is *accepted*, not started.
+  Building the git worktree (a `git fetch` plus a full checkout, seconds to tens
+  of seconds on a large repository), seeding workspace trust and launching the
+  agent all run in the background afterwards, so the response time no longer
+  depends on the size of the repository. What stays synchronous is everything cheap and everything
+  whose failure is the caller's to fix — validating `workdir`, the worktree
+  gate, resolving `launch_option_ids`, and reading the repository's local git
+  config — which is why those are still the `400`s below. The session is listed
+  as `spawning` from this response until its first hook binds it, and sends to
+  it are refused with `session_spawning` for that whole window (see the `409`
+  below).
+
+  A failure of the background preparation — a start point that does not exist on
+  the remote, a `git worktree add` error, a tmux failure — therefore cannot be a
+  response at all. It arrives on the live channel as a
+  [`spawn_failed`](live-channels.md#session-lifecycle) event carrying the error
+  text as its `reason`, and the eagerly-created row (with this send, by cascade)
+  is deleted, so the session stops being listed. The preparation is also given
+  up on if it has not finished within 10 minutes — a `git fetch` hanging on an
+  unreachable remote or a credential prompt has no timeout of its own — and that
+  gives the same `spawn_failed`, so a stuck session never sits `spawning`
+  indefinitely.
+
+  `provider: "codex"` does not take this split: an adapter-backed session is
+  created over the provider's connection inside the request, so its worktree
+  build and its launch are still synchronous and still fail the request itself
+  (a `5xx` carrying the git or adapter message, with no row left behind).
+
 - **400** — the target is ambiguous or contradictory (a JSON body): neither
   `thread_id` nor `new_session` given, both given, or `new_session` combined with
   a branch (`semantic_parent_uuid`). Also a `workdir` that does not exist or is
@@ -135,6 +164,13 @@ Response:
 - **409** — the target's session is closed and cannot be resumed because its
   transcript is gone (body `code: "resume_unavailable"`). No send is enqueued and
   the session stays closed.
+- **409** (body `code: "session_spawning"`) — the target's session is still
+  starting: it is listed from the moment its first send was accepted, but its
+  launch has not registered yet, so there is nothing to dispatch into. This
+  covers the whole starting window — the background launch preparation *and* the
+  wait for the launched agent's first hook. No send is enqueued and no second
+  agent is launched; the same request succeeds once the session's first hook
+  arrives (it is then `active`).
 
 ### `GET /api/sessions/{id}/sends`
 

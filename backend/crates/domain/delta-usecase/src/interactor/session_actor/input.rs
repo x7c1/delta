@@ -18,7 +18,7 @@ use super::runtime::SessionLiveState;
 use crate::agent::AgentEvent;
 use crate::error::Result;
 use crate::interactor::hooks::PermissionWait;
-use crate::interactor::lifecycle::FreshSpawn;
+use crate::interactor::lifecycle::{FreshSpawn, LaunchApproval};
 use crate::interactor::PermissionDecision;
 use crate::ports::{
     MessageDisplayHook, SessionEndHook, SessionEvent, SessionStartHook, StopHook,
@@ -59,6 +59,53 @@ pub(in crate::interactor) enum SessionInput {
         /// adapter path (`spawn_adapter_session`).
         provider: AgentProvider,
         reply: Reply<FreshSpawn>,
+    },
+    /// The background launch preparation of a freshly-accepted session reached
+    /// its last step: everything but the tmux pane is in place, and the pane is
+    /// about to be created. The launch task awaits this reply before calling
+    /// `create_session`.
+    ///
+    /// `SpawnFresh` above only *accepts* the session (validating, writing the
+    /// eager row and first send, and replying with real ids); the expensive
+    /// part — building the git worktree, seeding workspace trust, writing the
+    /// settings file and launching `claude` in a tmux pane — runs afterwards on
+    /// a `tokio::spawn`ed task holding a weak handle to this mailbox, exactly
+    /// like the Codex event pump. This is that task's checkpoint partway
+    /// through.
+    ///
+    /// Its handler turns the launching entry into the `PendingSpawn` that the
+    /// launch's first `SessionStart`/`UserPromptSubmit` binds. That record must
+    /// exist *before* the pane does: those hooks land on this same mailbox, so
+    /// a pane created first can fire one that finds nothing pending, is
+    /// dismissed as external input, and leaves the spawn recorded afterwards
+    /// with no hook left to bind it — a session that never activates. Awaiting
+    /// this reply makes the ordering structural instead of a race the launch
+    /// usually wins.
+    ///
+    /// The reply also tells the task whether to go on at all:
+    /// [`LaunchApproval::Abandon`] when no launching entry matches `token` (the
+    /// acceptance was already rolled back), in which case no pane is created.
+    /// See `SessionContext::record_launched_pane`.
+    LaunchPrepared {
+        token: crate::pane_token::PaneToken,
+        reply: Reply<LaunchApproval>,
+    },
+    /// The background launch preparation of a freshly-accepted session
+    /// finished, reported by the launch task through this actor's own mailbox.
+    ///
+    /// The counterpart to `LaunchPrepared` above, and unlike it fire-and-forget:
+    /// the task has no caller to reply to, so a failure is reported on the async
+    /// event seam instead.
+    ///
+    /// `token` identifies the launch the outcome belongs to, so a report that
+    /// arrives after its entry was already rolled back is discarded rather than
+    /// applied to an unrelated launch. What each outcome does to the session —
+    /// `Ok` leaves the already-recorded pending spawn alone, `Err` rolls the
+    /// acceptance back and reports it on the async event seam — is documented on
+    /// the handler, `SessionContext::finish_launch`.
+    LaunchFinished {
+        token: crate::pane_token::PaneToken,
+        outcome: Result<()>,
     },
     /// Resume the (closed but known) session.
     OpenSession { reply: Reply<()> },

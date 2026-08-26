@@ -92,7 +92,8 @@ const PROVIDER_TRIGGER_TINT = {
  * the card's provider marker. The menu always offers
  * `Copy session ID` (useful even for a closed session — copying its id, e.g. to
  * feed `claude --resume`, does not require the session to be running) and
- * additionally exposes `Close` while the session is open. The focused card is
+ * additionally exposes `Close` while the session is open (never on a session
+ * that is still starting — there is no bound pane to close). The focused card is
  * lifted with an indigo border, tint, and ring.
  *
  * Every session that has branched into sub-threads shows its {@link ThreadTree}
@@ -160,6 +161,10 @@ export const SessionNode = memo(function SessionNode({
     (state) => state.runningSubagents[item.session.id],
   );
   const unreadByThread = useLiveStore((state) => state.unread);
+  // Whether this session's launch has not registered yet. The row is listed
+  // from the moment its first send was accepted, so this is a real state a card
+  // can be in.
+  const spawning = item.session.status === 'spawning';
   // The kebab menu's dropdown opens below the trigger, but each windowed row is
   // an absolutely-positioned `transform` stacking context, so the dropdown is
   // painted under the next row's card. While the menu is open, lift this row
@@ -311,9 +316,13 @@ export const SessionNode = memo(function SessionNode({
             data-testid="session-node"
           >
             <span className="flex min-w-0 items-center gap-2">
+              {/* `Starting` is a third state alongside Open and Closed: it must
+                  not read as `Closed`, which invites a resume the server would
+                  refuse. It is a status the user waits out (a second or so),
+                  not one they can act on. */}
               <StatusDot
-                tone={item.open ? 'green' : 'slate'}
-                title={item.open ? 'Open' : 'Closed'}
+                tone={spawning ? 'amber' : item.open ? 'green' : 'slate'}
+                title={spawning ? 'Starting' : item.open ? 'Open' : 'Closed'}
               />
               {/* Line 1: the *launch-time* local git branch, captured once on
                   spawn and never updated on resume or a later `git checkout`.
@@ -437,7 +446,12 @@ export const SessionNode = memo(function SessionNode({
                   void navigator.clipboard.writeText(item.session.id);
                 },
               },
-              ...(item.open
+              // A starting session is not open either, so it lands in the same
+              // branch; spelling it out keeps the reason visible. Closing an
+              // unbound spawn is not a supported operation — there is no pane
+              // to tear down yet, and the launch would come up orphaned — so
+              // the item stays hidden until the session registers.
+              ...(item.open && !spawning
                 ? [
                     {
                       label: 'Close',

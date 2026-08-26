@@ -10,6 +10,7 @@ import {
   removeSessionSends,
 } from '@delta/api-client';
 import { useLiveStore } from '../store/liveStore';
+import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
 
 /**
  * Route a live `SessionEvent` to the two state homes:
@@ -20,9 +21,13 @@ import { useLiveStore } from '../store/liveStore';
  *   refetches the freshly-ingested transcript lines. Send-affecting events
  *   (the turn lifecycle, transcript growth, a close) also invalidate the
  *   session's open-send list — the server-side truth behind the pending strip.
- *   Lifecycle events (`session_registered`/`session_opened`/`session_closed`)
- *   invalidate the session list so a newly-spawned, resumed, or closed
+ *   Lifecycle events (`session_registered`/`session_opened`/`session_closed`,
+ *   and `spawn_failed` — a reaped spawn's row is deleted) invalidate the
+ *   session list so a starting, registered, resumed, closed, or vanished
  *   session's presence and open flag stay in sync.
+ * - **Nav store** (Zustand): one case only — a `spawn_failed` for the focused
+ *   session, which is about to stop existing, so focus is handed back to the
+ *   new-session screen where its Retry / Dismiss card lives.
  * - **Live store** (Zustand): ephemeral UI signals that are not REST resources
  *   — turn tracking, the spawn registry, permission notices, unread badges,
  *   external input, and the per-session resuming marker.
@@ -209,6 +214,22 @@ export function applySessionEvent(
       // `question_asked` (AskUserQuestion) clears via the same
       // `permission_resolved` the correlated tool_result emits.
       break;
+    case 'subagent_started':
+    case 'subagent_finished':
+      // The store recorded it above, but this also moved the session's
+      // QUERYABLE live state: the open-sends envelope carries
+      // `running_subagents`, and `usePendingSends` re-seeds the store from it
+      // authoritatively — an empty list there clears whatever the store holds,
+      // which is exactly what lets that envelope heal a reconnect.
+      //
+      // So an envelope the server computed BEFORE this event, still in flight
+      // when the event lands, would wipe the subagent it just recorded and
+      // leave the pane looking idle for the rest of the turn. Refetching here
+      // closes that race from both ends: the in-flight request is superseded
+      // (its stale result dropped rather than applied), and the response that
+      // does land was computed after the server recorded the change.
+      invalidateSessionSends(queryClient, event.session_id);
+      break;
     case 'assistant_streaming':
       // The live preview is held in the store (appended above by
       // `store.applyEvent`) and read straight from there by the transcript
@@ -220,9 +241,20 @@ export function applySessionEvent(
       // A freshly-spawned session never bound; the server reaped its row (the
       // store flips the tracked spawn to a Retry/Dismiss chip). Drop the
       // session's cached open sends — the row is gone, so a refetch would only
-      // 404. No session-list refetch: a message-less spawning session was
-      // never listed, so the list cannot lose a row for it.
+      // 404 — and refetch the session list, which was listing the starting
+      // session and must now lose it.
       removeSessionSends(queryClient, event.session_id);
+      invalidateSessions(queryClient);
+      // The user is very likely looking at it: the workspace focuses a
+      // starting session the moment its first send is accepted. Its screen is
+      // about to describe a session that no longer exists, and the failure's
+      // Retry / Dismiss card renders on the new-session surface (see
+      // `usePendingSends`) — so send focus back there, where the user can act
+      // on it. Reconciling rather than navigating leaves any overlay they
+      // opened in the meantime standing.
+      if (isFocused) {
+        useNavStore.getState().reconcileFocusedSession(NEW_SESSION_FOCUS);
+      }
       break;
     case 'repository_clone_completed':
     case 'repository_clone_failed':

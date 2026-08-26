@@ -16,7 +16,10 @@ import {
   reduceSessionRegistered,
 } from './noticesSlice';
 import { reduceTurnStarted } from './runningThreadsSlice';
-import { reduceSpawnFailed } from './spawnsSlice';
+import {
+  reduceSessionRegistered as reduceSpawnRegistered,
+  reduceSpawnFailed,
+} from './spawnsSlice';
 import { reduceStatusUpdated } from './statusSlice';
 import { reduceAssistantStreaming } from './streamingSlice';
 import {
@@ -52,6 +55,37 @@ type StoreEventReducer<K extends SessionEvent['kind']> = (
   event: Extract<SessionEvent, { kind: K }>,
 ) => Partial<LiveState> | LiveState;
 
+/**
+ * Run several reducers for the same event kind, left to right, and merge what
+ * each of them changed.
+ *
+ * One event can move state two slices own — `session_registered` sweeps the
+ * session's notices AND releases its tracked spawn — and the dispatch map holds
+ * exactly one entry per kind, so the composition happens here rather than by
+ * one slice reaching into another's state. Each reducer sees the state as the
+ * ones before it left it, so an ordering dependency would still work; none
+ * exists today. The identity-stable contract is preserved: when no reducer
+ * changed anything the original `state` is handed back unchanged, so zustand
+ * skips notifying subscribers.
+ */
+function chain<K extends SessionEvent['kind']>(
+  ...reducers: StoreEventReducer<K>[]
+): StoreEventReducer<K> {
+  return (state, event) => {
+    let changes: Partial<LiveState> | null = null;
+    let current = state;
+    for (const reducer of reducers) {
+      const result: Partial<LiveState> = reducer(current, event);
+      if (result === current) {
+        continue;
+      }
+      changes = { ...(changes ?? {}), ...result };
+      current = { ...current, ...result };
+    }
+    return changes ?? state;
+  };
+}
+
 const EVENT_REDUCERS: {
   [K in SessionEvent['kind']]?: StoreEventReducer<K>;
 } = {
@@ -68,7 +102,7 @@ const EVENT_REDUCERS: {
   external_input: reduceExternalInput,
   send_dispatched: reduceSendDispatched,
   send_parked: reduceSendParked,
-  session_registered: reduceSessionRegistered,
+  session_registered: chain(reduceSessionRegistered, reduceSpawnRegistered),
   session_opened: reduceSessionOpened,
   session_closed: reduceSessionClosed,
   status_updated: reduceStatusUpdated,

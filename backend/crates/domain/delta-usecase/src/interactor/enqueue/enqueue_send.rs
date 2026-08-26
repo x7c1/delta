@@ -24,6 +24,11 @@ where
     /// place when the `UserPromptSubmit` hook fires, with the
     /// cancel-on-dispatch-failure rollback.
     ///
+    /// A session whose own launch has not bound yet is the one target this
+    /// refuses outright ([`Error::SessionSpawning`]): it is reachable — listed
+    /// from the moment its first send was accepted — but there is nothing to
+    /// dispatch into and nothing to resume from.
+    ///
     /// A branch send (`branch_from: Some`) requires an existing session —
     /// there must be a message to branch from — which the thread target
     /// inherently provides.
@@ -120,6 +125,22 @@ where
                 )
                 .await?;
             return Ok((send, Vec::new()));
+        }
+
+        // A fresh spawn that has not bound yet is listed (as `spawning`) from
+        // the moment its first send was accepted, so a browser can reach this
+        // session's composer before the launch has produced a single hook —
+        // indeed before the launch has been *prepared* at all, since the
+        // worktree build and the agent launch run in the background. Nothing
+        // can be dispatched into it in either sub-state: no pane is mapped, and
+        // its transcript does not exist yet, so `ensure_open()` below would take
+        // the known-but-closed branch and launch a SECOND `claude --resume <id>`
+        // against a conversation the first launch has not written. Refuse the
+        // send instead, with a code the browser can word ("still starting").
+        // The composer disables itself on a starting session, so only a stale
+        // client reaches this.
+        if self.state.is_launching_or_pending() {
+            return Err(Error::SessionSpawning(self.id.as_str().to_owned()));
         }
 
         // Claude (pane-backed): ensure the session is open — resume it if it is

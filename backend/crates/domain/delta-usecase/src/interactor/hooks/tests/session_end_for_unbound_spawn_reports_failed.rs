@@ -26,6 +26,8 @@ async fn session_end_for_unbound_spawn_reports_failed() {
         vec![SessionEvent::SpawnFailed {
             session_id: id.clone(),
             pane_token: "delta-1".to_owned(),
+            // The hook reports only that the launch ended, never why.
+            reason: None,
         }],
     );
     // The pane was killed and the spawn is gone, so it can never mis-bind later.

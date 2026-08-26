@@ -10,11 +10,13 @@
 //! Split into one file per concern: [`SessionRuntime`]'s definition (and its
 //! cross-concern `is_empty` retirement predicate) lives here, while each
 //! live-state family — the open pane / agent session (`open`, `agent`), the
-//! spawn/resume launch state (`spawn`), the turn machine (`turn`), the
-//! streaming preview (`streaming`), permission waiters (`permission`), the
-//! pending question (`question`), subagent tracking (`subagents`), and the
-//! auto-compact debounce (`auto_compact`) — keeps its related types and
-//! `impl SessionRuntime` block in its own file.
+//! accept→launch window (`launching_spawn`, carrying the worktree that launch
+//! still has to build, `planned_worktree`), the bind/resume launch state
+//! (`spawn`), the turn machine (`turn`), the streaming preview (`streaming`),
+//! permission waiters (`permission`), the pending question (`question`),
+//! subagent tracking (`subagents`), and the auto-compact debounce
+//! (`auto_compact`) — keeps its related types and `impl SessionRuntime` block
+//! in its own file.
 
 mod agent;
 mod auto_compact;
@@ -26,6 +28,12 @@ mod spawn;
 mod streaming;
 mod subagents;
 mod turn;
+
+mod launching_spawn;
+pub use launching_spawn::LaunchingSpawn;
+
+mod planned_worktree;
+pub use planned_worktree::PlannedWorktree;
 
 pub use live_state::SessionLiveState;
 pub use open::{OpenAgentSession, OpenHandle};
@@ -67,8 +75,16 @@ pub struct SessionRuntime {
     /// Claude's `OpenHandle { token, pane }` path is byte-identical and only
     /// the open-state predicates learn about the new shape.
     open_agent: Option<OpenAgentSession>,
-    /// The fresh spawn awaiting its first `UserPromptSubmit`/`SessionStart`.
-    /// At most one exists per session: each spawn mints a fresh session id.
+    /// The accepted session whose launch preparation (worktree build, trust
+    /// seed, settings write, tmux launch) is still running on a background
+    /// task. Present from the moment the first send is accepted until that
+    /// task checks in from its `LaunchPrepared` checkpoint, where it becomes a
+    /// [`Self::pending_spawn`]; a preparation that fails before that checkpoint
+    /// is rolled back from here, with the eager row.
+    launching_spawn: Option<LaunchingSpawn>,
+    /// The fresh spawn awaiting its first `UserPromptSubmit`/`SessionStart`,
+    /// recorded just before its pane is created. At most one exists per
+    /// session: each spawn mints a fresh session id.
     pending_spawn: Option<PendingSpawn>,
     /// The resumed-but-not-yet-dispatched launch state, present from
     /// `open_session` until the held prompt dispatches (or the resume fails).
@@ -259,6 +275,7 @@ impl SessionRuntime {
     pub fn is_empty(&self) -> bool {
         self.open.is_none()
             && self.open_agent.is_none()
+            && self.launching_spawn.is_none()
             && self.pending_spawn.is_none()
             && self.resuming.is_none()
             && self.turn == TurnState::Idle

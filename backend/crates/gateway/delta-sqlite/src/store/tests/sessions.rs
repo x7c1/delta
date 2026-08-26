@@ -117,9 +117,7 @@ async fn list_sessions_page_uses_the_recency_index() {
              SELECT id, cwd, transcript_path, title, status, created_at, \
                     last_activity_at, COALESCE(last_activity_at, created_at) AS recency \
              FROM session \
-             WHERE NOT (status = 'spawning' AND last_activity_at IS NULL \
-                        AND NOT EXISTS (SELECT 1 FROM message m WHERE m.session_id = session.id)) \
-               AND (1 = 1) \
+             WHERE (1 = 1) \
              ORDER BY recency DESC, created_at DESC, id DESC \
              LIMIT 10",
         )
@@ -385,7 +383,7 @@ async fn list_sessions_page_falls_back_to_created_at_for_message_less_session() 
 }
 
 #[tokio::test]
-async fn list_sessions_page_excludes_message_less_spawning_sessions() {
+async fn list_sessions_page_lists_message_less_spawning_sessions() {
     let store = SqliteStore::open_in_memory().unwrap();
     session_active_at(&store, "sess-live", "2026-01-01T00:00:00Z").await;
     let spawning = SessionId::from("sess-spawn");
@@ -402,13 +400,17 @@ async fn list_sessions_page_excludes_message_less_spawning_sessions() {
         .await
         .unwrap();
 
-    // The message-less spawning session stays out of the list: the browser
-    // cannot open it, and the optimistic new-session chip must not bind to it.
+    // A session is listed from the moment its first send is accepted — the
+    // eager `spawning` row, before any hook — so the browser can focus it
+    // right away. It has no activity, so it keys on its own (just-now)
+    // `created_at` and sorts above the older active session.
     let page = store.list_sessions_page(None, 10).await.unwrap();
-    assert_eq!(page_ids(&page), vec!["sess-live"]);
+    assert_eq!(page_ids(&page), vec!["sess-spawn", "sess-live"]);
+    let spawning_row = page.iter().find(|(s, _)| s.id == spawning).unwrap();
+    assert_eq!(spawning_row.0.status, SessionStatus::Spawning);
 
-    // Activation (the first hook) makes it listable, exactly when a session
-    // used to first appear.
+    // Activation (the first hook) only changes the status; the row stays where
+    // it already was.
     store
         .register_session(NewSession {
             id: spawning.clone(),
@@ -421,7 +423,9 @@ async fn list_sessions_page_excludes_message_less_spawning_sessions() {
         .await
         .unwrap();
     let page = store.list_sessions_page(None, 10).await.unwrap();
-    assert_eq!(page.len(), 2, "the activated session is listed");
+    assert_eq!(page_ids(&page), vec!["sess-spawn", "sess-live"]);
+    let activated = page.iter().find(|(s, _)| s.id == spawning).unwrap();
+    assert_eq!(activated.0.status, SessionStatus::Active);
 }
 
 #[tokio::test]

@@ -226,23 +226,37 @@ pub enum SessionEvent {
         session_id: SessionId,
         request_id: i64,
     },
-    /// A freshly-spawned session failed to come up: its launch ended (or never
-    /// got far enough) before it ever registered via its first
-    /// `UserPromptSubmit`, so it never bound to a live session.
+    /// A freshly-spawned session failed to come up: its launch preparation
+    /// failed, or its launch ended (or never got far enough) before it ever
+    /// registered via its first `UserPromptSubmit`, so it never bound to a live
+    /// session.
     ///
-    /// A new spawn is fire-and-forget — `claude` is launched in a tmux pane and
-    /// the only thing that registers/binds it is the first `UserPromptSubmit`
-    /// hook. If `claude` crashes, exits, or hangs on auth before that hook ever
-    /// fires, nothing would otherwise time the dangling spawn out and the UI is
-    /// stuck "pending" forever with no error. This event is the failure signal:
-    /// it is emitted either by the `SessionEnd` hook (the launch exited while
-    /// still unbound — the immediate case) or by the watchdog reaper (the spawn
-    /// outlived its deadline without ever binding). It carries the Delta-minted
-    /// `session_id` so the browser can correlate it to the optimistic pending
-    /// chip, plus the `pane_token` of the tmux session that was torn down.
+    /// A new spawn is fire-and-forget — the send is accepted, the launch is
+    /// prepared in the background, and the only thing that registers/binds the
+    /// pane is the first `UserPromptSubmit` hook. If that preparation fails, or
+    /// `claude` crashes, exits, or hangs on auth before the hook ever fires,
+    /// nothing would otherwise time the dangling spawn out and the UI is stuck
+    /// "pending" forever with no error. This event is the failure signal, with
+    /// three producers: the background launch preparation (a failed
+    /// `git worktree add`, a remote branch that does not exist, a tmux
+    /// failure), the `SessionEnd` hook (the launch exited while still unbound —
+    /// the immediate case), and the watchdog reaper (the spawn outlived its
+    /// bind deadline). It carries the Delta-minted `session_id` so the browser
+    /// can correlate it to the optimistic pending chip, plus the `pane_token`
+    /// of the tmux session that was torn down.
     SpawnFailed {
         session_id: SessionId,
         pane_token: String,
+        /// Why the launch failed, when Delta can name the cause: the launch
+        /// preparation's own error text. `None` for the two watchdog-shaped
+        /// producers, which observe only silence — a launch that exited or
+        /// never bound says nothing about why.
+        ///
+        /// A preparation failure used to be the REST response's error body.
+        /// Now that the send is accepted before the launch runs, this field is
+        /// the only place that message can still reach the user, so the failed
+        /// chip shows it under "failed to start".
+        reason: Option<String>,
     },
     /// A chunk of the in-flight turn's assistant message, delivered live while
     /// the turn is still generating.
