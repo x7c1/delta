@@ -130,10 +130,16 @@ task only changes what the turn machine and the send row do.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] In a real Claude Code session, send a message that Claude rewrites on
-      echo (e.g. a namespaced slash command such as `/foo:bar` typed as `/bar`,
-      or a send with an image attachment) and confirm it is delivered exactly
-      once, the send leaves the open list, and no `SendParked` notice appears.
+- [x] In a real Claude Code session, make the `UserPromptSubmit` prompt differ
+      from the send's text and confirm the send is delivered exactly once, leaves
+      the open list, and no `SendParked` notice appears. Verified 2026-08-26 by
+      typing extra characters into the tmux pane in the 250 ms gap between
+      Delta's paste and its Enter (a script polling `capture-pane` for the pasted
+      text): the prompt arrived with the extra text, the server logged the
+      "does not equal the outstanding send's text" line once, the message was
+      typed once, no external-input or parked notice appeared, and after the
+      turn the row was `matched` with `matched_uuid` NULL ("turn ended with its
+      send unattributed" logged once).
 
 ## Out of scope
 
