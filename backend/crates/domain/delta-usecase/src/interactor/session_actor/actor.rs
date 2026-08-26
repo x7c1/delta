@@ -41,7 +41,12 @@ use super::runtime::SessionRuntime;
 /// Derefs to the core so port access (`self.store`, `self.tmux`, …) and the
 /// core's pure helpers keep their existing call syntax.
 pub(in crate::interactor) struct SessionContext<'a, T, X, S, W, G> {
-    pub(in crate::interactor) core: &'a InteractorCore<T, X, S, W, G>,
+    /// The shared core, held as the actor's own `Arc` rather than a bare
+    /// reference: a use case running here hands a *cloned* handle to the
+    /// background tasks it spawns (the launch preparation, the Codex event
+    /// pump), which outlive the borrow this context is built from. Reads keep
+    /// their existing syntax through the [`Deref`](std::ops::Deref) below.
+    pub(in crate::interactor) core: &'a Arc<InteractorCore<T, X, S, W, G>>,
     /// The session this actor exists for. Hook payloads carry the same id;
     /// the routing layer guarantees they match.
     pub(in crate::interactor) id: &'a SessionId,
@@ -72,11 +77,11 @@ pub(in crate::interactor) async fn run<T, X, S, W, G>(
     self_sender: mpsc::WeakUnboundedSender<SessionInput>,
     registry: Weak<Mutex<ActorMap>>,
 ) where
-    T: TmuxDriver,
-    X: Transcript,
-    S: SessionStore,
-    W: Workspace,
-    G: GitWorktree,
+    T: TmuxDriver + 'static,
+    X: Transcript + 'static,
+    S: SessionStore + 'static,
+    W: Workspace + 'static,
+    G: GitWorktree + 'static,
 {
     let mut state = SessionRuntime::default();
     let mut carried: Option<SessionInput> = None;
@@ -122,11 +127,11 @@ pub(in crate::interactor) async fn run<T, X, S, W, G>(
 /// state change has already happened, so it is not an error here.
 async fn handle<T, X, S, W, G>(ctx: &mut SessionContext<'_, T, X, S, W, G>, input: SessionInput)
 where
-    T: TmuxDriver,
-    X: Transcript,
-    S: SessionStore,
-    W: Workspace,
-    G: GitWorktree,
+    T: TmuxDriver + 'static,
+    X: Transcript + 'static,
+    S: SessionStore + 'static,
+    W: Workspace + 'static,
+    G: GitWorktree + 'static,
 {
     match input {
         SessionInput::EnqueueToThread {
@@ -180,6 +185,12 @@ where
                 }
             };
             let _ = reply.send(result);
+        }
+        SessionInput::LaunchPrepared { token, reply } => {
+            let _ = reply.send(Ok(ctx.record_launched_pane(&token)));
+        }
+        SessionInput::LaunchFinished { token, outcome } => {
+            ctx.finish_launch(&token, outcome).await;
         }
         SessionInput::OpenSession { reply } => {
             let _ = reply.send(ctx.open_session().await);

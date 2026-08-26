@@ -36,6 +36,9 @@ test('a spawn that never binds is focused first, then hands back a Retry / Dismi
     timeout: 15_000,
   });
   await expect(pending).toContainText(/failed to start/i, { timeout: 15_000 });
+  // The watchdog observes only silence, so the card carries no reason line —
+  // unlike a launch preparation that failed with a git or tmux error.
+  await expect(page.getByTestId('pending-fail-reason')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
   await expect(
     page.getByRole('status', { name: 'Starting', exact: true }),

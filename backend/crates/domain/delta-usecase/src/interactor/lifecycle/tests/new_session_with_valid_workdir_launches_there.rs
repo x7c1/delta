@@ -27,6 +27,8 @@ async fn new_session_with_valid_workdir_launches_there() {
     .await
     .unwrap();
 
+    ix.await_launch().await;
+
     let created = ix.tmux_fake().created.lock().unwrap().clone();
     assert_eq!(created.len(), 1, "one session spawned");
     assert_eq!(

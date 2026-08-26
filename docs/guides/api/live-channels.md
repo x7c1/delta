@@ -48,12 +48,15 @@ persisted: a streaming preview, the latest `status_updated` snapshot, and the
 nothing until the provider's next report, and a missed `send_parked` still
 leaves its message in the open-send list, held for an explicit release, just
 without the note saying why it is waiting. A missed `spawn_failed` leaves the
-same kind of hole: a reaped spawn's row is deleted, so the session stops being
-listed in `GET /api/sessions` — observable on a refetch, but with nothing to say
-it was a failure. Delta's own browser, which focused that session the moment its
-send was accepted, holds no launch deadline of its own, so it keeps waiting on a
-session that is gone instead of raising the Retry / Dismiss card; picking another
-session (or reloading) is the way out.
+same kind of hole: the failed spawn's row is deleted — whether its launch
+preparation failed or it came up and never bound — so the session stops being
+listed in `GET /api/sessions`, observable on a refetch but with nothing to say
+it was a failure. The `reason` a failed preparation reported goes with it: that
+text rides the event alone, so no refetch can recover it. Delta's own browser,
+which focused that session the moment its send was accepted, holds no launch
+deadline of its own, so it keeps waiting on a session that is gone instead of
+raising the Retry / Dismiss card; picking another session (or reloading) is the
+way out.
 
 The groups below are a reading aid only: they say nothing about the order in
 which frames arrive, and a client must handle each event whenever it lands.
@@ -67,7 +70,8 @@ which frames arrive, and a client must handle each event whenever it lands.
 
 { "kind": "session_closed", "session_id": "sess-1" }
 
-{ "kind": "spawn_failed", "session_id": "sess-1", "pane_token": "delta-1" }
+{ "kind": "spawn_failed", "session_id": "sess-1", "pane_token": "delta-1",
+  "reason": "git error: invalid reference: origin/nope" }
 ```
 
 - `session_registered` — emitted when a freshly-spawned session's first hook
@@ -88,15 +92,23 @@ which frames arrive, and a client must handle each event whenever it lands.
   every pending request) and then reports the close, so a watching browser
   converges from events alone — see
   [sessions.md](sessions.md) for the recovery story.
-- `spawn_failed` — a freshly-spawned session ended, or outlived its deadline,
-  before its first `UserPromptSubmit` ever bound it, so it never registered:
-  emitted by the `SessionEnd` hook when the launch exited, by the watchdog
-  reaper when it timed out. The contentless row is deleted, so the session stops
-  being listed; without the event a launch that crashed or hung on auth would
-  leave the browser sitting on a session that silently vanished. `session_id` is
-  the Delta-minted id the browser correlates with the session it focused on
-  acceptance (and with its pending chip); `pane_token` names the tmux session
-  that was torn down.
+- `spawn_failed` — a freshly-spawned session never came up. Three producers emit
+  it: the background launch preparation when it fails (the worktree build, the
+  trust seed or the agent launch — all of which run *after* the send was
+  accepted, see [sends.md](sends.md)), the `SessionEnd` hook when the launch
+  exited while still unbound, and the watchdog reaper when a launched spawn
+  outlived its bind deadline without ever registering. The contentless row is
+  deleted, so the session stops being listed; without the event a launch that
+  failed, crashed or hung on auth would leave the browser sitting on a session
+  that silently vanished. `session_id` is the Delta-minted id the browser
+  correlates with the session it focused on acceptance (and with its pending
+  chip); `pane_token` names the tmux session that was torn down.
+  `reason` carries the failure's message when Delta can name it — the launch
+  preparation's git or tmux error, which is the only place that text reaches the
+  user now that the send is accepted before the launch runs. The key is **absent
+  entirely** from the other two producers' frames: a launch that exited or never
+  bound says nothing about why. A client shows it as an extra line under its own
+  "failed to start" wording and renders that wording alone when it is missing.
 
 ### Sends and turns
 

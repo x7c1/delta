@@ -65,6 +65,9 @@ where
             return Ok(vec![SessionEvent::SpawnFailed {
                 session_id: hook.session_id,
                 pane_token: spawn.token.as_str().to_owned(),
+                // The hook only reports that the launch ended, never why it
+                // never bound, so there is no cause to pass on here.
+                reason: None,
             }]);
         }
 
@@ -84,6 +87,7 @@ where
             return Ok(vec![SessionEvent::SpawnFailed {
                 session_id: hook.session_id,
                 pane_token: resuming.token.as_str().to_owned(),
+                reason: None,
             }]);
         }
 

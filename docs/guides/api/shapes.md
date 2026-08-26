@@ -34,7 +34,11 @@ name. Conventions (timestamps, id types, error bodies) are in
 - `branch_at_launch`, `repo_root` and `repository_display_name` are spawn-time
   snapshots of the launch directory's git state, all `null` when it was not
   inside a git repository. They are never updated on resume or a later
-  `git checkout`.
+  `git checkout`. On a Claude worktree spawn `cwd` and `branch_at_launch` are
+  the accept-time *plan*: `branch_at_launch` is the branch the launch will put
+  that worktree on, and while the session is still `spawning`, `cwd` may name a
+  directory that does not exist yet — the launch creates the worktree there,
+  unless it reuses one that already holds the branch.
 - `provider` is `claude` or `codex`. `provider_session_id` and
   `provider_thread_id` carry the provider's own ids when the provider (not
   Delta) mints them, and are `null` for a Claude session.

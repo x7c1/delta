@@ -57,6 +57,8 @@ async fn new_session_with_launch_options_applies_flags_in_order() {
     .await
     .unwrap();
 
+    ix.await_launch().await;
+
     let created = ix.tmux_fake().created.lock().unwrap().clone();
     assert_eq!(created.len(), 1, "one session spawned");
     let minted = ix.pending_session_ids().await.remove(0);

@@ -32,6 +32,8 @@ async fn spawn_skips_tmux_session_names_already_in_use() {
         "delta-3",
         "the spawn skipped the two surviving names and minted the next free one",
     );
+    ix.await_launch().await;
+
     let created = ix.tmux_fake().created.lock().unwrap().clone();
     assert_eq!(created.len(), 1, "exactly one session was created");
     assert_eq!(created[0].name, "delta-3", "created under the free name");

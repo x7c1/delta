@@ -189,9 +189,14 @@ where
     /// Ensure at least one Claude Code session is up, spawning one if absent.
     ///
     /// Idempotent for the still-single server surface: if any session's actor
-    /// holds a live pane (bound or pending spawn) it is reused and
-    /// [`SessionLifecycle::Ready`] is returned with no side effects. Otherwise
-    /// a fresh session is spawned and [`SessionLifecycle::Starting`] returned.
+    /// holds a live pane it is reused and [`SessionLifecycle::Ready`] is
+    /// returned with no side effects. Otherwise a fresh session is spawned and
+    /// [`SessionLifecycle::Starting`] returned. "Live" spans the whole starting
+    /// window — a session that is bound, one whose pane is up and awaiting its
+    /// first bind, *and* one that has only been accepted, with its launch
+    /// preparation still running — so a second cold start arriving while the
+    /// first session's worktree is being checked out reuses it instead of
+    /// starting a rival session (`SessionRuntime::has_live_pane`).
     pub async fn ensure_session(&self) -> Result<SessionLifecycle> {
         for id in self.sessions.ids() {
             if self
@@ -877,6 +882,61 @@ mod test_seams {
             rx.await.ok()
         }
 
+        /// Wait until no session's launch preparation is still running *and*
+        /// every actor has applied its report.
+        ///
+        /// A new-session send is answered *before* its launch is prepared: the
+        /// worktree build, the trust seed and the tmux launch run on a
+        /// background task. So a test that asserts on what the launch did —
+        /// the created worktree, the spawned pane, the recorded pending spawn —
+        /// has to let that task finish first. This is that wait, and it is the
+        /// deterministic alternative to sleeping.
+        ///
+        /// It deliberately does not poll session state: the launch's records
+        /// move on their own schedule (the pending spawn is recorded mid-launch,
+        /// and the launch's first hook may consume it before the task reports
+        /// back), so no snapshot of that state means "the task is done". It
+        /// waits on [`InteractorCore::launches_in_flight`] instead, then flushes
+        /// every live actor's mailbox with a round-trip — the counter drops once
+        /// `LaunchFinished` has been *posted*, and the mailbox is FIFO, so
+        /// anything posted after that is handled after it.
+        ///
+        /// Panics rather than returning on timeout: a launch that never reports
+        /// back is a bug in the code under test, not a slow machine.
+        pub(crate) async fn await_launch(&self) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while self
+                .launches_in_flight
+                .load(std::sync::atomic::Ordering::SeqCst)
+                > 0
+            {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "timed out waiting for a launch preparation to finish"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+            for id in self.sessions.ids() {
+                self.with_runtime_existing(&id, |_| ()).await;
+            }
+        }
+
+        /// The session ids whose launch preparation is still in flight —
+        /// accepted, with no pane yet.
+        pub(crate) async fn launching_session_ids(&self) -> Vec<SessionId> {
+            let mut found = Vec::new();
+            for id in self.sessions.ids() {
+                let launching = self
+                    .with_runtime_existing(&id, |state| state.launching_spawn().is_some())
+                    .await
+                    .unwrap_or(false);
+                if launching {
+                    found.push(id);
+                }
+            }
+            found
+        }
+
         /// The Delta-minted session ids of the currently-pending spawns, in
         /// spawn order.
         ///
@@ -886,7 +946,14 @@ mod test_seams {
         /// bind. Spawn order is recovered from the pane token's monotonic
         /// mint ordinal (`delta-<n>`), since the pending entries now live one
         /// per actor.
+        ///
+        /// A spawn only becomes *pending* partway through its background launch,
+        /// so this awaits that launch first — a test reading ids back here wants
+        /// the spawn the hooks will address, not the accept-time state. A test
+        /// that deliberately holds a launch open reads
+        /// [`Self::launching_session_ids`] instead.
         pub(crate) async fn pending_session_ids(&self) -> Vec<SessionId> {
+            self.await_launch().await;
             let mut found = Vec::new();
             for id in self.sessions.ids() {
                 let ordinal = self
@@ -908,11 +975,13 @@ mod test_seams {
         /// Record a pending spawn with an explicit `created_at`, for watchdog
         /// tests.
         ///
-        /// The production `created_at` is `Instant::now()` at spawn time,
-        /// which a test cannot wind backwards. Reaper tests instead push a
-        /// spawn stamped at a chosen instant (e.g. `now - 31s`) and then call
-        /// `reap_stale_spawns(now)` so the deadline check is fully
-        /// deterministic.
+        /// The production `created_at` is `Instant::now()` at the instant the
+        /// background launch is about to create the pane (not at acceptance —
+        /// see `record_launched_pane`), which a test cannot wind backwards.
+        /// Reaper tests
+        /// instead push a spawn stamped at a chosen instant (e.g. `now - 31s`)
+        /// and then call `reap_stale_spawns(now)` so the deadline check is
+        /// fully deterministic.
         pub(crate) async fn push_pending_spawn_at(
             &self,
             token: &str,

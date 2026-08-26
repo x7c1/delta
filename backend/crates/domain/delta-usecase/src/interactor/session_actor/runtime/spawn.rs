@@ -1,6 +1,8 @@
-//! The launch state: a fresh spawn awaiting its first bind ([`PendingSpawn`])
-//! and a resumed session holding its first prompt until ready
-//! ([`ResumingSession`]), with the watchdog deadlines and drains for both.
+//! The bind-and-resume launch state: a fresh spawn awaiting its first bind
+//! ([`PendingSpawn`]) and a resumed session holding its first prompt until
+//! ready ([`ResumingSession`]), with the watchdog deadlines and drains. The
+//! window *before* a spawn has a pane at all lives in the `launching_spawn`
+//! module.
 
 use std::time::{Duration, Instant};
 
@@ -57,7 +59,8 @@ pub const RESUME_READY_DEADLINE: Duration = Duration::from_secs(30);
 /// deadlines, so it is testable without wall-clock sleeps.
 pub const RESUME_DISPATCH_SETTLE: Duration = Duration::from_millis(200);
 
-/// A freshly-spawned pane awaiting its first `UserPromptSubmit`.
+/// A spawn whose pane is being (or has been) created, awaiting its first
+/// `UserPromptSubmit`.
 ///
 /// Delta pins the conversation's `session_id` at spawn time by passing a
 /// freshly-minted UUID to `claude --session-id <uuid>`, so the first
@@ -65,6 +68,11 @@ pub const RESUME_DISPATCH_SETTLE: Duration = Duration::from_millis(200);
 /// this spawn's actor, whose pending entry this is. The session row (and any
 /// first prompt's send row) is written eagerly at spawn time, so binding only
 /// activates that row and maps the pane.
+///
+/// Recorded *just before* the pane is created, never after: the launch task
+/// awaits the actor's `LaunchPrepared` reply before it calls `create_session`,
+/// so this entry is always in place by the time the launched agent can fire a
+/// hook against it.
 #[derive(Debug, Clone)]
 pub struct PendingSpawn {
     /// The Delta-minted tmux session name.
@@ -134,13 +142,45 @@ pub struct ResumingSession {
 }
 
 impl SessionRuntime {
-    /// Record a freshly-spawned pane awaiting its first `UserPromptSubmit`.
+    /// Record the spawn whose pane is about to be created, awaiting its first
+    /// `UserPromptSubmit`.
+    ///
+    /// Called from the `LaunchPrepared` handler, i.e. strictly *before*
+    /// `create_session` runs — the hooks that bind this entry arrive on the
+    /// same mailbox, so recording it afterwards would let a fast launch fire
+    /// one against a session that has nothing pending yet.
     pub fn push_pending(&mut self, spawn: PendingSpawn) {
         debug_assert!(
             self.pending_spawn.is_none(),
             "a session id is minted per spawn, so at most one spawn is ever pending"
         );
         self.pending_spawn = Some(spawn);
+    }
+
+    /// Whether a spawn with this token is still pending — the launch task
+    /// asking, through its `LaunchFinished` report, whether the pane it just
+    /// created (or failed to create) still has a spawn to settle.
+    ///
+    /// `false` covers both "the first hook already bound it" (the normal fast
+    /// path, since the entry is recorded before the pane exists) and "it was
+    /// already rolled back".
+    pub fn has_pending_for_token(&self, token: &PaneToken) -> bool {
+        self.pending_spawn
+            .as_ref()
+            .is_some_and(|spawn| &spawn.token == token)
+    }
+
+    /// Remove the pending spawn with this token, if it is still there.
+    ///
+    /// The rollback counterpart to [`Self::push_pending`]: a `create_session`
+    /// that failed *after* the entry was recorded leaves a pending spawn no
+    /// pane will ever bind, so it is dropped with the rest of the acceptance.
+    /// Keyed by token so a late failure cannot consume an unrelated spawn.
+    pub fn remove_pending_for_token(&mut self, token: &PaneToken) -> Option<PendingSpawn> {
+        if self.has_pending_for_token(token) {
+            return self.pending_spawn.take();
+        }
+        None
     }
 
     /// Idempotently bind the pending spawn, returning whether the bind was
@@ -164,16 +204,22 @@ impl SessionRuntime {
         true
     }
 
-    /// Whether a fresh spawn is still awaiting its first bind — the session row
-    /// exists (and is listed as `spawning`) but no pane is mapped to it yet.
+    /// Whether a fresh spawn has yet to bind — either its launch preparation is
+    /// still running ([`LaunchingSpawn`]) or its pane is up and awaiting the
+    /// first hook ([`PendingSpawn`]). The session row exists (and is listed as
+    /// `spawning`) throughout, but no pane is mapped to it yet.
     ///
     /// Read by the enqueue path: a send arriving in this window must not take
     /// the `ensure_open()` → `open_session()` (`claude --resume <id>`) route,
     /// which would launch a second agent against a transcript the first launch
-    /// has not written yet. Non-destructive, unlike
+    /// has not written yet. Both sub-states answer the same way — the window
+    /// starts the moment the first send is accepted, which is *before* the
+    /// launch has been prepared at all. Non-destructive, unlike
     /// [`Self::take_unbound_pending`], so the spawn still binds normally.
-    pub fn has_pending_spawn(&self) -> bool {
-        self.pending_spawn.is_some()
+    ///
+    /// [`LaunchingSpawn`]: super::LaunchingSpawn
+    pub fn is_launching_or_pending(&self) -> bool {
+        self.launching_spawn.is_some() || self.pending_spawn.is_some()
     }
 
     /// Take the still-pending (unbound) spawn, removing it.
@@ -187,20 +233,6 @@ impl SessionRuntime {
         self.pending_spawn.take()
     }
 
-    /// Drop the pending spawn if it carries this token.
-    ///
-    /// Used to roll back a spawn whose launch failed, so a half-spawned pane
-    /// is not left pending where a later hook could mis-bind to it.
-    pub fn remove_pending_for_token(&mut self, token: &PaneToken) {
-        if self
-            .pending_spawn
-            .as_ref()
-            .is_some_and(|p| &p.token == token)
-        {
-            self.pending_spawn = None;
-        }
-    }
-
     /// Take the unbound spawn if its deadline has passed as of `now`, leaving
     /// a still-fresh or already-bound one in place.
     ///
@@ -210,7 +242,15 @@ impl SessionRuntime {
     /// shrink it). Once a spawn binds it moves out of the pending slot, so a
     /// bound session is never reaped.
     ///
+    /// A session whose launch preparation is still running carries a
+    /// [`LaunchingSpawn`], not a [`PendingSpawn`], so it is invisible here on
+    /// purpose: it has no pane to kill, and its bind deadline only starts when
+    /// the preparation reports in (`LaunchPrepared`) a beat before the pane is
+    /// created — see [`Self::start_launching`]. A slow `git fetch` therefore
+    /// cannot eat the bind deadline.
+    ///
     /// [`LaunchConfig`]: crate::launch_config::LaunchConfig
+    /// [`LaunchingSpawn`]: super::LaunchingSpawn
     pub fn take_stale_pending(&mut self, now: Instant, deadline: Duration) -> Option<PendingSpawn> {
         if self
             .pending_spawn

@@ -128,6 +128,16 @@ pub enum WireSessionEvent {
     SpawnFailed {
         session_id: String,
         pane_token: String,
+        /// Why the launch failed, when Delta can name the cause — the
+        /// background launch preparation's own error (a git or tmux message).
+        ///
+        /// Absent from the frame entirely for the two watchdog-shaped
+        /// producers (a launch that exited, a spawn that never bound), which
+        /// observe only silence. A client renders it under its "failed to
+        /// start" text when present and shows that text alone otherwise.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        reason: Option<String>,
     },
     /// A chunk of the in-flight turn's assistant message, streamed live.
     AssistantStreaming {
@@ -376,9 +386,11 @@ impl From<SessionEvent> for WireSessionEvent {
             SessionEvent::SpawnFailed {
                 session_id,
                 pane_token,
+                reason,
             } => Self::SpawnFailed {
                 session_id: session_id.0,
                 pane_token,
+                reason,
             },
             SessionEvent::AssistantStreaming {
                 session_id,
@@ -565,6 +577,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
         WireSessionEvent::SpawnFailed {
             session_id: session_id(),
             pane_token: "delta-sample".to_owned(),
+            reason: Some("git error: worktree add failed".to_owned()),
         },
         WireSessionEvent::AssistantStreaming {
             session_id: session_id(),
@@ -682,17 +695,41 @@ mod tests {
         );
     }
 
+    /// The watchdog-shaped producers name no cause, and the frame is then
+    /// byte-for-byte the one it has always been: the `reason` key is absent,
+    /// not `null`.
     #[test]
     fn spawn_failed_serializes_with_id_and_pane_token() {
         assert_eq!(
             json(&WireSessionEvent::SpawnFailed {
                 session_id: "sess-1".into(),
                 pane_token: "delta-1".into(),
+                reason: None,
             }),
             serde_json::json!({
                 "kind": "spawn_failed",
                 "session_id": "sess-1",
                 "pane_token": "delta-1",
+            }),
+        );
+    }
+
+    /// A failed launch preparation *does* know why, and that message is the
+    /// only place it can still reach the user — the send was accepted long
+    /// before the failure, so there is no error response to carry it.
+    #[test]
+    fn spawn_failed_carries_the_launch_failure_reason_when_known() {
+        assert_eq!(
+            json(&WireSessionEvent::SpawnFailed {
+                session_id: "sess-1".into(),
+                pane_token: "delta-1".into(),
+                reason: Some("git error: worktree add failed".into()),
+            }),
+            serde_json::json!({
+                "kind": "spawn_failed",
+                "session_id": "sess-1",
+                "pane_token": "delta-1",
+                "reason": "git error: worktree add failed",
             }),
         );
     }

@@ -37,19 +37,26 @@ test('a failed spawn returns to the new-session screen with a Retry / Dismiss ro
   const pending = page.getByTestId('pending-item');
   await expect(pending).toHaveCount(1);
 
-  // The spawn never bound; the backend reaps it and emits spawn_failed with
-  // the REAL session id the POST response carried (the mock mints
-  // deterministic spawn ids, so the first spawn's id is known here).
+  // The launch never came up: the backend emits spawn_failed with the REAL
+  // session id the POST response carried (the mock mints deterministic spawn
+  // ids, so the first spawn's id is known here). The launch preparation runs
+  // after the send is accepted, so the git error that killed it has no response
+  // body to travel in: the event's `reason` is the only account of it the user
+  // gets, and it has to reach the card.
   await emitEvent(page, {
     kind: 'spawn_failed',
     session_id: mockSpawnSessionId(1),
     pane_token: 'pane-never-bound',
+    reason: 'git error: invalid reference: origin/nope',
   });
 
   // The focused session no longer exists, so focus goes back to the
   // new-session screen — which is where the failure's card lives.
   await expect(page.getByTestId('new-session-empty')).toBeVisible();
   await expect(pending).toContainText(/failed to start/i);
+  await expect(page.getByTestId('pending-fail-reason')).toContainText(
+    'invalid reference: origin/nope',
+  );
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
   const dismiss = page.getByRole('button', { name: 'Dismiss' });
   await expect(dismiss).toBeVisible();

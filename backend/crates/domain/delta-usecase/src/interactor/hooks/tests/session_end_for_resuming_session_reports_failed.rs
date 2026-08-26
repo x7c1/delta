@@ -64,6 +64,8 @@ async fn session_end_for_resuming_session_reports_failed() {
         vec![SessionEvent::SpawnFailed {
             session_id: session_id.clone(),
             pane_token: "delta-3".to_owned(),
+            // The hook reports only that the launch ended, never why.
+            reason: None,
         }],
     );
     assert_eq!(

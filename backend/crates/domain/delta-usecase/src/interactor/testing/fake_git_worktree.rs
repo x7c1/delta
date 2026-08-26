@@ -1,12 +1,58 @@
 //! In-memory [`GitWorktree`] fake recording the calls the interactor makes and
 //! modelling a small set of "git repositories" for the worktree spawn path.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use tokio::sync::Notify;
 
 use crate::error::Result;
 use crate::ports::{GitWorktree, RemoteBranches, WorktreeStartPoint};
+
+/// A hold on the fake's worktree build, so a test can observe the window in
+/// which a session is accepted but not yet launched.
+///
+/// The real cost this stands in for is a `git fetch` plus a full checkout of a
+/// large repository — the whole reason the launch moved off the request path.
+/// Holding it open is what lets a test prove the `POST` answered *first*: while
+/// the gate is closed, `create_worktree` / `add_worktree_checkout` park before
+/// recording anything, so an empty `created` log is evidence that the build has
+/// not run rather than a race that happened to be won.
+#[derive(Clone)]
+pub(crate) struct WorktreeGate(Arc<WorktreeGateInner>);
+
+struct WorktreeGateInner {
+    open: Mutex<bool>,
+    opened: Notify,
+}
+
+impl WorktreeGate {
+    /// A gate that is closed: every worktree build waits until [`Self::open`].
+    pub(crate) fn closed() -> Self {
+        Self(Arc::new(WorktreeGateInner {
+            open: Mutex::new(false),
+            opened: Notify::new(),
+        }))
+    }
+
+    /// Let the held (and every later) worktree build through.
+    pub(crate) fn open(&self) {
+        *self.0.open.lock().unwrap() = true;
+        self.0.opened.notify_waiters();
+    }
+
+    async fn wait(&self) {
+        loop {
+            // Register for the notification *before* re-reading the flag, so an
+            // `open()` landing between the two is not missed.
+            let opened = self.0.opened.notified();
+            if *self.0.open.lock().unwrap() {
+                return;
+            }
+            opened.await;
+        }
+    }
+}
 
 /// A single recorded `create_worktree` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +116,11 @@ pub(crate) struct FakeGitWorktree {
     /// The dirs passed to `ensure_dir_trusted`, in order, so tests can assert
     /// whether (and with what path) trust-seeding was invoked.
     pub(crate) trusted: Mutex<Vec<String>>,
+    /// When set, every worktree build waits on this gate before recording (or
+    /// failing) anything — the seam the accept-before-launch tests hold open.
+    /// `None` (the default) means no wait at all, so every other test is
+    /// unaffected.
+    pub(crate) gate: Option<WorktreeGate>,
 }
 
 impl FakeGitWorktree {
@@ -103,6 +154,13 @@ impl FakeGitWorktree {
             .lock()
             .unwrap()
             .push((path.to_owned(), url.to_owned()));
+        self
+    }
+
+    /// Hold every worktree build on `gate` until the test opens it, so the
+    /// accept→launch window can be observed.
+    pub(crate) fn with_gate(mut self, gate: &WorktreeGate) -> Self {
+        self.gate = Some(gate.clone());
         self
     }
 
@@ -171,6 +229,9 @@ impl GitWorktree for FakeGitWorktree {
         branch: &str,
         start_point: WorktreeStartPoint,
     ) -> Result<()> {
+        if let Some(gate) = &self.gate {
+            gate.wait().await;
+        }
         if self.fail_create {
             return Err(crate::error::Error::Git("worktree add failed".into()));
         }
@@ -203,6 +264,9 @@ impl GitWorktree for FakeGitWorktree {
         worktree_path: &str,
         branch: &str,
     ) -> Result<()> {
+        if let Some(gate) = &self.gate {
+            gate.wait().await;
+        }
         if self.fail_create {
             return Err(crate::error::Error::Git("worktree add failed".into()));
         }
