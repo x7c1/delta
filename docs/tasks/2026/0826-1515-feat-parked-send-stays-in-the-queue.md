@@ -127,7 +127,7 @@ what it now means — see item 1.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] On a real Claude Code session, send `/help` from Delta: the built-in's
+- [x] On a real Claude Code session, send `/help` from Delta: the built-in's
       command picker swallows the submit, and swallows the retry too, so after
       the echo deadline fires twice (about two minutes) the send reappears in
       the queue with the neutral label and the parked notice, and Cancel removes
@@ -136,7 +136,11 @@ what it now means — see item 1.
       goes through and the send never parks. Press Escape in the pane
       afterwards to dismiss the picker. Releasing a parked row is covered by
       the automated release tests; `/help` cannot demonstrate it because a
-      re-typed `/help` is swallowed again.)
+      re-typed `/help` is swallowed again.) Verified 2026-08-27: after the
+      restart the migration stamped version 6 and left `delta.db.bak-v5`; the
+      `/help` send hit the deadline twice (60 s apart), was parked as a held
+      row with the notice, and Cancel removed both; the pane's picker was
+      dismissed with Escape afterwards.
 
 ## Out of scope
 
