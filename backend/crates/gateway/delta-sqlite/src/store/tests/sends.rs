@@ -407,3 +407,77 @@ async fn open_sends_lists_non_terminal_sends_oldest_first_per_session() {
     store.cancel_send(queued.id).await.unwrap();
     assert!(store.open_sends(&session.id).await.unwrap().is_empty());
 }
+
+/// Settling a send as delivered finishes a still-`dispatched` row and is a
+/// no-op on every terminal one — the guard that keeps the turn-end sweep from
+/// reviving a cancelled send or overwriting an attributed one.
+#[tokio::test]
+async fn settle_send_delivered_only_finishes_a_dispatched_row() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    // A dispatched row settles: `matched`, with no uuid claimed.
+    let delivered = store
+        .enqueue_send(&session.id, main, None, "delivered", None)
+        .await
+        .unwrap();
+    assert_eq!(delivered.status, SendStatus::Dispatched);
+    assert!(store.settle_send_delivered(delivered.id).await.unwrap());
+    let settled = store.send(delivered.id).await.unwrap().unwrap();
+    assert_eq!(settled.status, SendStatus::Matched);
+    assert_eq!(settled.matched_uuid, None, "delivered, but unattributed");
+    assert!(
+        store
+            .head_dispatched_send(&session.id)
+            .await
+            .unwrap()
+            .is_none(),
+        "a settled row no longer shadows the next dispatch"
+    );
+
+    // A second settle reports no transition, and never clears an attribution.
+    assert!(!store.settle_send_delivered(delivered.id).await.unwrap());
+    let attributed = store
+        .enqueue_send(&session.id, main, None, "attributed", None)
+        .await
+        .unwrap();
+    store
+        .mark_send_matched(attributed.id, &MessageUuid::from("u-1"))
+        .await
+        .unwrap();
+    assert!(!store.settle_send_delivered(attributed.id).await.unwrap());
+    assert_eq!(
+        store
+            .send(attributed.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .matched_uuid,
+        Some(MessageUuid::from("u-1")),
+        "the matched uuid survives an unattributed settle"
+    );
+
+    // A cancelled (or parked) row stays terminal: a settle never revives it.
+    let cancelled = store
+        .enqueue_send(&session.id, main, None, "cancelled", None)
+        .await
+        .unwrap();
+    store.cancel_send(cancelled.id).await.unwrap();
+    assert!(!store.settle_send_delivered(cancelled.id).await.unwrap());
+    assert_eq!(
+        store.send(cancelled.id).await.unwrap().unwrap().status,
+        SendStatus::Cancelled,
+    );
+
+    // A queued row is not deliverable yet, and an unknown id is not an error.
+    let queued = store
+        .enqueue_queued_send(&session.id, main, None, "queued", None)
+        .await
+        .unwrap();
+    assert!(!store.settle_send_delivered(queued.id).await.unwrap());
+    assert_eq!(
+        store.send(queued.id).await.unwrap().unwrap().status,
+        SendStatus::Queued,
+    );
+    assert!(!store.settle_send_delivered(9999).await.unwrap());
+}

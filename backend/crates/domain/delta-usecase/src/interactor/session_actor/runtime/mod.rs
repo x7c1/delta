@@ -206,26 +206,30 @@ pub struct SessionRuntime {
     last_auto_compact_redispatch_at: Option<Instant>,
     /// How many times each send has been returned to `queued` by the turn
     /// machine's [`OrphanedSend::Requeue`] disposition, keyed by send id — the
-    /// budget that stops an un-echoable send from being re-typed forever.
+    /// budget that stops a send nobody ever hears about from being re-typed
+    /// forever.
     ///
-    /// Requeueing is optimistic: it re-dispatches on the next idle, which is
-    /// the right answer for a one-off mangling and the wrong one for a send
-    /// that can *never* match its echo, where every attempt mismatches the
-    /// same way and burns another model turn. [`MAX_REQUEUES_PER_SEND`] caps
-    /// the retries; past the cap the send is parked (cancelled and surfaced)
-    /// instead of requeued.
+    /// The loop it bounds is dispatch → silence → requeue: no prompt
+    /// submission arrives while the send is outstanding, so it is returned to
+    /// `queued` and re-typed on the next idle. That is the right answer for a
+    /// one-off swallow and the wrong one for keystrokes that vanish the same
+    /// way every time, where each attempt burns another model turn.
+    /// [`MAX_REQUEUES_PER_SEND`] caps the retries; past the cap the send is
+    /// parked (cancelled and surfaced) instead of requeued. A prompt that does
+    /// arrive consumes the send by position whatever its text says, so a
+    /// rewritten echo spends nothing here.
     ///
-    /// The count does not distinguish *why* the echo failed: an unrelated
-    /// prompt landing inside the narrow dispatch⇄echo window twice for the
-    /// same send spends the budget too. That prompt may be someone typing into
-    /// the pane, or a harness-injected task notification, which spends the
-    /// budget without even surfacing as external input. That is the point —
-    /// the net has to catch failure modes Delta has not thought of — and firing
-    /// early is bounded and legible: the send is parked with its text handed
-    /// back.
+    /// The count does not distinguish *why* nothing was heard. The
+    /// [`TurnInput::EchoDeadline`] watchdog is the everyday spender; the
+    /// table's defensive `AwaitingEcho` arms spend it too — a turn ending, an
+    /// interrupt, or a fresh dispatch arriving while a send is still awaiting
+    /// its echo, and a prompt arriving in the resume window, before the held
+    /// keystrokes have been typed at all. That is the point — the net has to
+    /// catch failure modes Delta has not thought of — and firing early is
+    /// bounded and legible: the send is parked with its text handed back.
     ///
     /// Runtime-only, like everything else here: a restart drops the counts,
-    /// granting an un-echoable send one further re-dispatch before the cap
+    /// granting such a send one further re-dispatch before the cap
     /// stops it again — the loop still terminates, so a retry count persisted
     /// on the send row would not be worth its cost.
     ///
@@ -237,6 +241,7 @@ pub struct SessionRuntime {
     /// the past and must not pin the actor alive.
     ///
     /// [`OrphanedSend::Requeue`]: crate::turn::OrphanedSend::Requeue
+    /// [`TurnInput::EchoDeadline`]: crate::turn::TurnInput::EchoDeadline
     /// [`MAX_REQUEUES_PER_SEND`]: turn::MAX_REQUEUES_PER_SEND
     requeues_per_send: HashMap<i64, u32>,
 }

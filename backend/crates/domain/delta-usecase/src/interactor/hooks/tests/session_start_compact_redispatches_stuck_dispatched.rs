@@ -51,52 +51,48 @@ async fn session_start_compact_redispatches_stuck_dispatched() {
     );
     // The send row is still `Dispatched` — the re-type is just keystrokes,
     // it does not change the row's status (the next `UserPromptSubmit`
-    // echo will resolve it via the normal `SendMatched` flow).
+    // consumes the send and starts its turn).
     assert_eq!(
         ix.store().send(send.id).await.unwrap().unwrap().status,
         SendStatus::Dispatched,
-        "the re-typed send stays Dispatched until the echo matches it"
+        "the re-typed send stays Dispatched until a prompt submission consumes it"
     );
 }
 
-/// Two `Dispatched` sends for the same session must both be re-typed in
-/// FIFO order on a single `compact` hook. Pins the helper's behaviour even
-/// though the single-outstanding rule normally caps the queue at one — the
-/// helper is the recovery path, so it must not silently drop later entries
-/// if more than one is somehow outstanding.
+/// Only the awaited send is stuck. `Dispatched` is not on its own a claim
+/// that nobody heard about a send — a send consumed by a rewritten echo also
+/// keeps that status until the turn ends — so the helper reads the turn
+/// machine and re-types the one send it is waiting for, never every row it
+/// finds. Pinned against a second `Dispatched` row, which the
+/// single-outstanding rule makes rare but which recovery must not re-deliver.
 #[tokio::test]
-async fn session_start_compact_redispatches_all_dispatched_in_order() {
+async fn session_start_compact_redispatches_only_the_awaited_send() {
     let ix = interactor();
     let session = SessionId::from("sess-1");
     ix.seed_session().await;
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
-    // Seed two `dispatched` send rows directly through the store: the
-    // single-outstanding dispatch path normally only ever promotes one at a
-    // time, so this is the only way to test the re-dispatch helper against
-    // a multi-entry queue. `SessionStore::enqueue_send` records the row
-    // already in `Dispatched` (this is the store-level seam the actor calls
-    // after typing the keystrokes), so no extra promotion is needed. They
-    // share the session, the thread, and arrive in id order (ascending) —
-    // the FIFO the helper must preserve.
-    let s1 = ix
-        .store()
-        .enqueue_send(&session, main, None, "first stuck prompt", None)
+    // The awaited send: dispatched through the normal path, so the turn
+    // machine is in `AwaitingEcho` for it and one set of keystrokes was sent.
+    let awaited = ix
+        .enqueue_send(to(main), "the awaited prompt", None)
         .await
-        .unwrap();
-    let s2 = ix
-        .store()
-        .enqueue_send(&session, main, None, "second stuck prompt", None)
-        .await
-        .unwrap();
-    // Sanity: store now reports two `Dispatched` rows.
-    let dispatched = ix.store().dispatched_sends(&session).await.unwrap();
-    assert_eq!(dispatched.len(), 2);
+        .unwrap()
+        .0;
+    assert_eq!(ix.tmux_fake().sent.lock().unwrap().len(), 1);
 
-    // (The seed turn fires no keystrokes; the store-level seeding above
-    // bypasses tmux entirely. So `sent` starts empty.)
-    let before = ix.tmux_fake().sent.lock().unwrap().len();
-    assert_eq!(before, 0);
+    // A second `Dispatched` row seeded straight through the store — the
+    // dispatch path only ever promotes one at a time, so this is the only way
+    // to put a row the turn machine knows nothing about in front of the
+    // helper. `SessionStore::enqueue_send` records it already `Dispatched`
+    // (the store-level seam the actor calls after typing the keystrokes).
+    let bystander = ix
+        .store()
+        .enqueue_send(&session, main, None, "someone else's row", None)
+        .await
+        .unwrap();
+    let dispatched = ix.store().dispatched_sends(&session).await.unwrap();
+    assert_eq!(dispatched.len(), 2, "two dispatched rows face the helper");
 
     let _ = ix
         .on_session_start(session_start(session.as_str(), "compact"))
@@ -107,17 +103,20 @@ async fn session_start_compact_redispatches_all_dispatched_in_order() {
     assert_eq!(
         sent.len(),
         2,
-        "both dispatched sends are re-typed on one call, got {sent:?}"
+        "exactly one re-type on top of the original dispatch, got {sent:?}"
     );
-    assert_eq!(sent[0].1.as_str(), "first stuck prompt", "FIFO order");
-    assert_eq!(sent[1].1.as_str(), "second stuck prompt", "FIFO order");
-    // Statuses unchanged.
     assert_eq!(
-        ix.store().send(s1.id).await.unwrap().unwrap().status,
+        sent[1].1.as_str(),
+        "the awaited prompt",
+        "the re-typed send is the one the turn machine awaits"
+    );
+    // Statuses unchanged: the re-type is keystrokes only.
+    assert_eq!(
+        ix.store().send(awaited.id).await.unwrap().unwrap().status,
         SendStatus::Dispatched
     );
     assert_eq!(
-        ix.store().send(s2.id).await.unwrap().unwrap().status,
+        ix.store().send(bystander.id).await.unwrap().unwrap().status,
         SendStatus::Dispatched
     );
 }

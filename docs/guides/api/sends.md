@@ -18,7 +18,11 @@ provider's adapter:
   through the transcript (and released by the
   [echo deadline](#when-no-echo-ever-arrives) when it never does). This is the
   path with a real `queued` stage: only one send may be outstanding per turn, so
-  anything composed mid-turn waits.
+  anything composed mid-turn waits. When Claude Code rewrites the prompt before
+  recording it (a folded slash command, an `[Image #N]` prefix), no transcript
+  line carries the send's text — the prompt still counts as that send's, so it
+  is never typed a second time, and the row settles `matched` at the end of that
+  turn with `matched_uuid` left `null`: delivered, attributed to no message.
 - **Adapter-backed (Codex)** — no pane, no keystrokes: the text rides a
   turn-start request on the `codex app-server` connection and is matched to the
   turn id that request returns, so the row goes `dispatched` → `matched` within
@@ -264,10 +268,11 @@ is still `queued`, so the guarded queued cancel already covers it.
 ### When no echo ever arrives
 
 A pane-backed send is confirmed by its echo: the `UserPromptSubmit` hook coming
-back with the same text. Sometimes nothing comes back at all — Claude Code's TUI
-raises a dialog between turns and swallows the pasted text whole, answering
-itself with the trailing Enter, or someone presses `Escape` in the attached pane
-before the prompt submits. There is no signal to react to in any of those cases:
+back for it, whatever text it reports. Sometimes nothing comes back at all —
+Claude Code's TUI raises a dialog between turns and swallows the pasted text
+whole, answering itself with the trailing Enter, or someone presses `Escape` in
+the attached pane before the prompt submits. There is no signal to react to in
+any of those cases:
 no user message, no hook, no turn boundary. Left alone, the row would stay
 `dispatched` forever behind a permanent "in progress", with everything composed
 after it stuck `queued`.
@@ -279,11 +284,11 @@ So silence is bounded. A send that has been awaiting its echo for longer than
    returns to `queued`, then re-types immediately: a single `Escape` into the
    pane first (dismissing a lingering dialog and discarding any half-landed
    composer draft), then the same text. If whatever swallowed the keystrokes has
-   gone, the echo matches and the send completes normally — the user sees only a
+   gone, the echo arrives and the send completes normally — the user sees only a
    delayed answer.
 2. **Second deadline — parked.** A retry that is swallowed too spends the send's
-   retry budget (the same budget a mismatching echo spends). The row flips to
-   `cancelled` and leaves the open-send list, and `send_parked`
+   retry budget. The row flips to `cancelled` and leaves the open-send list, and
+   `send_parked`
    ([live-channels.md](live-channels.md)) carries the composed text back so the
    browser can hand it to the user rather than dropping it silently. Anything
    queued behind it dispatches on the spot.

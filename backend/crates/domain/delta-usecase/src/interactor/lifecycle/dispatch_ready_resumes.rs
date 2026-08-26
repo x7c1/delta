@@ -45,7 +45,7 @@ where
     /// `dispatch_queued_send` is a no-op while the resuming entry exists (a
     /// keystroke typed into the not-yet-input-ready pane would be lost), so a
     /// genuinely `queued` row present at settle — e.g. one composed mid-turn
-    /// before the restart, or one requeued by a mismatched echo — is flushed
+    /// before the restart, or one requeued by an expired echo deadline — is flushed
     /// here. A *restored* row (recovered at boot from a dead process's
     /// `dispatched` state) is NOT flushed: the queued selection skips it, so
     /// it stays visible until the user explicitly releases or cancels it.

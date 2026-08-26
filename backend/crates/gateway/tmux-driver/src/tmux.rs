@@ -322,9 +322,11 @@ const SUBMIT_ENTER_DELAY: std::time::Duration = std::time::Duration::from_millis
 /// normalizes each embedded LF (0x0a) in typed input to a single space. A
 /// multi-line prompt typed via `send-keys -l` therefore echoes back via the
 /// `UserPromptSubmit` hook as space-joined text, which never matches the
-/// outstanding send's original `\n`-containing text. The mismatch is classified
-/// as external input and the send is requeued — then re-typed and re-mismatched
-/// on the next dispatch, looping forever. Wrapping the payload in
+/// outstanding send's original `\n`-containing text. The prompt still consumes
+/// the send — consumption goes by position, not by text — so the message is not
+/// re-typed, but no transcript line carries the send's text: the send settles
+/// `matched` with no thread attribution, and every multi-line message lands
+/// outside the thread it was composed for. Wrapping the payload in
 /// `ESC [ 200 ~` … `ESC [ 201 ~` tells the TUI "this is a paste", which
 /// preserves embedded LFs verbatim and makes the hook echo match.
 fn input_commands(pane: &str, text: &str) -> Vec<Vec<String>> {

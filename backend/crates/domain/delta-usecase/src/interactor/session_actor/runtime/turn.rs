@@ -11,13 +11,19 @@ use super::SessionRuntime;
 /// How many times one send may be returned to `queued` by the turn machine
 /// before Delta stops re-dispatching it and parks it instead.
 ///
-/// One retry, not zero: a send whose echo was mangled once (interleaved pane
-/// typing, a compaction swallowing the keystrokes) really does come back
-/// intact on the next attempt, and losing a composed message to a single
-/// hiccup would be worse than the retry. Not more than one: a send whose echo
-/// can *never* match — Claude Code rewrites the prompt, so equality is
-/// unreachable — mismatches identically on every attempt, and each attempt
-/// costs a full model turn. Two dispatches are enough to tell the two apart.
+/// The budget covers exactly one situation: *nobody ever heard about the
+/// send*. No prompt submission arrived while it was outstanding, so its
+/// keystrokes never became a prompt at all. (A prompt that does arrive consumes
+/// the send by position, whatever its text says, so a rewritten echo no longer
+/// spends anything here — that used to be this budget's main customer.)
+///
+/// One retry, not zero: keystrokes swallowed once — a TUI modal eating the
+/// paste and its trailing Enter, a compaction landing on top of them — really
+/// do arrive on the next attempt, and losing a composed message to a single
+/// hiccup would be worse than the retry. Not more than one: whatever ate them
+/// may still be there, each attempt costs a full model turn, and a send that
+/// vanished twice is better handed back to the user (parked, with its text)
+/// than re-typed forever. Two dispatches are enough to tell the two apart.
 pub const MAX_REQUEUES_PER_SEND: u32 = 1;
 
 /// How long a dispatched send may wait for its `UserPromptSubmit` echo before
@@ -121,9 +127,10 @@ impl SessionRuntime {
     /// Spend one requeue from `send_id`'s budget, reporting whether the send
     /// may still be returned to `queued` (and so re-dispatched on the next
     /// idle). `false` means the budget is exhausted: the caller must park the
-    /// send instead of requeueing it, or the dispatch⇄mismatch cycle never
-    /// ends. See [`MAX_REQUEUES_PER_SEND`] and the `requeues_per_send` field
-    /// docs for why the cap is where it is.
+    /// send instead of requeueing it, or the dispatch⇄silence cycle never ends
+    /// (whatever swallowed the keystrokes swallows the re-typed ones too). See
+    /// [`MAX_REQUEUES_PER_SEND`] and the `requeues_per_send` field docs for why
+    /// the cap is where it is.
     pub fn claim_requeue(&mut self, send_id: i64) -> bool {
         let spent = self.requeues_per_send.entry(send_id).or_insert(0);
         *spent += 1;

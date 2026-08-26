@@ -20,9 +20,9 @@
 //! EchoMatched` correlation: the adapter's `send` (Codex: `turn/start`) returns
 //! synchronously and is the authoritative confirmation that the turn started,
 //! so there is no echo to match. Routing such a send through the Claude path
-//! would leave it `AwaitingEcho` and then `CancelIfUnmatched` at turn end —
-//! cancelling a *successful* send, because the adapter never calls
-//! `mark_send_matched` from an echo.
+//! would leave it `AwaitingEcho` for a `UserPromptSubmit` that never comes:
+//! nothing would consume it, so the turn end would requeue and re-type a
+//! message the provider has already accepted.
 //!
 //! So an adapter-backed turn is tracked **`ExternalPrompt`-style** ([`TurnInput::ExternalPrompt`]
 //! → `InFlight { send_id: None }`): the FSM never references the send id, so a

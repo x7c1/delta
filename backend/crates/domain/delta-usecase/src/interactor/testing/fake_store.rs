@@ -703,6 +703,22 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
+    async fn settle_send_delivered(&self, id: i64) -> Result<bool> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(s) = g
+            .sends
+            .iter_mut()
+            .find(|s| s.id == id && s.status == SendStatus::Dispatched)
+        {
+            // Delivered, but no transcript line claimed it: `matched_uuid`
+            // stays `None`, exactly as the SQL leaves the column `NULL`.
+            s.status = SendStatus::Matched;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>> {
         let g = self.inner.lock().unwrap();
         Ok(g.messages

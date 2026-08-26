@@ -24,31 +24,48 @@ where
     /// (SessionStart never fires); routing by id lets several Claude Code
     /// sessions register independently — each lands on its own actor.
     ///
-    /// Correlation is against the ONE outstanding send: under the
-    /// single-outstanding dispatch rule at most one `dispatched` send exists
-    /// per session, so the hook's prompt either echoes that send's text
-    /// (Delta's own dispatch coming back — resolved *before* syncing, so the
-    /// locator quote is returned as `additionalContext` even when the user's
-    /// transcript line has not been written yet) or it is external input. The
-    /// echo test ([`claude_format::prompt_echoes_send`]) is exact equality for
-    /// a plain send, widened only to absorb the rewrite Claude Code applies to
-    /// an image-attachment send. A mismatch means either the dispatched
-    /// keystrokes were mangled — pane input interleaving with them, say — or
-    /// the prompt was never Delta's to begin with; either way it is logged
-    /// loudly, treated as the external input it textually is, and the turn
-    /// machine returns the outstanding send to `queued` so it re-dispatches
-    /// intact once this turn ends — at most once, after which the send is
-    /// parked instead of looping (see [`SessionContext::apply_turn_input`]).
+    /// ## Which send this prompt belongs to is decided by POSITION
     ///
-    /// The actual message→thread attribution (and `mark_send_matched`) happens
-    /// inside [`Self::sync_transcript`], keyed by comparing each ingested user
-    /// line against the outstanding send. A [`SessionEvent::TurnStarted`] is
-    /// emitted when the user line for this prompt was attributed in this sync;
-    /// otherwise the later `TurnCompleted` triggers the UI refetch.
-    /// [`SessionEvent::ExternalInput`] is emitted only when the prompt matched
-    /// no outstanding send — except for harness-injected task-notification
-    /// prompts, which also match no send but are not pane typing, so they are
-    /// suppressed.
+    /// `UserPromptSubmit` carries no id Delta could round-trip, only text — and
+    /// Claude Code freely rewrites a prompt between the keystrokes landing and
+    /// the submission (local-command folding, the unknown-command notice,
+    /// namespace expansion, the `[Image #N]` prefix), so text equality cannot
+    /// answer "did my send's turn start?". Position can: under the
+    /// single-outstanding dispatch rule at most one `dispatched` send exists
+    /// per session, and while it is outstanding its keystrokes are already in
+    /// the pane — so a prompt arriving now is *that send's*, whatever it says.
+    /// The handler therefore feeds the turn machine
+    /// [`TurnInput::EchoMatched`] whenever a send is outstanding, and
+    /// [`TurnInput::ExternalPrompt`] only when there is none — or when the
+    /// session is still inside its resume window, where the send's keystrokes
+    /// are deliberately *held* and so cannot be what submitted.
+    ///
+    /// The trade is deliberate: a prompt genuinely typed into the pane while a
+    /// Delta send is outstanding is credited to that send. Worst case the
+    /// message is delivered once and filed under the wrong thread — against the
+    /// old behaviour's worst case of delivering it twice (a rewritten echo
+    /// requeued the send, so the same text was typed again, one model turn per
+    /// attempt) or wedging it as permanently "In Progress".
+    ///
+    /// ## Which thread its lines belong to is still decided by TEXT
+    ///
+    /// Attribution keeps using [`claude_format::prompt_echoes_send`] (exact
+    /// equality for a plain send, widened to absorb the image-attachment
+    /// rewrite): only a textual match resolves the send *this* prompt is,
+    /// which is what supplies the `additionalContext` locator quote and the
+    /// [`SessionEvent::TurnStarted`] announcement, and — inside
+    /// [`Self::sync_transcript`], by comparing ingested user lines — the
+    /// `mark_send_matched` that binds the send to a transcript uuid. A
+    /// consumed-but-unattributed send is settled as delivered when its turn
+    /// ends (`OrphanedSend::SettleIfUnmatched`), so the row never lingers
+    /// `dispatched` and is never reported as failed.
+    ///
+    /// [`SessionEvent::ExternalInput`] follows consumption, not text: it is
+    /// emitted only when NO send was consumed. Announcing a rewritten echo as
+    /// pane typing would contradict the very decision the turn machine just
+    /// made — and would put a spurious "typed in the pane" notice on Delta's
+    /// own message. Harness-injected task-notification prompts consume no send
+    /// either, but are not pane typing, so they stay suppressed.
     ///
     /// Returns the events to broadcast and, when a locator quote should be
     /// injected, the `additionalContext` string for the hook response.
@@ -83,7 +100,17 @@ where
         // even when the user line has not been ingested yet (the common
         // timing case).
         let outstanding = self.store.head_dispatched_send(&hook.session_id).await?;
-        let pending = outstanding
+        // CONSUMPTION, by position: an outstanding send whose keystrokes really
+        // are in the pane owns this prompt. Inside the resume window they are
+        // held instead of typed, so nothing is consumed there.
+        let consumed = outstanding
+            .as_ref()
+            .filter(|_| !self.state.is_resuming())
+            .cloned();
+        // ATTRIBUTION, by text: only a prompt that still reads as the send's
+        // own text resolves *which* send it is, which is what the locator-quote
+        // note and the turn announcement are keyed on.
+        let attributed = outstanding
             .as_ref()
             .filter(|send| claude_format::prompt_echoes_send(&send.text, &hook.prompt))
             .cloned();
@@ -91,7 +118,7 @@ where
         // user line is not yet ingested and `latest_user_thread` still reports
         // the PREVIOUS thread the user was in — letting us detect a switch.
         let additional_context = self
-            .thread_switch_context(&hook.session_id, pending.as_ref())
+            .thread_switch_context(&hook.session_id, attributed.as_ref())
             .await?;
 
         // Ingest new transcript lines. This compares each user line against
@@ -106,50 +133,64 @@ where
         // dispatched it or it was typed straight into the embedded pane. Feed
         // the turn machine AFTER the sync, so an interrupt marker of the
         // *previous* turn in the same batch is consumed first. The machine
-        // moves to `InFlight` either way; on the mismatch path (an outstanding
-        // send exists but the prompt is not its echo) the transition also
-        // returns that send to `queued` and is logged loudly.
-        match pending {
-            Some(pending) => {
+        // moves to `InFlight` either way; which send (if any) it credits with
+        // the turn is the positional decision made above.
+        match consumed {
+            Some(consumed) => {
+                if attributed.is_none() {
+                    tracing::info!(
+                        session_id = %hook.session_id,
+                        send_id = consumed.id,
+                        expected = %consumed.text.trim(),
+                        got = %hook.prompt.trim(),
+                        "UserPromptSubmit does not equal the outstanding send's text \
+                         (Claude Code rewrote the prompt, most likely): the send is the \
+                         only thing that could have submitted here, so its turn starts \
+                         and it is NOT re-typed; only its thread attribution is left to \
+                         the transcript text"
+                    );
+                }
                 self.apply_turn_input(TurnInput::EchoMatched {
-                    send_id: pending.id,
+                    send_id: consumed.id,
                 })
                 .await?;
-                // The outstanding send matches this prompt. If its user line
-                // was attributed in this very sync, announce the turn now;
+                // Announce the turn only when the text also resolved the send:
+                // `TurnStarted` carries the matched uuid and the thread to
+                // light up, both of them attribution facts. If the send's user
+                // line was attributed in this very sync, announce now;
                 // otherwise the line was not in the JSONL yet (the common
                 // timing case) and the later `Stop` sync attributes it, with
                 // `TurnCompleted` driving the UI refetch.
-                if let Some(uuid) = match_uuid_for_prompt(&new_messages, &hook.prompt) {
-                    events.push(SessionEvent::TurnStarted {
-                        session_id: hook.session_id.clone(),
-                        send_id: pending.id,
-                        // The dispatched send carries the thread it was composed
-                        // for, so the running indicator lights on that exact
-                        // thread (main or a branch) rather than the session.
-                        thread_id: pending.thread_id,
-                        matched_uuid: uuid,
-                    });
+                if let Some(attributed) = &attributed {
+                    if let Some(uuid) = match_uuid_for_prompt(&new_messages, &hook.prompt) {
+                        events.push(SessionEvent::TurnStarted {
+                            session_id: hook.session_id.clone(),
+                            send_id: attributed.id,
+                            // The dispatched send carries the thread it was
+                            // composed for, so the running indicator lights on
+                            // that exact thread (main or a branch) rather than
+                            // the session.
+                            thread_id: attributed.thread_id,
+                            matched_uuid: uuid,
+                        });
+                    }
                 }
             }
             None => {
                 if let Some(outstanding) = &outstanding {
-                    tracing::warn!(
+                    tracing::debug!(
                         session_id = %hook.session_id,
                         send_id = outstanding.id,
-                        expected = %outstanding.text.trim(),
-                        got = %hook.prompt.trim(),
-                        "UserPromptSubmit does not echo the outstanding send: the \
-                         dispatched keystrokes were mangled or overtaken; treating the \
-                         prompt as external input (the turn machine requeues the send, \
-                         or parks it once its requeue budget is spent)"
+                        "UserPromptSubmit arrived while a send is outstanding but its \
+                         keystrokes are still held for the resume window; the prompt \
+                         cannot be that send's, so it is external input"
                     );
                 }
                 self.apply_turn_input(TurnInput::ExternalPrompt).await?;
-                // No outstanding send matched this prompt. A background-task
-                // notification is injected by the harness as a prompt
-                // submission, not typed into the pane, so it must not surface as
-                // external input.
+                // This prompt consumed no send, so it really is input from
+                // outside Delta — except a background-task notification, which
+                // the harness injects as a prompt submission rather than typing
+                // it into the pane, so it must not surface as external input.
                 if !claude_format::is_task_notification(&hook.prompt) {
                     events.push(SessionEvent::ExternalInput {
                         session_id: hook.session_id.clone(),
