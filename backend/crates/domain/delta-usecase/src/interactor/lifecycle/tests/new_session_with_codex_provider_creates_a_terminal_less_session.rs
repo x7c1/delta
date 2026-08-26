@@ -100,7 +100,7 @@ async fn new_session_with_codex_provider_creates_a_terminal_less_session() {
         "the visible prompt reached the adapter's send"
     );
 
-    // The turn is tracked ExternalPrompt-style: InFlight with no send id, so the
+    // The turn is tracked as consuming no send: InFlight with no send id, so the
     // FSM never references the completed send.
     let live = ix.live_state_for(&session_id).await;
     assert_eq!(live.turn, TurnState::InFlight { send_id: None });

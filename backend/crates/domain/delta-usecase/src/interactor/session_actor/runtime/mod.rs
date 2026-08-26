@@ -219,14 +219,16 @@ pub struct SessionRuntime {
     /// arrive consumes the send by position whatever its text says, so a
     /// rewritten echo spends nothing here.
     ///
-    /// The count does not distinguish *why* nothing was heard. The
-    /// [`TurnInput::EchoDeadline`] watchdog is the everyday spender; the
-    /// table's defensive `AwaitingEcho` arms spend it too — a turn ending, an
-    /// interrupt, or a fresh dispatch arriving while a send is still awaiting
-    /// its echo, and a prompt arriving in the resume window, before the held
-    /// keystrokes have been typed at all. That is the point — the net has to
-    /// catch failure modes Delta has not thought of — and firing early is
-    /// bounded and legible: the send is parked with its text handed back.
+    /// The count does not distinguish *why* the send went back to `queued`.
+    /// The [`TurnInput::EchoDeadline`] watchdog is the everyday spender; the
+    /// resume window is the other designed-for one — a prompt arriving before
+    /// the held keystrokes have been typed at all cannot be the held send's,
+    /// so that send returns to the queue. The table's defensive `AwaitingEcho`
+    /// arms spend it too: a turn ending, an interrupt, or a fresh dispatch
+    /// arriving while a send is still awaiting its echo. That is the point —
+    /// the net has to catch failure modes Delta has not thought of — and
+    /// firing early is bounded and legible: the send is parked with its text
+    /// handed back.
     ///
     /// Runtime-only, like everything else here: a restart drops the counts,
     /// granting such a send one further re-dispatch before the cap
@@ -234,7 +236,8 @@ pub struct SessionRuntime {
     /// on the send row would not be worth its cost.
     ///
     /// An entry is dropped whenever the turn machine itself retires the send
-    /// (echo matched, orphan-cancelled, parked). A send the *user* cancels
+    /// (a prompt submission consumed it, a slash-command resolution ended its
+    /// degenerate turn, orphan-cancelled, parked). A send the *user* cancels
     /// while it sits `queued` leaves its count behind, harmlessly: send ids
     /// are never reused, so a leftover count can never be charged to a later
     /// send. NOT part of [`Self::is_empty`]: a leftover count is a fact about

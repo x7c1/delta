@@ -46,7 +46,13 @@ pub enum Effect {
     /// send: feed the turn machine back to idle and notify the browser so the
     /// stuck send clears, exactly like [`Effect::TurnAborted`] does for an
     /// API-error turn-end.
-    LocalCommandTurnEnded,
+    ///
+    /// `send_id` names the send this command resolved — the same one the
+    /// paired [`Effect::SendMatched`] carries. The turn machine needs it to
+    /// tell this honest end of *that send's* degenerate turn apart from a
+    /// generic stop arriving while a send is still awaiting its echo (which
+    /// means the keystrokes were lost, and requeues them).
+    LocalCommandTurnEnded { send_id: i64 },
     /// The head outstanding send was consumed by this transcript line: mark the
     /// send row matched to this transcript uuid.
     ///

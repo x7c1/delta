@@ -80,11 +80,17 @@ impl SessionRuntime {
             TurnState::AwaitingEcho { .. } => {}
             _ => self.awaiting_echo_since = None,
         }
-        // A matched send has left the outstanding set for good; dropping its
-        // budget here (not only on the orphan dispositions) keeps the map
-        // bounded by the sends in flight, not by the session's lifetime.
-        if let TurnInput::EchoMatched { send_id } = input {
-            self.forget_requeues(send_id);
+        // A consumed send has left the outstanding set for good — whether a
+        // prompt submission consumed it or a slash command resolved it — so
+        // dropping its budget here (not only on the orphan dispositions) keeps
+        // the map bounded by the sends in flight, not by the session's
+        // lifetime.
+        match input {
+            TurnInput::PromptSubmitted {
+                send_id: Some(send_id),
+            }
+            | TurnInput::CommandResolved { send_id } => self.forget_requeues(send_id),
+            _ => {}
         }
         if result.next == TurnState::Idle {
             self.pending_permissions.clear();
@@ -141,6 +147,14 @@ impl SessionRuntime {
     /// (matched, cancelled, or parked), so its retry history is moot.
     pub fn forget_requeues(&mut self, send_id: i64) {
         self.requeues_per_send.remove(&send_id);
+    }
+
+    /// How many requeues `send_id` has spent, for the tests that assert a path
+    /// claimed none (a slash-command resolution must not touch the budget).
+    /// Read-only, unlike [`Self::claim_requeue`], which spends one.
+    #[cfg(test)]
+    pub(crate) fn requeues_spent(&self, send_id: i64) -> u32 {
+        self.requeues_per_send.get(&send_id).copied().unwrap_or(0)
     }
 
     /// Restart the echo-deadline clock for the send currently being awaited.

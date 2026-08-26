@@ -17,6 +17,15 @@
 //! ([`crate::interactor::echo_deadline`]) is essentially its only live one: a
 //! prompt that arrives consumes the outstanding send whatever its text says,
 //! so only genuine silence still requeues.
+//!
+//! The other history-dependent rule lives here for the same reason: a requeue
+//! fired inside the **resume window** must also drop the resume's held copy of
+//! the keystrokes ([`SessionRuntime::drop_held_prompt`]). The table cannot know
+//! that copy exists, and leaving it would have the settle type the message and
+//! the next idle flush dispatch the requeued row — the same message delivered
+//! twice.
+//!
+//! [`SessionRuntime::drop_held_prompt`]: crate::interactor::session_actor::runtime::SessionRuntime::drop_held_prompt
 
 use crate::agent::{AgentEvent, TurnStatus};
 use crate::error::Result;
@@ -100,6 +109,21 @@ where
         match result.orphaned {
             None => {}
             Some(OrphanedSend::Requeue(send_id)) => {
+                // Inside the resume window this send's keystrokes were never
+                // typed: they are still held on the resuming entry, waiting
+                // for the settle. The queue is now the message's single owner
+                // — whether it is requeued or parked below — so drop the held
+                // copy. Outside the window there is no entry to hold anything,
+                // and this is a no-op.
+                if self.state.drop_held_prompt() {
+                    tracing::info!(
+                        session_id = %id,
+                        send_id,
+                        "the requeued send was still held for the resume window; dropping the \
+                         held keystrokes so it is typed once, off the queue, and not again at \
+                         resume settle"
+                    );
+                }
                 // Requeueing assumes the next dispatch echoes cleanly; the
                 // budget is what keeps that optimism from becoming an
                 // unbounded loop. See `SessionRuntime::claim_requeue`.
@@ -199,14 +223,15 @@ where
     /// Apply a turn-*end* fact, expressed as a provider-neutral
     /// [`AgentEvent::TurnCompleted`] status, to the session's turn machine.
     ///
-    /// Every live turn-end path (the `Stop` hook, the transcript interrupt
-    /// marker, the API-error abort, the local-command end) names its end as a
-    /// [`TurnStatus`] and routes through here, so [`turn_input_for_agent_event`]
-    /// — the single neutral mapping proven in the `turn` module — owns which
-    /// [`TurnInput`] a completed / interrupted / failed turn feeds the machine,
-    /// rather than each call site choosing `Stop`/`Interrupt` directly. The
-    /// mapping is total for a `TurnCompleted` event, so the `expect` documents
-    /// an invariant rather than hiding a fallible parse.
+    /// Every live turn-end path that ends a turn *generically* — the `Stop`
+    /// hook, the transcript interrupt marker, the API-error abort — names its
+    /// end as a [`TurnStatus`] and routes through here, so
+    /// [`turn_input_for_agent_event`] — the single neutral mapping proven in
+    /// the `turn` module — owns which [`TurnInput`] a completed / interrupted
+    /// / failed turn feeds the machine, rather than each call site choosing
+    /// `Stop`/`Interrupt` directly. The mapping is total for a `TurnCompleted`
+    /// event, so the `expect` documents an invariant rather than hiding a
+    /// fallible parse.
     pub(in crate::interactor) async fn apply_turn_end(
         &mut self,
         status: TurnStatus,

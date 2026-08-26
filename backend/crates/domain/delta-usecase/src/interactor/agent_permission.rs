@@ -546,7 +546,7 @@ mod tests {
         let mut state = SessionRuntime::default();
         let session = SessionId::from("sess-1");
         state.apply_turn(TurnInput::Dispatch { send_id: 1 });
-        state.apply_turn(TurnInput::EchoMatched { send_id: 1 });
+        state.apply_turn(TurnInput::PromptSubmitted { send_id: Some(1) });
         for id in 1..=3 {
             reduce_permission_event(
                 &mut state,
