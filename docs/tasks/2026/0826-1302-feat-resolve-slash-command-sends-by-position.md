@@ -105,13 +105,21 @@ send is left alone exactly as today.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] On a real Claude Code session, send `/help` from Delta and type extra
-      characters into the tmux pane in the 250 ms gap between Delta's paste
-      and its Enter (a script polling `tmux capture-pane` for the pasted text),
-      so Claude records an unknown-command notice for a name that differs from
-      the send. The send clears from the open list without the echo deadline
-      firing, nothing is re-typed, and the server logs one `attributed=false`
-      warning.
+- [x] On a real Claude Code session, send an unknown slash command from Delta
+      and type extra characters into the tmux pane in the 250 ms gap between
+      Delta's paste and its Enter (a script polling `tmux capture-pane` for the
+      pasted text), so Claude records an unknown-command notice for a name that
+      differs from the send. The send clears from the open list without the
+      echo deadline firing, nothing is re-typed, and the server logs one
+      `attributed=false` warning. Verified 2026-08-26 with `/<word>` rewritten
+      to `/<word>zzz`: the notice line was attributed to the send's thread, the
+      row was `matched` with the notice's uuid within the same second, and the
+      "does not spell the send's own text" warning was logged once. (A built-in
+      such as `/help` is not usable for this check: it opens a TUI dialog and
+      records nothing in the transcript.) Observed alongside, pre-existing and
+      not caused by this change: the local-command turn end is fed to the turn
+      machine as `Stop` from `AwaitingEcho`, which logs an "anomalous
+      transition" warning and a no-op requeue — a follow-up on this branch.
 
 ## Out of scope
 
