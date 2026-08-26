@@ -396,15 +396,18 @@ pub trait SessionStore: std::marker::Send + Sync {
     ///
     /// Under the single-outstanding dispatch rule at most one `dispatched` row
     /// exists per session, so this *is* the send both `UserPromptSubmit`
-    /// correlation and transcript attribution work from — though they use it
-    /// differently. The hook **consumes** this send by position: its keystrokes
+    /// correlation and transcript attribution work from, and both use it the
+    /// same way — by position. The hook **consumes** this send: its keystrokes
     /// are already in the pane, so the prompt that submits is its own whatever
     /// text the hook reports (Claude Code rewrites prompts), and no comparison
-    /// happens there. Attribution still claims a transcript line for it only by
-    /// trimmed-text equality, so a rewritten prompt leaves the row consumed but
-    /// unattributed until [`Self::settle_send_delivered`] finishes it at turn
-    /// end. Defined as the oldest `dispatched` row so that, should the
-    /// invariant ever be violated, both deterministically pick the earliest.
+    /// happens there. Attribution then **claims** it for the first human user
+    /// line ingested after the dispatch, again whatever that line says, binding
+    /// the row through [`Self::mark_send_matched`]; trimmed-text equality only
+    /// reports whether the echo came back verbatim. The row is left for
+    /// [`Self::settle_send_delivered`] to finish at turn end only when no such
+    /// line was ingested at all. Defined as the oldest `dispatched` row so
+    /// that, should the invariant ever be violated, both deterministically pick
+    /// the earliest.
     async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>>;
 
     /// All `dispatched` sends for a session, oldest first (ascending `id`).
@@ -425,16 +428,17 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// `matched` only while it is still `dispatched` — returning whether a row
     /// actually transitioned.
     ///
-    /// The unattributed sibling of [`Self::mark_send_matched`]. Consumption of
-    /// a send is decided by *position* (a prompt submitted while that send was
-    /// the outstanding one), attribution by *text* (a transcript line equal to
-    /// it). When the two disagree — Claude Code rewrote the prompt between
-    /// typing and recording, so no ingested line ever equals the send's text —
-    /// the message was still delivered, and the turn it started has now ended.
-    /// Cancelling such a row would record a delivered message as undelivered
-    /// (and re-surface it to the user as a failure); leaving it `dispatched`
-    /// would shadow [`Self::head_dispatched_send`] for the next send. So it
-    /// settles as `matched` with `matched_uuid` left `NULL`: delivered, with no
+    /// The unattributed sibling of [`Self::mark_send_matched`]. Both
+    /// consumption and attribution are decided by *position*: a prompt
+    /// submitted while that send was the outstanding one consumes it, and the
+    /// first human transcript line ingested afterwards claims it — a rewritten
+    /// echo included. What is left for this call is the case where no such line
+    /// ever arrived: the turn ended (or a `/compact` swallowed the echo) before
+    /// any user line was ingested. The message was still delivered. Cancelling
+    /// such a row would record a delivered message as undelivered (and
+    /// re-surface it to the user as a failure); leaving it `dispatched` would
+    /// shadow [`Self::head_dispatched_send`] for the next send. So it settles
+    /// as `matched` with `matched_uuid` left `NULL`: delivered, with no
     /// transcript line claimed.
     ///
     /// The `WHERE status = 'dispatched'` guard makes it a no-op (returning

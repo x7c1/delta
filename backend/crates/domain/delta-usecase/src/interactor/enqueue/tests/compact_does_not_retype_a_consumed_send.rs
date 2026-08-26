@@ -1,11 +1,12 @@
 //! The compact recovery re-types only what nobody has heard about yet.
 //!
-//! A send whose echo Claude Code rewrote stays `dispatched` for the whole turn
-//! — no transcript line carries its text, so nothing claims the row until the
-//! turn ends and it is settled as delivered. The row alone therefore cannot say
-//! whether a send is stuck; the turn machine can. Re-typing a send that was
-//! already consumed would deliver the same message twice, which is exactly the
-//! duplicate positional consumption exists to remove.
+//! A send stays `dispatched` until a transcript line claims it, and in the
+//! common timing case that line is not in the JSONL yet: the prompt submitted,
+//! the send's turn is running, and nothing has been ingested for it. The row
+//! alone therefore cannot say whether a send is stuck; the turn machine can.
+//! Re-typing a send that was already consumed would deliver the same message
+//! twice, which is exactly the duplicate positional consumption exists to
+//! remove.
 
 use delta_model::{SendStatus, SessionId};
 
@@ -28,10 +29,9 @@ async fn compact_does_not_retype_a_consumed_send() {
     assert_eq!(ix.tmux_fake().sent.lock().unwrap().len(), 1);
 
     // Claude Code submits the prompt under a rewritten text. The send is
-    // consumed by position, so the turn is now the send's — but no transcript
-    // line matches it, so its row stays `dispatched` until the turn ends.
-    ix.transcript_fake()
-        .push(user_line("u-1", "<command-name>/plan</command-name>"));
+    // consumed by position, so the turn is now the send's — but its user line
+    // has not been written to the JSONL yet (the common timing case), so
+    // nothing has claimed the row and it still reads `dispatched`.
     ix.on_user_prompt_submit(submit("<command-name>/plan</command-name>"))
         .await
         .unwrap();

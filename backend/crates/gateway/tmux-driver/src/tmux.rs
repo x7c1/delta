@@ -320,15 +320,18 @@ const SUBMIT_ENTER_DELAY: std::time::Duration = std::time::Duration::from_millis
 ///
 /// Why bracketed paste: outside paste mode, Claude's TUI input widget
 /// normalizes each embedded LF (0x0a) in typed input to a single space. A
-/// multi-line prompt typed via `send-keys -l` therefore echoes back via the
-/// `UserPromptSubmit` hook as space-joined text, which never matches the
-/// outstanding send's original `\n`-containing text. The prompt still consumes
-/// the send — consumption goes by position, not by text — so the message is not
-/// re-typed, but no transcript line carries the send's text: the send settles
-/// `matched` with no thread attribution, and every multi-line message lands
-/// outside the thread it was composed for. Wrapping the payload in
-/// `ESC [ 200 ~` … `ESC [ 201 ~` tells the TUI "this is a paste", which
-/// preserves embedded LFs verbatim and makes the hook echo match.
+/// multi-line prompt typed via `send-keys -l` therefore reaches Claude as
+/// space-joined text, and echoes back via the `UserPromptSubmit` hook in that
+/// same form, which never equals the outstanding send's original
+/// `\n`-containing text. Correlation survives that — the prompt consumes the
+/// send by position, and the first line ingested afterwards is attributed to
+/// the send's thread whatever it says — so what the flattening costs is the
+/// message itself: the line breaks the user wrote never reach Claude. It also
+/// fails the verbatim check on every multi-line send, which logs each one as a
+/// rewritten prompt and withholds the extras keyed on that verdict (the
+/// locator-quote frame, the `TurnStarted` naming the matched uuid). Wrapping
+/// the payload in `ESC [ 200 ~` … `ESC [ 201 ~` tells the TUI "this is a
+/// paste", which preserves embedded LFs verbatim and makes the hook echo match.
 fn input_commands(pane: &str, text: &str) -> Vec<Vec<String>> {
     vec![
         clear_input_commands(pane),

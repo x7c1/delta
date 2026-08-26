@@ -17,9 +17,9 @@ pub struct AttributionState {
     /// Seeded from the latest persisted user message (defaulting to `main`).
     pub carry_thread: ThreadId,
     /// The outstanding `dispatched` sends in dispatch (FIFO) order. Only the
-    /// head is ever compared — mirroring the store's `head_dispatched_send`,
-    /// which always returns the oldest `dispatched` row — and a match consumes
-    /// it, exposing the next.
+    /// head is ever correlated against — mirroring the store's
+    /// `head_dispatched_send`, which always returns the oldest `dispatched`
+    /// row — and the next human line consumes it, exposing the next send.
     ///
     /// Under the single-outstanding dispatch rule a live session seeds at most
     /// one element here. The queue form is what makes whole-history replay

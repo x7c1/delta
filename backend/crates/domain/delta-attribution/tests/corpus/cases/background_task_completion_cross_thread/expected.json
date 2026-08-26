@@ -42,7 +42,8 @@
     {
       "kind": "send_matched",
       "send_id": 1,
-      "matched_uuid": "u0"
+      "matched_uuid": "u0",
+      "attributed": true
     },
     {
       "kind": "subagent_launched",

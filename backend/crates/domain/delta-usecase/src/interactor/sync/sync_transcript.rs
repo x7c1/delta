@@ -211,7 +211,30 @@ where
                 Effect::SendMatched {
                     send_id,
                     matched_uuid,
+                    attributed,
                 } => {
+                    // `attributed` is a report, not a gate: the send is bound to
+                    // this line either way. On the rewrite path only, re-read
+                    // the send row so the warning can name both texts — the
+                    // shape of an uncatalogued rewrite is what makes it
+                    // actionable.
+                    if !attributed {
+                        let sent = self.store.send(send_id).await?;
+                        let echoed = messages
+                            .iter()
+                            .find(|message| message.uuid == matched_uuid)
+                            .and_then(|message| message.content_text.as_deref());
+                        tracing::warn!(
+                            session_id = %session_id,
+                            send_id,
+                            matched_uuid = %matched_uuid.as_str(),
+                            sent = %sent.as_ref().map(|s| s.text.trim()).unwrap_or("<send row gone>"),
+                            echoed = %echoed.unwrap_or("").trim(),
+                            "the transcript line consuming this send does not equal the \
+                             send's text (Claude Code rewrote the prompt, most likely); \
+                             the line is still attributed to the send's thread"
+                        );
+                    }
                     self.store.mark_send_matched(send_id, &matched_uuid).await?;
                 }
                 Effect::SubagentLaunched {

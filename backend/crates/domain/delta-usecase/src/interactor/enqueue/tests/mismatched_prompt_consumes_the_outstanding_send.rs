@@ -41,18 +41,26 @@ async fn mismatched_prompt_consumes_the_outstanding_send() {
         .await
         .unwrap();
 
-    // The send's turn is the one now running: no orphan, so the row is still
-    // outstanding for its transcript line to claim, and nothing is re-typed.
+    // The send's turn is the one now running: no orphan, and nothing is
+    // re-typed. The transcript line ingested by the same sync consumes the row
+    // by position too, so it settles as `matched` against that line rather than
+    // being requeued or cancelled.
     assert_eq!(
         ix.live_state_for(&session).await.turn,
         TurnState::InFlight {
             send_id: Some(send.id)
         },
     );
+    let row = ix.store().send(send.id).await.unwrap().unwrap();
     assert_eq!(
-        ix.store().send(send.id).await.unwrap().unwrap().status,
-        SendStatus::Dispatched,
+        row.status,
+        SendStatus::Matched,
         "the send is consumed, not requeued and not cancelled",
+    );
+    assert_eq!(
+        row.matched_uuid.as_ref().map(|u| u.as_str()),
+        Some("u-1"),
+        "the line that consumed it is the line it is bound to",
     );
     assert_eq!(
         ix.tmux_fake().sent.lock().unwrap().len(),
@@ -68,8 +76,10 @@ async fn mismatched_prompt_consumes_the_outstanding_send() {
             .any(|e| matches!(e, SessionEvent::ExternalInput { .. })),
         "got {events:?}"
     );
-    // Attribution, though, still needs the text: no line equals the send, so
-    // no turn is announced for it (the `TurnCompleted` refetch covers the UI).
+    // The hook's own announcement still keys on the text: no submitted prompt
+    // equals the send, so no `TurnStarted` goes out here (the `TurnCompleted`
+    // refetch covers the UI). The line's THREAD attribution no longer depends
+    // on that — the ingest above already bound it to the send.
     assert!(
         !events
             .iter()

@@ -7,6 +7,12 @@
 //! consumed it, and Claude answered it — recording that as "cancelled" tells
 //! the user their delivered message failed. `matched_uuid` stays `NULL`: the
 //! delivery is recorded, the transcript line is not claimed.
+//!
+//! An ingested human line consumes the send by position, so the row reaching
+//! turn end unclaimed means the turn produced no human line at all: the prompt
+//! was swallowed (a compaction routine), or the turn ended before its line was
+//! flushed and ingested. That is the path pinned here — no user line is ever
+//! pushed for the first send.
 
 use delta_model::{SendStatus, SessionId};
 
@@ -22,14 +28,15 @@ async fn turn_end_settles_a_consumed_send_as_delivered() {
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
     let (send, _) = ix.enqueue_send(to(main), "run it", None).await.unwrap();
-    ix.transcript_fake().push(user_line("u-1", "run it (v2)"));
+    // The prompt submits — consuming the send by position — but no user line is
+    // ever written for it, so nothing claims the row.
     ix.on_user_prompt_submit(submit("run it (v2)"))
         .await
         .unwrap();
     assert_eq!(
         ix.store().send(send.id).await.unwrap().unwrap().status,
         SendStatus::Dispatched,
-        "mid-turn the row waits for a transcript line that will never match",
+        "mid-turn the row waits for a transcript line that never arrives",
     );
 
     ix.on_stop(StopHook {

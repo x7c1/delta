@@ -31,6 +31,7 @@ fn a_plain_send_echo_lands_on_its_thread_and_marks_the_send_matched() {
         vec![Effect::SendMatched {
             send_id: 7,
             matched_uuid: MessageUuid::from("u-1"),
+            attributed: true,
         }]
     );
     assert!(
@@ -711,32 +712,69 @@ fn an_unknown_background_completion_falls_back_to_inheriting_carry() {
 }
 
 #[test]
-fn an_external_human_line_resets_carry_to_main_without_consuming_the_send() {
-    // A human user line matching no outstanding send is external input: it
-    // lands on `main` and resets `carry_thread` — but the non-matching
-    // outstanding send stays dispatched, so its echo can still match later.
+fn a_human_line_whose_text_differs_still_consumes_the_outstanding_send() {
+    // Consumption is POSITIONAL: while a send is outstanding its keystrokes are
+    // already in the pane, so the next human user line is that send's echo
+    // whatever text Claude Code recorded (a prompt rewrite, or characters typed
+    // on top of the pasted text). It lands on the send's thread — together with
+    // the reply that follows it — and the send is consumed. The text mismatch
+    // survives only as `attributed: false`, the log-worthy hint that the echo
+    // was not verbatim.
     let pending = branch_send(7, CHILD, "uuid-parent", "branch text");
     let outcome = attribute_lines(
         &session(),
         MAIN,
-        AttributionState::new(CHILD, Some(pending)),
+        AttributionState::new(MAIN, Some(pending)),
         vec![
-            user_line("u-ext", "typed straight into the pane"),
-            assistant_line("a-ext", "external reply"),
-            user_line("u-b", "branch text"),
+            user_line("u-b", "branch text with extra characters"),
+            assistant_line("a-b", "branch reply"),
         ],
     );
 
-    assert_eq!(message(&outcome, "u-ext").thread_id, MAIN);
-    assert_eq!(message(&outcome, "a-ext").thread_id, MAIN);
-    // The send survived the external turn and matched its real echo.
     assert_eq!(message(&outcome, "u-b").thread_id, CHILD);
+    assert_eq!(
+        message(&outcome, "u-b").semantic_parent_uuid,
+        Some(MessageUuid::from("uuid-parent"))
+    );
+    // The reply follows the echo onto the branch instead of vanishing on main.
+    assert_eq!(message(&outcome, "a-b").thread_id, CHILD);
+    assert_eq!(outcome.state.carry_thread, CHILD);
     assert_eq!(
         outcome.effects,
         vec![Effect::SendMatched {
             send_id: 7,
             matched_uuid: MessageUuid::from("u-b"),
+            attributed: false,
         }]
+    );
+    assert!(
+        outcome.state.outstanding.is_empty(),
+        "the send is consumed by position, so it never lingers dispatched"
+    );
+}
+
+#[test]
+fn a_human_line_with_no_outstanding_send_resets_carry_to_main() {
+    // The other half of the positional rule: with nothing outstanding, no send
+    // can explain this line, so it is input typed straight into the pane. It
+    // opens a turn on `main` and resets `carry_thread` — the reply follows it
+    // to main — and no send effect is emitted.
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::new(CHILD, None),
+        vec![
+            user_line("u-ext", "typed straight into the pane"),
+            assistant_line("a-ext", "external reply"),
+        ],
+    );
+
+    assert_eq!(message(&outcome, "u-ext").thread_id, MAIN);
+    assert_eq!(message(&outcome, "a-ext").thread_id, MAIN);
+    assert_eq!(outcome.state.carry_thread, MAIN);
+    assert!(
+        outcome.effects.is_empty(),
+        "there was no send to consume, so nothing is reported as matched"
     );
 }
 
@@ -767,7 +805,11 @@ fn non_human_lines_inherit_carry() {
 }
 
 #[test]
-fn send_matching_compares_trimmed_text() {
+fn send_text_comparison_ignores_surrounding_whitespace() {
+    // The text comparison no longer decides consumption (position does), but it
+    // still decides the `attributed` flag — and it compares TRIMMED text, so a
+    // send whose stored text carries surrounding whitespace is still recognized
+    // as echoed verbatim and raises no rewrite warning.
     let outcome = attribute_lines(
         &session(),
         MAIN,
@@ -776,6 +818,14 @@ fn send_matching_compares_trimmed_text() {
     );
 
     assert_eq!(message(&outcome, "u-1").thread_id, CHILD);
+    assert_eq!(
+        outcome.effects,
+        vec![Effect::SendMatched {
+            send_id: 7,
+            matched_uuid: MessageUuid::from("u-1"),
+            attributed: true,
+        }]
+    );
 }
 
 #[test]
@@ -844,6 +894,7 @@ fn a_local_command_group_folds_to_meta_resolves_its_send_and_ends_the_turn() {
             Effect::SendMatched {
                 send_id: 7,
                 matched_uuid: MessageUuid::from("cmdname"),
+                attributed: true,
             },
             Effect::LocalCommandTurnEnded,
         ]
@@ -885,6 +936,7 @@ fn a_namespaced_local_command_name_line_matches_a_short_form_send() {
             Effect::SendMatched {
                 send_id: 7,
                 matched_uuid: MessageUuid::from("cmdname"),
+                attributed: true,
             },
             Effect::LocalCommandTurnEnded,
         ]
@@ -948,6 +1000,7 @@ fn an_unknown_command_notice_resolves_its_send_and_ends_the_turn() {
             Effect::SendMatched {
                 send_id: 7,
                 matched_uuid: MessageUuid::from("notice"),
+                attributed: true,
             },
             Effect::LocalCommandTurnEnded,
         ]
@@ -978,6 +1031,7 @@ fn an_unknown_command_notice_matches_a_send_carrying_args() {
             Effect::SendMatched {
                 send_id: 7,
                 matched_uuid: MessageUuid::from("notice"),
+                attributed: true,
             },
             Effect::LocalCommandTurnEnded,
         ]
@@ -1093,6 +1147,7 @@ fn a_queued_replay_after_compact_matches_its_send_instead_of_folding_to_meta() {
             Effect::SendMatched {
                 send_id: 7,
                 matched_uuid: MessageUuid::from("u-replay"),
+                attributed: true,
             },
         ]
     );
@@ -1180,11 +1235,13 @@ fn a_real_prompt_after_a_local_command_is_an_ordinary_user_turn() {
             Effect::SendMatched {
                 send_id: 7,
                 matched_uuid: MessageUuid::from("cmdname"),
+                attributed: true,
             },
             Effect::LocalCommandTurnEnded,
             Effect::SendMatched {
                 send_id: 8,
                 matched_uuid: MessageUuid::from("u-real"),
+                attributed: true,
             },
         ]
     );
@@ -1221,6 +1278,7 @@ fn a_forked_skill_launch_lights_a_background_indicator_and_records_the_launch() 
             Effect::SendMatched {
                 send_id: 7,
                 matched_uuid: MessageUuid::from("cmdname"),
+                attributed: true,
             },
             Effect::LocalCommandTurnEnded,
             Effect::SubagentLaunched {

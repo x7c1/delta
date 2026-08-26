@@ -42,12 +42,14 @@
     {
       "kind": "send_matched",
       "send_id": 1,
-      "matched_uuid": "fake-session-u0"
+      "matched_uuid": "fake-session-u0",
+      "attributed": true
     },
     {
       "kind": "send_matched",
       "send_id": 2,
-      "matched_uuid": "fake-session-u2"
+      "matched_uuid": "fake-session-u2",
+      "attributed": true
     },
     {
       "kind": "resolve_permission",

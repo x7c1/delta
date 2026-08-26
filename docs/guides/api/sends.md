@@ -19,10 +19,12 @@ provider's adapter:
   [echo deadline](#when-no-echo-ever-arrives) when it never does). This is the
   path with a real `queued` stage: only one send may be outstanding per turn, so
   anything composed mid-turn waits. When Claude Code rewrites the prompt before
-  recording it (a folded slash command, an `[Image #N]` prefix), no transcript
-  line carries the send's text — the prompt still counts as that send's, so it
-  is never typed a second time, and the row settles `matched` at the end of that
-  turn with `matched_uuid` left `null`: delivered, attributed to no message.
+  recording it (a folded slash command, an `[Image #N]` prefix), the first user
+  line of that turn still counts as the send's echo whatever it says: the send
+  is never typed a second time, and the row is matched to that line's uuid.
+  `matched_uuid` is left `null` only when no user line reaches the transcript
+  before the turn ends — the row still settles `matched` at that turn's end:
+  delivered, attributed to no message.
 - **Adapter-backed (Codex)** — no pane, no keystrokes: the text rides a
   turn-start request on the `codex app-server` connection and is matched to the
   turn id that request returns, so the row goes `dispatched` → `matched` within

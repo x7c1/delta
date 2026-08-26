@@ -23,18 +23,20 @@ where
     /// position — whatever text Claude Code ends up reporting for it.
     /// Statuses stay `Dispatched` so the turn machine's `AwaitingEcho` head
     /// is unchanged; only the keystrokes are re-sent. (Which transcript line
-    /// the send is attributed to is still decided by text, separately, and
-    /// does not gate any of this.)
+    /// the send is attributed to is decided by position too — the first human
+    /// line ingested after the dispatch — and does not gate any of this.)
     ///
     /// "Stuck" is read from the turn machine, not from the rows: only
     /// [`TurnState::AwaitingEcho`] means no prompt submission has been heard
     /// for the send yet. A row also sits at `Dispatched` while the turn is
     /// already `InFlight { send_id: Some(_) }` — there the send *was*
-    /// delivered, its echo simply arrived rewritten, so no transcript line
-    /// has claimed the row and it is settled at turn end instead. Re-typing
-    /// that one would deliver the same message twice, which is precisely the
-    /// duplicate this recovery exists to avoid. The single-outstanding rule
-    /// leaves at most one awaited send, so at most one is ever re-typed.
+    /// delivered and the transcript ingest has simply not caught up yet: the
+    /// first human line it ingests claims the row, a rewritten echo included,
+    /// and if the turn ends before any does, the row settles instead.
+    /// Re-typing that one would deliver the same message twice, which is
+    /// precisely the duplicate this recovery exists to avoid. The
+    /// single-outstanding rule leaves at most one awaited send, so at most
+    /// one is ever re-typed.
     ///
     /// Both detection paths reach this helper through
     /// [`Self::try_redispatch_after_compact`], which owns the debounce so
