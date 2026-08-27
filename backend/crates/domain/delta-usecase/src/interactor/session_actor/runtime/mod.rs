@@ -165,14 +165,28 @@ pub struct SessionRuntime {
     /// first value); the `Effect::SubagentIndicatorStarted` arm of
     /// `sync_transcript` drains the buffer when it creates the in-memory entry
     /// and persists the upgrade through the store. The buffer is NOT part of
-    /// [`Self::is_empty`] — leaked entries are reclaimed by actor retirement.
+    /// [`Self::is_empty`] — an undrained entry must not pin the actor alive.
     ///
-    /// TODO: clean leaked entries on session lifecycle events. A nested
-    /// `Agent`'s `PostToolUse` lands here too, but its `tool_use_id` will never
-    /// appear in the parent's JSONL (it lives in the subagent's own transcript),
-    /// so the entry is never drained. The leak is bounded by the number of
-    /// nested `Agent` launches per session — small in practice — but a sweep
-    /// keyed off `SubagentCompleted` or session close would tighten the bound.
+    /// Not every recorded entry has a drain waiting for it: a NESTED `Agent`
+    /// launch (a subagent calling `Agent` itself) reaches the same hook, and its
+    /// `tool_use_id` lives only in the subagent's own transcript, so the parent
+    /// fold never emits the `SubagentIndicatorStarted` that would take it. It
+    /// cannot be told apart when it is recorded — the hook payload carries no
+    /// parent/depth signal, and Claude Code 2.1.193 presents such a hook with
+    /// the PARENT's `transcript_path`, so the foreign-transcript guard does not
+    /// catch it either.
+    ///
+    /// So the buffer is swept where the agent process is known to be gone:
+    /// [`Self::drain_running_subagents`] (the session-close / session-end sweep)
+    /// and [`Self::forget_turn`] (session deletion). `close_session` syncs the
+    /// transcript immediately before that sweep, so a legitimately pending id
+    /// has already had its drain there. `on_session_end` does not sync first —
+    /// the background tail can still fold a straggler launch line afterwards,
+    /// creating an entry with `task_id: None` — but with the process gone no
+    /// `<task-notification>` can follow it either, so the id that fold misses
+    /// had nothing left to correlate. Not at turn end: the launch line may still
+    /// be missing from the parent JSONL when the turn-end hook fires — that race
+    /// is the whole reason this buffer exists.
     pending_post_tool_use_agent_ids: HashMap<String, String>,
     /// The push-based content accumulator for a terminal-less agent session
     /// (Codex): the event pump folds every [`AgentEvent`] from the session's
