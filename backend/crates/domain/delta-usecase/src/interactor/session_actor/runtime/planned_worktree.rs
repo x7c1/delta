@@ -20,4 +20,10 @@ pub struct PlannedWorktree {
     pub repository_display_name: Option<String>,
     /// What the user asked for: where the worktree's branch starts from.
     pub spec: WorktreeSpec,
+    /// The branch the session was planned to be on in the worktree — the
+    /// per-session `delta-<session-id>` for the new-branch start points, the
+    /// named branch for `use_remote_branch`. Carried across so a build that
+    /// lands somewhere other than the planned path can name the branch that
+    /// pulled it there.
+    pub branch: String,
 }

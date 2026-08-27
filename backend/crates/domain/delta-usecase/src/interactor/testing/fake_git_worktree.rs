@@ -1,6 +1,7 @@
 //! In-memory [`GitWorktree`] fake recording the calls the interactor makes and
 //! modelling a small set of "git repositories" for the worktree spawn path.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -111,6 +112,22 @@ pub(crate) struct FakeGitWorktree {
     /// anywhere"); a present `(branch, path)` makes the fake report `path` as
     /// the worktree already holding that branch (driving the reuse path).
     pub(crate) checked_out_branches: Mutex<Vec<(String, String)>>,
+    /// Scripted *sequences* of `worktree_path_for_branch` answers, keyed by
+    /// branch name and consumed in call order — the seam for the accept→launch
+    /// window, where the plan phase and the build phase each ask once and a
+    /// worktree may have appeared in between.
+    ///
+    /// Takes precedence over [`Self::checked_out_branches`] for a branch that
+    /// appears in both. Each call pops the next answer; once one answer is
+    /// left it is returned for every further call, so a lookup made a third
+    /// time (a retry, say) is still deterministic rather than falling off the
+    /// end of the script.
+    ///
+    /// Scripting *this* rather than mutating `checked_out_branches` between
+    /// calls is deliberate: the launch runs on a `tokio::spawn`ed task, so
+    /// "mutate the map after the accept returns" would be betting on scheduler
+    /// order, not stating a fact about the two lookups.
+    pub(crate) branch_lookup_script: Mutex<Vec<(String, VecDeque<Option<String>>)>>,
     /// The `add_worktree_checkout` calls made, in order.
     pub(crate) checked_out: Mutex<Vec<CheckedOutWorktree>>,
     /// The dirs passed to `ensure_dir_trusted`, in order, so tests can assert
@@ -173,6 +190,44 @@ impl FakeGitWorktree {
             .unwrap()
             .push((branch.to_owned(), path.to_owned()));
         self
+    }
+
+    /// Script successive `worktree_path_for_branch(_, branch)` answers, consumed
+    /// in call order — e.g. `[None, Some(path)]` for a branch that is not
+    /// checked out when the accept phase plans the launch and *is* by the time
+    /// the launch task builds it. See [`Self::branch_lookup_script`] for how an
+    /// exhausted script behaves.
+    pub(crate) fn with_branch_lookups(
+        self,
+        branch: &str,
+        answers: impl IntoIterator<Item = Option<&'static str>>,
+    ) -> Self {
+        let answers: VecDeque<Option<String>> = answers
+            .into_iter()
+            .map(|answer| answer.map(str::to_owned))
+            .collect();
+        assert!(
+            !answers.is_empty(),
+            "a scripted branch lookup needs at least one answer to fall back on"
+        );
+        self.branch_lookup_script
+            .lock()
+            .unwrap()
+            .push((branch.to_owned(), answers));
+        self
+    }
+
+    /// The next scripted answer for `branch`, or `None` when the branch is not
+    /// scripted at all (the caller then falls back to `checked_out_branches`).
+    fn next_scripted_lookup(&self, branch: &str) -> Option<Option<String>> {
+        let mut script = self.branch_lookup_script.lock().unwrap();
+        let (_, answers) = script.iter_mut().find(|(name, _)| name == branch)?;
+        // Keep the last answer in place so every further call repeats it.
+        if answers.len() > 1 {
+            answers.pop_front()
+        } else {
+            answers.front().cloned()
+        }
     }
 }
 
@@ -249,6 +304,9 @@ impl GitWorktree for FakeGitWorktree {
         _repo_root: &str,
         branch: &str,
     ) -> Result<Option<String>> {
+        if let Some(scripted) = self.next_scripted_lookup(branch) {
+            return Ok(scripted);
+        }
         Ok(self
             .checked_out_branches
             .lock()

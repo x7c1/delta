@@ -69,14 +69,20 @@ where
     /// written, so the REST response can go out while the build is still
     /// running. [`Self::resolve_worktree_launch_dir`] performs the same
     /// decision on the launch task and must reach the same path — the launch
-    /// logs a warning if it ever does not.
+    /// fails outright ([`Error::WorktreeLandedElsewhere`]) if it ever does not.
     ///
     /// For the new-branch start points (`Head`/`RemoteBranch`) the answer is
     /// pure string work: the build always cuts `delta-<session-id>` at
-    /// [`Self::default_worktree_path`]. For `UseRemoteBranch` the user works on
-    /// the named branch itself, and git forbids one branch in two worktrees, so
-    /// the worktree already holding it is reused when one exists — which needs
-    /// one cheap `git worktree list`, no fetch and no checkout.
+    /// [`Self::default_worktree_path`], so those two can never diverge. For
+    /// `UseRemoteBranch` the user works on the named branch itself, and git
+    /// forbids one branch in two worktrees, so the worktree already holding it
+    /// is reused when one exists — which needs one cheap `git worktree list`,
+    /// no fetch and no checkout. That lookup is also the only way the two halves
+    /// can disagree: a second session started on the same branch while the first
+    /// is still checking it out plans the default path and then finds the first
+    /// session's worktree at build time.
+    ///
+    /// [`Error::WorktreeLandedElsewhere`]: crate::error::Error::WorktreeLandedElsewhere
     pub(in crate::interactor) async fn plan_worktree_launch_dir(
         &self,
         session_id: &delta_model::SessionId,

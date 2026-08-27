@@ -93,9 +93,11 @@ which frames arrive, and a client must handle each event whenever it lands.
   converges from events alone — see
   [sessions.md](sessions.md) for the recovery story.
 - `spawn_failed` — a freshly-spawned session never came up. Three producers emit
-  it: the background launch preparation when it fails (the worktree build, the
-  trust seed or the agent launch — all of which run *after* the send was
-  accepted, see [sends.md](sends.md)), the `SessionEnd` hook when the launch
+  it: the background launch preparation when it fails (the worktree build,
+  including one that landed on a path other than the one planned at accept time;
+  the trust seed; the agent launch; or the whole sequence outrunning its
+  deadline — all of which run *after* the send was accepted, see
+  [sends.md](sends.md)), the `SessionEnd` hook when the launch
   exited while still unbound, and the watchdog reaper when a launched spawn
   outlived its bind deadline without ever registering. The contentless row is
   deleted, so the session stops being listed; without the event a launch that
@@ -104,7 +106,7 @@ which frames arrive, and a client must handle each event whenever it lands.
   correlates with the session it focused on acceptance (and with its pending
   chip); `pane_token` names the tmux session that was torn down.
   `reason` carries the failure's message when Delta can name it — the launch
-  preparation's git or tmux error, which is the only place that text reaches the
+  preparation's error text, which is the only place that text reaches the
   user now that the send is accepted before the launch runs. The key is **absent
   entirely** from the other two producers' frames: a launch that exited or never
   bound says nothing about why. A client shows it as an extra line under its own

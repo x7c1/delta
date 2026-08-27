@@ -145,7 +145,21 @@ Response:
   up on if it has not finished within 10 minutes — a `git fetch` hanging on an
   unreachable remote or a credential prompt has no timeout of its own — and that
   gives the same `spawn_failed`, so a stuck session never sits `spawning`
-  indefinitely.
+  indefinitely. That deadline is overridable with
+  `DELTA_LAUNCH_PREP_DEADLINE_MS` (milliseconds), the way the echo watchdog's is
+  with `DELTA_ECHO_DEADLINE_MS`.
+
+  One more failure belongs to this window. The launch directory is decided when
+  the send is accepted (it is what the session row records as its `cwd`), and
+  for a `use_remote_branch` start point that decision is "reuse the worktree
+  already holding the branch, else create one" — so starting a second session on
+  the same branch while the first is still checking it out can plan a path the
+  build then never creates, because it finds the first session's worktree
+  instead. Git forbids one branch in two worktrees, so there is nothing to
+  build at the planned path and nothing to re-point the persisted `cwd` at: the
+  launch fails with a `spawn_failed` whose `reason` names the branch and both
+  paths. Retrying the send re-decides against the worktree that now exists and
+  starts there.
 
   `provider: "codex"` does not take this split: an adapter-backed session is
   created over the provider's connection inside the request, so its worktree

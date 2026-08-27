@@ -1,5 +1,7 @@
 //! Session-lifecycle use-case tests.
 
+mod a_launch_preparation_that_outruns_its_deadline_reports_spawn_failed;
+mod a_worktree_that_landed_off_its_planned_path_fails_the_launch;
 mod clear_session_input_clears_open_pane_and_noops_when_closed;
 mod close_session_kills_the_pane_and_keeps_the_data;
 mod close_session_known_but_not_open_is_a_noop;
