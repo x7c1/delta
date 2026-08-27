@@ -31,14 +31,22 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 /** The strip as the transcript pane mounts it: rows merged per surface. */
-function Strip({ surface }: { surface: PendingSurface }) {
+function Strip({
+  surface,
+  sessionSpawning,
+}: {
+  surface: PendingSurface;
+  sessionSpawning?: boolean;
+}) {
   const entries = usePendingSends(surface);
-  return <PendingQueue entries={entries} />;
+  return <PendingQueue entries={entries} sessionSpawning={sessionSpawning} />;
 }
 
 function renderStrip(
   surface: PendingSurface,
   seed?: (queryClient: QueryClient) => void,
+  // As the transcript pane relays it: the focused session is still starting.
+  sessionSpawning?: boolean,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -48,7 +56,7 @@ function renderStrip(
   return render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <Strip surface={surface} />
+        <Strip surface={surface} sessionSpawning={sessionSpawning} />
       </ApiProvider>
     </QueryClientProvider>,
   );
@@ -104,6 +112,32 @@ describe('PendingQueue server sends', () => {
     expect(screen.getByText('queued — sends when idle')).toBeInTheDocument();
     expect(screen.getByText('awaiting reply')).toBeInTheDocument();
     expect(screen.getByText('1 queued')).toBeInTheDocument();
+  });
+
+  it('says a queued send waits for the session while it is still starting', () => {
+    // The first prompt of a launch that has been accepted but not bound yet
+    // (a Codex launch parks it `queued` until `thread/start` answers) is not
+    // waiting on a busy session — there is no session yet. "sends when idle"
+    // would describe a session that is working on something else, so the row
+    // says what it is actually waiting for.
+    renderStrip(
+      { kind: 'thread', sessionId: SESSION_ID, threadId: 1 },
+      (queryClient) => {
+        queryClient.setQueryData(queryKeys.sessionSends(SESSION_ID), {
+          sends: [
+            serverSend({ id: 1, text: 'wake up eventually', status: 'queued' }),
+          ],
+        });
+      },
+      true,
+    );
+
+    expect(
+      screen.getByText('queued — sends when the session starts'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('queued — sends when idle'),
+    ).not.toBeInTheDocument();
   });
 
   it('cancels a dispatched send whose echo never arrived, clearing the strip', async () => {
@@ -643,6 +677,8 @@ const failedSpawn: SpawnItem = {
   text: 'start a new session',
   workdir: '/work/dir',
   launchOptionIds: [2, 5],
+  provider: 'claude',
+  worktree: null,
   status: 'failed',
 };
 
@@ -714,6 +750,72 @@ describe('PendingQueue failed spawn', () => {
     expect(locals).toHaveLength(1);
     expect(locals[0].sessionId).toBe(mockSpawnSessionId(1));
   });
+
+  it('Retry re-sends the provider and the worktree the failed launch used', async () => {
+    // The whole point of Retry is "the same session, again". A Codex launch
+    // started from a PR fails in the launch preparation more often than any
+    // other (the adapter handshake, the worktree checkout), and retrying it as
+    // a Claude session in the plain workdir would start something the user
+    // never asked for — silently, since the chip says nothing about which
+    // session it is about to start.
+    let captured: unknown;
+    server.use(
+      http.post('*/api/sends', async ({ request }) => {
+        captured = await request.json();
+        return HttpResponse.json(
+          {
+            send: {
+              id: 11,
+              session_id: 'sess-retried',
+              thread_id: 12,
+              semantic_parent_uuid: null,
+              text: 'start a new session',
+              locator_quote: null,
+              status: 'queued',
+              matched_uuid: null,
+              created_at: '2026-01-01T00:00:00Z',
+              held_at: null,
+            },
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    useLiveStore.setState({
+      spawns: [
+        {
+          ...failedSpawn,
+          provider: 'codex',
+          worktree: {
+            start_point: { kind: 'use_remote_branch', name: 'feature/x' },
+          },
+        },
+      ],
+    });
+    renderStrip({ kind: 'new-session' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => {
+      expect(captured).toEqual({
+        new_session: true,
+        text: 'start a new session',
+        workdir: '/work/dir',
+        launch_option_ids: [2, 5],
+        worktree: {
+          start_point: { kind: 'use_remote_branch', name: 'feature/x' },
+        },
+        provider: 'codex',
+      });
+    });
+    // …and the freshly tracked spawn keeps them too, so a second failure can
+    // be retried the same way.
+    const fresh = useLiveStore.getState().spawns[0];
+    expect(fresh.provider).toBe('codex');
+    expect(fresh.worktree).toEqual({
+      start_point: { kind: 'use_remote_branch', name: 'feature/x' },
+    });
+  });
 });
 
 describe('PendingQueue failed submit', () => {
@@ -724,7 +826,13 @@ describe('PendingQueue failed submit', () => {
       sending: [
         {
           id: 'l1',
-          target: { kind: 'new-session', workdir: null, launchOptionIds: [7] },
+          target: {
+            kind: 'new-session',
+            workdir: null,
+            launchOptionIds: [7],
+            provider: 'claude',
+            worktree: null,
+          },
           text: 'start a new session',
           status: 'failed',
           createdAt: 0,
@@ -749,7 +857,13 @@ describe('PendingQueue failed submit', () => {
       sending: [
         {
           id: 'l1',
-          target: { kind: 'new-session', workdir: null, launchOptionIds: [7] },
+          target: {
+            kind: 'new-session',
+            workdir: null,
+            launchOptionIds: [7],
+            provider: 'claude',
+            worktree: null,
+          },
           text: 'start a new session',
           status: 'failed',
           createdAt: 0,

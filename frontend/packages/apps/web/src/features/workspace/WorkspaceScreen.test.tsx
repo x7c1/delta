@@ -154,6 +154,8 @@ function trackedSpawn(sessionId: string) {
     text: 'first message',
     workdir: null,
     launchOptionIds: [],
+    provider: 'claude' as const,
+    worktree: null,
     status: 'spawning' as const,
   };
 }

@@ -238,15 +238,23 @@ pub enum SessionEvent {
     /// nothing would otherwise time the dangling spawn out and the UI is stuck
     /// "pending" forever with no error. This event is the failure signal, with
     /// three producers: the background launch preparation (a failed
-    /// `git worktree add`, a remote branch that does not exist, a tmux
-    /// failure), the `SessionEnd` hook (the launch exited while still unbound —
-    /// the immediate case), and the watchdog reaper (the spawn outlived its
-    /// bind deadline). It carries the Delta-minted `session_id` so the browser
-    /// can correlate it to the optimistic pending chip, plus the `pane_token`
-    /// of the tmux session that was torn down.
+    /// `git worktree add`, a remote branch that does not exist, a tmux failure,
+    /// an adapter that would not connect or start a thread), the `SessionEnd`
+    /// hook (the launch exited while still unbound — the immediate case), and
+    /// the watchdog reaper (the spawn outlived its bind deadline).
+    ///
+    /// It is emitted for **every** provider: an adapter-backed (Codex) launch
+    /// is accepted and prepared in the background exactly like a Claude one, so
+    /// its failures reach the browser here rather than as a `5xx` body.
     SpawnFailed {
+        /// The Delta-minted session id, so the browser can correlate the
+        /// failure to the optimistic pending chip. This is the only key the
+        /// browser matches on.
         session_id: SessionId,
-        pane_token: String,
+        /// The tmux session that was torn down, for a pane-backed (Claude)
+        /// launch. `None` for an adapter-backed one, which never had a pane —
+        /// so there is no name to report and none was ever given to tmux.
+        pane_token: Option<String>,
         /// Why the launch failed, when Delta can name the cause: the launch
         /// preparation's own error text. `None` for the two watchdog-shaped
         /// producers, which observe only silence — a launch that exited or

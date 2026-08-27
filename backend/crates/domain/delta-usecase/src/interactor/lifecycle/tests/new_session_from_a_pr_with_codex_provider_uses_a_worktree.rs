@@ -48,6 +48,7 @@ async fn new_session_from_a_pr_with_codex_provider_uses_a_worktree() {
         )
         .await
         .expect("a Codex session must start from a PR-origin worktree, not error");
+    ix.await_launch().await;
     assert!(
         events.is_empty(),
         "no synchronous events from a codex create"

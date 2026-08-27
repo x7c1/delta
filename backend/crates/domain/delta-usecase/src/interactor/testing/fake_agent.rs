@@ -11,14 +11,14 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use delta_model::{ContentBlock, Message, MessageUuid, Role, SessionId, ThreadId};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 use crate::agent::{
     AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentContentSource, AgentEvent,
     AgentEventStream, AgentProvider, AgentSessionHandle, ContentSourceRequest,
     ContextInjectionCapability, EventCapability, ForkCapability, InterruptCapability,
-    LaunchCapability, LaunchRequest, PermissionCapability, PtyHandle, ResumeCapability,
-    ResumeRequest, SendReceipt, SendRequest, SessionIdentityCapability,
+    LaunchCapability, LaunchOptionSpec, LaunchRequest, PermissionCapability, PtyHandle,
+    ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionIdentityCapability,
     SessionScopedAllowCapability, SteerCapability, TerminalCapability, TranscriptCapability,
     TurnStatus,
 };
@@ -57,6 +57,52 @@ pub(crate) struct FakeAgentLog {
     /// provider token and the decision, in order. Proves a browser decision
     /// reached the adapter over the trait with the correct token/decision.
     pub resolves: Vec<(String, PermissionDecision)>,
+}
+
+/// A hold on the fake factory's `connect`, so a test can observe the window in
+/// which an adapter-backed session is accepted but not yet launched.
+///
+/// The mirror of [`WorktreeGate`](super::WorktreeGate) for the other half of an
+/// adapter-backed launch: that one holds the worktree build, this one holds
+/// standing the provider up (the real cost it stands in for is spawning
+/// `codex app-server` and running its handshake, then `thread/start`). While the
+/// gate is closed `connect` parks before building — or failing — anything, so an
+/// empty [`FakeAgentLog::launches`] is evidence that the launch has not run
+/// rather than a race that happened to be won.
+#[derive(Clone)]
+pub(crate) struct ConnectGate(Arc<ConnectGateInner>);
+
+struct ConnectGateInner {
+    open: Mutex<bool>,
+    opened: Notify,
+}
+
+impl ConnectGate {
+    /// A gate that is closed: every `connect` waits until [`Self::open`].
+    pub(crate) fn closed() -> Self {
+        Self(Arc::new(ConnectGateInner {
+            open: Mutex::new(false),
+            opened: Notify::new(),
+        }))
+    }
+
+    /// Let the held (and every later) `connect` through.
+    pub(crate) fn open(&self) {
+        *self.0.open.lock().unwrap() = true;
+        self.0.opened.notify_waiters();
+    }
+
+    async fn wait(&self) {
+        loop {
+            // Register for the notification *before* re-reading the flag, so an
+            // `open()` landing between the two is not missed.
+            let opened = self.0.opened.notified();
+            if *self.0.open.lock().unwrap() {
+                return;
+            }
+            opened.await;
+        }
+    }
 }
 
 /// A scripted, in-memory [`AgentAdapter`] standing in for the Codex adapter.
@@ -335,6 +381,16 @@ enum ConnectOutcome {
 /// existing single-connect tests keep working regardless of call order).
 pub(crate) struct FakeAgentFactory {
     outcome: ConnectOutcome,
+    /// When set, every `connect` waits on this gate before succeeding or
+    /// failing — the seam the accept-before-launch tests hold open. `None` (the
+    /// default) means no wait at all, so every other test is unaffected.
+    gate: Option<ConnectGate>,
+    /// When set, [`AgentAdapterFactory::validate_launch_options`] refuses a
+    /// selection naming this option, standing in for what the real Codex
+    /// factory refuses while rendering `thread/start` (a Delta-owned field, a
+    /// duplicate, disagreeing `config` rows). `None` (the default) accepts
+    /// every selection, like the trait's default.
+    refused_option: Option<String>,
     /// The profile this factory and every adapter it builds report — one
     /// declaration for both, mirroring the real gateway.
     capabilities: AgentCapabilities,
@@ -371,7 +427,55 @@ impl FakeAgentFactory {
                 thread_id: thread_id.into(),
                 turn_id: turn_id.map(str::to_owned),
             },
+            gate: None,
+            refused_option: None,
             capabilities,
+            log: Arc::new(Mutex::new(FakeAgentLog::default())),
+            event_tx: Mutex::new(event_tx),
+            pending_rx: Mutex::new(Some(event_rx)),
+        })
+    }
+
+    /// Like [`Self::new`], but holding every `connect` on `gate` until the test
+    /// opens it, so the accept→launch window can be observed.
+    pub(crate) fn gated(
+        thread_id: impl Into<String>,
+        turn_id: Option<&str>,
+        gate: &ConnectGate,
+    ) -> Arc<Self> {
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        Arc::new(Self {
+            outcome: ConnectOutcome::Adapter {
+                thread_id: thread_id.into(),
+                turn_id: turn_id.map(str::to_owned),
+            },
+            gate: Some(gate.clone()),
+            refused_option: None,
+            capabilities: FAKE_AGENT_CAPABILITIES,
+            log: Arc::new(Mutex::new(FakeAgentLog::default())),
+            event_tx: Mutex::new(event_tx),
+            pending_rx: Mutex::new(Some(event_rx)),
+        })
+    }
+
+    /// A factory that **refuses** any selection naming `refused_option`, so a
+    /// test can drive the accept phase's launch-option gate without a real
+    /// adapter. Its `connect` would otherwise succeed, which is what makes an
+    /// empty launch log evidence that the refusal happened before the launch
+    /// rather than instead of a launch that would have failed anyway.
+    pub(crate) fn refusing_launch_option(
+        thread_id: impl Into<String>,
+        refused_option: impl Into<String>,
+    ) -> Arc<Self> {
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        Arc::new(Self {
+            outcome: ConnectOutcome::Adapter {
+                thread_id: thread_id.into(),
+                turn_id: None,
+            },
+            gate: None,
+            refused_option: Some(refused_option.into()),
+            capabilities: FAKE_AGENT_CAPABILITIES,
             log: Arc::new(Mutex::new(FakeAgentLog::default())),
             event_tx: Mutex::new(event_tx),
             pending_rx: Mutex::new(Some(event_rx)),
@@ -383,6 +487,8 @@ impl FakeAgentFactory {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         Arc::new(Self {
             outcome: ConnectOutcome::Fail,
+            gate: None,
+            refused_option: None,
             capabilities: FAKE_AGENT_CAPABILITIES,
             log: Arc::new(Mutex::new(FakeAgentLog::default())),
             event_tx: Mutex::new(event_tx),
@@ -415,7 +521,31 @@ impl AgentAdapterFactory for FakeAgentFactory {
         self.capabilities
     }
 
+    /// Refuse a selection naming the configured option, mirroring the Codex
+    /// factory's own pre-check (which runs its `thread/start` builder). Every
+    /// other factory accepts everything, exactly as the trait's default does.
+    fn validate_launch_options(
+        &self,
+        _workdir: &str,
+        options: &[LaunchOptionSpec],
+        _worktree_repo_root: Option<&str>,
+    ) -> Result<()> {
+        let Some(refused) = &self.refused_option else {
+            return Ok(());
+        };
+        match options.iter().find(|option| &option.name == refused) {
+            Some(option) => Err(Error::LaunchOptionRejected(format!(
+                "`{}` cannot be used with this fake provider",
+                option.name
+            ))),
+            None => Ok(()),
+        }
+    }
+
     async fn connect(&self) -> Result<Arc<dyn AgentAdapter>> {
+        if let Some(gate) = &self.gate {
+            gate.wait().await;
+        }
         match &self.outcome {
             ConnectOutcome::Adapter { thread_id, turn_id } => {
                 // First connect: reuse the pre-made channel (so `event_sender()`

@@ -68,6 +68,7 @@ async fn codex_closed_session_send_resumes_across_restart() {
         )
         .await
         .unwrap();
+    ix.await_launch().await;
     let session_id = first.session_id.clone();
     let main_thread = ix.store().main_thread_id(&session_id).await.unwrap();
 

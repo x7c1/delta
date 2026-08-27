@@ -66,6 +66,7 @@ async fn interrupt_reaches_the_adapter_and_keeps_the_session_open() {
         )
         .await
         .unwrap();
+    ix.await_launch().await;
     let session_id = send.session_id.clone();
 
     // The turn is in flight (tracked as consuming no send, no send id).

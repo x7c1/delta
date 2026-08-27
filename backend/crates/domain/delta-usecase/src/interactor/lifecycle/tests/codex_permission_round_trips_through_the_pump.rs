@@ -69,6 +69,7 @@ async fn codex_permission_round_trips_through_the_pump() {
         )
         .await
         .unwrap();
+    ix.await_launch().await;
     let session_id = send.session_id.clone();
 
     // The adapter surfaces an approval carrying its opaque provider token.
@@ -159,6 +160,7 @@ async fn deciding_an_unknown_codex_permission_is_a_conflict() {
         )
         .await
         .unwrap();
+    ix.await_launch().await;
     let _ = send;
 
     let result = ix.decide_permission(9999, PermissionDecision::Deny).await;
@@ -192,6 +194,7 @@ async fn session_with_a_pending_approval(
         )
         .await
         .unwrap();
+    ix.await_launch().await;
     let session_id = send.session_id.clone();
 
     events

@@ -14,9 +14,10 @@ use serde_json::json;
 
 use delta_usecase::{
     AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentProvider, CommsLogSink,
-    Error as UsecaseError, NullCommsLog, Result as UsecaseResult,
+    Error as UsecaseError, LaunchOptionSpec, NullCommsLog, Result as UsecaseResult,
 };
 
+use crate::adapter::thread_start_params;
 use crate::{AppServerConnection, CodexAppServerAdapter, CodexLaunchConfig, CODEX_CAPABILITIES};
 
 /// Builds the Codex [`AgentAdapter`] on demand from a held launch config.
@@ -68,6 +69,25 @@ impl AgentAdapterFactory for CodexAdapterFactory {
         // The same const the built adapter's `capabilities()` returns, so the
         // pre-connect profile can never drift from a running adapter's.
         CODEX_CAPABILITIES
+    }
+
+    /// Answer whether these launch options can be rendered onto `thread/start`,
+    /// by building the very params the launch will build and throwing them away.
+    ///
+    /// Running the real builder — rather than re-stating "no `cwd`, no
+    /// duplicates, no conflicting `config`" here — is the point: the rules stay
+    /// written down exactly once, in [`thread_start_params`], and a rule added
+    /// there is enforced at accept time without this method being touched. The
+    /// params are pure (no connection, no process, no I/O), so a spawn's accept
+    /// phase can run this inside `POST /api/sends` and answer a refused
+    /// selection with a synchronous `400` instead of a later `spawn_failed`.
+    fn validate_launch_options(
+        &self,
+        workdir: &str,
+        options: &[LaunchOptionSpec],
+        worktree_repo_root: Option<&str>,
+    ) -> UsecaseResult<()> {
+        thread_start_params(workdir, options, worktree_repo_root).map(|_params| ())
     }
 
     async fn connect(&self) -> UsecaseResult<Arc<dyn AgentAdapter>> {

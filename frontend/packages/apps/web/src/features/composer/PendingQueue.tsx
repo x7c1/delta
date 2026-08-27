@@ -14,6 +14,14 @@ import type { PendingEntry } from './usePendingSends';
 export interface PendingQueueProps {
   /** The merged pending rows for the active surface (see `usePendingSends`). */
   entries: PendingEntry[];
+  /**
+   * True while the surface's session is still starting (`status: 'spawning'`),
+   * relayed by the transcript pane which already resolves it. It only changes
+   * what a `queued` row says (a Codex launch parks its first prompt as
+   * `queued` until `thread/start` answers). Defaults to `false` — a surface
+   * that never starts a session.
+   */
+  sessionSpawning?: boolean;
 }
 
 /**
@@ -22,7 +30,9 @@ export interface PendingQueueProps {
  *
  * - a `queued` send is parked server-side and dispatches when the session goes
  *   idle — labelled so it reads as deliberate waiting, not a failure (queued
- *   sends used to look stuck and provoked duplicate resubmits);
+ *   sends used to look stuck and provoked duplicate resubmits). While the
+ *   session is still starting the label says so instead: nothing is busy, the
+ *   session is simply not up yet (see `sessionSpawning`);
  * - a `dispatched` send has reached the agent and is waiting on the reply (an
  *   "awaiting reply" spinner); an in-flight submit (the POST itself) shows a
  *   "sending" spinner;
@@ -52,7 +62,10 @@ export interface PendingQueueProps {
  * cancel" label and an explicit Send action (the release endpoint) alongside
  * the usual Cancel.
  */
-export function PendingQueue({ entries }: PendingQueueProps) {
+export function PendingQueue({
+  entries,
+  sessionSpawning = false,
+}: PendingQueueProps) {
   const client = useApiClient();
   const removeSending = useLiveStore((state) => state.removeSending);
   const clearSpawn = useLiveStore((state) => state.clearSpawn);
@@ -293,7 +306,11 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                     entry.key,
                     entry.send.text,
                     <div className="flex shrink-0 items-center gap-1">
-                      <Badge tone="neutral">queued — sends when idle</Badge>
+                      <Badge tone="neutral">
+                        {sessionSpawning
+                          ? 'queued — sends when the session starts'
+                          : 'queued — sends when idle'}
+                      </Badge>
                       {cancelButton}
                     </div>,
                   )
@@ -330,13 +347,17 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                         size="sm"
                         variant="secondary"
                         onClick={() => {
-                          // Re-attempt the identical launch (same text, chosen
-                          // directory, and selected launch options), then drop
-                          // the failed chip so only the fresh attempt shows.
+                          // Re-attempt the identical launch: the same text plus
+                          // the whole configuration the target retained (chosen
+                          // directory, selected launch options, provider,
+                          // worktree). Then drop the failed chip so only the
+                          // fresh attempt shows.
                           retrySpawn({
                             text: entry.item.text,
                             workdir: target.workdir,
                             launchOptionIds: target.launchOptionIds,
+                            provider: target.provider,
+                            worktree: target.worktree,
                           });
                           removeSending(entry.item.id);
                         }}
@@ -374,6 +395,8 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                         text: entry.spawn.text,
                         workdir: entry.spawn.workdir,
                         launchOptionIds: entry.spawn.launchOptionIds,
+                        provider: entry.spawn.provider,
+                        worktree: entry.spawn.worktree,
                       });
                       clearSpawn(entry.spawn.sessionId);
                     }}

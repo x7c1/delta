@@ -189,6 +189,13 @@ where
         SessionInput::LaunchPrepared { token, reply } => {
             let _ = reply.send(Ok(ctx.record_launched_pane(&token)));
         }
+        SessionInput::AdapterLaunchPrepared {
+            token,
+            prepared,
+            reply,
+        } => {
+            let _ = reply.send(ctx.bind_adapter_launch(&token, *prepared).await);
+        }
         SessionInput::LaunchFinished { token, outcome } => {
             ctx.finish_launch(&token, outcome).await;
         }

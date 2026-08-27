@@ -7,7 +7,7 @@ use tower::ServiceExt;
 
 use delta_usecase::SessionEvent;
 
-use crate::support::{build_app, get, post_json, ScenarioGuard, TIMEOUT};
+use crate::support::{await_session_registered, build_app, get, post_json, ScenarioGuard, TIMEOUT};
 
 /// The Codex interrupt full loop: browser → server → `fake-codex`.
 ///
@@ -64,6 +64,12 @@ async fn codex_interrupt_settles_the_in_flight_turn_over_the_full_stack() {
         .as_str()
         .expect("the send response carries its session id")
         .to_owned();
+
+    // The send is *accepted* before the adapter has connected, so wait for the
+    // launch to bind before interrupting: an interrupt aimed at a session whose
+    // agent is not up yet is a well-defined no-op, and nothing would ever settle
+    // the turn.
+    await_session_registered(&mut events, &session_id).await;
 
     // Interrupt the in-flight turn over the REST surface.
     let response = app

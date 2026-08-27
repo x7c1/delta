@@ -113,6 +113,7 @@ async fn codex_session_in_flight(
         )
         .await
         .unwrap();
+    ix.await_launch().await;
     let session_id = send.session_id.clone();
     assert_eq!(
         ix.live_state_for(&session_id).await.turn,
@@ -305,6 +306,7 @@ async fn a_send_after_a_death_resumes_the_session_and_runs_a_fresh_turn() {
         )
         .await
         .unwrap();
+    ix.await_launch().await;
     let session_id = first.session_id.clone();
     let main_thread = ix.store().main_thread_id(&session_id).await.unwrap();
 

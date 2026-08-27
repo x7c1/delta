@@ -38,6 +38,7 @@ async fn codex_second_send_dispatches_over_the_adapter() {
         )
         .await
         .unwrap();
+    ix.await_launch().await;
     let session_id = first.session_id.clone();
     let thread_id = first.thread_id;
 
@@ -135,6 +136,7 @@ async fn codex_branch_send_injects_context_and_reuses_branch_bookkeeping() {
         )
         .await
         .unwrap();
+    ix.await_launch().await;
     let session_id = first.session_id.clone();
     let main_thread = first.thread_id;
     ix.apply_turn_input(&session_id, TurnInput::Stop)

@@ -90,6 +90,8 @@ function beginNewSessionSending(overrides: { id?: string } = {}) {
       kind: 'new-session',
       workdir: null,
       launchOptionIds: [],
+      provider: 'claude',
+      worktree: null,
     },
     text: 'hi',
     status: 'sending',
@@ -449,6 +451,8 @@ describe('liveStore turn tracking', () => {
       text: 'first message',
       workdir: null,
       launchOptionIds: [],
+      provider: 'claude',
+      worktree: null,
     });
     useLiveStore.getState().applyEvent({
       kind: 'permission_requested',
@@ -670,7 +674,13 @@ describe('liveStore sending (pre-acceptance submits)', () => {
   it('keeps the reason a rejection named, for the chip to show verbatim', () => {
     useLiveStore.getState().beginSending({
       id: 'l1',
-      target: { kind: 'new-session', workdir: null, launchOptionIds: [7] },
+      target: {
+        kind: 'new-session',
+        workdir: null,
+        launchOptionIds: [7],
+        provider: 'claude',
+        worktree: null,
+      },
       text: 'start a new session',
       status: 'sending',
       createdAt: 0,
@@ -696,6 +706,8 @@ describe('liveStore spawn tracking', () => {
       text: 'start a new session',
       workdir: '/work/dir',
       launchOptionIds: [],
+      provider: 'claude',
+      worktree: null,
     });
   }
 
@@ -717,6 +729,37 @@ describe('liveStore spawn tracking', () => {
     expect(spawn.workdir).toBe('/work/dir');
     // The first send's turn will never end; its tracked twin goes with it.
     expect(useLiveStore.getState().localSends).toEqual({});
+  });
+
+  it('keeps the failed spawn’s provider and worktree for its Retry', () => {
+    // The retry payload is the WHOLE launch configuration, not just the text
+    // and the directory: a failed Codex + worktree launch that came back as a
+    // Claude session in the plain workdir is a different session than the one
+    // the user asked for.
+    const worktree = {
+      start_point: { kind: 'remote_branch' as const, name: 'develop' },
+    };
+    useLiveStore.getState().trackSpawn({
+      sessionId: 'sess-spawn-codex',
+      threadId: 42,
+      text: 'start on codex',
+      workdir: '/work/dir',
+      launchOptionIds: [4],
+      provider: 'codex',
+      worktree,
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-codex',
+      pane_token: 'pane-1',
+    });
+
+    const spawn = useLiveStore.getState().spawns[0];
+    expect(spawn.status).toBe('failed');
+    expect(spawn.provider).toBe('codex');
+    expect(spawn.worktree).toEqual(worktree);
+    expect(spawn.launchOptionIds).toEqual([4]);
   });
 
   it('carries the failure reason onto the tracked spawn', () => {

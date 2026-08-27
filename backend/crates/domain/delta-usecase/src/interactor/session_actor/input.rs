@@ -90,6 +90,33 @@ pub(in crate::interactor) enum SessionInput {
         token: crate::pane_token::PaneToken,
         reply: Reply<LaunchApproval>,
     },
+    /// The background launch of a freshly-accepted **adapter-backed** session
+    /// (Codex) has connected its provider and started its thread, and hands the
+    /// live connection over to be bound.
+    ///
+    /// The terminal-less counterpart of `LaunchPrepared`, and its mirror image:
+    /// a pane launch checks in before its pane exists, an adapter launch after
+    /// its connection does. What the handler does with it (persist the provider
+    /// ids, bind the adapter, start the event pump, dispatch the accepted first
+    /// prompt, announce `session_registered`) — and why the two check in at
+    /// opposite ends — is documented on `SessionContext::bind_adapter_launch`
+    /// and its module.
+    ///
+    /// The reply is fallible, unlike `LaunchPrepared`'s: binding persists rows
+    /// and dispatches a turn, so its error becomes the launch's error and rides
+    /// out on the `SpawnFailed` the browser shows. A
+    /// [`LaunchApproval::Abandon`] answer means the acceptance was already
+    /// rolled back, in which case the task drops the connection it was holding
+    /// rather than leaving a provider process behind.
+    ///
+    /// Boxed because it is by far the largest variant here (a live adapter, a
+    /// provider handle and the observed branch), and every `SessionInput` would
+    /// otherwise be sized by it.
+    AdapterLaunchPrepared {
+        token: crate::pane_token::PaneToken,
+        prepared: Box<crate::interactor::lifecycle::PreparedAdapterLaunch>,
+        reply: Reply<LaunchApproval>,
+    },
     /// The background launch preparation of a freshly-accepted session
     /// finished, reported by the launch task through this actor's own mailbox.
     ///

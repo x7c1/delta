@@ -44,6 +44,7 @@ async fn codex_plain_workdir_session_reports_its_observed_branch() {
         )
         .await
         .expect("a Codex session starts in the plain workdir");
+    ix.await_launch().await;
 
     let request = {
         let log = factory.log();
@@ -94,6 +95,7 @@ async fn a_session_outside_a_git_working_tree_reports_no_branch() {
     )
     .await
     .expect("a Codex session starts in the default scratch dir");
+    ix.await_launch().await;
 
     let request = {
         let log = factory.log();
@@ -140,6 +142,7 @@ async fn a_failing_git_degrades_the_branch_instead_of_failing_the_spawn() {
         )
         .await
         .expect("a broken git must not fail the spawn");
+    ix.await_launch().await;
 
     let request = {
         let log = factory.log();

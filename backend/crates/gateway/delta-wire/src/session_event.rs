@@ -125,11 +125,23 @@ pub enum WireSessionEvent {
     /// A previously-requested tool permission was resolved.
     PermissionResolved { session_id: String, request_id: i64 },
     /// A freshly-spawned session failed to come up before it ever registered.
+    /// Emitted for every provider: an adapter-backed (Codex) launch is
+    /// accepted and prepared in the background exactly like a Claude one.
     SpawnFailed {
+        /// The Delta-minted session id — the only key a client correlates the
+        /// failure by.
         session_id: String,
-        pane_token: String,
+        /// The tmux session that was torn down, for a pane-backed (Claude)
+        /// launch.
+        ///
+        /// Absent from the frame entirely for an adapter-backed launch, which
+        /// never had a pane to name.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        pane_token: Option<String>,
         /// Why the launch failed, when Delta can name the cause — the
-        /// background launch preparation's own error (a git or tmux message).
+        /// background launch preparation's own error (a git, tmux or adapter
+        /// message).
         ///
         /// Absent from the frame entirely for the two watchdog-shaped
         /// producers (a launch that exited, a spawn that never bound), which
@@ -576,7 +588,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
         },
         WireSessionEvent::SpawnFailed {
             session_id: session_id(),
-            pane_token: "delta-sample".to_owned(),
+            pane_token: Some("delta-sample".to_owned()),
             reason: Some("git error: worktree add failed".to_owned()),
         },
         WireSessionEvent::AssistantStreaming {
@@ -703,13 +715,31 @@ mod tests {
         assert_eq!(
             json(&WireSessionEvent::SpawnFailed {
                 session_id: "sess-1".into(),
-                pane_token: "delta-1".into(),
+                pane_token: Some("delta-1".into()),
                 reason: None,
             }),
             serde_json::json!({
                 "kind": "spawn_failed",
                 "session_id": "sess-1",
                 "pane_token": "delta-1",
+            }),
+        );
+    }
+
+    /// An adapter-backed (Codex) launch has no pane, so the key is absent
+    /// rather than an invented name: the session id is what a client keys on.
+    #[test]
+    fn spawn_failed_omits_the_pane_token_for_an_adapter_backed_launch() {
+        assert_eq!(
+            json(&WireSessionEvent::SpawnFailed {
+                session_id: "sess-1".into(),
+                pane_token: None,
+                reason: Some("agent error: codex is not installed".into()),
+            }),
+            serde_json::json!({
+                "kind": "spawn_failed",
+                "session_id": "sess-1",
+                "reason": "agent error: codex is not installed",
             }),
         );
     }
@@ -722,7 +752,7 @@ mod tests {
         assert_eq!(
             json(&WireSessionEvent::SpawnFailed {
                 session_id: "sess-1".into(),
-                pane_token: "delta-1".into(),
+                pane_token: Some("delta-1".into()),
                 reason: Some("git error: worktree add failed".into()),
             }),
             serde_json::json!({
