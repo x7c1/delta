@@ -121,12 +121,18 @@ impl SessionRuntime {
     /// background subagents: the session is being deleted, so no later
     /// completion notification can arrive to finish a background entry — keeping
     /// one would pin a doomed actor alive forever.
+    ///
+    /// The buffered `PostToolUse` agent ids go for the same reason: with the
+    /// session gone, no `tool_use` line of its can ever be folded again, so a
+    /// buffered id has nothing left to attach to (see the
+    /// `pending_post_tool_use_agent_ids` field docs).
     pub fn forget_turn(&mut self) {
         self.turn = TurnState::Idle;
         self.awaiting_echo_since = None;
         self.pending_permissions.clear();
         self.pending_question = None;
         self.running_subagents.clear();
+        self.pending_post_tool_use_agent_ids.clear();
         self.streaming_message = None;
         self.requeues_per_send.clear();
     }
@@ -200,5 +206,27 @@ impl SessionRuntime {
         };
         let since = self.awaiting_echo_since?;
         (now.duration_since(since) >= deadline).then_some(send_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forget_turn_also_clears_the_pending_post_tool_use_agent_ids() {
+        let mut runtime = SessionRuntime::default();
+        // A nested `Agent` launch's id: recorded by the hook, but its
+        // `tool_use_id` never appears in the parent's JSONL, so no
+        // `SubagentIndicatorStarted` will ever drain it.
+        runtime.record_pending_post_tool_use_agent_id("toolu_nested", "agent_1");
+
+        runtime.forget_turn();
+
+        assert_eq!(
+            runtime.drain_pending_post_tool_use_agent_id("toolu_nested"),
+            None,
+            "session deletion drops the buffered agent ids with the running set"
+        );
     }
 }
