@@ -178,6 +178,16 @@ impl Server<'_> {
                 // answer. Real `thread/start` returns the started thread under
                 // `result.thread` (a `Thread`, whose `id` is the thread id).
                 append_record(self.thread_start_log.as_deref(), params, "thread start log")?;
+                // Stand in for a slow cold start of the real server, so a test
+                // can observe the window between "the send was accepted" and
+                // "the session is live". Blocking is right here: the fake serves
+                // one client on one thread, and a real server that is still
+                // starting a thread answers nothing else either.
+                if self.scenario.thread_start_delay_ms > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        self.scenario.thread_start_delay_ms,
+                    ));
+                }
                 // The response also announces what the server decided: the real
                 // `ThreadStartResponse` requires a top-level `model`. The
                 // scenario's model is answered verbatim, *ignoring* any `model`

@@ -26,6 +26,7 @@ async fn new_session_with_codex_provider_creates_a_terminal_less_session() {
         )
         .await
         .unwrap();
+    ix.await_launch().await;
     let session_id = send.session_id.clone();
     assert!(
         events.is_empty(),

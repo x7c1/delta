@@ -1,10 +1,6 @@
 import { useCallback, useRef, type FormEvent } from 'react';
 import type { ThreadId } from '@delta/model';
-import {
-  PROVIDER_WIRE_DEFAULT,
-  type SendRequest,
-  type Thread,
-} from '@delta/wire-gen';
+import type { SendRequest, Thread } from '@delta/wire-gen';
 import { Button } from '@delta/ui-kit';
 import {
   NEW_SESSION_DRAFT_KEY,
@@ -12,9 +8,10 @@ import {
 } from '../../store/composerStore';
 import { COMPOSER_MAX_HEIGHT } from './autoGrow';
 import { useAutoGrow } from './useAutoGrow';
-import { useLiveStore } from '../../store/liveStore';
+import { useLiveStore, type NewSessionLaunch } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
 import { useOptionalComposerDraftTarget } from './composerDraftTarget';
+import { newSessionSendBody } from './newSessionRequest';
 import { useSubmitSend } from './useSubmitSend';
 
 /**
@@ -158,6 +155,31 @@ export function Composer({ mode }: ComposerProps) {
       }
       clearDraft(draftKey);
 
+      // A new session's full configuration, assembled once and used twice: for
+      // the request body and for the submit target that retains it, so a failed
+      // launch can be retried as the identical launch. (Unused for a thread
+      // send, where the session already exists with its own configuration.)
+      //
+      // The worktree request is attached only when the opt-in toggle is on AND
+      // a directory is selected AND a concrete start-point has been chosen: the
+      // picker only surfaces the toggle once a git-repo directory is chosen, so
+      // the first two guards mirror that and keep the backend-rejected
+      // "worktree without workdir" state unreachable. The pending-branch
+      // sentinel is filtered here too (and gates the Send button below); the
+      // backend rejects worktree requests without a concrete branch, so it must
+      // never reach the wire.
+      const launch: NewSessionLaunch = {
+        workdir: newSessionWorkdir,
+        launchOptionIds: newSessionLaunchOptionIds,
+        provider: newSessionProvider,
+        worktree:
+          newSessionWorktreeEnabled &&
+          newSessionWorkdir &&
+          newSessionWorktreeStartPoint.kind !== 'pending_remote_branch'
+            ? { start_point: newSessionWorktreeStartPoint }
+            : null,
+      };
+
       // Build the send target. A branch carries the semantic parent; otherwise
       // it is a plain send to the active thread. Both target the active thread
       // regardless of open/closed — for a closed session the backend
@@ -165,39 +187,7 @@ export function Composer({ mode }: ComposerProps) {
       // stays on that sub-thread instead of jumping to the session's main thread.
       let body: SendRequest;
       if (isNew) {
-        // Honor the picker's chosen working directory when one is selected;
-        // omit `workdir` entirely otherwise so the server uses its default
-        // per-spawn directory (today's behavior). Likewise, attach the selected
-        // launch options only when at least one is picked, so an unselected
-        // session starts with no extra launch flags.
-        // Attach the worktree request only when the opt-in toggle is on AND a
-        // directory is selected AND a concrete start-point has been chosen: the
-        // picker only surfaces the toggle once a git-repo directory is chosen,
-        // so the first two guards mirror that and keep the backend-rejected
-        // "worktree without workdir" state unreachable. The pending-branch
-        // sentinel is filtered here too (and gates the Send button below); the
-        // backend rejects worktree requests without a concrete branch, so it
-        // must never reach the wire.
-        body = {
-          new_session: true,
-          text,
-          ...(newSessionWorkdir ? { workdir: newSessionWorkdir } : {}),
-          ...(newSessionLaunchOptionIds.length > 0
-            ? { launch_option_ids: newSessionLaunchOptionIds }
-            : {}),
-          ...(newSessionWorktreeEnabled &&
-          newSessionWorkdir &&
-          newSessionWorktreeStartPoint.kind !== 'pending_remote_branch'
-            ? { worktree: { start_point: newSessionWorktreeStartPoint } }
-            : {}),
-          // Attach the provider only when it differs from the wire omit
-          // default: the backend resolves an omitted `provider` to
-          // `PROVIDER_WIRE_DEFAULT`, so omitting it keeps a send on that
-          // provider byte-for-byte identical to a pre-provider send.
-          ...(newSessionProvider !== PROVIDER_WIRE_DEFAULT
-            ? { provider: newSessionProvider }
-            : {}),
-        };
+        body = newSessionSendBody(text, launch);
       } else if (branching) {
         body = {
           thread_id: activeThread!.id,
@@ -217,11 +207,7 @@ export function Composer({ mode }: ComposerProps) {
                 sessionId: activeThread.session_id,
                 threadId: activeThread.id,
               }
-            : {
-                kind: 'new-session',
-                workdir: newSessionWorkdir,
-                launchOptionIds: newSessionLaunchOptionIds,
-              },
+            : { kind: 'new-session', ...launch },
           text,
           body,
         });

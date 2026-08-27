@@ -485,6 +485,8 @@ describe('applySessionEvent', () => {
       text: 'new session',
       workdir: null,
       launchOptionIds: [],
+      provider: 'claude',
+      worktree: null,
     });
     queryClient.setQueryData(queryKeys.sessionSends('sess-spawned'), {
       sends: [serverSend({ session_id: 'sess-spawned', thread_id: 42 })],
@@ -521,6 +523,8 @@ describe('applySessionEvent', () => {
       text: 'new session',
       workdir: null,
       launchOptionIds: [],
+      provider: 'claude',
+      worktree: null,
     });
 
     applySessionEvent(

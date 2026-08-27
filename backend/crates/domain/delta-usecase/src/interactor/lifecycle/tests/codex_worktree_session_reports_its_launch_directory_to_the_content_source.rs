@@ -56,6 +56,7 @@ async fn codex_worktree_session_reports_its_launch_directory_to_the_content_sour
         )
         .await
         .expect("a Codex session starts in the reused worktree");
+    ix.await_launch().await;
 
     // The session row recorded the worktree as its launch directory, distinct
     // from the dir the user selected.

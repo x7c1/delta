@@ -1,5 +1,35 @@
 import type { StateCreator } from 'zustand';
 import type { SessionId, ThreadId } from '@delta/model';
+import type { AgentProvider, WorktreeSpec } from '@delta/wire-gen';
+
+/**
+ * Everything a new-session send chooses about the session it starts, beyond the
+ * first prompt itself: where it runs, which launch options it applies, which
+ * agent backend it launches on, and whether it runs in a git worktree.
+ *
+ * This is the unit that has to survive a failed launch. The launch preparation
+ * runs *after* the send is accepted, so any part of it can fail with the
+ * session row already created — and the failed chip's Retry re-sends the
+ * identical configuration. Retaining only part of it is what made Retry quietly
+ * start a *different* session (a Claude session in the plain workdir, after a
+ * Codex + worktree launch failed), so the whole configuration travels together:
+ * on the submit target ({@link SendingItem.target}), on the tracked spawn
+ * ({@link SpawnItem}), and back onto the retried request body.
+ */
+export interface NewSessionLaunch {
+  /** The chosen working directory, or `null` for the server's default. */
+  workdir: string | null;
+  /** The selected launch-option ids, in selection order. */
+  launchOptionIds: number[];
+  /**
+   * The agent backend the session launches on. Always concrete here — the
+   * composer always has a provider selected; the wire's omit-the-default rule
+   * belongs to the request builder alone.
+   */
+  provider: AgentProvider;
+  /** The opt-in worktree request, or `null` to launch in `workdir` itself. */
+  worktree: WorktreeSpec | null;
+}
 
 /**
  * A submit the server has not accepted yet (its `POST /api/sends` is in
@@ -11,17 +41,13 @@ export interface SendingItem {
   /** Client-side id (the server has not issued one yet). */
   id: string;
   /**
-   * Where the submit happened: an existing thread, or the new-session
-   * composer (which retains the chosen `workdir` and selected launch options
-   * so a failed launch request can be retried with the same configuration).
+   * Where the submit happened: an existing thread, or the new-session composer
+   * — which retains the launch's whole {@link NewSessionLaunch} configuration,
+   * so a failed launch request can be retried exactly as it was submitted.
    */
   target:
     | { kind: 'thread'; sessionId: SessionId; threadId: ThreadId }
-    | {
-        kind: 'new-session';
-        workdir: string | null;
-        launchOptionIds: number[];
-      };
+    | ({ kind: 'new-session' } & NewSessionLaunch);
   text: string;
   /** sending: POST in flight; failed: POST rejected (dismiss or retry). */
   status: 'sending' | 'failed';

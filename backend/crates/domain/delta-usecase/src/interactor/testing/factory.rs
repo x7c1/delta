@@ -113,6 +113,26 @@ pub(crate) fn interactor_with_git_and_codex_factory(
     interactor_with_git(git_worktree).with_adapter_factory(factory as Arc<dyn AgentAdapterFactory>)
 }
 
+/// Build a test interactor with a specific [`FakeGitWorktree`], a Codex
+/// [`AgentAdapterFactory`] **and** the async event seam, returning the receiver
+/// alongside it.
+///
+/// What the deferred adapter-backed launch tests need at once: the git fake to
+/// script (or hold) the worktree build the launch task runs, the adapter factory
+/// to drive (or fail) the connect, and the seam because a Codex spawn's outcome
+/// — `session_registered` or `spawn_failed` — is announced *after* the accepting
+/// request returned, so it is observable nowhere else.
+pub(crate) fn interactor_with_git_and_codex_factory_and_event_sink(
+    git_worktree: FakeGitWorktree,
+    factory: Arc<FakeAgentFactory>,
+) -> (TestInteractor, crate::ports::AsyncEventReceiver) {
+    let (sink, receiver) = crate::ports::AsyncEventSink::channel();
+    (
+        interactor_with_git_and_codex_factory(git_worktree, factory).with_event_sink(sink),
+        receiver,
+    )
+}
+
 /// Build a test interactor with the async event seam wired, returning the
 /// receiver alongside it — the only way to observe an event emitted *outside*
 /// a call's synchronous `Vec<SessionEvent>` return, such as a parked send

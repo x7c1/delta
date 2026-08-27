@@ -3,6 +3,13 @@
 //! merged into the one object that field holds (with the worktree git grant
 //! unioned into it), and a selection the adapter refuses — a Delta-owned field,
 //! or two `config` rows that disagree — is rejected at spawn.
+//!
+//! The refusal is the adapter's, but it is decided **in the request**: whether
+//! the selections render onto `thread/start` depends on nothing but the request,
+//! so the accept phase asks the adapter about them before it writes a row and
+//! before the background launch connects. The user therefore gets a `400`
+//! carrying the offending key on the send they just made, not a `spawn_failed`
+//! chip about a session that was created and torn down again.
 
 use axum::http::StatusCode;
 use serde_json::json;
@@ -104,6 +111,10 @@ async fn codex_launch_options_reach_thread_start_over_the_full_stack() {
 /// branch-at-launch columns are recorded against it — so a user option
 /// silently overriding it would leave those columns describing a directory the
 /// agent is not running in. Failing the spawn is the only honest answer.
+///
+/// The refusal comes from the adapter, which the accept phase consults before
+/// creating anything — so it is a synchronous response and not a `spawn_failed`
+/// arriving after the send was accepted.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_codex_launch_option_overriding_a_delta_owned_field_fails_the_spawn() {
     let scenario = streaming_turn_scenario();
@@ -132,8 +143,8 @@ async fn a_codex_launch_option_overriding_a_delta_owned_field_fails_the_spawn() 
         "the error names the offending key, got {body:?}"
     );
 
-    // The eager session row was rolled back, so a rejected spawn leaves nothing
-    // behind for the navigator to show.
+    // Nothing was created: the refusal lands before the eager row is written, so
+    // there is not even a row to roll back.
     let (status, sessions) = get(&app, "/api/sessions").await;
     assert_eq!(status, StatusCode::OK, "sessions fetched: {sessions:?}");
     assert_eq!(

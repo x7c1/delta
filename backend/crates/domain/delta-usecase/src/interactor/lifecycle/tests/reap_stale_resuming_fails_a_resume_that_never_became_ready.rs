@@ -61,7 +61,7 @@ async fn reap_stale_resuming_fails_a_resume_that_never_became_ready() {
         events,
         vec![SessionEvent::SpawnFailed {
             session_id: session_id.clone(),
-            pane_token: "delta-7".to_owned(),
+            pane_token: Some("delta-7".to_owned()),
             // The watchdog observes silence, so it names no cause.
             reason: None,
         }],

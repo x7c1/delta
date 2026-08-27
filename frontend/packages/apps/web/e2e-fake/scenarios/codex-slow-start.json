@@ -1,0 +1,23 @@
+{
+  "thread_id": "thr_slow_start",
+  "thread_start_delay_ms": 2500,
+  "turn": {
+    "turn_id": "turn_slow_start",
+    "emit": [
+      { "type": "turn_started" },
+      {
+        "type": "item_started",
+        "item": { "id": "item_1", "type": "agentMessage" }
+      },
+      {
+        "type": "item_completed",
+        "item": {
+          "id": "item_1",
+          "type": "agentMessage",
+          "text": "up at last"
+        }
+      },
+      { "type": "turn_completed", "status": "completed" }
+    ]
+  }
+}

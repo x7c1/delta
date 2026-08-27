@@ -56,10 +56,24 @@ thread_id: number,
  * The raw `{"questions":[…]}` tool input, serialized as JSON text, so
  * the browser can render the question card.
  */
-tool_input: string, } | { "kind": "permission_resolved", session_id: string, request_id: number, } | { "kind": "spawn_failed", session_id: string, pane_token: string, 
+tool_input: string, } | { "kind": "permission_resolved", session_id: string, request_id: number, } | { "kind": "spawn_failed", 
+/**
+ * The Delta-minted session id — the only key a client correlates the
+ * failure by.
+ */
+session_id: string, 
+/**
+ * The tmux session that was torn down, for a pane-backed (Claude)
+ * launch.
+ *
+ * Absent from the frame entirely for an adapter-backed launch, which
+ * never had a pane to name.
+ */
+pane_token?: string, 
 /**
  * Why the launch failed, when Delta can name the cause — the
- * background launch preparation's own error (a git or tmux message).
+ * background launch preparation's own error (a git, tmux or adapter
+ * message).
  *
  * Absent from the frame entirely for the two watchdog-shaped
  * producers (a launch that exited, a spawn that never bound), which

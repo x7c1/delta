@@ -3,6 +3,8 @@
 //! interactor's routing layer (they mint the session id and pick the actor);
 //! everything here runs inside a session's actor.
 
+mod adapter_launch;
+mod adapter_session;
 mod close_session;
 mod dispatch_ready_resumes;
 mod finish_launch;
@@ -11,11 +13,11 @@ mod mint_free_token;
 mod open_session;
 mod reap_stale_spawns;
 mod record_launched_pane;
-mod spawn_adapter_session;
 mod spawn_fresh;
 mod workdir_for;
 mod worktree_launch_dir;
 
+pub(in crate::interactor) use adapter_launch::PreparedAdapterLaunch;
 pub(in crate::interactor) use record_launched_pane::LaunchApproval;
 pub(in crate::interactor) use spawn_fresh::FreshSpawn;
 

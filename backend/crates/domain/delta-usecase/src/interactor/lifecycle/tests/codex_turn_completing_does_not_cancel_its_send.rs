@@ -29,6 +29,7 @@ async fn codex_turn_completing_does_not_cancel_its_send() {
         )
         .await
         .unwrap();
+    ix.await_launch().await;
     let session_id = send.session_id.clone();
 
     // The Codex turn is in flight, tracked with no send id.

@@ -6,7 +6,9 @@ use delta_model::Send;
 use crate::agent::{AgentProvider, LaunchOptionSpec};
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::interactor::session_actor::runtime::{LaunchingSpawn, PlannedWorktree};
+use crate::interactor::session_actor::runtime::{
+    LaunchTarget, LaunchingSpawn, PaneLaunch, PlannedWorktree,
+};
 use crate::pane_token::PaneToken;
 use crate::ports::{pane_for, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::repository::{display_name, identity_key};
@@ -382,11 +384,13 @@ where
         // session as starting rather than as idle-and-closed.
         let launching = LaunchingSpawn {
             token: token.clone(),
-            pane,
             workdir,
             worktree: planned_worktree,
-            seed_trust,
-            command,
+            target: LaunchTarget::Pane(PaneLaunch {
+                pane,
+                seed_trust,
+                command,
+            }),
             accepted_at: Instant::now(),
         };
         self.state.start_launching(launching.clone());

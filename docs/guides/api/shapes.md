@@ -142,7 +142,10 @@ Any unmodelled block kind is preserved as `{ "type": "other" }`.
   reports. How a row walks that ladder depends on how the provider is driven
   (see [sends.md](sends.md) for the two dispatch paths): an adapter-backed
   session (Codex) goes `dispatched` → `matched` inside the enqueue call, so its
-  rows are effectively never observed in an open status.
+  rows are effectively never observed in an open status — except the first
+  prompt of a *new* session, which is written `queued` when the session is
+  accepted and stays open until the background launch has brought the
+  provider thread up and dispatched it.
 - `matched_uuid` carries the id the send was correlated with, once it was: the
   uuid of the transcript message it produced for a pane-backed session, the
   provider's own turn id for an adapter-backed one — so it is not always an id

@@ -297,6 +297,31 @@ pub(crate) async fn register_launch_option(
         .expect("the created launch option carries its id")
 }
 
+/// Pump the broadcast until the named session's launch has bound its agent.
+///
+/// A Codex session is *accepted* before it is live: `POST /api/sends` answers
+/// as soon as its rows exist, and the connect + `thread/start` run on a
+/// background task. `session_registered` is the moment that finished, so a test
+/// that drives the live session (an interrupt, a follow-up send) has to line up
+/// against it rather than against the `201`.
+pub(crate) async fn await_session_registered(
+    events: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+    session_id: &str,
+) {
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        let event = tokio::time::timeout_at(deadline, events.recv())
+            .await
+            .expect("timed out waiting for the Codex session to bind")
+            .expect("the broadcast channel stayed open");
+        if let SessionEvent::SessionRegistered { session_id: sid } = event {
+            if sid.as_str() == session_id {
+                return;
+            }
+        }
+    }
+}
+
 /// Pump the broadcast until the turn completes, so a test can line up against a
 /// finished turn without re-implementing the wait.
 pub(crate) async fn await_turn_completion(

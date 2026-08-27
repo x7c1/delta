@@ -62,6 +62,7 @@ async fn new_session_with_codex_launch_options_reaches_the_adapter() {
     )
     .await
     .expect("a Codex session with launch options starts");
+    ix.await_launch().await;
 
     let launches = {
         let log = factory.log();

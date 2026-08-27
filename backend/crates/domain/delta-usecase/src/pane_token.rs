@@ -24,6 +24,25 @@ impl PaneToken {
         &self.0
     }
 
+    /// The launch key of an **adapter-backed** (terminal-less) session, derived
+    /// from its session id: `adapter-<session-id>`.
+    ///
+    /// Such a session has no tmux pane at all, so this value is **never handed
+    /// to tmux** — no `new-session`, no `has-session`, no `kill-session` is ever
+    /// issued for it. It exists only because the accept→launch window is keyed
+    /// by [`PaneToken`] (`LaunchingSpawn`, `finish_launch`), and an
+    /// adapter-backed launch has to live in that same window so both providers
+    /// share one launch shell. Deriving it from the session id (rather than
+    /// minting one) keeps [`PaneTokenMinter`]'s counter — and the `delta-<n>`
+    /// namespace tmux really uses — untouched, and makes the key both unique
+    /// and reproducible without probing tmux for a free name.
+    ///
+    /// The `adapter-` prefix is what keeps it out of that namespace: a token
+    /// that reached tmux by mistake could never collide with a real pane.
+    pub(crate) fn for_adapter_launch(session_id: &delta_model::SessionId) -> Self {
+        Self(format!("adapter-{}", session_id.as_str()))
+    }
+
     /// Construct a token from a raw session name, for tests that seed the
     /// registry directly (the watchdog tests push a pending spawn whose token a
     /// production minter would otherwise own).
@@ -73,6 +92,20 @@ mod tests {
         assert_eq!(minter.mint().as_str(), "delta-1");
         assert_eq!(minter.mint().as_str(), "delta-2");
         assert_eq!(minter.mint().as_str(), "delta-3");
+    }
+
+    #[test]
+    fn adapter_launch_key_is_derived_from_the_session_id_and_never_minted() {
+        let minter = PaneTokenMinter::new();
+        let session_id = delta_model::SessionId::from("sess-1");
+        let key = PaneToken::for_adapter_launch(&session_id);
+        assert_eq!(key.as_str(), "adapter-sess-1");
+        // It is reproducible from the id alone…
+        assert_eq!(key, PaneToken::for_adapter_launch(&session_id));
+        // …and costs the tmux namespace nothing: the minter is untouched, and
+        // the key could not collide with a `delta-<n>` pane even if it leaked.
+        assert_eq!(minter.mint().as_str(), "delta-1");
+        assert!(!key.as_str().starts_with("delta-"));
     }
 
     #[test]

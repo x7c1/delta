@@ -7,6 +7,9 @@
 //! accept phase needs the launch directory up front (it is stored as the
 //! session's `cwd`) while the build itself, which can be a `git fetch` plus a
 //! full checkout of a large repository, runs afterwards on the launch task.
+//! That holds for every provider: a Codex session started from a PR is accepted
+//! and answered exactly as a Claude one is, and builds its worktree on the same
+//! background task.
 //! Planning is cheap: the new-branch start points are pure string work, and
 //! only `UseRemoteBranch` consults git at all (a `git worktree list`).
 
@@ -109,12 +112,11 @@ where
     }
 
     /// Build (or reuse) the git worktree for an opt-in worktree request and
-    /// return its path — the effective launch directory. Shared by the Claude
-    /// launch task ([`spawn_launch_preparation`]) and the adapter-backed
-    /// ([`spawn_adapter_session`](crate::interactor::session_actor::actor::SessionContext::spawn_adapter_session))
-    /// launch path, so a session started from a PR (which always arrives as a
-    /// [`WorktreeStartPoint::UseRemoteBranch`] request) lands in the same
-    /// worktree regardless of the chosen provider.
+    /// return its path — the effective launch directory. It runs once per
+    /// launch, on the shared launch task ([`spawn_launch_preparation`]), in
+    /// front of whichever provider tail follows — so a session started from a
+    /// PR (which always arrives as a [`WorktreeStartPoint::UseRemoteBranch`]
+    /// request) lands in the same worktree regardless of the chosen provider.
     ///
     /// `repo_root` is the repository containing the user-selected workdir — the
     /// caller has already run the [`GitWorktree::repo_root`] gate — and
@@ -129,12 +131,11 @@ where
     /// one exists, otherwise a new worktree checking it out is created.
     ///
     /// This is the expensive half — a `RemoteBranch` start point fetches, and
-    /// every created worktree is a full checkout. The two callers pay it at
-    /// different times: the Claude path runs it on the launch task, after the
-    /// accept phase's side-effect-free validation has passed and the response
-    /// has gone out, so a failure here is a `spawn_failed` event; the
-    /// adapter-backed path has not been split that way and still builds inside
-    /// the request, so the same failure is a synchronous `5xx` there.
+    /// every created worktree is a full checkout. It is paid on the launch
+    /// task, after the accept phase's side-effect-free validation has passed
+    /// and the response has gone out, so a failure here reaches the browser as
+    /// a `spawn_failed` event rather than as a response body — for every
+    /// provider alike.
     ///
     /// [`spawn_launch_preparation`]: super::launch_prep::spawn_launch_preparation
     pub(in crate::interactor) async fn resolve_worktree_launch_dir(

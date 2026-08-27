@@ -1079,7 +1079,10 @@ export function TranscriptPane({
               </div>
             )}
 
-            <PendingQueue entries={pendingEntries} />
+            <PendingQueue
+              entries={pendingEntries}
+              sessionSpawning={spawning}
+            />
           </div>
         )}
 

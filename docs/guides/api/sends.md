@@ -28,7 +28,11 @@ provider's adapter:
 - **Adapter-backed (Codex)** — no pane, no keystrokes: the text rides a
   turn-start request on the `codex app-server` connection and is matched to the
   turn id that request returns, so the row goes `dispatched` → `matched` within
-  the same call.
+  the same call. The one row that does sit `queued` first is a **new session's
+  first prompt**: it is written when the send is accepted, before the provider
+  thread exists, and only reaches that turn-start call once the background
+  launch has started the thread (see the `201` under
+  [`POST /api/sends`](#post-apisends)).
 
 Permission and question answers are not sends — they resolve a request the agent
 raised mid-turn. Permission requests form a FIFO **queue** per session (an
@@ -123,22 +127,26 @@ Response:
   (see the field note above), so it is `null` on both the response and the
   persisted row.
 
-  For the default `provider: "claude"` the `201` is returned
-  **before the launch preparation**: the session is *accepted*, not started.
-  Building the git worktree (a `git fetch` plus a full checkout, seconds to tens
-  of seconds on a large repository), seeding workspace trust and launching the
-  agent all run in the background afterwards, so the response time no longer
-  depends on the size of the repository. What stays synchronous is everything cheap and everything
-  whose failure is the caller's to fix — validating `workdir`, the worktree
-  gate, resolving `launch_option_ids`, and reading the repository's local git
-  config — which is why those are still the `400`s below. The session is listed
-  as `spawning` from this response until its first hook binds it, and sends to
-  it are refused with `session_spawning` for that whole window (see the `409`
-  below).
+  The `201` is returned **before the launch**, for every provider: the session
+  is *accepted*, not started. Building the git worktree (a `git fetch` plus a
+  full checkout, seconds to tens of seconds on a large repository) and then
+  standing the agent up — for `claude`, seeding workspace trust and launching
+  the tmux pane; for `codex`, connecting to the provider (`codex app-server`
+  plus its handshake) and starting its thread — all run in the background
+  afterwards, so the response time no longer depends on the size of the
+  repository or on how long the provider takes to come up. What stays
+  synchronous is everything cheap and everything whose failure is the caller's
+  to fix — validating `workdir`, the worktree gate, resolving
+  `launch_option_ids` (and, for an adapter-backed provider, having its adapter
+  vet them), and reading the repository's local git config — which is why those
+  are still the `400`s below. The session is listed as `spawning` from
+  this response until its launch binds it, and sends to it are refused with
+  `session_spawning` for that whole window (see the `409` below).
 
-  A failure of the background preparation — a start point that does not exist on
-  the remote, a `git worktree add` error, a tmux failure — therefore cannot be a
-  response at all. It arrives on the live channel as a
+  A failure of the background launch — a start point that does not exist on
+  the remote, a `git worktree add` error, a tmux failure, a provider that will
+  not connect or start a thread — therefore cannot be a response at all. It
+  arrives on the live channel as a
   [`spawn_failed`](live-channels.md#session-lifecycle) event carrying the error
   text as its `reason`, and the eagerly-created row (with this send, by cascade)
   is deleted, so the session stops being listed. The preparation is also given
@@ -161,10 +169,11 @@ Response:
   paths. Retrying the send re-decides against the worktree that now exists and
   starts there.
 
-  `provider: "codex"` does not take this split: an adapter-backed session is
-  created over the provider's connection inside the request, so its worktree
-  build and its launch are still synchronous and still fail the request itself
-  (a `5xx` carrying the git or adapter message, with no row left behind).
+  For `provider: "codex"` the first prompt sits in the session's send list as
+  `queued` until the provider thread exists, then dispatches: unlike a Claude
+  spawn — where the prompt rides on the launch command line, so launching *is*
+  delivering it — there is nothing to hand it to until `thread/start` has
+  answered.
 
 - **400** — the target is ambiguous or contradictory (a JSON body): neither
   `thread_id` nor `new_session` given, both given, or `new_session` combined with
@@ -177,6 +186,12 @@ Response:
   names the offending key or key paths). A malformed body or a missing required
   field such as `text` is rejected earlier as one of the framework-level
   `400`/`415`/`422` cases in [README.md](README.md).
+
+  The `launch_option_rejected` case is answered **before the session row is
+  written**, even though it is the provider's adapter — not Delta — that decides
+  it: rendering the selections is a pure function of the request, so the accept
+  phase asks the adapter about them without connecting. No session is created
+  and torn down again.
 - **404** — no thread (or branch parent thread) with the given `thread_id`.
 - **409** — the target's session is closed and cannot be resumed because its
   transcript is gone (body `code: "resume_unavailable"`). No send is enqueued and
@@ -184,10 +199,11 @@ Response:
 - **409** (body `code: "session_spawning"`) — the target's session is still
   starting: it is listed from the moment its first send was accepted, but its
   launch has not registered yet, so there is nothing to dispatch into. This
-  covers the whole starting window — the background launch preparation *and* the
-  wait for the launched agent's first hook. No send is enqueued and no second
-  agent is launched; the same request succeeds once the session's first hook
-  arrives (it is then `active`).
+  covers the whole starting window, for either provider — the background launch
+  and, for `claude`, the wait for the launched agent's first hook on top of it.
+  No send is enqueued and no second agent is launched; the same request succeeds
+  once the launch has bound the session (it is then `active`, announced as
+  `session_registered`).
 
 ### `GET /api/sessions/{id}/sends`
 

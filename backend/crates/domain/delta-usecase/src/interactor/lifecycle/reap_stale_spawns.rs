@@ -40,6 +40,15 @@ where
     /// own [`LAUNCH_PREP_DEADLINE`], after which the launch fails itself and
     /// reports the same `SpawnFailed` (with a `reason`).
     ///
+    /// An **adapter-backed** (Codex) session is only ever that third shape while
+    /// it is starting: its launch is accepted and deferred exactly like a
+    /// Claude one, but the bind is the launch's own last step rather than
+    /// something a hook has to deliver afterwards, so it never becomes a pending
+    /// spawn and `pending_spawn_deadline` never applies to it. The launch
+    /// preparation deadline — which covers the worktree build, the `connect` and
+    /// the `thread/start` together — is its only watchdog, and it needs no
+    /// other: an adapter launch that hangs hangs *inside* that window.
+    ///
     /// For each stale launch it kills the tmux pane (best-effort, guarded by
     /// `has_session`) and produces a [`SessionEvent::SpawnFailed`] so the browser
     /// can surface the failure and clear the optimistic pending chip. The same
@@ -80,7 +89,7 @@ where
             self.clean_up_failed_spawn_row(&session_id).await?;
             events.push(SessionEvent::SpawnFailed {
                 session_id,
-                pane_token: spawn.token.as_str().to_owned(),
+                pane_token: Some(spawn.token.as_str().to_owned()),
                 // The watchdog observes silence, not a cause: nothing said why
                 // the launch never bound.
                 reason: None,
@@ -102,7 +111,7 @@ where
             let _ = self.apply_turn_input(crate::turn::TurnInput::Close).await;
             events.push(SessionEvent::SpawnFailed {
                 session_id: self.id.clone(),
-                pane_token: resuming.token.as_str().to_owned(),
+                pane_token: Some(resuming.token.as_str().to_owned()),
                 reason: None,
             });
         }

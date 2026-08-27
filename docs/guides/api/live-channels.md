@@ -72,16 +72,21 @@ which frames arrive, and a client must handle each event whenever it lands.
 
 { "kind": "spawn_failed", "session_id": "sess-1", "pane_token": "delta-1",
   "reason": "git error: invalid reference: origin/nope" }
+
+{ "kind": "spawn_failed", "session_id": "sess-2",
+  "reason": "agent error: failed to spawn app-server: No such file or directory (os error 2)" }
 ```
 
-- `session_registered` — emitted when a freshly-spawned session's first hook
-  binds it: its row flips from `spawning` to `active`. The session was already
-  listed (and focusable) before this — it is listed from the moment its first
-  send was accepted, see [sessions.md](sessions.md) — so this is not the moment
-  it becomes visible, it is the moment it becomes *usable*: only now is a pane
-  mapped to it, so a send to it stops being refused with `session_spawning`.
-  It also doubles as the "opened" signal for such a session, which never emits a
-  separate `session_opened`.
+- `session_registered` — emitted when a freshly-spawned session's launch binds
+  it: its row flips from `spawning` to `active`. Both providers emit it, at
+  their own bind: a Claude session's first hook, a Codex session's
+  `thread/start` returning and the adapter being held as the session's agent.
+  The session was already listed (and focusable) before this — it is listed from
+  the moment its first send was accepted, see [sessions.md](sessions.md) — so
+  this is not the moment it becomes visible, it is the moment it becomes
+  *usable*: only now is an agent bound to it, so a send to it stops being
+  refused with `session_spawning`. It also doubles as the "opened" signal for
+  such a session, which never emits a separate `session_opened`.
 - `session_opened` — a known, previously-closed session became live again
   (resumed by id via `POST /api/sessions/{id}/open`). A brand-new session never
   emits this.
@@ -92,25 +97,30 @@ which frames arrive, and a client must handle each event whenever it lands.
   every pending request) and then reports the close, so a watching browser
   converges from events alone — see
   [sessions.md](sessions.md) for the recovery story.
-- `spawn_failed` — a freshly-spawned session never came up. Three producers emit
-  it: the background launch preparation when it fails (the worktree build,
-  including one that landed on a path other than the one planned at accept time;
-  the trust seed; the agent launch; or the whole sequence outrunning its
-  deadline — all of which run *after* the send was accepted, see
-  [sends.md](sends.md)), the `SessionEnd` hook when the launch
-  exited while still unbound, and the watchdog reaper when a launched spawn
-  outlived its bind deadline without ever registering. The contentless row is
-  deleted, so the session stops being listed; without the event a launch that
-  failed, crashed or hung on auth would leave the browser sitting on a session
-  that silently vanished. `session_id` is the Delta-minted id the browser
-  correlates with the session it focused on acceptance (and with its pending
-  chip); `pane_token` names the tmux session that was torn down.
-  `reason` carries the failure's message when Delta can name it — the launch
-  preparation's error text, which is the only place that text reaches the
-  user now that the send is accepted before the launch runs. The key is **absent
-  entirely** from the other two producers' frames: a launch that exited or never
-  bound says nothing about why. A client shows it as an extra line under its own
-  "failed to start" wording and renders that wording alone when it is missing.
+- `spawn_failed` — a freshly-spawned session never came up, for **any**
+  provider. Three producers emit it: the background launch when it fails (the
+  worktree build, including one that landed on a path other than the one planned
+  at accept time; for Claude the trust seed and the tmux launch; for an
+  adapter-backed provider the connect and the `thread/start`; or the whole
+  sequence outrunning its deadline — all of which run *after* the send was
+  accepted, see [sends.md](sends.md)), the
+  `SessionEnd` hook when a Claude launch exited while still unbound, and the
+  watchdog reaper when a launched Claude spawn outlived its bind deadline
+  without ever registering. The contentless row is deleted, so the session stops
+  being listed; without the event a launch that failed, crashed or hung on auth
+  would leave the browser sitting on a session that silently vanished.
+
+  `session_id` is the Delta-minted id the browser correlates with the session it
+  focused on acceptance (and with its pending chip); it is the only key a client
+  matches on. `pane_token` names the tmux session that was torn down, and is
+  **absent entirely** for an adapter-backed (Codex) launch, which never had a
+  pane. `reason` carries the failure's message when Delta can name it — the
+  launch's error text, which is the only place that text reaches the user now
+  that the send is accepted before the launch runs; it too is **absent
+  entirely** from the other two producers' frames, since a launch that exited or
+  never bound says nothing about why. A client shows it as an extra line under
+  its own "failed to start" wording and renders that wording alone when it is
+  missing.
 
 ### Sends and turns
 

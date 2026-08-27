@@ -3,7 +3,7 @@ import type { SessionId, ThreadId } from '@delta/model';
 import type { EventReducer } from './eventReducer';
 import type { NoticesSlice } from './noticesSlice';
 import { noticeOf, removeNotices, withNotice } from './noticesSlice';
-import type { SendsSlice } from './sendsSlice';
+import type { NewSessionLaunch, SendsSlice } from './sendsSlice';
 import { dropLocalSendsForSession } from './sendsSlice';
 
 /**
@@ -16,16 +16,15 @@ type SpawnsState = Pick<SpawnsSlice, 'spawns'> &
   Pick<SendsSlice, 'localSends'>;
 
 /** A new-session spawn tracked from the POST response (real ids). */
-export interface SpawnItem {
+export interface SpawnItem extends NewSessionLaunch {
   sessionId: SessionId;
   /** The spawned session's `main` thread (from the POST response). */
   threadId: ThreadId;
-  /** The first prompt, retained so a failed spawn can be retried. */
+  /**
+   * The first prompt, retained — with the launch configuration this extends —
+   * so a failed spawn can be retried as the identical launch.
+   */
   text: string;
-  /** The chosen working directory, retained for the same Retry. */
-  workdir: string | null;
-  /** The selected launch-option ids, retained for the same Retry. */
-  launchOptionIds: number[];
   /** spawning: launch in flight; failed: reaped (`spawn_failed` arrived). */
   status: 'spawning' | 'failed';
   /**

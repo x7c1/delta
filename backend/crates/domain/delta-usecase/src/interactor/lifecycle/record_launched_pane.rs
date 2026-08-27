@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::interactor::session_actor::runtime::PendingSpawn;
+use crate::interactor::session_actor::runtime::{LaunchTarget, PendingSpawn};
 use crate::pane_token::PaneToken;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
@@ -72,6 +72,22 @@ where
             );
             return LaunchApproval::Abandon;
         };
+        // Only a pane launch posts this checkpoint (an adapter launch checks in
+        // on `AdapterLaunchPrepared` instead), so a mismatch is a routing bug
+        // rather than a race: put the entry back untouched and abandon, so no
+        // pane is created and `LaunchFinished` still finds the entry to settle.
+        if !matches!(launching.target, LaunchTarget::Pane(_)) {
+            tracing::error!(
+                token = %token.as_str(),
+                session_id = %self.id,
+                "an adapter-backed launch reported a pane checkpoint; abandoning it"
+            );
+            self.state.start_launching(launching);
+            return LaunchApproval::Abandon;
+        }
+        let LaunchTarget::Pane(pane) = launching.target else {
+            unreachable!("the guard above rejected every non-pane target")
+        };
         tracing::info!(
             token = %token.as_str(),
             session_id = %self.id,
@@ -81,7 +97,7 @@ where
         );
         self.state.push_pending(PendingSpawn {
             token: launching.token,
-            pane: launching.pane,
+            pane: pane.pane,
             // Stamp just before the pane is created, not at acceptance: the
             // preparation that just finished may have taken far longer than the
             // bind deadline allows for, and the first hook can only fire from

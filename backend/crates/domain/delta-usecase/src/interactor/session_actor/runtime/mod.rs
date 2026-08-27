@@ -30,7 +30,7 @@ mod subagents;
 mod turn;
 
 mod launching_spawn;
-pub use launching_spawn::LaunchingSpawn;
+pub use launching_spawn::{AdapterLaunch, LaunchTarget, LaunchingSpawn, PaneLaunch};
 
 mod planned_worktree;
 pub use planned_worktree::PlannedWorktree;

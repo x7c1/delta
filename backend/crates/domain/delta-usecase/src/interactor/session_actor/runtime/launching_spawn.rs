@@ -4,6 +4,9 @@
 
 use std::time::Instant;
 
+use delta_model::{AgentProvider, ThreadId};
+
+use crate::agent::LaunchOptionSpec;
 use crate::pane_token::PaneToken;
 
 use super::{PlannedWorktree, SessionRuntime};
@@ -13,18 +16,27 @@ use super::{PlannedWorktree, SessionRuntime};
 /// `POST /api/sends { new_session: true }` answers as soon as the session is
 /// *accepted*: the row exists (listed as `spawning`), the first send is
 /// recorded, and the response carries real ids. Everything expensive — the
-/// worktree build, the trust seed, writing the settings file, and launching
-/// `claude` in a tmux pane — happens afterwards on a background task, which
-/// reports back through this actor's own mailbox. This entry is what the actor
-/// holds in between: no pane exists yet, so nothing can bind, but the session
-/// is emphatically not idle.
+/// worktree build, and then whatever standing the agent up costs for the chosen
+/// provider (Claude: the trust seed, the settings file and `tmux new-session`;
+/// an adapter-backed provider: `connect` plus `thread/start`) — happens
+/// afterwards on a background task, which reports back through this actor's own
+/// mailbox. This entry is what the actor holds in between: no agent exists yet,
+/// so nothing can bind, but the session is emphatically not idle.
 ///
-/// It lasts until the launch's last step: the task checks in with
-/// [`SessionInput::LaunchPrepared`] once everything but the pane is in place,
-/// and the handler swaps this entry for the [`PendingSpawn`] the launch's first
-/// hook binds — *before* the pane is created, so no hook can arrive ahead of
-/// that record. A preparation that fails before then never reaches the swap and
-/// is rolled back from here instead, on `LaunchFinished`.
+/// Both providers use this same window, so the accept→launch split is one
+/// mechanism rather than two: what differs is only the per-provider tail
+/// ([`LaunchTarget`]) and which checkpoint message the task posts back
+/// ([`SessionInput::LaunchPrepared`] for a pane,
+/// [`SessionInput::AdapterLaunchPrepared`] for an adapter).
+///
+/// For a **pane** launch the entry lasts until the launch's last step: the task
+/// checks in once everything but the pane is in place, and the handler swaps
+/// this entry for the [`PendingSpawn`] the launch's first hook binds — *before*
+/// the pane is created, so no hook can arrive ahead of that record. For an
+/// **adapter** launch there is no hook and no pending spawn: the checkpoint
+/// handler binds the live adapter directly, so the entry is taken and never
+/// replaced. A preparation that fails before its checkpoint never reaches
+/// either swap and is rolled back from here instead, on `LaunchFinished`.
 ///
 /// Its presence makes [`SessionRuntime::has_live_pane`] true (a cold start must
 /// not spawn a second session alongside it), keeps
@@ -37,28 +49,28 @@ use super::{PlannedWorktree, SessionRuntime};
 /// only starts when the pane is about to exist.
 ///
 /// [`SessionInput::LaunchPrepared`]: crate::interactor::session_actor::input::SessionInput::LaunchPrepared
+/// [`SessionInput::AdapterLaunchPrepared`]: crate::interactor::session_actor::input::SessionInput::AdapterLaunchPrepared
 /// [`PendingSpawn`]: super::PendingSpawn
 #[derive(Debug, Clone)]
 pub struct LaunchingSpawn {
-    /// The Delta-minted tmux session name the launch will create.
+    /// The launch's key: the Delta-minted tmux session name for a pane launch,
+    /// and the session-derived, never-tmux-bound stand-in
+    /// ([`PaneToken::for_adapter_launch`]) for an adapter launch. It is what
+    /// pairs the task's reports with the entry they settle.
     pub token: PaneToken,
-    /// The pane keystrokes will be sent to (`<token>:0.0`) once it exists.
-    pub pane: String,
     /// The directory the agent will be launched in, as planned by the accept
     /// phase — the worktree path for a worktree spawn, the user-selected
-    /// directory for a plain one, the per-token scratch dir otherwise. Also
-    /// what the eager session row already stored as its `cwd`, which is why it
-    /// is computed before the build rather than read back from it.
+    /// directory for a plain one, the per-token (Claude) or per-session
+    /// (adapter) scratch dir otherwise. Also what the eager session row already
+    /// stored as its `cwd`, which is why it is computed before the build rather
+    /// than read back from it.
     pub workdir: String,
     /// The worktree still to build, when one was requested. `None` for a plain
     /// spawn, which has no git work left to do.
     pub worktree: Option<PlannedWorktree>,
-    /// Whether Claude Code's workspace-trust dialog must be pre-accepted for
-    /// [`Self::workdir`] before launching there.
-    pub seed_trust: bool,
-    /// The full argv the launch runs (`claude --settings … --session-id …`,
-    /// the user's launch options, then any first prompt).
-    pub command: Vec<String>,
+    /// What the launch stands up once the worktree is in place — the one thing
+    /// that differs between a pane-backed and an adapter-backed launch.
+    pub target: LaunchTarget,
     /// When the send was accepted — the instant the REST response went out.
     ///
     /// Not a watchdog deadline (the launch task owns its own timeout): it is
@@ -66,6 +78,55 @@ pub struct LaunchingSpawn {
     /// preparation actually took, which is the number this whole split exists
     /// to keep out of the request.
     pub accepted_at: Instant,
+}
+
+/// The provider-specific tail of a launch: everything the background task still
+/// has to do once the (shared) worktree build is done — and the only thing in
+/// the launch machinery that branches on the provider.
+#[derive(Debug, Clone)]
+pub enum LaunchTarget {
+    /// Claude: a tmux pane running `claude`, bound by the first hook it fires.
+    Pane(PaneLaunch),
+    /// An adapter-backed provider (Codex): a `connect` + `thread/start` over
+    /// the provider's adapter, bound by the checkpoint the task posts back.
+    Adapter(AdapterLaunch),
+}
+
+/// The tail of a pane-backed (Claude) launch.
+#[derive(Debug, Clone)]
+pub struct PaneLaunch {
+    /// The pane keystrokes will be sent to (`<token>:0.0`) once it exists.
+    pub pane: String,
+    /// Whether Claude Code's workspace-trust dialog must be pre-accepted for
+    /// [`LaunchingSpawn::workdir`] before launching there.
+    pub seed_trust: bool,
+    /// The full argv the launch runs (`claude --settings … --session-id …`,
+    /// the user's launch options, then any first prompt).
+    pub command: Vec<String>,
+}
+
+/// The tail of an adapter-backed (Codex) launch.
+///
+/// It carries what the connect/`thread/start` needs (the provider and the
+/// user's launch options) plus what the checkpoint handler needs to finish the
+/// session off on the actor: the `main` thread the eager row created, and the
+/// first prompt's already-written `queued` send row.
+#[derive(Debug, Clone)]
+pub struct AdapterLaunch {
+    /// Which adapter-backed provider to resolve through the factory registry.
+    pub provider: AgentProvider,
+    /// The user-selected launch options, already resolved to neutral
+    /// `(name, value?)` pairs by the accept phase. Rendered for the provider by
+    /// the adapter, never here.
+    pub launch_options: Vec<LaunchOptionSpec>,
+    /// The eager row's `main` thread, which the content source is folded onto
+    /// and the first prompt's turn dispatches against.
+    pub main_thread_id: ThreadId,
+    /// The first prompt's `send` row, written `queued` by the accept phase.
+    /// `None` for a prompt-less spawn. Nothing has received it until the
+    /// adapter's `turn/start`, so it is promoted and dispatched by the
+    /// checkpoint handler.
+    pub first_send_id: Option<i64>,
 }
 
 impl SessionRuntime {

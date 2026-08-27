@@ -1,24 +1,38 @@
 //! The background half of a fresh spawn: everything between accepting a
-//! new-session send and having a live `claude` pane.
+//! new-session send and having a live agent.
 //!
 //! `POST /api/sends { new_session: true }` used to block for the whole launch.
 //! On a large repository that is seconds to tens of seconds of a disabled
 //! composer and a browser that cannot switch to the session it just created,
 //! because the worktree build (`git fetch` + `git worktree add`, a full
 //! checkout) sits inside the request. So the request now only *accepts* the
-//! session — see [`spawn_fresh`](super::spawn_fresh) — and this module performs
-//! the rest on a `tokio::spawn`ed task, reporting back through the session
-//! actor's own mailbox — [`SessionInput::LaunchPrepared`] just before the pane
-//! is created, then [`SessionInput::LaunchFinished`] with the outcome.
+//! session — see [`spawn_fresh`](super::spawn_fresh) and
+//! [`adapter_session`](super::adapter_session) —
+//! and this module performs the rest on a `tokio::spawn`ed task, reporting back
+//! through the session actor's own mailbox: a mid-launch checkpoint, then
+//! [`SessionInput::LaunchFinished`] with the outcome.
+//!
+//! This shell is **shared by both providers**, and is the reason the split is
+//! one mechanism rather than two: one deadline
+//! ([`LaunchConfig::launch_prep_deadline`]), one in-flight count, one
+//! `LaunchFinished` rollback. Only the tail differs
+//! ([`LaunchTarget`]) — Claude seeds trust, writes its settings file and
+//! creates a tmux pane (checkpointing on [`SessionInput::LaunchPrepared`] just
+//! before it), while an adapter-backed provider connects and starts a thread
+//! (checkpointing on [`SessionInput::AdapterLaunchPrepared`] with the live
+//! connection). The worktree build in front of both is shared outright.
 //!
 //! The task never touches runtime state: it holds a
 //! [`WeakUnboundedSender`](mpsc::WeakUnboundedSender) and an `Arc` of the core
 //! and nothing else, exactly like the Codex event pump
 //! ([`spawn_agent_event_pump`](crate::interactor::agent_event::spawn_agent_event_pump)).
-//! Every mutation stays on the actor, in mailbox order, in the
-//! `LaunchPrepared` handler
-//! ([`record_launched_pane`](super::record_launched_pane)) and the
-//! `LaunchFinished` one ([`finish_launch`](super::finish_launch)).
+//! Every mutation stays on the actor, in mailbox order, in the checkpoint
+//! handlers ([`record_launched_pane`](super::record_launched_pane),
+//! [`adapter_launch`](super::adapter_launch)) and the `LaunchFinished` one
+//! ([`finish_launch`](super::finish_launch)).
+//!
+//! [`LaunchConfig::launch_prep_deadline`]: crate::launch_config::LaunchConfig::launch_prep_deadline
+//! [`SessionInput::AdapterLaunchPrepared`]: crate::interactor::session_actor::input::SessionInput::AdapterLaunchPrepared
 
 use std::sync::Arc;
 
@@ -27,7 +41,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::input::SessionInput;
-use crate::interactor::session_actor::runtime::LaunchingSpawn;
+use crate::interactor::session_actor::runtime::{LaunchTarget, LaunchingSpawn, PaneLaunch};
 use crate::interactor::InteractorCore;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
@@ -92,38 +106,20 @@ where
     W: Workspace,
     G: GitWorktree,
 {
-    /// Prepare and launch an accepted session, in the order the synchronous
-    /// spawn used to run these steps in.
+    /// Prepare and launch an accepted session: the shared worktree build, then
+    /// the chosen provider's tail.
     ///
-    /// 1. Build (or reuse) the requested git worktree. It must land on the path
-    ///    the accept phase planned — that path is already stored as the
-    ///    session's `cwd` — so a mismatch fails the launch
-    ///    ([`Error::WorktreeLandedElsewhere`]) rather than starting the agent in
-    ///    a directory that was never created. See that variant for the one start
-    ///    point that can diverge and why no repair is available.
-    /// 2. Pre-accept Claude Code's workspace-trust dialog for the launch
-    ///    directory when it is a git working tree. Without it `claude` opens a
-    ///    blocking dialog at startup, no `UserPromptSubmit` ever fires, and the
-    ///    spawn is reaped at the bind deadline.
-    /// 3. Write Delta's session settings (hooks + theme) to the Delta-owned
-    ///    path the launch argv points `--settings` at.
-    /// 4. Check in with the session's actor ([`SessionInput::LaunchPrepared`]),
-    ///    which records the [`PendingSpawn`] the launch's first hook will bind,
-    ///    and await its reply. This step exists purely for its ordering: the
-    ///    hooks the next step triggers land on that same mailbox, so the spawn
-    ///    has to be recorded before the pane can exist — otherwise a fast agent
-    ///    submits its launch prompt against a session that has nothing pending,
-    ///    the hook is dismissed as external input, and the spawn recorded
-    ///    afterwards has no hook left to bind it. The reply can also say
-    ///    [`LaunchApproval::Abandon`] (the acceptance was rolled back while the
-    ///    preparation ran), which ends the launch here with no pane created.
-    /// 5. Launch the agent in its tmux pane.
+    /// The build comes first for both providers and must land on the path the
+    /// accept phase planned — that path is already stored as the session's
+    /// `cwd` — so a mismatch fails the launch
+    /// ([`Error::WorktreeLandedElsewhere`]) rather than starting the agent in a
+    /// directory that was never created. See that variant for the one start
+    /// point that can diverge and why no repair is available.
     ///
     /// Any failure aborts the rest: the caller rolls the eager row back, so a
     /// half-prepared launch leaves nothing behind but the (side-effect-free)
-    /// minted token and, for a failed step 5, a worktree that a retry reuses.
-    ///
-    /// [`PendingSpawn`]: crate::interactor::session_actor::runtime::PendingSpawn
+    /// launch key and, for a failure after the build, a worktree that a retry
+    /// reuses.
     async fn prepare_launch(
         &self,
         session_id: &SessionId,
@@ -147,7 +143,45 @@ where
                 });
             }
         }
-        if launching.seed_trust {
+        match &launching.target {
+            LaunchTarget::Pane(pane) => {
+                self.prepare_pane_launch(launching, pane, self_sender).await
+            }
+            LaunchTarget::Adapter(spec) => {
+                self.prepare_adapter_launch(session_id, launching, spec, self_sender)
+                    .await
+            }
+        }
+    }
+
+    /// The Claude tail of a launch, once the worktree is in place.
+    ///
+    /// 1. Pre-accept Claude Code's workspace-trust dialog for the launch
+    ///    directory when it is a git working tree. Without it `claude` opens a
+    ///    blocking dialog at startup, no `UserPromptSubmit` ever fires, and the
+    ///    spawn is reaped at the bind deadline.
+    /// 2. Write Delta's session settings (hooks + theme) to the Delta-owned
+    ///    path the launch argv points `--settings` at.
+    /// 3. Check in with the session's actor ([`SessionInput::LaunchPrepared`]),
+    ///    which records the [`PendingSpawn`] the launch's first hook will bind,
+    ///    and await its reply. This step exists purely for its ordering: the
+    ///    hooks the next step triggers land on that same mailbox, so the spawn
+    ///    has to be recorded before the pane can exist — otherwise a fast agent
+    ///    submits its launch prompt against a session that has nothing pending,
+    ///    the hook is dismissed as external input, and the spawn recorded
+    ///    afterwards has no hook left to bind it. The reply can also say
+    ///    [`LaunchApproval::Abandon`] (the acceptance was rolled back while the
+    ///    preparation ran), which ends the launch here with no pane created.
+    /// 4. Launch the agent in its tmux pane.
+    ///
+    /// [`PendingSpawn`]: crate::interactor::session_actor::runtime::PendingSpawn
+    async fn prepare_pane_launch(
+        &self,
+        launching: &LaunchingSpawn,
+        pane: &PaneLaunch,
+        self_sender: &mpsc::WeakUnboundedSender<SessionInput>,
+    ) -> Result<()> {
+        if pane.seed_trust {
             self.git_worktree
                 .ensure_dir_trusted(&launching.workdir)
                 .await?;
@@ -159,11 +193,7 @@ where
             return Ok(());
         }
         self.tmux
-            .create_session(
-                launching.token.as_str(),
-                &launching.workdir,
-                &launching.command,
-            )
+            .create_session(launching.token.as_str(), &launching.workdir, &pane.command)
             .await
     }
 }

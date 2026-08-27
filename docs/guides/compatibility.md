@@ -156,6 +156,17 @@ And, as direct consequences:
 - Release notes do **not** carry a "Breaking changes" category for wire
   shape changes.
 
+A worked example of what that permission buys, so the policy is not abstract:
+`spawn_failed.pane_token` was a required `string` and is now **optional**, and
+the frames that omit it are not an error case but the ordinary shape of a
+failure on a terminal-less provider — an adapter-backed (Codex) session never
+had a tmux pane to name. Under `v1.0` rules that would be a breaking narrowing
+needing a version negotiation and a deprecation window; under `v0.x` it is one
+edit to `delta-wire`, `make gen`, and the regenerated `@delta/wire-gen` types
+committed alongside. What made it safe is not the change's size but the
+lockstep below — and that the browser keys the event on `session_id`, so no
+consumer depended on the field being present.
+
 ### Why this is safe
 
 The wire contract is an **internal implementation extension**, not an

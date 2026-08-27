@@ -60,18 +60,20 @@ Response:
   no messages yet. `next_cursor` is an opaque token to fetch the following page,
   or `null` on the last page.
 
-  A session is listed from the moment its first send is accepted: the
-  `POST /api/sends` that spawns it writes the row before the launch, and that row
-  carries `status: "spawning"` until the session's first hook registers it — the
-  same row then reads `status: "active"` (announced as `session_registered`). A
-  spawning session is addressable like any other (its threads and open sends are
-  queryable, so the browser can focus it and show its first prompt right away),
-  but it is not open — no pane is bound to it yet, so it reports `open: false`
-  and nothing can be dispatched into it: a send to it is refused with
-  `409 session_spawning` (see [sends.md](sends.md)). A launch that fails to
-  prepare, and a spawn that came up but never bound (reaped at its bind
-  deadline), both have their row deleted, so the session disappears from this
-  list again and the client hears `spawn_failed`.
+  A session is listed from the moment its first send is accepted, whatever its
+  provider: the `POST /api/sends` that spawns it writes the row before the
+  launch, and that row carries `status: "spawning"` until the launch binds it —
+  the first hook for a Claude session, the adapter's `thread/start` for a Codex
+  one. The same row then reads `status: "active"` (announced as
+  `session_registered` either way). A spawning session is addressable like any
+  other (its threads and open sends are queryable, so the browser can focus it
+  and show its first prompt right away), but it is not open — nothing is bound
+  to it yet, so it reports `open: false` and nothing can be dispatched into it:
+  a send to it is refused with `409 session_spawning` (see
+  [sends.md](sends.md)). A launch that fails, and a Claude spawn that came up
+  but never bound (reaped at its bind deadline), both have their row deleted, so
+  the session disappears from this list again and the client hears
+  `spawn_failed`.
 
 - **400** — a malformed `cursor`.
 

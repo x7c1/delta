@@ -61,6 +61,7 @@ async fn codex_worktree_session_grants_its_repo_root_to_the_adapter() {
         )
         .await
         .expect("a Codex session starts in the reused worktree");
+    ix.await_launch().await;
     let session_id = send.session_id.clone();
 
     {
@@ -147,6 +148,7 @@ async fn a_plain_codex_session_names_no_repository() {
     )
     .await
     .expect("a Codex session starts in the plain workdir");
+    ix.await_launch().await;
 
     let log = factory.log();
     let log = log.lock().unwrap();

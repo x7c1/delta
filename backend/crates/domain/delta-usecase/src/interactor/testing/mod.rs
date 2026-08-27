@@ -22,12 +22,13 @@ pub(crate) use factory::{
     interactor, interactor_with_codex_factory, interactor_with_codex_factory_and_event_sink,
     interactor_with_event_sink, interactor_with_failing_create_session_and_event_sink,
     interactor_with_failing_tmux, interactor_with_gh_and_event_sink, interactor_with_git,
-    interactor_with_git_and_codex_factory, interactor_with_git_and_event_sink,
-    interactor_with_git_and_gh, interactor_with_git_and_worktree_base, interactor_with_tmux,
-    TestInteractor, SEED_TRANSCRIPT_PATH, TEST_SETTINGS_JSON, TEST_SETTINGS_PATH,
-    TEST_WORKDIR_BASE, TEST_WORKTREE_BASE,
+    interactor_with_git_and_codex_factory, interactor_with_git_and_codex_factory_and_event_sink,
+    interactor_with_git_and_event_sink, interactor_with_git_and_gh,
+    interactor_with_git_and_worktree_base, interactor_with_tmux, TestInteractor,
+    SEED_TRANSCRIPT_PATH, TEST_SETTINGS_JSON, TEST_SETTINGS_PATH, TEST_WORKDIR_BASE,
+    TEST_WORKTREE_BASE,
 };
-pub(crate) use fake_agent::{FakeAgentFactory, FAKE_AGENT_CAPABILITIES};
+pub(crate) use fake_agent::{ConnectGate, FakeAgentFactory, FAKE_AGENT_CAPABILITIES};
 pub(crate) use fake_binary_detector::FakeBinaryDetector;
 pub(crate) use fake_external_opener::FakeExternalOpener;
 pub(crate) use fake_gh_cli::{FakeGhCli, CLONE_MARKER};

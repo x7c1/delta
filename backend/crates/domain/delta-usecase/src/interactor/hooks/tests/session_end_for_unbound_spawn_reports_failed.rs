@@ -25,7 +25,7 @@ async fn session_end_for_unbound_spawn_reports_failed() {
         events,
         vec![SessionEvent::SpawnFailed {
             session_id: id.clone(),
-            pane_token: "delta-1".to_owned(),
+            pane_token: Some("delta-1".to_owned()),
             // The hook reports only that the launch ended, never why.
             reason: None,
         }],

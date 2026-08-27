@@ -34,6 +34,12 @@
 //! - `model` (default `"fake-codex-model"`): the model reported as the
 //!   `thread/start` / `thread/resume` response's top-level `model` — the model
 //!   the server *resolved* for the thread, whatever the client asked for.
+//! - `thread_start_delay_ms` (default `0`): how long the fake stalls before
+//!   answering `thread/start`, standing in for a slow cold start of the real
+//!   `codex app-server`. It widens the window between "the send was accepted"
+//!   and "the session is live" enough for a test to observe the starting
+//!   session, exactly as `fake-claude`'s `session_start.delay_ms` does on the
+//!   pane path.
 //! - `turn` (optional): what a `turn/start` request plays. When absent, a
 //!   `turn/start` still gets a response but emits nothing.
 //!
@@ -196,6 +202,16 @@ pub struct Scenario {
     /// The id returned from `thread/start` and stamped into notifications.
     #[serde(default = "default_thread_id")]
     pub thread_id: String,
+    /// How long to stall before answering `thread/start`, in milliseconds.
+    ///
+    /// A real `codex app-server` takes a moment to come up and start a thread,
+    /// and a session is only live once it has. Delta accepts the new-session
+    /// send before any of that runs, so the honest way to test what the browser
+    /// shows in between is to make that window wide enough to look at. `0` (the
+    /// default) keeps every other scenario prompt, which matters: the shared
+    /// Codex specs wait for output at the default timeout.
+    #[serde(default)]
+    pub thread_start_delay_ms: u64,
     /// The model reported as the top-level `model` of the `thread/start` /
     /// `thread/resume` response — what the server *resolved* for the thread,
     /// which a real `codex app-server` decides from the request, the user's
@@ -267,6 +283,7 @@ impl Scenario {
         Self {
             server_info: default_server_info(),
             thread_id: DEFAULT_THREAD_ID.to_owned(),
+            thread_start_delay_ms: 0,
             model: DEFAULT_MODEL.to_owned(),
             turn: Some(Turn {
                 turn_id: default_turn_id(),

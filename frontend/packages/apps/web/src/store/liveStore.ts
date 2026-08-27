@@ -50,7 +50,11 @@ import { createEventsSlice } from './live/eventReducers';
  */
 
 export type { LiveState } from './live/liveState';
-export type { SendingItem, LocalSend } from './live/sendsSlice';
+export type {
+  SendingItem,
+  LocalSend,
+  NewSessionLaunch,
+} from './live/sendsSlice';
 export type { SpawnItem } from './live/spawnsSlice';
 export type { StreamingMessage } from './live/streamingSlice';
 export type { SubagentActivity } from './live/subagentsSlice';
