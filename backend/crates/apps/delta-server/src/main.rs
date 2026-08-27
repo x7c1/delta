@@ -129,6 +129,11 @@ fn env_port() -> u16 {
 ///   both the unbound-fresh-spawn deadline and the resume-readiness deadline,
 ///   which share the same production value — so a "launch never came up" path
 ///   can be exercised quickly under test.
+/// - `DELTA_LAUNCH_PREP_DEADLINE_MS` shrinks (or stretches) how long an
+///   accepted session's background launch preparation (worktree build, trust
+///   seed, settings write, agent launch) may run before it is abandoned, so
+///   the "preparation never finished" path can be exercised in milliseconds
+///   instead of the production ten minutes.
 /// - `DELTA_PERMISSION_DECISION_TIMEOUT_MS` shrinks (or stretches) how long
 ///   the `PermissionRequest` hook response waits for a browser decision
 ///   before falling back to the TUI prompt, so the passthrough path can be
@@ -151,6 +156,13 @@ fn launch_from_env() -> delta_usecase::LaunchConfig {
     {
         launch.pending_spawn_deadline = deadline;
         launch.resume_ready_deadline = deadline;
+    }
+    if let Some(deadline) = std::env::var("DELTA_LAUNCH_PREP_DEADLINE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+    {
+        launch.launch_prep_deadline = deadline;
     }
     if let Some(deadline) = std::env::var("DELTA_PERMISSION_DECISION_TIMEOUT_MS")
         .ok()

@@ -44,18 +44,19 @@ where
     ///   is not reachable, so it is warned about and ignored.
     ///
     /// **Rollback** — a remote branch that does not exist, a `git worktree add`
-    /// error, a tmux failure, or the whole sequence outrunning
-    /// [`LAUNCH_PREP_DEADLINE`] — undoes the acceptance exactly as the
-    /// synchronous launch failure used to: kill any pane that did come up
-    /// (best-effort), drop the turn, delete the eager session row (its main
-    /// thread and first send go by cascade). The REST caller is long gone, so
-    /// the failure is reported on the async event seam instead, as a
-    /// [`SessionEvent::SpawnFailed`] carrying the error text — that `reason` is
-    /// the only place the git or tmux message can still be shown, since it is no
-    /// longer a `4xx`/`5xx` body.
+    /// error, a worktree that landed on a path other than the one the accept
+    /// phase planned ([`Error::WorktreeLandedElsewhere`]), a tmux failure, or
+    /// the whole sequence outrunning [`LaunchConfig::launch_prep_deadline`] —
+    /// undoes the acceptance exactly as the synchronous launch failure used to:
+    /// kill any pane that did come up (best-effort), drop the turn, delete the
+    /// eager session row (its main thread and first send go by cascade). The
+    /// REST caller is long gone, so the failure is reported on the async event
+    /// seam instead, as a [`SessionEvent::SpawnFailed`] carrying the error text
+    /// — that `reason` is the only place any of those messages can still be
+    /// shown, since it is no longer a `4xx`/`5xx` body.
     ///
     /// [`spawn_launch_preparation`]: super::launch_prep::spawn_launch_preparation
-    /// [`LAUNCH_PREP_DEADLINE`]: super::launch_prep::LAUNCH_PREP_DEADLINE
+    /// [`LaunchConfig::launch_prep_deadline`]: crate::launch_config::LaunchConfig::launch_prep_deadline
     pub(in crate::interactor) async fn finish_launch(
         &mut self,
         token: &PaneToken,

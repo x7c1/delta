@@ -52,7 +52,7 @@ where
     /// under test. The usecase returns the events to broadcast — the server owns
     /// the periodic tick that fans this out and broadcasts the result.
     ///
-    /// [`LAUNCH_PREP_DEADLINE`]: super::launch_prep::LAUNCH_PREP_DEADLINE
+    /// [`LAUNCH_PREP_DEADLINE`]: crate::launch_config::LAUNCH_PREP_DEADLINE
     pub(in crate::interactor) async fn reap_stale_launch(
         &mut self,
         now: Instant,

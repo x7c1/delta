@@ -199,6 +199,37 @@ pub enum Error {
     #[error("launch preparation timed out: {0}")]
     LaunchPreparationTimedOut(String),
 
+    /// A freshly-accepted session's worktree build landed on a different path
+    /// than the accept phase planned, so the session row's `cwd` names a
+    /// directory that does not exist.
+    ///
+    /// Only reachable for a `use_remote_branch` start point, whose plan is
+    /// "reuse the worktree already holding the branch, else create one": a
+    /// second session started from the same branch while the first is still
+    /// checking out plans the default path, then finds the first session's
+    /// worktree at build time. Git forbids one branch in two worktrees, so
+    /// there is nothing to build at the planned path and nothing to re-point
+    /// the (already persisted) `cwd` at — the launch fails instead of starting
+    /// the agent in a directory that is not there. A retry re-plans and, the
+    /// worktree now existing, reuses it.
+    ///
+    /// Never returned to a REST caller: like
+    /// [`Self::LaunchPreparationTimedOut`] it happens long after the send was
+    /// accepted, so it reaches the browser as the `reason` of a
+    /// [`SessionEvent::SpawnFailed`](crate::ports::SessionEvent::SpawnFailed).
+    #[error(
+        "the worktree for branch {branch} landed on {built}, not on the planned {planned}; \
+         retry the session to start it in {built}"
+    )]
+    WorktreeLandedElsewhere {
+        /// The branch the worktree checks out.
+        branch: String,
+        /// The launch directory the accept phase planned (and stored as `cwd`).
+        planned: String,
+        /// Where the worktree holding `branch` actually is.
+        built: String,
+    },
+
     /// A `gh` CLI invocation failed despite the gateway reporting gh as
     /// authenticated. Surfaced as `500`. Missing/unauthenticated gh is
     /// NOT routed here — it is reported via the use case's

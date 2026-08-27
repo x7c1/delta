@@ -21,7 +21,6 @@
 //! `LaunchFinished` one ([`finish_launch`](super::finish_launch)).
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use delta_model::SessionId;
 use tokio::sync::{mpsc, oneshot};
@@ -33,18 +32,6 @@ use crate::interactor::InteractorCore;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
 use super::LaunchApproval;
-
-/// How long the whole launch preparation may take before it is abandoned.
-///
-/// The sequence is unbounded from Delta's side: `git fetch origin <branch>` can
-/// hang on an unreachable remote or a credential prompt with no timeout of its
-/// own, and a session stuck there would sit `spawning` forever — nothing else
-/// watches it, because the bind watchdog only starts once a pane exists. This
-/// is that backstop. It is set far above any honest preparation (a cold clone
-/// of a large repository is minutes at worst) precisely so it never truncates a
-/// slow-but-healthy checkout: reaching it means the launch is stuck, and the
-/// session is failed with a reason the browser can show.
-pub(in crate::interactor) const LAUNCH_PREP_DEADLINE: Duration = Duration::from_secs(600);
 
 /// Run an accepted session's launch preparation on a background task and post
 /// its outcome back to the session's actor.
@@ -75,17 +62,17 @@ pub(in crate::interactor) fn spawn_launch_preparation<T, X, S, W, G>(
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     tokio::spawn(async move {
         let token = launching.token.clone();
+        let deadline = core.launch.launch_prep_deadline;
         let outcome = match tokio::time::timeout(
-            LAUNCH_PREP_DEADLINE,
+            deadline,
             core.prepare_launch(&session_id, &launching, &self_sender),
         )
         .await
         {
             Ok(outcome) => outcome,
             Err(_) => Err(Error::LaunchPreparationTimedOut(format!(
-                "the launch preparation for {} did not finish within {}s",
+                "the launch preparation for {} did not finish within {deadline:?}",
                 launching.workdir,
-                LAUNCH_PREP_DEADLINE.as_secs()
             ))),
         };
         if let Some(sender) = self_sender.upgrade() {
@@ -110,8 +97,10 @@ where
     ///
     /// 1. Build (or reuse) the requested git worktree. It must land on the path
     ///    the accept phase planned — that path is already stored as the
-    ///    session's `cwd` — so a mismatch is logged loudly rather than silently
-    ///    launching somewhere else.
+    ///    session's `cwd` — so a mismatch fails the launch
+    ///    ([`Error::WorktreeLandedElsewhere`]) rather than starting the agent in
+    ///    a directory that was never created. See that variant for the one start
+    ///    point that can diverge and why no repair is available.
     /// 2. Pre-accept Claude Code's workspace-trust dialog for the launch
     ///    directory when it is a git working tree. Without it `claude` opens a
     ///    blocking dialog at startup, no `UserPromptSubmit` ever fires, and the
@@ -151,13 +140,11 @@ where
                 )
                 .await?;
             if built != launching.workdir {
-                tracing::warn!(
-                    session_id = %session_id,
-                    planned = %launching.workdir,
-                    built = %built,
-                    "the built worktree path differs from the one planned at accept time; \
-                     launching in the planned path, which the session row already records"
-                );
+                return Err(Error::WorktreeLandedElsewhere {
+                    branch: worktree.branch.clone(),
+                    planned: launching.workdir.clone(),
+                    built,
+                });
             }
         }
         if launching.seed_trust {

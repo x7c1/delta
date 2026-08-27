@@ -72,8 +72,10 @@ where
     /// instead of waiting on a spinner for the checkout.
     ///
     /// A launch failure therefore can no longer be a synchronous error. It
-    /// arrives as a [`SessionEvent::SpawnFailed`] carrying the git or tmux
-    /// message as its `reason`, and the eager row is deleted — see
+    /// arrives as a [`SessionEvent::SpawnFailed`] carrying the preparation's
+    /// failure message as its `reason` — a git or tmux error, a worktree that
+    /// landed off the path this phase planned, or the whole sequence outrunning
+    /// its deadline — and the eager row is deleted; see
     /// [`Self::finish_launch`].
     ///
     /// # Ordering
@@ -285,11 +287,12 @@ where
                     .await?;
                 (
                     planned.path,
-                    Some(planned.branch),
+                    Some(planned.branch.clone()),
                     Some(PlannedWorktree {
                         repo_root,
                         repository_display_name: repository_display_name.clone(),
                         spec: spec.clone(),
+                        branch: planned.branch,
                     }),
                 )
             }
