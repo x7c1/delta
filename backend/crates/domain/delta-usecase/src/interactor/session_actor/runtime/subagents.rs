@@ -112,7 +112,15 @@ impl SessionRuntime {
     /// the foreground entries (see [`Self::apply_turn`]), so in practice this
     /// returns the surviving BACKGROUND entries. Draining the whole set anyway
     /// is deliberately kind-agnostic so nothing lingering can be missed.
+    ///
+    /// The buffered `PostToolUse` agent ids go with the running set. Nothing
+    /// left in the buffer is still reachable: the background tail may fold a
+    /// straggler launch line after the sweep, but with the process gone no
+    /// `<task-notification>` follows it, and a nested `Agent` launch's id never
+    /// had a fold coming at all (see the `pending_post_tool_use_agent_ids`
+    /// field docs, which spell out the per-call-site detail).
     pub fn drain_running_subagents(&mut self) -> Vec<RunningSubagent> {
+        self.pending_post_tool_use_agent_ids.clear();
         std::mem::take(&mut self.running_subagents)
     }
 
@@ -285,6 +293,23 @@ mod tests {
         assert!(
             runtime.live_state().running_subagents.is_empty(),
             "drain leaves the running set empty"
+        );
+    }
+
+    #[test]
+    fn drain_running_subagents_also_clears_the_pending_post_tool_use_agent_ids() {
+        let mut runtime = SessionRuntime::default();
+        // A nested `Agent` launch's id: recorded by the hook, but its
+        // `tool_use_id` never appears in the parent's JSONL, so no
+        // `SubagentIndicatorStarted` will ever drain it.
+        runtime.record_pending_post_tool_use_agent_id("toolu_nested", "agent_1");
+
+        runtime.drain_running_subagents();
+
+        assert_eq!(
+            runtime.drain_pending_post_tool_use_agent_id("toolu_nested"),
+            None,
+            "the process-gone sweep drops the buffered agent ids with the running set"
         );
     }
 
