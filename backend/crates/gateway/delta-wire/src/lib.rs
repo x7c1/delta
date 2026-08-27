@@ -39,7 +39,9 @@ pub mod rest;
 mod session;
 pub use session::{WireSession, WireSessionStatus};
 mod session_event;
-pub use session_event::{event_kinds, WireRateLimitWindow, WireSessionEvent, WireStatusSnapshot};
+pub use session_event::{
+    event_kinds, WireRateLimitWindow, WireSessionEvent, WireStatusSnapshot, WireUnsentSend,
+};
 mod thread;
 pub use thread::WireThread;
 

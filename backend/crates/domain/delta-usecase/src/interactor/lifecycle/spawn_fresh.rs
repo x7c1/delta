@@ -86,8 +86,10 @@ where
     /// and the task's `LaunchPrepared`/`LaunchFinished` — like the launch's own
     /// hooks — land on this same mailbox strictly after this message. So a send
     /// arriving anywhere in the accept→launch window finds
-    /// [`SessionRuntime::is_launching_or_pending`] true and is refused with
-    /// `session_spawning` exactly as one arriving against a pending spawn is.
+    /// [`SessionRuntime::is_launching_or_pending`] true and is handled exactly
+    /// as one arriving against a pending spawn is: a plain send is accepted as
+    /// a `queued` row and dispatched once the launch binds, and only a branch
+    /// send is refused with `session_spawning`.
     ///
     /// The record the first `UserPromptSubmit` binds is the [`PendingSpawn`],
     /// installed by the launch task's `LaunchPrepared` checkpoint — which it

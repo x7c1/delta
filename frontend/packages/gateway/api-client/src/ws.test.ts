@@ -86,6 +86,7 @@ describe('parseSessionEvent', () => {
         kind: 'spawn_failed',
         session_id: 'sess-1',
         pane_token: 'delta-1',
+        unsent: [{ send_id: 3, text: 'never went out' }],
       }),
     );
 
@@ -93,6 +94,7 @@ describe('parseSessionEvent', () => {
       kind: 'spawn_failed',
       session_id: 'sess-1',
       pane_token: 'delta-1',
+      unsent: [{ send_id: 3, text: 'never went out' }],
     });
   });
 

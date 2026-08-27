@@ -42,9 +42,10 @@ use super::{PlannedWorktree, SessionRuntime};
 /// not spawn a second session alongside it), keeps
 /// [`SessionRuntime::is_empty`] false (the actor must stay alive to receive
 /// the launch's outcome), and makes
-/// [`SessionRuntime::is_launching_or_pending`] true (a send arriving now is
-/// refused with `session_spawning`, exactly as one arriving against a
-/// [`PendingSpawn`] is). The watchdog drains deliberately do NOT see it: a
+/// [`SessionRuntime::is_launching_or_pending`] true (a plain send arriving now
+/// is queued until the launch binds and a branch send is refused with
+/// `session_spawning`, exactly as one arriving against a [`PendingSpawn`] is).
+/// The watchdog drains deliberately do NOT see it: a
 /// launch preparation has its own deadline on the task, and the bind deadline
 /// only starts when the pane is about to exist.
 ///

@@ -91,8 +91,9 @@ status codes and error bodies — is documented here only.
   - `409 Conflict` — the request cannot take effect against current state. The
     body's `code` says which case it is: `resume_unavailable` (the session's
     local transcript file is gone, so `claude --resume <id>` has nothing to
-    replay), `session_spawning` (the target session was accepted but its
-    launch has not registered yet, so there is nothing to dispatch into),
+    replay), `session_spawning` (a *branch* send whose target session was
+    accepted but has not bound yet, so it has ingested no message to branch
+    from — a plain send there is accepted as a `queued` row instead),
     `permission_not_pending`, `question_not_pending`,
     `send_not_cancellable`, `send_not_releasable`, `clone_root_duplicate`,
     `clone_dest_exists` (the one path a clone could land on is already taken —

@@ -985,9 +985,10 @@ export function TranscriptPane({
     );
   } else if (composerMode) {
     // A starting session is not open, so it arrives here `readOnly` — but it was
-    // never closed, and no send will resume it (the server refuses one until its
-    // launch registers). The composer's own "starting" placeholder is what says
-    // so; the closed notice would be a second, wrong explanation.
+    // never closed, and nothing resumes it: a send composed now is accepted and
+    // parked as a `queued` row until its launch registers. The composer's own
+    // "starting" placeholder is what says so; the closed notice would be a
+    // second, wrong explanation.
     const showClosedNotice = readOnly && !newSession && !spawning;
     // Whether the upper (notices) card has anything to show. Each of these
     // conditions matches exactly one child it gates — `showClosedNotice` the

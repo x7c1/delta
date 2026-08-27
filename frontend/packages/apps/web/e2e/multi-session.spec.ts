@@ -216,12 +216,13 @@ test('starting a new session focuses it before any hook registers it', async ({
   await expect(starting).toHaveCount(1);
 
   // Its first prompt rides along in the pending strip, exactly once, and the
-  // composer says the session is not ready for another one yet.
+  // composer says what a message sent now would do — wait for the session,
+  // rather than go out immediately.
   const pending = page.getByTestId('pending-item');
   await expect(pending).toHaveCount(1);
   await expect(pending).toContainText('hello new session');
   await expect(page.getByRole('textbox')).toHaveAttribute(
     'placeholder',
-    'This session is starting…',
+    'Message sends when the session is ready…',
   );
 });

@@ -9,9 +9,13 @@ import { emitEvent, useManualEventControl } from './support/app';
  * and the workspace switches to the starting session right away. The backend's
  * watchdog then reaps the spawn that never bound and emits `spawn_failed`
  * carrying that same id — deleting the row the user is looking at. The failure
- * therefore has to do two things: take the user back to the new-session screen,
- * and stop the chip looking stuck — it becomes a distinct error row offering
- * Retry and Dismiss. Dismiss clears it.
+ * therefore has to do three things: take the user back to the new-session
+ * screen, stop the chip looking stuck — it becomes a distinct error row
+ * offering Retry and Dismiss — and hand back the messages the launch never
+ * delivered. Those `send` rows are deleted with the session, so the event
+ * carries their text and the browser restores everything the Retry chip does
+ * not already hold into the new-session composer. Dismiss clears the row and
+ * leaves the restored draft alone.
  */
 test('a failed spawn returns to the new-session screen with a Retry / Dismiss row', async ({
   page,
@@ -43,11 +47,18 @@ test('a failed spawn returns to the new-session screen with a Retry / Dismiss ro
   // after the send is accepted, so the git error that killed it has no response
   // body to travel in: the event's `reason` is the only account of it the user
   // gets, and it has to reach the card.
+  // `unsent` carries what the session had accepted and never delivered: its
+  // first prompt (send id 1, which the Retry chip already holds) and the
+  // message typed after it while the launch was still coming up.
   await emitEvent(page, {
     kind: 'spawn_failed',
     session_id: mockSpawnSessionId(1),
     pane_token: 'pane-never-bound',
     reason: 'git error: invalid reference: origin/nope',
+    unsent: [
+      { send_id: 1, text: 'start something that never boots' },
+      { send_id: 2, text: 'typed while it was starting' },
+    ],
   });
 
   // The focused session no longer exists, so focus goes back to the
@@ -61,7 +72,22 @@ test('a failed spawn returns to the new-session screen with a Retry / Dismiss ro
   const dismiss = page.getByRole('button', { name: 'Dismiss' });
   await expect(dismiss).toBeVisible();
 
-  // Dismiss clears the failed chip.
+  // The second message is back in the composer, ready to send again — and the
+  // first prompt is NOT duplicated there, because Retry is what re-sends that
+  // one. Nothing was re-sent on the user's behalf.
+  await expect(page.getByRole('textbox')).toHaveValue(
+    'typed while it was starting',
+  );
+  // The card accounts for it, since the composer it went to is a different
+  // surface and Retry does not take it along.
+  await expect(page.getByTestId('pending-fail-note')).toHaveText(
+    '1 later message was returned to the composer. Retry re-sends only this one.',
+  );
+
+  // Dismiss clears the failed chip, leaving the restored draft untouched.
   await dismiss.click();
   await expect(pending).toHaveCount(0);
+  await expect(page.getByRole('textbox')).toHaveValue(
+    'typed while it was starting',
+  );
 });

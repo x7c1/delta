@@ -7,6 +7,7 @@
 
 export type { SessionEvent } from './generated/SessionEvent';
 export { EVENT_KINDS, type SessionEventKind } from './generated/event-kinds';
+export type { UnsentSend } from './generated/UnsentSend';
 
 export type { CommsFrame } from './generated/CommsFrame';
 export type { CommsDirection } from './generated/CommsDirection';

@@ -136,16 +136,18 @@ Any unmodelled block kind is preserved as `{ "type": "other" }`.
 }
 ```
 
-- `status` is one of `queued` (waiting for the session to go idle), `dispatched`
+- `status` is one of `queued` (waiting for the session to go idle — or, for a
+  session that is still `spawning`, to start at all), `dispatched`
   (handed to the agent, awaiting correlation), `matched`, or `cancelled`. The
   first two are the *open* statuses [`GET /api/sessions/{id}/sends`](sends.md#get-apisessionsidsends)
   reports. How a row walks that ladder depends on how the provider is driven
   (see [sends.md](sends.md) for the two dispatch paths): an adapter-backed
   session (Codex) goes `dispatched` → `matched` inside the enqueue call, so its
-  rows are effectively never observed in an open status — except the first
-  prompt of a *new* session, which is written `queued` when the session is
-  accepted and stays open until the background launch has brought the
-  provider thread up and dispatched it.
+  rows are effectively never observed in an open status — except the ones a
+  *new* session accepts while it is still starting (its first prompt and
+  anything composed behind it), which are written `queued` when the send is
+  accepted and stay open until the background launch has brought the provider
+  thread up and dispatched them.
 - `matched_uuid` carries the id the send was correlated with, once it was: the
   uuid of the transcript message it produced for a pane-backed session, the
   provider's own turn id for an adapter-backed one — so it is not always an id

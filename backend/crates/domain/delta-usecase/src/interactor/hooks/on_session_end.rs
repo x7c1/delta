@@ -61,6 +61,8 @@ where
             // Its turn entry (set when the first prompt's send was enqueued) is
             // dropped with it.
             self.state.forget_turn();
+            // BEFORE the cleanup, which deletes the rows this reads.
+            let unsent = self.undelivered_sends(&hook.session_id).await;
             self.clean_up_failed_spawn_row(&hook.session_id).await?;
             return Ok(vec![SessionEvent::SpawnFailed {
                 session_id: hook.session_id,
@@ -68,6 +70,7 @@ where
                 // The hook only reports that the launch ended, never why it
                 // never bound, so there is no cause to pass on here.
                 reason: None,
+                unsent,
             }]);
         }
 
@@ -88,6 +91,10 @@ where
                 session_id: hook.session_id,
                 pane_token: Some(resuming.token.as_str().to_owned()),
                 reason: None,
+                // A failed resume keeps its session row and its send rows: the
+                // `Close` above requeued the held prompt rather than deleting
+                // it, so there is nothing to hand back to the composer.
+                unsent: Vec::new(),
             }]);
         }
 

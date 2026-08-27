@@ -4,6 +4,7 @@ import type {
   FileChangeDetail,
   PendingPermission,
   PendingQuestion,
+  UnsentSend,
 } from '@delta/wire-gen';
 import type { EventReducer } from './eventReducer';
 import type { SendsSlice } from './sendsSlice';
@@ -172,14 +173,19 @@ export interface ResumeUnavailableNotice {
 }
 
 /**
- * A `spawn_failed` that arrived before {@link SpawnsSlice.trackSpawn} registered
- * the spawn. The event is broadcast on the live channel while the
- * `POST /api/sends` response travels back separately, so the failure can
- * legitimately outrun the registration; dropping it would leave the chip
- * spinning forever. Never rendered: buffered here and consumed by
- * {@link SpawnsSlice.trackSpawn}, which then registers the spawn as `failed`
- * directly. An entry for a spawn this client never tracks (e.g. another
- * client's) is removed if the session registers, and is otherwise inert.
+ * A `spawn_failed` for a session this client has no tracked spawn for. The
+ * event is broadcast on the live channel while the `POST /api/sends` response
+ * travels back separately, so a failure can legitimately outrun the
+ * registration; dropping it would leave the chip spinning forever. Never
+ * rendered: buffered here and consumed by {@link SpawnsSlice.trackSpawn}, which
+ * then registers the spawn as `failed` directly.
+ *
+ * An id whose registration is NOT on its way (no new-session POST in flight —
+ * this client reloaded and lost its in-memory registry, or the spawn is another
+ * client's) can never be consumed, so `reduceSpawnFailed` deals with it on the
+ * spot and leaves the entry behind flagged {@link restored}, as the marker that
+ * stops a repeat of the same event restoring the same text again. Either shape
+ * is removed if the session registers after all.
  */
 export interface SpawnFailureBufferedNotice {
   kind: 'spawn_failure_buffered';
@@ -190,6 +196,20 @@ export interface SpawnFailureBufferedNotice {
    * watchdog-shaped failures, which name none.
    */
   reason?: string;
+  /**
+   * The messages the failed launch never delivered, carried across for the same
+   * reason as {@link SpawnFailureBufferedNotice.reason}: their rows are deleted
+   * server-side, so this buffer is the only copy left. `trackSpawn` restores
+   * them into the new-session draft once it knows which of them is the spawn's
+   * own first prompt (the Retry chip already holds that one).
+   */
+  unsent: UnsentSend[];
+  /**
+   * True when {@link unsent} was already put back into the new-session draft
+   * whole, because no registration could ever arrive to split it. Read by
+   * {@link SpawnsSlice.trackSpawn} so the restore never happens twice.
+   */
+  restored: boolean;
 }
 
 /** One per-session notice; at most one of each kind exists per session. */

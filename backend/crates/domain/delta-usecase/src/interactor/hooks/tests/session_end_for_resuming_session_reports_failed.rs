@@ -66,6 +66,9 @@ async fn session_end_for_resuming_session_reports_failed() {
             pane_token: Some("delta-3".to_owned()),
             // The hook reports only that the launch ended, never why.
             reason: None,
+            // A failed resume keeps its rows: nothing is deleted, so there is
+            // no text to hand back to the composer.
+            unsent: Vec::new(),
         }],
     );
     assert_eq!(

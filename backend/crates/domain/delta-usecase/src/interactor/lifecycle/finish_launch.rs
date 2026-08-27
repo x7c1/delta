@@ -53,11 +53,13 @@ where
     /// outrunning [`LaunchConfig::launch_prep_deadline`] — undoes the
     /// acceptance exactly as the synchronous launch failure used to: reclaim
     /// whatever the launch did stand up (a pane, or a connected adapter), drop
-    /// the turn, delete the eager session row (its main thread and first send
+    /// the turn, delete the eager session row (its main thread and every send
     /// go by cascade). The REST caller is long gone, so the failure is reported
     /// on the async event seam instead, as a [`SessionEvent::SpawnFailed`]
     /// carrying the error text — that `reason` is the only place any of those
-    /// messages can still be shown, since it is no longer a `4xx`/`5xx` body.
+    /// messages can still be shown, since it is no longer a `4xx`/`5xx` body —
+    /// and carrying `unsent`, the text of every send the launch accepted but
+    /// never delivered, read a step before the rows cascade away.
     ///
     /// [`spawn_launch_preparation`]: super::launch_prep::spawn_launch_preparation
     /// [`LaunchConfig::launch_prep_deadline`]: crate::launch_config::LaunchConfig::launch_prep_deadline
@@ -183,10 +185,12 @@ where
                 );
             }
         }
-        // The session row (and its first send, by cascade) is deleted, so the
+        // The session row (and every send row, by cascade) is deleted, so the
         // turn entry is dropped without orphan handling.
         self.state.forget_turn();
         let session_id = self.id.clone();
+        // BEFORE the cleanup, which deletes the rows this reads.
+        let unsent = self.undelivered_sends(&session_id).await;
         if let Err(cleanup_err) = self.clean_up_failed_spawn_row(&session_id).await {
             // Report the launch failure regardless: the browser is waiting on a
             // session that will never come up, and a row that outlived its
@@ -201,6 +205,7 @@ where
             session_id,
             pane_token: pane_token.map(|token| token.as_str().to_owned()),
             reason: Some(err.to_string()),
+            unsent,
         });
     }
 }

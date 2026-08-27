@@ -13,6 +13,12 @@ import { startNewSession } from './support/app';
  * the row on screen. The user must land back on the new-session screen with an
  * error row offering Retry and Dismiss, rather than be left looking at a
  * session that no longer exists.
+ *
+ * And nothing they typed may be lost with the row. A session accepts sends as
+ * `queued` rows for as long as it is starting, and those rows cascade away with
+ * the session — so the failure event carries their text, and the browser puts
+ * everything the Retry chip does not already hold back into the new-session
+ * composer. Restored, never re-sent: the message waits there for the user.
  */
 test('a spawn that never binds is focused first, then hands back a Retry / Dismiss row', async ({
   page,
@@ -27,6 +33,13 @@ test('a spawn that never binds is focused first, then hands back a Retry / Dismi
   ).toHaveCount(1);
   const pending = page.getByTestId('pending-item');
   await expect(pending).toHaveCount(1);
+
+  // A second message, composed while the launch was still coming up: accepted
+  // as a `queued` row that never reaches an agent.
+  const textbox = page.getByRole('textbox');
+  await textbox.fill('typed while it was starting');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(pending).toHaveCount(2);
 
   // The watchdog reaps the spawn after the (shortened) deadline. Its row is
   // deleted, so focus returns to the new-session screen — where the chip is
@@ -44,7 +57,24 @@ test('a spawn that never binds is focused first, then hands back a Retry / Dismi
     page.getByRole('status', { name: 'Starting', exact: true }),
   ).toHaveCount(0);
 
-  // Dismiss clears it; nothing else of the failed spawn remains.
+  // The second message's rows are gone with the session, so its text came back
+  // on the failure event and is waiting in the new-session composer. The first
+  // prompt is NOT duplicated there — the Retry button above is what re-sends
+  // that one — and neither message was re-sent behind the user's back.
+  await expect(page.getByRole('textbox')).toHaveValue(
+    'typed while it was starting',
+  );
+  // The composer is a different surface from the chip, so the chip is what says
+  // the message went there — and that Retry will not take it along.
+  await expect(page.getByTestId('pending-fail-note')).toHaveText(
+    '1 later message was returned to the composer. Retry re-sends only this one.',
+  );
+
+  // Dismiss clears the failure row; nothing else of the failed spawn remains,
+  // and the restored draft is untouched by it.
   await page.getByRole('button', { name: 'Dismiss' }).click();
   await expect(pending).toHaveCount(0);
+  await expect(page.getByRole('textbox')).toHaveValue(
+    'typed while it was starting',
+  );
 });

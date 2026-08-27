@@ -579,8 +579,9 @@ export interface MockStore {
      * yet. Mirrors the real server's `spawning` status: the row is listed and
      * addressable by id from the moment its first send is accepted, but it is
      * not open (no pane is bound to it) until a `session_registered` event
-     * activates it — or a `spawn_failed` deletes it. A send aimed at it while
-     * it is starting is refused with `409 session_spawning`, as on the server.
+     * activates it — or a `spawn_failed` deletes it. A plain send aimed at it
+     * while it is starting is accepted as a `queued` row, and a branch send is
+     * refused with `409 session_spawning`, as on the server.
      */
     spawning?: boolean;
     /**

@@ -482,6 +482,11 @@ where
                 "failed to apply a Codex turn end to the turn machine"
             );
         }
+        // The session is idle again, so release the next `queued` send — one at
+        // a time, the single-outstanding rule — exactly as Claude's `Stop` hook
+        // does. An adapter-backed session has no `Stop` hook, so without this
+        // its queue would never move.
+        self.flush_queued_send_async().await;
         // A cleanly completed turn is a `TurnCompleted`; an interrupted or failed
         // one clears the stuck chip via `TurnInterrupted`, mirroring how the
         // Claude transcript sync signals a turn that ended without a `Stop` hook.

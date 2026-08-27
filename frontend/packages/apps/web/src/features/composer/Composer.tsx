@@ -34,9 +34,11 @@ export type ComposerMode =
       /**
        * True while the session is still starting (`status: 'spawning'`). Its row
        * exists — and is focusable — from the moment its first send was accepted,
-       * but its launch has not registered yet, so the server refuses any send to
-       * it (`409 session_spawning`). The composer says so and offers no send
-       * until the launch comes up, a beat later.
+       * but its launch has not bound yet, so nothing can be *dispatched* into
+       * it. A plain send is still accepted: the server records it as a `queued`
+       * row and types it the moment the launch binds. So Send stays enabled and
+       * only the placeholder changes, to say the message waits for the session
+       * rather than going out now.
        */
       spawning: boolean;
     };
@@ -257,9 +259,10 @@ export function Composer({ mode }: ComposerProps) {
   const placeholder = isNew
     ? 'Message to start a new session…'
     : // The starting state outranks every other wording, branching included:
-      // whatever the user meant to send, nothing can be sent yet.
+      // whatever the user meant to send waits for the launch rather than going
+      // out now.
       spawning
-      ? 'This session is starting…'
+      ? 'Message sends when the session is ready…'
       : branching
         ? 'Ask a follow-up on the selected text…'
         : readOnly
@@ -274,19 +277,18 @@ export function Composer({ mode }: ComposerProps) {
   // keyboard path cannot bypass gates the button enforces:
   //   - empty draft
   //   - a send is already in-flight
-  //   - the session is still starting: the server refuses a send to it
-  //     (`409 session_spawning`), which the composer has no special handling
-  //     for — it would leave a dead `failed` chip in the pending strip for the
-  //     user to clear, a second before the same send would have worked
   //   - a new session must start in a chosen directory (selection mandatory)
   //   - if the worktree toggle is on, the start-point must be a concrete
   //     value: `pending_remote_branch` means the Other-remote-branch picker
   //     was opened but no branch was picked yet, and the backend rejects
   //     worktree requests without a concrete branch.
+  // A still-starting session is deliberately NOT a gate: the server accepts a
+  // plain send there as a `queued` row and dispatches it when the launch binds,
+  // so holding the user at a disabled button through a minute-long checkout
+  // would withhold something that works.
   const submitDisabled =
     draft.trim().length === 0 ||
     sendInFlight ||
-    spawning ||
     (isNew && !newSessionWorkdir) ||
     (isNew &&
       newSessionWorktreeEnabled &&

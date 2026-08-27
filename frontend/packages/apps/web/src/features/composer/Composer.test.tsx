@@ -116,13 +116,13 @@ describe('Composer', () => {
     expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID);
   });
 
-  it('offers no send while the session is still starting', async () => {
+  it('still offers send while the session is still starting', async () => {
     // A session is focusable from the moment its first send is accepted, so
     // its composer is reachable while the launch is still coming up. The
-    // server refuses a send to it (`409 session_spawning`), so the composer
-    // says it is starting and neither the button nor Cmd/Ctrl+Enter can fire
-    // one — a send here would only leave a dead `failed` chip in the pending
-    // strip, a beat before the same send would have worked.
+    // server accepts a plain send there as a `queued` row and types it when
+    // the launch binds, so Send stays live — holding the user at a disabled
+    // button through a minute-long checkout would withhold something that
+    // works. Only the placeholder changes, to say the message waits.
     render(
       <QueryClientProvider
         client={
@@ -145,23 +145,25 @@ describe('Composer', () => {
     );
 
     const textarea = screen.getByRole('textbox');
-    expect(textarea).toHaveAttribute('placeholder', 'This session is starting…');
+    expect(textarea).toHaveAttribute(
+      'placeholder',
+      'Message sends when the session is ready…',
+    );
 
-    fireEvent.change(textarea, { target: { value: 'too early' } });
+    // An empty draft is still no send; typing one arms the button.
     const send = screen.getByRole('button', { name: 'Send' });
     expect(send).toBeDisabled();
+    fireEvent.change(textarea, { target: { value: 'while it starts' } });
+    expect(send).toBeEnabled();
 
-    // The keyboard path is gated by the same flag, so it cannot bypass the
-    // disabled button.
     fireEvent.click(send);
-    fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
-    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
 
-    await act(async () => {
-      await Promise.resolve();
+    // The send goes out and the server's `queued` row is tracked like any
+    // other accepted send.
+    await waitFor(() => {
+      expect(Object.keys(useLiveStore.getState().localSends)).toHaveLength(1);
     });
     expect(useLiveStore.getState().sending).toHaveLength(0);
-    expect(useLiveStore.getState().localSends).toEqual({});
   });
 
   it('enqueues an optimistic send on a closed (read-only) resume', async () => {

@@ -167,6 +167,17 @@ committed alongside. What made it safe is not the change's size but the
 lockstep below — and that the browser keys the event on `session_id`, so no
 consumer depended on the field being present.
 
+The same event gained a **required** field the other way round:
+`spawn_failed.unsent` — the id and text of every send the failed launch never
+delivered — is always present, `[]` included, rather than omitted when empty.
+A required addition is the stricter shape of the two (an older client parsing
+strictly would reject the frame), and under `v0.x` it needs no ceremony for
+exactly the same reason: the only consumer ships from this checkout. It is
+required, not optional, because the field's whole job is to be the last copy of
+text that no longer exists anywhere else — a client that has to guess whether an
+absent key means "nothing outstanding" or "an older server" would be guessing
+about lost user input.
+
 ### Why this is safe
 
 The wire contract is an **internal implementation extension**, not an

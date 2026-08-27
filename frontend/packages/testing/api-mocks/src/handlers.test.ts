@@ -373,11 +373,52 @@ describe('new-session send mock (eager rows)', () => {
     expect(sends.map((s) => s.text)).toEqual(['kick off']);
   });
 
-  it('refuses a second send while the row is still spawning', async () => {
-    // Pins the mock to the real server's refusal: without it a frontend that
-    // stopped disabling the starting composer would still pass every suite
-    // (see the guard in `handlers.ts` for why the server refuses).
+  it('queues a second plain send while the row is still spawning', async () => {
+    // Pins the mock to the real server's acceptance: a plain send during the
+    // spawn window is recorded `queued` (the server types it at the bind), so a
+    // frontend that keeps Send enabled there exercises the same path the server
+    // takes (see the guard in `handlers.ts`).
     const { handlers, applyEvent } = createMockApi();
+    const httpHandlers = handlers as HttpHandler[];
+
+    const first = (await (
+      await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+        new_session: true,
+        text: 'kick off',
+      })
+    ).json()) as SendResponse;
+
+    const queued = await runPost(
+      httpHandlers,
+      '/api/sends',
+      'http://localhost/api/sends',
+      { thread_id: first.send.thread_id, text: 'and one more' },
+    );
+    expect(queued.status).toBe(201);
+    expect(((await queued.json()) as SendResponse).send.status).toBe('queued');
+
+    // Once the launch registers, a send there dispatches immediately again.
+    applyEvent({
+      kind: 'session_registered',
+      session_id: first.send.session_id,
+    });
+    const accepted = await runPost(
+      httpHandlers,
+      '/api/sends',
+      'http://localhost/api/sends',
+      { thread_id: first.send.thread_id, text: 'now you are up' },
+    );
+    expect(accepted.status).toBe(201);
+    expect(((await accepted.json()) as SendResponse).send.status).toBe(
+      'dispatched',
+    );
+  });
+
+  it('refuses a branch send while the row is still spawning', async () => {
+    // The one shape the server still refuses there: a session that has never
+    // bound has ingested no message to branch from, so `409 session_spawning`
+    // stands for branch sends alone.
+    const { handlers } = createMockApi();
     const httpHandlers = handlers as HttpHandler[];
 
     const first = (await (
@@ -391,26 +432,16 @@ describe('new-session send mock (eager rows)', () => {
       httpHandlers,
       '/api/sends',
       'http://localhost/api/sends',
-      { thread_id: first.send.thread_id, text: 'too early' },
+      {
+        thread_id: first.send.thread_id,
+        text: 'branch from nothing',
+        semantic_parent_uuid: 'no-such-message',
+      },
     );
     expect(refused.status).toBe(409);
     expect(((await refused.json()) as { code?: string }).code).toBe(
       'session_spawning',
     );
-
-    // The gate lifts with the spawn window: once the launch registers, the
-    // same send goes through.
-    applyEvent({
-      kind: 'session_registered',
-      session_id: first.send.session_id,
-    });
-    const accepted = await runPost(
-      httpHandlers,
-      '/api/sends',
-      'http://localhost/api/sends',
-      { thread_id: first.send.thread_id, text: 'now you are up' },
-    );
-    expect(accepted.status).toBe(201);
   });
 
   it('activates the row on session_registered and deletes it on spawn_failed', async () => {
@@ -450,6 +481,7 @@ describe('new-session send mock (eager rows)', () => {
       kind: 'spawn_failed',
       session_id: failed,
       pane_token: 'pane-x',
+      unsent: [],
     });
     page = await getSessionsPage(httpHandlers, '?limit=100');
     expect(page.sessions.some((s) => s.session.id === failed)).toBe(false);

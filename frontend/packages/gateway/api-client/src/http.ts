@@ -59,6 +59,15 @@ export interface ApiClientOptions {
  * Callers branch on this to keep the session closed and show a specific message
  * rather than a generic failure.
  *
+ * `session_spawning` means a **branch** send named a session whose launch has
+ * not bound yet, so it has ingested no message to branch from. Only branch
+ * sends can see it: a plain send to a starting session is accepted as a
+ * `queued` row and dispatched when the launch binds. Unlike the codes around
+ * it, nothing branches on this one — the composer cannot compose a branch send
+ * against a session with no messages, so a browser that somehow met it would
+ * render its generic failure copy. It is declared for completeness of the
+ * server's code set.
+ *
  * `permission_not_pending` means a permission decision can no longer take
  * effect: the request was already decided, or its hook wait timed out and the
  * interactive TUI prompt owns it now. Callers branch on this to swap the

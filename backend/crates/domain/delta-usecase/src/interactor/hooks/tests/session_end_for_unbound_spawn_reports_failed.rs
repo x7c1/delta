@@ -28,6 +28,9 @@ async fn session_end_for_unbound_spawn_reports_failed() {
             pane_token: Some("delta-1".to_owned()),
             // The hook reports only that the launch ended, never why.
             reason: None,
+            // This spawn was seeded through the runtime seam, so it accepted no
+            // send at all; a spawn with sends hands their text back here.
+            unsent: Vec::new(),
         }],
     );
     // The pane was killed and the spawn is gone, so it can never mis-bind later.

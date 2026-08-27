@@ -9,10 +9,15 @@ import { startNewSession } from './support/app';
  * stretching the window between "the POST returned" and "the session
  * registered" wide enough to observe. Inside that window the workspace must
  * already be ON the new session — the row is listed as `spawning`, so its card
- * reads `Starting`, its composer says the session is starting and offers no
- * send, and its first prompt sits in the pending strip. When the hook finally
- * lands the same session simply becomes `Open` and the scripted reply arrives:
- * one continuous session, no hand-off the user can see.
+ * reads `Starting`, its composer says a message sent now waits for the session,
+ * and its first prompt sits in the pending strip.
+ *
+ * And a message composed inside that window really is accepted: Send stays
+ * live, the server records the message as a `queued` row (the strip says so),
+ * and once the launch binds and the opening turn ends it is typed and answered
+ * — without the user ever having watched a disabled button. When the hook
+ * finally lands the same session simply becomes `Open`: one continuous session,
+ * no hand-off the user can see.
  */
 test('a slow launch is focused as a starting session, then comes up in place', async ({
   page,
@@ -32,7 +37,7 @@ test('a slow launch is focused as a starting session, then comes up in place', a
   const textbox = page.getByRole('textbox');
   await expect(textbox).toHaveAttribute(
     'placeholder',
-    'This session is starting…',
+    'Message sends when the session is ready…',
   );
   // A starting session has no live pane, so it reaches the pane read-only —
   // but it was never closed, and no send resumes it. The closed notice must
@@ -44,11 +49,22 @@ test('a slow launch is focused as a starting session, then comes up in place', a
   await expect(pending).toHaveCount(1);
   await expect(pending).toContainText('slow-start wake up eventually');
 
-  // A follow-up cannot be sent yet: the server would refuse it
-  // (`409 session_spawning`), so the composer does not offer one — even with a
-  // draft ready to go.
+  // A follow-up CAN be sent inside the window: the server accepts it as a
+  // `queued` row and types it when the launch binds, so Send stays live.
   await textbox.fill('a follow-up, once you are up');
-  await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
+  const send = page.getByRole('button', { name: 'Send' });
+  await expect(send).toBeEnabled();
+  await send.click();
+
+  // It is accepted, not dispatched: the strip now holds both messages, and the
+  // second one says what it is waiting for.
+  await expect(pending).toHaveCount(2);
+  await expect(pending.nth(1)).toContainText('a follow-up, once you are up');
+  await expect(
+    page.getByText('queued — sends when the session starts'),
+  ).toBeVisible();
+  // The draft was consumed by the accepted send, not held back.
+  await expect(textbox).toHaveValue('');
 
   // The hook lands: the very same card flips to Open — no second session, no
   // return to the new-session screen — and the scripted reply arrives.
@@ -56,13 +72,15 @@ test('a slow launch is focused as a starting session, then comes up in place', a
     page.getByRole('status', { name: 'Open', exact: true }),
   ).toHaveCount(1, { timeout: 15_000 });
   await expect(page.getByRole('status', { name: 'Starting', exact: true })).toHaveCount(0);
-  // The prompt and the scripted answer, in that order — asserted by count, so
-  // the spec never depends on what the scenario replies (see e2e.md).
-  await expect(page.getByTestId('message-item')).toHaveCount(2, {
+  // The opening turn ends, which is what flushes the queue: the follow-up is
+  // typed and answered in its own turn. Four messages — both prompts and both
+  // scripted answers — asserted by count, so the spec never depends on what the
+  // scenario replies (see e2e.md).
+  await expect(page.getByTestId('message-item')).toHaveCount(4, {
     timeout: 15_000,
   });
-  // And the composer is live again, with the draft that was held back ready to
-  // send — the same textarea, never reset by the hand-off.
-  await expect(textbox).toHaveValue('a follow-up, once you are up');
-  await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled();
+  await expect(page.getByText('a follow-up, once you are up')).toBeVisible();
+  // Nothing is left waiting, and the composer is live again.
+  await expect(pending).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
 });

@@ -3,6 +3,9 @@
   "steps": [
     { "type": "await_prompt" },
     { "type": "reply", "text": "up at last" },
+    { "type": "stop" },
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "and the one you queued" },
     { "type": "stop" }
   ]
 }

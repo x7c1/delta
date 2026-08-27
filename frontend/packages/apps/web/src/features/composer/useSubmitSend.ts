@@ -91,6 +91,7 @@ export function useSubmitSend(): (args: {
             sessionId: send.session_id,
             threadId: send.thread_id,
             text: send.text,
+            firstSendId: send.id,
             workdir: target.workdir,
             launchOptionIds: target.launchOptionIds,
             provider: target.provider,

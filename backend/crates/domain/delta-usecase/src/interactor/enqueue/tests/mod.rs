@@ -1,5 +1,6 @@
 //! Enqueue use-case tests.
 
+mod a_failed_launch_reports_its_unsent_queued_text;
 mod boot_restored_send_awaits_explicit_release;
 mod branch_send_creates_child_thread;
 mod branch_send_during_external_turn_is_queued;
@@ -24,9 +25,10 @@ mod parked_send_waits_in_the_queue_until_released;
 mod plain_send_mid_turn_is_queued;
 mod queued_branch_send_dispatches_after_interrupt;
 mod queued_send_dispatches_after_api_error;
+mod queued_sends_flush_once_the_spawn_binds;
 mod resume_window_defers_queued_send_until_settle;
 mod resume_window_prompt_does_not_consume_the_held_send;
-mod send_to_a_still_spawning_session_is_refused;
+mod send_to_a_still_spawning_session_is_queued;
 mod send_to_closed_session_with_missing_transcript_writes_no_send_row;
 mod swallowed_send_is_retyped_then_parked_by_the_echo_deadline;
 mod turn_end_settles_a_consumed_send_as_delivered;

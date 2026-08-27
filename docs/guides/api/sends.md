@@ -28,10 +28,12 @@ provider's adapter:
 - **Adapter-backed (Codex)** — no pane, no keystrokes: the text rides a
   turn-start request on the `codex app-server` connection and is matched to the
   turn id that request returns, so the row goes `dispatched` → `matched` within
-  the same call. The one row that does sit `queued` first is a **new session's
-  first prompt**: it is written when the send is accepted, before the provider
-  thread exists, and only reaches that turn-start call once the background
-  launch has started the thread (see the `201` under
+  the same call. The rows that do sit `queued` first are the ones a **new
+  session** accepts while it is still starting: its first prompt, and anything
+  composed after it before the launch binds. They are written when the send is
+  accepted, before the provider thread exists; the first prompt reaches its
+  turn-start call once the background launch has started the thread, and each
+  row behind it goes out when the turn ahead of it ends (see the `201` under
   [`POST /api/sends`](#post-apisends)).
 
 Permission and question answers are not sends — they resolve a request the agent
@@ -140,20 +142,28 @@ Response:
   `launch_option_ids` (and, for an adapter-backed provider, having its adapter
   vet them), and reading the repository's local git config — which is why those
   are still the `400`s below. The session is listed as `spawning` from
-  this response until its launch binds it, and sends to it are refused with
-  `session_spawning` for that whole window (see the `409` below).
+  this response until its launch binds it. A plain send arriving in that window
+  is **accepted as a `queued` row** — nothing can be dispatched into a session
+  with no pane and no provider thread, but the message is recorded and typed
+  the moment the launch binds, so a user watching a slow checkout is not made
+  to wait to compose their next message. A *branch* send is the one shape
+  refused there (`session_spawning`, see the `409` below): the session has
+  ingested no message to branch from.
 
   A failure of the background launch — a start point that does not exist on
   the remote, a `git worktree add` error, a tmux failure, a provider that will
   not connect or start a thread — therefore cannot be a response at all. It
   arrives on the live channel as a
   [`spawn_failed`](live-channels.md#session-lifecycle) event carrying the error
-  text as its `reason`, and the eagerly-created row (with this send, by cascade)
-  is deleted, so the session stops being listed. The preparation is also given
-  up on if it has not finished within 10 minutes — a `git fetch` hanging on an
-  unreachable remote or a credential prompt has no timeout of its own — and that
-  gives the same `spawn_failed`, so a stuck session never sits `spawning`
-  indefinitely. That deadline is overridable with
+  text as its `reason`, and the eagerly-created row (with every send of the
+  session, by cascade) is deleted, so the session stops being listed. Because
+  those rows go, that event also carries `unsent`: the id and text of every send
+  the launch never delivered, first prompt included, so a client can put the
+  messages back in front of the user. Nothing is re-sent server-side. The
+  preparation is also given up on if it has not finished within 10 minutes — a
+  `git fetch` hanging on an unreachable remote or a credential prompt has no
+  timeout of its own — and that gives the same `spawn_failed`, so a stuck
+  session never sits `spawning` indefinitely. That deadline is overridable with
   `DELTA_LAUNCH_PREP_DEADLINE_MS` (milliseconds), the way the echo watchdog's is
   with `DELTA_ECHO_DEADLINE_MS`.
 
@@ -196,14 +206,20 @@ Response:
 - **409** — the target's session is closed and cannot be resumed because its
   transcript is gone (body `code: "resume_unavailable"`). No send is enqueued and
   the session stays closed.
-- **409** (body `code: "session_spawning"`) — the target's session is still
-  starting: it is listed from the moment its first send was accepted, but its
-  launch has not registered yet, so there is nothing to dispatch into. This
-  covers the whole starting window, for either provider — the background launch
-  and, for `claude`, the wait for the launched agent's first hook on top of it.
-  No send is enqueued and no second agent is launched; the same request succeeds
-  once the launch has bound the session (it is then `active`, announced as
-  `session_registered`).
+- **409** (body `code: "session_spawning"`) — a **branch** send
+  (`semantic_parent_uuid`) whose target session is still starting: it is listed
+  from the moment its first send was accepted, but its launch has not bound yet,
+  so it has ingested no message to branch from. This covers the whole starting
+  window, for either provider — the background launch and, for `claude`, the
+  wait for the launched agent's first hook on top of it. No send is enqueued;
+  the same request succeeds once the launch has bound the session (it is then
+  `active`, announced as `session_registered`).
+
+  A **plain** send to a starting session is not refused: it is accepted as a
+  `queued` row (`201`) and dispatched when the launch binds — at the end of the
+  turn the first prompt opens, for either provider, or immediately at the bind
+  when no such turn starts (the spawn carried no first prompt, or that prompt
+  was cancelled before the launch bound).
 
 ### `GET /api/sessions/{id}/sends`
 

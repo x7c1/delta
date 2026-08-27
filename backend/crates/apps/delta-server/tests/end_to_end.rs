@@ -620,27 +620,47 @@ async fn new_session_send_spawns_and_persists_first_prompt() {
         "a session that has ingested nothing has no activity yet"
     );
 
-    // Nothing can be dispatched into it while it is starting: no pane is bound
-    // and its transcript does not exist, so a second send is refused rather
-    // than resumed into a second agent.
+    // Nothing can be *dispatched* into it while it is starting — no pane is
+    // bound and its transcript does not exist — but a plain send is still
+    // accepted: it is recorded `queued` and typed once the launch binds, so the
+    // user never waits at a disabled composer through a slow checkout.
+    let (status, queued) = post_json(
+        &app,
+        "/api/sends",
+        json!({ "thread_id": thread_id, "text": "and one more while it starts" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(queued["send"]["status"], "queued");
+    assert_eq!(queued["send"]["session_id"], session_id);
+
+    // A *branch* send is the one shape still refused there: the session has
+    // ingested no message, so there is nothing to branch from.
     let (status, refused) = post_json(
         &app,
         "/api/sends",
-        json!({ "thread_id": thread_id, "text": "too early" }),
+        json!({
+            "thread_id": thread_id,
+            "text": "branch from nothing",
+            "semantic_parent_uuid": "no-such-message",
+        }),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(refused["code"], "session_spawning");
 
-    // The open-send list is queryable for the eager row: the browser keeps the
-    // first-send pending chip rendered from server state across the spawn
-    // window — and the refused send left nothing behind.
+    // The open-send list is queryable for the eager rows: the browser keeps the
+    // pending strip rendered from server state across the spawn window — the
+    // dispatched first prompt, then the queued follow-up, and nothing from the
+    // refused branch send.
     let (status, body) = get(&app, &format!("/api/sessions/{session_id}/sends")).await;
     assert_eq!(status, StatusCode::OK);
     let sends = body["sends"].as_array().expect("sends array");
-    assert_eq!(sends.len(), 1, "the first prompt is the one open send");
+    assert_eq!(sends.len(), 2, "the first prompt and the queued follow-up");
     assert_eq!(sends[0]["text"], "kick off a new conversation");
     assert_eq!(sends[0]["status"], "dispatched");
+    assert_eq!(sends[1]["text"], "and one more while it starts");
+    assert_eq!(sends[1]["status"], "queued");
 
     // A fresh tmux session was spawned with the first prompt carried on its
     // launch command line (claude auto-submits it at startup), not injected via

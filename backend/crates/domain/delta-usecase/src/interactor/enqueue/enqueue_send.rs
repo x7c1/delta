@@ -24,10 +24,11 @@ where
     /// place when the `UserPromptSubmit` hook fires, with the
     /// cancel-on-dispatch-failure rollback.
     ///
-    /// A session whose own launch has not bound yet is the one target this
-    /// refuses outright ([`Error::SessionSpawning`]): it is reachable — listed
-    /// from the moment its first send was accepted — but there is nothing to
-    /// dispatch into and nothing to resume from.
+    /// A session whose own launch has not bound yet has nothing to dispatch
+    /// into and nothing to resume from, so a plain send is **accepted as a
+    /// `queued` row** there and flushed once the launch binds. A branch send in
+    /// that window is refused ([`Error::SessionSpawning`]): it needs a message
+    /// to branch from, and a session that has not bound has none.
     ///
     /// A branch send (`branch_from: Some`) requires an existing session —
     /// there must be a message to branch from — which the thread target
@@ -48,18 +49,46 @@ where
         // session's composer before the launch has produced a single hook —
         // indeed before the launch has been *prepared* at all, since the
         // worktree build and the agent launch run in the background. Nothing
-        // can be dispatched into it, whatever the provider: a Claude spawn has
-        // no pane mapped and no transcript yet, so `ensure_open()` below would
-        // take the known-but-closed branch and launch a SECOND
+        // can be *dispatched* into it, whatever the provider: a Claude spawn
+        // has no pane mapped and no transcript yet, so `ensure_open()` below
+        // would take the known-but-closed branch and launch a SECOND
         // `claude --resume <id>` against a conversation the first launch has not
         // written; an adapter-backed spawn has no provider thread yet, so the
         // reconnect just below would try to resume a NULL `provider_session_id`
-        // and fail as a `5xx` instead of the honest "still starting". Refuse
-        // the send here — ahead of both paths — with a code the browser can
-        // word. The composer disables itself on a starting session, so only a
-        // stale client reaches this.
+        // and fail as a `5xx` instead of the honest "still starting".
+        //
+        // But "cannot dispatch yet" is not "cannot accept": a PR-origin session
+        // can spend a minute checking out, and the user who already knows their
+        // next message should not have to wait at a disabled button. So the
+        // send is recorded as a `queued` row here — the same state a send
+        // composed mid-turn takes — and the flush that runs when the session
+        // binds types it in order, on the ordinary queued path. This branch is
+        // explicit and terminal: it must never fall through to `ensure_open()`
+        // below, which is exactly the rival-agent launch described above.
+        //
+        // No event accompanies it. There is no `send_queued` kind: a queued row
+        // reaches clients as this call's own 201 body and through
+        // `GET /api/sessions/{id}/sends`, which is how every other queued send
+        // is announced today.
+        //
+        // A **branch** send stays refused (see the doc comment): a session that
+        // has never bound has no message for `resolve_branch_target` to anchor
+        // to.
         if self.state.is_launching_or_pending() {
-            return Err(Error::SessionSpawning(self.id.as_str().to_owned()));
+            if branch_from.is_some() {
+                return Err(Error::SessionSpawning(self.id.as_str().to_owned()));
+            }
+            let send = self
+                .store
+                .enqueue_queued_send(self.id, thread_id, None, text, locator_quote)
+                .await?;
+            tracing::info!(
+                session_id = %self.id,
+                send_id = send.id,
+                "a send arrived while the session was still spawning; queued it \
+                 to flush once the launch binds"
+            );
+            return Ok((send, Vec::new()));
         }
 
         // A closed adapter-backed session (e.g. Codex) — its in-process adapter

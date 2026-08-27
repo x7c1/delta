@@ -694,8 +694,42 @@ describe('PendingQueue failed spawn', () => {
     expect(
       screen.getByRole('button', { name: 'Dismiss' }),
     ).toBeInTheDocument();
-    // A failure the server could not explain shows the generic line alone.
+    // A failure the server could not explain shows the generic line alone,
+    // and a launch with nothing queued behind its first prompt has no
+    // returned-message line either.
     expect(screen.queryByTestId('pending-fail-reason')).toBeNull();
+    expect(screen.queryByTestId('pending-fail-note')).toBeNull();
+  });
+
+  // A launch that failed with sends queued behind its first prompt hands those
+  // back to the new-session composer — a different screen, with no trace of
+  // where they came from. The chip is the only place that can account for
+  // them, and for the fact that Retry re-sends its own prompt alone.
+  it('says how many messages went back to the composer', () => {
+    useLiveStore.setState({ spawns: [{ ...failedSpawn, restoredCount: 1 }] });
+    renderStrip({ kind: 'new-session' });
+
+    expect(screen.getByTestId('pending-fail-note')).toHaveTextContent(
+      '1 later message was returned to the composer. Retry re-sends only this one.',
+    );
+  });
+
+  it('pluralizes the returned-message line', () => {
+    useLiveStore.setState({ spawns: [{ ...failedSpawn, restoredCount: 3 }] });
+    renderStrip({ kind: 'new-session' });
+
+    expect(screen.getByTestId('pending-fail-note')).toHaveTextContent(
+      '3 later messages were returned to the composer.',
+    );
+  });
+
+  it('omits the returned-message line when nothing was returned', () => {
+    // The first prompt was all there was: it is on this chip, and the composer
+    // holds nothing of this launch's.
+    useLiveStore.setState({ spawns: [{ ...failedSpawn, restoredCount: 0 }] });
+    renderStrip({ kind: 'new-session' });
+
+    expect(screen.queryByTestId('pending-fail-note')).toBeNull();
   });
 
   // The launch preparation runs after the send is accepted, so a git or tmux
