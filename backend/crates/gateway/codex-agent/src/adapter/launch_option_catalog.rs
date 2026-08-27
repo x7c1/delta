@@ -28,23 +28,22 @@ use super::CONFIG_FIELD;
 /// no aliases, so any entry would be a dated snapshot of a concrete slug.
 /// `sandbox` and `personality` are not shipped either — not in use.
 ///
-/// The `config` entry is a **starting point to copy**, not something most users
-/// select as-is: `config` is a single `thread/start` field and
-/// [`thread_start_params`] rejects the same field twice, so this row and a
-/// user's own `config` row are mutually exclusive. That is the intended flow —
-/// real `config` values carry machine-specific paths
-/// (`sandbox_workspace_write.writable_roots`), so the user duplicates this row,
-/// adds their paths and selects theirs. Shipping it means they do not have to
-/// discover the JSON key names first.
+/// The `config` entry is a **starting point**, both to select and to copy.
+/// `config` is the one `thread/start` field a launch may select twice
+/// ([`thread_start_params`] deep-merges every selected `config` into one
+/// object), so this row and a user's own `config` row can be ticked together and
+/// the settings add up — only a genuine disagreement between them is rejected.
+/// Real `config` values also carry machine-specific paths
+/// (`sandbox_workspace_write.writable_roots`), so the other supported flow is
+/// still to duplicate this row, add those paths and select the copy. Either way
+/// shipping it means the user does not have to discover the JSON key names
+/// first.
 ///
-/// Adapting it has one consequence worth knowing: a selected `config` that
-/// states anything at or under `sandbox_workspace_write` is what makes Delta
-/// stand aside from the worktree git grant (`apply_worktree_git_grant`), so a
-/// session in a Delta-created worktree gets no `<repo-root>/.git` grant of its
-/// own and git writes inside it can raise approval prompts. A copy that lists
-/// its own `writable_roots` therefore has to include that path itself. The
-/// shipped value says nothing about the sandbox, so selecting it as-is leaves
-/// the grant in place.
+/// Listing `writable_roots` in such a row costs nothing:
+/// `apply_worktree_git_grant` **appends** the worktree's `<repo-root>/.git` to
+/// whatever list the merged config states, so a session in a Delta-created
+/// worktree keeps that grant whether or not the user states a sandbox of their
+/// own.
 ///
 /// Guard tests below pin that no entry names a `DELTA_OWNED_THREAD_FIELDS`
 /// field, that every value backed by a schema enum is still a member of it in

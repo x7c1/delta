@@ -1,12 +1,15 @@
 //! Launch options the user registered for Codex: the ones the session selects
-//! reach `thread/start` as real fields, and one naming a Delta-owned field is
-//! rejected at spawn.
+//! reach `thread/start` as real fields, several selected `config` rows are
+//! merged into the one object that field holds (with the worktree git grant
+//! unioned into it), and a selection the adapter refuses — a Delta-owned field,
+//! or two `config` rows that disagree — is rejected at spawn.
 
 use axum::http::StatusCode;
 use serde_json::json;
 
 use crate::support::{
     build_app, drain_one_turn, get, post_json, register_launch_option, streaming_turn_scenario,
+    GitRepoGuard,
 };
 
 /// The Codex **launch-options** full loop: options the user registered for
@@ -131,6 +134,163 @@ async fn a_codex_launch_option_overriding_a_delta_owned_field_fails_the_spawn() 
 
     // The eager session row was rolled back, so a rejected spawn leaves nothing
     // behind for the navigator to show.
+    let (status, sessions) = get(&app, "/api/sessions").await;
+    assert_eq!(status, StatusCode::OK, "sessions fetched: {sessions:?}");
+    assert_eq!(
+        sessions["sessions"].as_array().map(Vec::len),
+        Some(0),
+        "a rejected spawn leaves no session row: {sessions:?}"
+    );
+}
+
+/// Two selected `config` rows reach `thread/start` as **one** object, and the
+/// worktree git grant is unioned into the writable roots one of them states.
+///
+/// `config` is the one `thread/start` field a launch may select twice: it is a
+/// single JSON object holding many independent settings, so the shipped preset
+/// and the row carrying a user's machine-specific `writable_roots` are additive,
+/// not exclusive. This drives that over the whole stack — two registry rows, one
+/// selection, a real git repository and a real Delta-created worktree — and
+/// reads the merged object back off the params the fake app-server received.
+///
+/// The grant is the part only a worktree launch can prove: `<repo-root>/.git`
+/// (where a linked worktree's git writes actually land) joins the list the user
+/// already stated instead of being suppressed by it, so a session in a worktree
+/// keeps the grant however the user configures their sandbox.
+#[tokio::test(flavor = "multi_thread")]
+async fn two_codex_config_options_merge_and_the_worktree_grant_joins_them() {
+    const USER_ROOT: &str = "/tmp/delta-user-writable-root";
+    let repo = GitRepoGuard::init("config-merge", "main");
+    let scenario = streaming_turn_scenario();
+    let (app, state) = build_app(&scenario);
+    let mut events = state.subscribe();
+    state
+        .spawn_async_event_drain()
+        .expect("the async drain is taken exactly once");
+
+    let roots = register_launch_option(
+        &app,
+        "config",
+        Some(&format!(
+            r#"{{"sandbox_workspace_write.writable_roots":["{USER_ROOT}"]}}"#
+        )),
+        "codex",
+    )
+    .await;
+    let reasoning = register_launch_option(
+        &app,
+        "config",
+        Some(r#"{"model_reasoning_summary":"auto"}"#),
+        "codex",
+    )
+    .await;
+
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({
+            "new_session": true,
+            "provider": "codex",
+            "text": "hello codex",
+            "launch_option_ids": [roots, reasoning],
+            "workdir": repo.path(),
+            "worktree": { "start_point": { "kind": "head" } },
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "two `config` rows are merged, not rejected: {body:?}"
+    );
+    let session_id = body["send"]["session_id"]
+        .as_str()
+        .expect("the send response carries its session id")
+        .to_owned();
+    drain_one_turn(&mut events, &session_id).await;
+
+    let starts = scenario.thread_starts();
+    assert_eq!(starts.len(), 1, "one thread was started: {starts:?}");
+    let config = &starts[0]["config"];
+    assert_eq!(
+        config["model_reasoning_summary"],
+        json!("auto"),
+        "the second row's unrelated setting survived the merge: {config}"
+    );
+    let granted: Vec<&str> = config["sandbox_workspace_write.writable_roots"]
+        .as_array()
+        .expect("the merged config states the writable roots as a list")
+        .iter()
+        .map(|root| root.as_str().expect("every writable root is a string"))
+        .collect();
+    assert_eq!(
+        granted.first(),
+        Some(&USER_ROOT),
+        "the user's own root is first, in selection order: {granted:?}"
+    );
+    assert!(
+        granted
+            .iter()
+            .any(|root| root.ends_with("/.git") && root.contains("config-merge-repo")),
+        "the worktree's source repository `.git` joined the user's roots: {granted:?}"
+    );
+}
+
+/// Two selected `config` rows that disagree about one setting fail the spawn:
+/// `400` with the stable `launch_option_rejected` code, a message naming the
+/// key path, and no session row left behind.
+///
+/// The merge is additive, not "last one wins" — a mis-copied duplicate has to
+/// surface, because silently applying one of the two values would leave the user
+/// debugging an agent that ignored a setting they can see ticked.
+#[tokio::test(flavor = "multi_thread")]
+async fn two_conflicting_codex_config_options_fail_the_spawn() {
+    let scenario = streaming_turn_scenario();
+    let (app, _state) = build_app(&scenario);
+
+    let high = register_launch_option(
+        &app,
+        "config",
+        Some(r#"{"model_reasoning_effort":"high"}"#),
+        "codex",
+    )
+    .await;
+    let low = register_launch_option(
+        &app,
+        "config",
+        Some(r#"{"model_reasoning_effort":"low"}"#),
+        "codex",
+    )
+    .await;
+
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({
+            "new_session": true,
+            "provider": "codex",
+            "text": "hello codex",
+            "launch_option_ids": [high, low],
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "one setting cannot have two values: {body:?}"
+    );
+    assert_eq!(
+        body["code"],
+        json!("launch_option_rejected"),
+        "the refusal carries its stable code so the browser can show the message: {body:?}"
+    );
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("model_reasoning_effort")),
+        "the error names the conflicting key path, got {body:?}"
+    );
+
     let (status, sessions) = get(&app, "/api/sessions").await;
     assert_eq!(status, StatusCode::OK, "sessions fetched: {sessions:?}");
     assert_eq!(

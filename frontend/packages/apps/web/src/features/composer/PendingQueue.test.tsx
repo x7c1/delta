@@ -715,3 +715,52 @@ describe('PendingQueue failed spawn', () => {
     expect(locals[0].sessionId).toBe(mockSpawnSessionId(1));
   });
 });
+
+describe('PendingQueue failed submit', () => {
+  beforeEach(reset);
+
+  it('shows the generic line alone when the server named nothing', () => {
+    useLiveStore.setState({
+      sending: [
+        {
+          id: 'l1',
+          target: { kind: 'new-session', workdir: null, launchOptionIds: [7] },
+          text: 'start a new session',
+          status: 'failed',
+          createdAt: 0,
+        },
+      ],
+    });
+    renderStrip({ kind: 'new-session' });
+
+    expect(screen.getByText(/failed to start/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('pending-fail-reason')).toBeNull();
+  });
+
+  // A refused launch option is the one send rejection whose message says
+  // something the chip's own copy cannot: which selected option, or which
+  // merged-`config` key path, the server would not apply. Swallowing it would
+  // leave the user guessing which of their ticked rows to fix.
+  it('shows a refused launch option message verbatim under the generic line', () => {
+    const message =
+      'launch option rejected: the selected `config` options disagree: ' +
+      '`sandbox_workspace_write.writable_roots` is set to both ["/a"] and "/b"';
+    useLiveStore.setState({
+      sending: [
+        {
+          id: 'l1',
+          target: { kind: 'new-session', workdir: null, launchOptionIds: [7] },
+          text: 'start a new session',
+          status: 'failed',
+          createdAt: 0,
+          reason: message,
+        },
+      ],
+    });
+    renderStrip({ kind: 'new-session' });
+
+    expect(screen.getByTestId('pending-fail-reason')).toHaveTextContent(
+      message,
+    );
+  });
+});

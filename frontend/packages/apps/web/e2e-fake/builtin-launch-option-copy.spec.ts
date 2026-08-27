@@ -4,12 +4,16 @@ import { test, expect } from './support/fixtures';
  * The copy-and-adapt flow for a launch option Delta ships, end to end against
  * the real backend.
  *
- * The Codex `config` built-in exists to be copied, not selected as-is: `config`
- * is a single `thread/start` field and the adapter rejects the same field twice,
- * so this row and a user's own `config` row are mutually exclusive — and a real
- * `config` carries machine-specific paths. The supported flow is therefore
- * "read the shipped row, duplicate it, add your paths, register yours", and this
- * spec walks exactly that.
+ * The Codex `config` built-in is a starting point: a real `config` carries
+ * machine-specific paths (`sandbox_workspace_write.writable_roots`) the shipped
+ * row cannot know, so the user reads it, duplicates it, adds their paths and
+ * registers a row of their own. This spec walks exactly that.
+ *
+ * Copying is not forced by exclusivity — `config` is the one `thread/start`
+ * field a launch may select twice, and the adapter deep-merges every selected
+ * `config` into one object — but it is still how a row with your own paths comes
+ * to exist, and duplicating the shipped one means not having to discover the
+ * JSON key names first.
  *
  * What it pins, in order:
  *

@@ -104,6 +104,14 @@ export interface ApiClientOptions {
  * Both surface inline on the PR row that asked for the clone, showing the
  * server's own message; the codes keep the two cases apart from a generic
  * failure.
+ *
+ * `launch_option_rejected` means a launch option selected for a new session is
+ * one the provider's adapter will not apply: it names a field Delta fills in
+ * itself, it names the same field twice, or two selected Codex `config` rows
+ * disagree about one setting inside the object they merge into. The message is
+ * the only thing that says which — it names the offending field or key path —
+ * so callers show it verbatim on the failed send instead of their generic
+ * "could not be sent" copy.
  */
 export type ApiErrorCode =
   | 'resume_unavailable'
@@ -119,7 +127,8 @@ export type ApiErrorCode =
   | 'open_cwd_path_not_allowed'
   | 'open_cwd_unknown_handler'
   | 'open_cwd_command_not_found'
-  | 'open_cwd_spawn_failed';
+  | 'open_cwd_spawn_failed'
+  | 'launch_option_rejected';
 
 /** An error raised when the server responds with a non-2xx status. */
 export class ApiError extends Error {
