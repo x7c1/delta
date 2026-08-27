@@ -147,13 +147,17 @@ pub enum Error {
     Agent(String),
 
     /// A selected launch option cannot be applied to the session being started:
-    /// it names a field the provider's adapter reserves for Delta, or the same
-    /// field twice. Reported by a gateway adapter as it renders the launch
-    /// request for its provider. Surfaced as `400` — the request named a
-    /// selection the server will not honour, and the message says which one, so
-    /// the user can fix the registry entry (a silent drop or a silent override
-    /// would leave them debugging an agent that ignored their setting, or worse,
-    /// one running somewhere Delta did not record).
+    /// it names a field the provider's adapter reserves for Delta, it names the
+    /// same field twice, or — for a field the adapter *merges* rather than sets
+    /// once, like Codex's `config` object — two selections disagree about one
+    /// setting inside it. Reported by a gateway adapter as it renders the launch
+    /// request for its provider. Surfaced as `400` with the stable code
+    /// `launch_option_rejected` — the request named a selection the server will
+    /// not honour, and the message says which one (naming the offending key, or
+    /// every conflicting key path at once), so the user can fix the registry
+    /// entry (a silent drop or a silent override would leave them debugging an
+    /// agent that ignored their setting, or worse, one running somewhere Delta
+    /// did not record).
     #[error("launch option rejected: {0}")]
     LaunchOptionRejected(String),
 

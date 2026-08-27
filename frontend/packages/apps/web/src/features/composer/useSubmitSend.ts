@@ -112,7 +112,18 @@ export function useSubmitSend(): (args: {
           removeSending(id);
           markResumeUnavailable(target.sessionId);
         } else {
-          failSending(id);
+          // A refused launch option is the one send failure whose message says
+          // something the chip's own copy cannot: it names the field, or the
+          // config key path, the selection got wrong. Carry it onto the chip so
+          // the user can fix the registry row instead of guessing which of
+          // their ticked options the server disliked.
+          failSending(
+            id,
+            error instanceof ApiError &&
+              error.code === 'launch_option_rejected'
+              ? error.message
+              : undefined,
+          );
         }
         throw error;
       }

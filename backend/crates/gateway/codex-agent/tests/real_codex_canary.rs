@@ -485,8 +485,10 @@ fn git_branch_of(dir: &Path) -> Option<String> {
 /// Also worth reading in the output: the baseline roots (a start with no grant)
 /// against the granted ones. As of `codex-cli 0.144.4` the leaf override
 /// **replaces** the user's global `writable_roots` rather than unioning with it
-/// — accepted deliberately (see the adapter's module docs), and printed here so
-/// the trade-off stays visible rather than folklore.
+/// — which is why the adapter unions Delta's path *into* a list a selected
+/// `config` states rather than standing aside from it (see the adapter's module
+/// docs), and why the observation is printed here so it stays visible rather
+/// than folklore.
 ///
 /// No turn is started, so this consumes no model quota — two `thread/start`
 /// calls against the real server.

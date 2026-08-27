@@ -41,6 +41,15 @@ export interface SendingItem {
    * with the {@link SendsSlice.sending} array.
    */
   dropOnResolve?: true;
+  /**
+   * What the server said was wrong, when the rejection named something the
+   * generic failure copy cannot say — today a launch option the provider's
+   * adapter refuses (`launch_option_rejected`), whose message names the
+   * offending field or config key path. Shown verbatim under the failed chip's
+   * headline, the way a `spawn_failed` reason is; absent for every failure
+   * whose message says no more than "it failed".
+   */
+  reason?: string;
 }
 
 /**
@@ -67,8 +76,12 @@ export interface SendsSlice {
 
   /** Record a submit whose `POST /api/sends` is about to fly. */
   beginSending: (item: SendingItem) => void;
-  /** Mark an in-flight submit rejected, surfacing the recoverable chip. */
-  failSending: (id: string) => void;
+  /**
+   * Mark an in-flight submit rejected, surfacing the recoverable chip.
+   * `reason` is the server's own message when it named something specific (see
+   * {@link SendingItem.reason}).
+   */
+  failSending: (id: string, reason?: string) => void;
   /** Drop a submit chip (POST accepted, or the failure dismissed). */
   removeSending: (id: string) => void;
   /** Track an accepted send until its turn ends (real ids from the POST). */
@@ -144,10 +157,10 @@ export const createSendsSlice: StateCreator<SendsSlice, [], [], SendsSlice> = (
   beginSending: (item) =>
     set((state) => ({ sending: [...state.sending, item] })),
 
-  failSending: (id) =>
+  failSending: (id, reason) =>
     set((state) => ({
       sending: state.sending.map((item) =>
-        item.id === id ? { ...item, status: 'failed' } : item,
+        item.id === id ? { ...item, status: 'failed', reason } : item,
       ),
     })),
 

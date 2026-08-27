@@ -659,9 +659,30 @@ describe('liveStore sending (pre-acceptance submits)', () => {
 
     useLiveStore.getState().failSending('l1');
     expect(useLiveStore.getState().sending[0].status).toBe('failed');
+    // A failure the server could not explain carries no reason, so the chip
+    // shows its generic line alone.
+    expect(useLiveStore.getState().sending[0].reason).toBeUndefined();
 
     useLiveStore.getState().removeSending('l1');
     expect(useLiveStore.getState().sending).toHaveLength(0);
+  });
+
+  it('keeps the reason a rejection named, for the chip to show verbatim', () => {
+    useLiveStore.getState().beginSending({
+      id: 'l1',
+      target: { kind: 'new-session', workdir: null, launchOptionIds: [7] },
+      text: 'start a new session',
+      status: 'sending',
+      createdAt: 0,
+    });
+
+    useLiveStore
+      .getState()
+      .failSending('l1', 'launch option rejected: `cwd` cannot be used');
+
+    expect(useLiveStore.getState().sending[0].reason).toBe(
+      'launch option rejected: `cwd` cannot be used',
+    );
   });
 });
 

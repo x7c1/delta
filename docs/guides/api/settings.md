@@ -88,6 +88,34 @@ other row's. `builtin` marks these rows. Building on one means duplicating it
 into a row of your own; there is no endpoint for editing, adding to or hiding
 the catalog.
 
+One selection rule is provider-specific and worth knowing before ticking two
+rows that set the same thing. For Codex, `name` is a session-start request
+field, and a field can only be set once — so selecting two rows with the same
+`name` fails the send (`400`, `code: launch_option_rejected`). The exception is
+`config`, which is not one setting but a JSON object holding many: **several
+`config` rows may be selected together and are deep-merged** into the one object
+the request carries: nested tables merge key by key, and
+`sandbox_workspace_write.writable_roots` — a set of paths, where two rows each
+naming their machine's roots mean both — is unioned in selection order without
+repeating an entry. That is what lets Delta's shipped `Config: reasoning
+summary` row be ticked alongside a row carrying your own machine-specific
+writable roots. Only a genuine disagreement is refused — two different values
+for one setting, a scalar against a table, two different lists under any key
+*other* than `writable_roots` (an ordered list such as an MCP server's `args` is
+a sequence, not a set, so splicing two together would produce a value neither
+row asked for), or one setting written in both of Codex's spellings (the dotted
+key `sandbox_workspace_write.writable_roots` and the nested table) — and then
+the `400` names every conflicting key path at once, so the whole list can be
+fixed in one pass.
+
+Delta adds one entry of its own to that merged object. A Codex session running
+in a worktree Delta created needs the worktree's real git directory to be
+writable or git commands inside it raise approval prompts, so
+`<repo-root>/.git` is appended to whatever `writable_roots` the merged `config`
+states — under the spelling it used — and added as that key when it states
+none. Everything you wrote is kept: the grant is one added path, never a
+replacement, and it is skipped when the path is already listed.
+
 ### `GET /api/launch-options`
 
 List the registered launch options for the Settings screen to manage: the rows

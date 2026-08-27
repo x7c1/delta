@@ -313,3 +313,70 @@ pub(crate) async fn await_turn_completion(
         }
     }
 }
+
+/// A throwaway git repository on a named branch, removed on drop.
+///
+/// Used by the loops that need the real `Git` gateway to run: the branch a
+/// message reports, and the repository a worktree session is cut from, must be
+/// ones `git` actually produced rather than scripted fakes. `tag` keeps two
+/// loops' repositories apart when they run in the same process.
+pub(crate) struct GitRepoGuard {
+    dir: std::path::PathBuf,
+}
+
+impl GitRepoGuard {
+    /// Create a repository with one empty commit on `branch`.
+    ///
+    /// The commit is required, not decorative: on an unborn HEAD
+    /// `git rev-parse --abbrev-ref HEAD` exits non-zero, which the gateway
+    /// (correctly) reads as "no branch". `--initial-branch` pins the name rather
+    /// than depending on the host's `init.defaultBranch`, and the identity is
+    /// passed with `-c` so the test does not depend on the host's git config
+    /// either.
+    pub(crate) fn init(tag: &str, branch: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "fake-codex-{tag}-repo-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        Self::git(&dir, &["init", "--quiet", "--initial-branch", branch]);
+        Self::git(
+            &dir,
+            &[
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "user.name=delta test",
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ],
+        );
+        Self { dir }
+    }
+
+    /// Run one `git` invocation in `dir`, failing the test if it does not
+    /// succeed — a silently broken fixture would look like a missing branch.
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .expect("git must be available to run this test");
+        assert!(status.success(), "git {args:?} failed in {dir:?}");
+    }
+
+    pub(crate) fn path(&self) -> String {
+        self.dir.to_string_lossy().into_owned()
+    }
+}
+
+impl Drop for GitRepoGuard {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.dir).ok();
+    }
+}

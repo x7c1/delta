@@ -87,9 +87,10 @@ export function PendingQueue({ entries }: PendingQueueProps) {
     text: string,
     message: string,
     actions: ReactNode,
-    // What the server said went wrong, when it could name it (see
-    // `SpawnItem.reason`). Shown verbatim *under* the generic line rather than
-    // replacing it: that line says what to do, this says what happened.
+    // What the server said went wrong, when it could name it (a failed spawn's
+    // `SpawnItem.reason`, or a refused launch option's `SendingItem.reason`).
+    // Shown verbatim *under* the generic line rather than replacing it: that
+    // line says what to do, this says what happened.
     reason?: string,
   ) => (
     <li
@@ -351,6 +352,7 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                       Dismiss
                     </Button>
                   </>,
+                  entry.item.reason,
                 );
               }
               return sendRow(

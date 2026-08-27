@@ -14,6 +14,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "process", "sync", "rt", "macros"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 # The real-codex canary (`tests/real_codex_canary.rs`) drives the adapter on a
