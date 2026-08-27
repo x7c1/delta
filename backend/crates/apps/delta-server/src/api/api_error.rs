@@ -65,6 +65,15 @@ const CLONE_ROOT_NOT_REGISTERED_CODE: &str = "clone_root_not_registered";
 /// client only meets this from a stale list.
 const LAUNCH_OPTION_BUILTIN_CODE: &str = "launch_option_builtin";
 
+/// Stable machine-readable code for a session-start selection the provider's
+/// adapter will not apply (a Delta-owned field, the same field twice, or two
+/// selected Codex `config` rows that disagree about one setting). The message is
+/// the only thing that says *which* selection is wrong — it names the offending
+/// key, or every conflicting key path — so the frontend shows it verbatim on the
+/// failed send rather than a generic "could not be sent", and the code is what
+/// tells it this `400` carries such a message at all.
+const LAUNCH_OPTION_REJECTED_CODE: &str = "launch_option_rejected";
+
 /// Stable machine-readable code for a clone whose destination
 /// (`<clone_root>/<repo_name>`) already exists. The clone panel shows the
 /// message inline on the row; there is no fallback naming, so the way past it
@@ -260,10 +269,15 @@ impl IntoResponse for ApiError {
                     // field.
                     Error::InvalidPromptTemplate(_) => (StatusCode::BAD_REQUEST, None),
                     // A selected launch option the provider's adapter will not
-                    // apply (a Delta-owned field, or the same field twice):
-                    // the caller can fix it, so 400 with the adapter's message
-                    // naming the offending key.
-                    Error::LaunchOptionRejected(_) => (StatusCode::BAD_REQUEST, None),
+                    // apply (a Delta-owned field, the same field twice, or two
+                    // selected Codex `config` rows disagreeing about one
+                    // setting): the caller can fix it, so 400 with the
+                    // adapter's message naming the offending key path(s), and a
+                    // stable code so the frontend knows to show that message
+                    // instead of its generic failure copy.
+                    Error::LaunchOptionRejected(_) => {
+                        (StatusCode::BAD_REQUEST, Some(LAUNCH_OPTION_REJECTED_CODE))
+                    }
                     // A delete aimed at a launch option Delta ships. A 409,
                     // not a 400: the id is fine and the same call against a
                     // user row is honoured — it is the target's state that

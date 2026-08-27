@@ -5,7 +5,8 @@ use axum::http::StatusCode;
 use serde_json::json;
 
 use crate::support::{
-    build_app, drain_one_turn, get, post_json, register_launch_option, ScenarioGuard, REPLY,
+    build_app, drain_one_turn, get, post_json, register_launch_option, GitRepoGuard, ScenarioGuard,
+    REPLY,
 };
 
 /// The Codex **message-metadata** full loop: a persisted Codex message reports
@@ -35,7 +36,7 @@ use crate::support::{
 async fn codex_messages_report_the_resolved_model_the_observed_branch_and_the_launch_dir() {
     const RESOLVED_MODEL: &str = "gpt-5.6-sol";
     const OBSERVED_BRANCH: &str = "feature/observed-by-delta";
-    let repo = GitRepoGuard::init(OBSERVED_BRANCH);
+    let repo = GitRepoGuard::init("metadata", OBSERVED_BRANCH);
     let scenario = ScenarioGuard::write(&format!(
         r#"{{
             "thread_id": "thr_metadata",
@@ -120,70 +121,5 @@ async fn codex_messages_report_the_resolved_model_the_observed_branch_and_the_la
              observed by Delta — this session has no worktree, so nothing else \
              knows it: {message:?}"
         );
-    }
-}
-
-/// A throwaway git repository on a named branch, removed on drop.
-///
-/// Used by the metadata loop to exercise the real `Git` gateway: the branch a
-/// message reports must be one `git` actually produced, not a scripted fake.
-struct GitRepoGuard {
-    dir: std::path::PathBuf,
-}
-
-impl GitRepoGuard {
-    /// Create a repository with one empty commit on `branch`.
-    ///
-    /// The commit is required, not decorative: on an unborn HEAD
-    /// `git rev-parse --abbrev-ref HEAD` exits non-zero, which the gateway
-    /// (correctly) reads as "no branch". `--initial-branch` pins the name rather
-    /// than depending on the host's `init.defaultBranch`, and the identity is
-    /// passed with `-c` so the test does not depend on the host's git config
-    /// either.
-    fn init(branch: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "fake-codex-metadata-repo-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        std::fs::remove_dir_all(&dir).ok();
-        std::fs::create_dir_all(&dir).unwrap();
-        Self::git(&dir, &["init", "--quiet", "--initial-branch", branch]);
-        Self::git(
-            &dir,
-            &[
-                "-c",
-                "user.email=test@example.invalid",
-                "-c",
-                "user.name=delta test",
-                "commit",
-                "--quiet",
-                "--allow-empty",
-                "-m",
-                "initial",
-            ],
-        );
-        Self { dir }
-    }
-
-    /// Run one `git` invocation in `dir`, failing the test if it does not
-    /// succeed — a silently broken fixture would look like a missing branch.
-    fn git(dir: &std::path::Path, args: &[&str]) {
-        let status = std::process::Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .status()
-            .expect("git must be available to run this test");
-        assert!(status.success(), "git {args:?} failed in {dir:?}");
-    }
-
-    fn path(&self) -> String {
-        self.dir.to_string_lossy().into_owned()
-    }
-}
-
-impl Drop for GitRepoGuard {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.dir).ok();
     }
 }

@@ -79,7 +79,10 @@ status codes and error bodies — is documented here only.
     `permission_decision_unsupported` from
     [`POST /api/permissions/{id}/decision`](sends.md#post-apipermissionsiddecision)
     (a decision value this session's provider cannot express — nothing is
-    mutated).
+    mutated), or `launch_option_rejected` from
+    [`POST /api/sends`](sends.md#post-apisends) (a selected launch option the
+    provider's adapter will not apply; the message names the offending field or
+    config key path).
   - `403 Forbidden` — a path the server is not permitted to read, as opposed to
     one that does not exist. Returned by the directory browse
     ([workdirs.md — `GET /api/workdir/list`](workdirs.md#get-apiworkdirlist)).

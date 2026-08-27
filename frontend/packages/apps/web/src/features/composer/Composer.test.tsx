@@ -567,6 +567,50 @@ describe('Composer', () => {
     return { read: () => captured };
   }
 
+  // A launch option the provider's adapter will not apply is refused with a
+  // stable code and a message that names WHICH selection is wrong — the field
+  // Delta owns, or the `config` key path two selected rows disagree about. That
+  // message is the only account the user gets, so the chip has to keep it
+  // rather than collapse it into "the session failed to start".
+  it('keeps a refused launch option message on the failed chip', async () => {
+    const message =
+      'launch option rejected: the selected `config` options disagree: ' +
+      '`model_reasoning_effort` is set to both "high" and "low"';
+    server.use(
+      http.post('*/api/sends', () =>
+        HttpResponse.json(
+          { error: message, code: 'launch_option_rejected' },
+          { status: 400 },
+        ),
+      ),
+    );
+    useComposerStore.setState({
+      newSessionWorkdir: '/home/dev/projects/delta',
+      newSessionLaunchOptionIds: [3, 1],
+    });
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer mode={{ kind: 'new-session' }} />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start with options' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      const sending = useLiveStore.getState().sending;
+      expect(sending[0]?.status).toBe('failed');
+      expect(sending[0]?.reason).toBe(message);
+    });
+  });
+
   it('wires the auto-grow effect: an inline height and overflow style are applied', async () => {
     // jsdom performs no layout, so `scrollHeight` is 0 and the clamp resolves to
     // the min height; we cannot assert real growth here (covered by the

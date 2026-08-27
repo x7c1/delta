@@ -171,9 +171,12 @@ Response:
   a branch (`semantic_parent_uuid`). Also a `workdir` that does not exist or is
   not a directory, a `worktree` requested without a `workdir` or for a directory
   that is not a git repository, and a selected launch option the provider's
-  adapter refuses. A malformed body or a missing required field such as `text`
-  is rejected earlier as one of the framework-level `400`/`415`/`422` cases in
-  [README.md](README.md).
+  adapter refuses (body `code: "launch_option_rejected"` — it names a field
+  Delta sets itself, names the same field twice, or two selected Codex `config`
+  rows disagree about one setting inside the object they merge into; the message
+  names the offending key or key paths). A malformed body or a missing required
+  field such as `text` is rejected earlier as one of the framework-level
+  `400`/`415`/`422` cases in [README.md](README.md).
 - **404** — no thread (or branch parent thread) with the given `thread_id`.
 - **409** — the target's session is closed and cannot be resumed because its
   transcript is gone (body `code: "resume_unavailable"`). No send is enqueued and
