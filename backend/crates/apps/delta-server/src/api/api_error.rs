@@ -10,11 +10,15 @@ use delta_wire::rest::WireErrorBody;
 /// error body so the frontend can distinguish it from a generic failure.
 const RESUME_UNAVAILABLE_CODE: &str = "resume_unavailable";
 
-/// Stable machine-readable code for a send aimed at a session whose launch has
-/// not bound yet. Such a session is listed (and focusable) from the moment its
-/// first send is accepted, so a stale client can reach its composer while it is
-/// still starting; the code lets the frontend say exactly that instead of
-/// rendering a generic failure.
+/// Stable machine-readable code for a **branch** send aimed at a session whose
+/// launch has not bound yet. Such a session is listed (and focusable) from the
+/// moment its first send is accepted, so its composer is reachable while it is
+/// still starting — and a plain send there is accepted as a `queued` row rather
+/// than refused. A branch send is the one shape with nowhere to go: the session
+/// has ingested no message to branch from. The browser cannot compose one
+/// either, for the same reason (branching anchors on a message), so no frontend
+/// path words this code today; it keeps the case distinguishable for an API
+/// client, and for a browser that grows the path later.
 const SESSION_SPAWNING_CODE: &str = "session_spawning";
 
 /// Stable machine-readable code for a permission decision that can no longer
@@ -148,10 +152,10 @@ impl IntoResponse for ApiError {
                         (StatusCode::CONFLICT, Some(RESUME_UNAVAILABLE_CODE))
                     }
                     // The session exists but its launch has not bound yet, so
-                    // there is nothing to dispatch into: a conflict with
-                    // current state (the same send succeeds once the launch
-                    // registers), reported with a stable code so the frontend
-                    // can say the session is still starting.
+                    // it has no message to branch from: a conflict with current
+                    // state (the same branch send succeeds once the launch
+                    // registers), reported with a stable code so a client can
+                    // tell it apart from a generic failure.
                     Error::SessionSpawning(_) => {
                         (StatusCode::CONFLICT, Some(SESSION_SPAWNING_CODE))
                     }
@@ -338,9 +342,10 @@ mod tests {
         (status, code)
     }
 
-    /// A send to a session whose launch has not bound yet is a conflict with
-    /// current state, not a server fault: `409` with the `session_spawning`
-    /// code the browser words as "this session is still starting".
+    /// A branch send to a session whose launch has not bound yet is a conflict
+    /// with current state, not a server fault: `409` with the stable
+    /// `session_spawning` code, which keeps it distinguishable from the other
+    /// send-time conflict. (A plain send there is queued, never refused.)
     #[tokio::test]
     async fn a_still_spawning_session_renders_a_conflict_with_its_code() {
         let (status, code) = rendered(delta_usecase::Error::SessionSpawning("sess-1".into())).await;

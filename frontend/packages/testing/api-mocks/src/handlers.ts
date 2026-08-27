@@ -577,12 +577,14 @@ export function createMockApi(): MockApi {
         return HttpResponse.json({ error: 'unknown thread' }, { status: 404 });
       }
       // A still-`spawning` session is listed, so its composer is reachable
-      // before its launch has registered — and there is nothing to dispatch
-      // into yet. The real server refuses such a send with `409`
-      // `session_spawning` rather than resuming a second agent; mirror it, or a
-      // frontend that stopped disabling the starting composer would sail
-      // through the suites.
-      if (session.spawning) {
+      // before its launch has bound — and there is nothing to dispatch into
+      // yet. The real server still *accepts* a plain send there, recording it
+      // as a `queued` row it types once the launch binds (handled below, by the
+      // `spawning` branch on the row's status); a **branch** send is the one
+      // shape it refuses, because the session has ingested no message to branch
+      // from. Mirror exactly that split, or a frontend that mis-handles either
+      // half would sail through the suites.
+      if (session.spawning && target.semantic_parent_uuid) {
         return HttpResponse.json(
           {
             error: `session is still starting: ${session.session.id}`,
@@ -621,7 +623,9 @@ export function createMockApi(): MockApi {
         semantic_parent_uuid: target.semantic_parent_uuid ?? null,
         text: target.text,
         locator_quote: target.locator_quote ?? null,
-        status: 'dispatched',
+        // A send accepted while the session is still starting has reached no
+        // agent: the server records it `queued` and types it at the bind.
+        status: session.spawning ? 'queued' : 'dispatched',
         matched_uuid: null,
         created_at: new Date().toISOString(),
         held_at: null,

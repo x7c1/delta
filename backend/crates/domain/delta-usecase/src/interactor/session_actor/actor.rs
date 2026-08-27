@@ -292,6 +292,9 @@ where
         SessionInput::ReleaseSend { send_id, reply } => {
             let _ = reply.send(ctx.release_send(send_id).await);
         }
+        SessionInput::FlushQueuedSend => {
+            ctx.flush_queued_send_async().await;
+        }
         SessionInput::IngestAgentEvent { event } => {
             ctx.on_agent_event(event).await;
         }

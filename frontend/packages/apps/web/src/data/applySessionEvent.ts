@@ -27,7 +27,8 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
  *   session's presence and open flag stay in sync.
  * - **Nav store** (Zustand): one case only — a `spawn_failed` for the focused
  *   session, which is about to stop existing, so focus is handed back to the
- *   new-session screen where its Retry / Dismiss card lives.
+ *   new-session screen where its Retry / Dismiss card lives (and where the live
+ *   store has just restored whatever the failed launch never sent).
  * - **Live store** (Zustand): ephemeral UI signals that are not REST resources
  *   — turn tracking, the spawn registry, permission notices, unread badges,
  *   external input, and the per-session resuming marker.
@@ -239,10 +240,13 @@ export function applySessionEvent(
       break;
     case 'spawn_failed':
       // A freshly-spawned session never bound; the server reaped its row (the
-      // store flips the tracked spawn to a Retry/Dismiss chip). Drop the
-      // session's cached open sends — the row is gone, so a refetch would only
-      // 404 — and refetch the session list, which was listing the starting
-      // session and must now lose it.
+      // store flips the tracked spawn to a Retry/Dismiss chip and restores
+      // `event.unsent` into the new-session composer draft). That restore
+      // happens in `store.applyEvent` above, i.e. strictly before the focus
+      // handoff below, so the composer mounts with the text already in place.
+      // Drop the session's cached open sends — the
+      // row is gone, so a refetch would only 404 — and refetch the session
+      // list, which was listing the starting session and must now lose it.
       removeSessionSends(queryClient, event.session_id);
       invalidateSessions(queryClient);
       // The user is very likely looking at it: the workspace focuses a

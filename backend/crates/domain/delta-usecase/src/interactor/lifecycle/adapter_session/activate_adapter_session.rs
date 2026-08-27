@@ -37,10 +37,14 @@ where
     /// 3. The first prompt, if any, is promoted and dispatched.
     /// 4. [`SessionEvent::SessionRegistered`] goes out on the async seam. This
     ///    is the browser's release signal for the spawn it is tracking (the
-    ///    composer re-enables on it), so it is emitted last: only now is every
-    ///    claim it makes about the session true. Its Claude counterpart is the
-    ///    first `UserPromptSubmit` hook's registration, which an adapter-backed
+    ///    composer re-enables on it), so it is announced only once every claim
+    ///    it makes about the session is true — and before anything this bind
+    ///    dispatches, so no `SendDispatched` reaches the browser for a session
+    ///    it has not seen registered. Its Claude counterpart is the first
+    ///    `UserPromptSubmit` hook's registration, which an adapter-backed
     ///    session never has.
+    /// 5. The queue is flushed ([`Self::flush_queued_send_async`]), covering the
+    ///    rows this session accepted while it was still spawning.
     ///
     /// Returns `Err` on any failure, which the launch task reports as
     /// `LaunchFinished(Err)` so the standard rollback runs — including closing
@@ -85,6 +89,24 @@ where
             "adapter-backed session bound (terminal-less); provider ids persisted"
         );
         self.emit_async_event(crate::ports::SessionEvent::SessionRegistered { session_id });
+        // A session accepts plain sends as `queued` rows for as long as it is
+        // spawning, and this bind is the moment they become dispatchable. The
+        // first prompt above usually covers that: dispatching it leaves the
+        // turn `InFlight`, so this flush finds a busy turn and does nothing,
+        // and the rest of the queue drains at that turn's `turn/completed`.
+        // What it covers is the launch that starts no turn at all — a spawn
+        // that carried no first prompt, or one whose first prompt was cancelled
+        // during the launch window. No turn end is coming there, so without
+        // this flush every row accepted in that window would sit `queued` until
+        // the user sent again. The turn-idle guard inside makes it exactly one
+        // dispatch either way.
+        //
+        // Called, not posted: unlike the Claude bind (`bind_pending_spawn`),
+        // which runs inside a hook that blocks `claude` and so must not type
+        // into a TUI that is not yet accepting input, this already runs on the
+        // actor, and an adapter-backed send is a request rather than a
+        // keystroke.
+        self.flush_queued_send_async().await;
         Ok(())
     }
 

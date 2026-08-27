@@ -152,6 +152,7 @@ function trackedSpawn(sessionId: string) {
     sessionId,
     threadId: SESSION_2_MAIN_THREAD_ID,
     text: 'first message',
+    firstSendId: 1,
     workdir: null,
     launchOptionIds: [],
     provider: 'claude' as const,
@@ -443,6 +444,7 @@ describe('WorkspaceScreen multi-session', () => {
       kind: 'spawn_failed',
       session_id: UNLISTED_SPAWN_ID,
       pane_token: 'delta-9',
+      unsent: [],
     });
 
     await waitFor(() =>

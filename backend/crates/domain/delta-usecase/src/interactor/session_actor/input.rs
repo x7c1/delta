@@ -268,6 +268,24 @@ pub(in crate::interactor) enum SessionInput {
         reply: Reply<Option<SessionEvent>>,
     },
 
+    // ---- Queue flush --------------------------------------------------------
+    /// Dispatch this session's oldest `queued` send if the session is now idle
+    /// and live — posted by the actor to *itself* from the hook that binds a
+    /// fresh spawn.
+    ///
+    /// Posted rather than dispatched inline because a hook handler must never
+    /// type keystrokes — `hooks::bind_pending_spawn` has the reasoning and the
+    /// bind shapes this covers. The post moves the dispatch to the next mailbox
+    /// iteration, after the hook has returned.
+    ///
+    /// Fire-and-forget: the poster is a hook with nothing to return the
+    /// resulting [`SessionEvent::SendDispatched`] to, so the handler emits it
+    /// on the async seam. A no-op whenever the queue is empty or the session is
+    /// not idle-and-live.
+    ///
+    /// [`SessionEvent::SendDispatched`]: crate::ports::SessionEvent::SendDispatched
+    FlushQueuedSend,
+
     // ---- Agent event pump --------------------------------------------------
     /// One neutral [`AgentEvent`] from a terminal-less agent session's event
     /// stream (Codex), delivered by that session's event pump.

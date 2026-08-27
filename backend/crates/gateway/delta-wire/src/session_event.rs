@@ -1,6 +1,6 @@
 //! The wire form of [`SessionEvent`].
 
-use delta_usecase::{RateLimitWindow, SessionEvent, StatusSnapshot};
+use delta_usecase::{RateLimitWindow, SessionEvent, StatusSnapshot, UnsentSend};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -150,6 +150,16 @@ pub enum WireSessionEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         reason: Option<String>,
+        /// Every send the failed launch accepted but never delivered, oldest
+        /// first — the first prompt included. The rows are deleted with the
+        /// session, so this frame is the last place their text exists.
+        ///
+        /// Always present (`[]` when the spawn had nothing outstanding), so a
+        /// client reads it without a presence check. A client restores the
+        /// entries it does not already hold — the spawn's own first prompt is
+        /// already on its Retry chip — into its composer draft. Nothing here is
+        /// re-sent by the server.
+        unsent: Vec<WireUnsentSend>,
     },
     /// A chunk of the in-flight turn's assistant message, streamed live.
     AssistantStreaming {
@@ -265,6 +275,27 @@ pub struct WireRateLimitWindow {
     pub used_percentage: Option<f64>,
     /// Unix epoch seconds at which the window resets.
     pub resets_at: Option<i64>,
+}
+
+/// The wire form of one send a failed launch never delivered — the twin of
+/// [`UnsentSend`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(rename = "UnsentSend")]
+pub struct WireUnsentSend {
+    /// The deleted `send` row's id, so a client can tell the spawn's own first
+    /// prompt apart from the messages typed after it.
+    pub send_id: i64,
+    /// The message the user composed, exactly as it was accepted.
+    pub text: String,
+}
+
+impl From<UnsentSend> for WireUnsentSend {
+    fn from(send: UnsentSend) -> Self {
+        Self {
+            send_id: send.send_id,
+            text: send.text,
+        }
+    }
 }
 
 impl From<RateLimitWindow> for WireRateLimitWindow {
@@ -399,10 +430,12 @@ impl From<SessionEvent> for WireSessionEvent {
                 session_id,
                 pane_token,
                 reason,
+                unsent,
             } => Self::SpawnFailed {
                 session_id: session_id.0,
                 pane_token,
                 reason,
+                unsent: unsent.into_iter().map(WireUnsentSend::from).collect(),
             },
             SessionEvent::AssistantStreaming {
                 session_id,
@@ -590,6 +623,10 @@ fn sample_events() -> Vec<WireSessionEvent> {
             session_id: session_id(),
             pane_token: Some("delta-sample".to_owned()),
             reason: Some("git error: worktree add failed".to_owned()),
+            unsent: vec![WireUnsentSend {
+                send_id: 7,
+                text: "the message that never went out".to_owned(),
+            }],
         },
         WireSessionEvent::AssistantStreaming {
             session_id: session_id(),
@@ -707,9 +744,10 @@ mod tests {
         );
     }
 
-    /// The watchdog-shaped producers name no cause, and the frame is then
-    /// byte-for-byte the one it has always been: the `reason` key is absent,
-    /// not `null`.
+    /// The watchdog-shaped producers name no cause, so the `reason` key is
+    /// absent rather than `null`. `unsent` is always present: a spawn with
+    /// nothing outstanding reports an empty list, not a missing key, so a
+    /// client reads it without a presence check.
     #[test]
     fn spawn_failed_serializes_with_id_and_pane_token() {
         assert_eq!(
@@ -717,11 +755,45 @@ mod tests {
                 session_id: "sess-1".into(),
                 pane_token: Some("delta-1".into()),
                 reason: None,
+                unsent: Vec::new(),
             }),
             serde_json::json!({
                 "kind": "spawn_failed",
                 "session_id": "sess-1",
                 "pane_token": "delta-1",
+                "unsent": [],
+            }),
+        );
+    }
+
+    /// Each undelivered send serializes as its row id plus its text, and the
+    /// list keeps the id order it was read in.
+    #[test]
+    fn spawn_failed_carries_the_undelivered_sends_in_order() {
+        assert_eq!(
+            json(&WireSessionEvent::SpawnFailed {
+                session_id: "sess-1".into(),
+                pane_token: Some("delta-1".into()),
+                reason: None,
+                unsent: vec![
+                    WireUnsentSend {
+                        send_id: 1,
+                        text: "first message".into(),
+                    },
+                    WireUnsentSend {
+                        send_id: 2,
+                        text: "and one more".into(),
+                    },
+                ],
+            }),
+            serde_json::json!({
+                "kind": "spawn_failed",
+                "session_id": "sess-1",
+                "pane_token": "delta-1",
+                "unsent": [
+                    { "send_id": 1, "text": "first message" },
+                    { "send_id": 2, "text": "and one more" },
+                ],
             }),
         );
     }
@@ -735,11 +807,13 @@ mod tests {
                 session_id: "sess-1".into(),
                 pane_token: None,
                 reason: Some("agent error: codex is not installed".into()),
+                unsent: Vec::new(),
             }),
             serde_json::json!({
                 "kind": "spawn_failed",
                 "session_id": "sess-1",
                 "reason": "agent error: codex is not installed",
+                "unsent": [],
             }),
         );
     }
@@ -754,12 +828,14 @@ mod tests {
                 session_id: "sess-1".into(),
                 pane_token: Some("delta-1".into()),
                 reason: Some("git error: worktree add failed".into()),
+                unsent: Vec::new(),
             }),
             serde_json::json!({
                 "kind": "spawn_failed",
                 "session_id": "sess-1",
                 "pane_token": "delta-1",
                 "reason": "git error: worktree add failed",
+                "unsent": [],
             }),
         );
     }

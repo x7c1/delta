@@ -5,6 +5,10 @@ import type { Send } from '@delta/wire-gen';
 import { applySessionEvent } from './applySessionEvent';
 import { noticeOf, useLiveStore } from '../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
+import {
+  NEW_SESSION_DRAFT_KEY,
+  useComposerStore,
+} from '../store/composerStore';
 
 const FOCUSED = 'sess-1';
 
@@ -37,6 +41,9 @@ describe('applySessionEvent', () => {
       streamingMessages: {},
     });
     useNavStore.setState({ focusedSessionId: FOCUSED });
+    // A failed spawn restores its undelivered text into the new-session draft,
+    // so the composer store is shared state these tests move too.
+    useComposerStore.setState({ drafts: {} });
   });
 
   it('invalidates the focused active thread, its session threads, and its open sends on turn_started', () => {
@@ -483,6 +490,7 @@ describe('applySessionEvent', () => {
       sessionId: 'sess-spawned',
       threadId: 42,
       text: 'new session',
+      firstSendId: 1,
       workdir: null,
       launchOptionIds: [],
       provider: 'claude',
@@ -493,7 +501,12 @@ describe('applySessionEvent', () => {
     });
 
     applySessionEvent(
-      { kind: 'spawn_failed', session_id: 'sess-spawned', pane_token: 'pane-1' },
+      {
+        kind: 'spawn_failed',
+        session_id: 'sess-spawned',
+        pane_token: 'pane-1',
+        unsent: [],
+      },
       queryClient,
       null,
       FOCUSED,
@@ -521,6 +534,7 @@ describe('applySessionEvent', () => {
       sessionId: 'sess-spawned',
       threadId: 42,
       text: 'new session',
+      firstSendId: 1,
       workdir: null,
       launchOptionIds: [],
       provider: 'claude',
@@ -528,7 +542,12 @@ describe('applySessionEvent', () => {
     });
 
     applySessionEvent(
-      { kind: 'spawn_failed', session_id: 'sess-spawned', pane_token: 'pane-1' },
+      {
+        kind: 'spawn_failed',
+        session_id: 'sess-spawned',
+        pane_token: 'pane-1',
+        unsent: [],
+      },
       queryClient,
       null,
       'sess-spawned',
@@ -536,6 +555,48 @@ describe('applySessionEvent', () => {
 
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
     expect(useLiveStore.getState().spawns[0].status).toBe('failed');
+  });
+
+  it('restores the failed launch’s unsent text before handing focus back', () => {
+    // The `send` rows are deleted server-side, so the event is the last copy of
+    // what the user typed after the first prompt. It has to be in the draft
+    // before focus returns to the new-session screen, or the composer would
+    // mount empty and only fill in on a later render.
+    const queryClient = new QueryClient();
+    useNavStore.setState({ focusedSessionId: 'sess-spawned' });
+    useComposerStore.getState().setDraft(NEW_SESSION_DRAFT_KEY, 'meanwhile');
+    useLiveStore.getState().trackSpawn({
+      sessionId: 'sess-spawned',
+      threadId: 42,
+      text: 'new session',
+      firstSendId: 1,
+      workdir: null,
+      launchOptionIds: [],
+      provider: 'claude',
+      worktree: null,
+    });
+
+    applySessionEvent(
+      {
+        kind: 'spawn_failed',
+        session_id: 'sess-spawned',
+        pane_token: 'pane-1',
+        unsent: [
+          { send_id: 1, text: 'new session' },
+          { send_id: 2, text: 'typed while it started' },
+        ],
+      },
+      queryClient,
+      null,
+      'sess-spawned',
+    );
+
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    // Appended below what was already there, and without the first prompt (the
+    // Retry chip holds that one).
+    expect(useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY]).toBe(
+      'meanwhile\n\ntyped while it started',
+    );
   });
 
   it('routes a permission request to the store as a notice', () => {

@@ -17,11 +17,28 @@ export interface PendingQueueProps {
   /**
    * True while the surface's session is still starting (`status: 'spawning'`),
    * relayed by the transcript pane which already resolves it. It only changes
-   * what a `queued` row says (a Codex launch parks its first prompt as
-   * `queued` until `thread/start` answers). Defaults to `false` — a surface
-   * that never starts a session.
+   * what a `queued` row says: every send accepted during the launch window sits
+   * `queued` until the launch binds, whichever provider it starts. Defaults to
+   * `false` — a surface that never starts a session.
    */
   sessionSpawning?: boolean;
+}
+
+/**
+ * The failed-spawn row's account of the messages that did not stay on it: a
+ * launch that failed with sends queued behind its first prompt hands those back
+ * to the new-session composer (see `SpawnItem.restoredCount`), which is a
+ * different screen from the one the user may be on and holds no trace of where
+ * they came from. Retry re-sends the row's own prompt and nothing else, so the
+ * line says both halves. `undefined` when there is nothing to account for.
+ */
+function restoredNote(restoredCount: number | undefined): string | undefined {
+  if (restoredCount === undefined || restoredCount === 0) {
+    return undefined;
+  }
+  return restoredCount === 1
+    ? '1 later message was returned to the composer. Retry re-sends only this one.'
+    : `${restoredCount} later messages were returned to the composer. Retry re-sends only this one.`;
 }
 
 /**
@@ -105,6 +122,9 @@ export function PendingQueue({
     // Shown verbatim *under* the generic line rather than replacing it: that
     // line says what to do, this says what happened.
     reason?: string,
+    // Where the rest of the user's text went, for a failed spawn that put its
+    // later messages back in the new-session composer (see `restoredNote`).
+    note?: string,
   ) => (
     <li
       key={key}
@@ -121,6 +141,11 @@ export function PendingQueue({
       {reason && (
         <p className="break-words text-muted" data-testid="pending-fail-reason">
           {reason}
+        </p>
+      )}
+      {note && (
+        <p className="break-words text-muted" data-testid="pending-fail-note">
+          {note}
         </p>
       )}
       <div className="flex justify-end gap-2">{actions}</div>
@@ -412,6 +437,7 @@ export function PendingQueue({
                   </Button>
                 </>,
                 entry.spawn.reason,
+                restoredNote(entry.spawn.restoredCount),
               );
           }
         })}

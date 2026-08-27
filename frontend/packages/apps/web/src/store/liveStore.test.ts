@@ -6,6 +6,8 @@ import {
   useLiveStore,
   type LocalSend,
 } from './liveStore';
+import { NEW_SESSION_DRAFT_KEY, useComposerStore } from './composerStore';
+import { useNotificationStore } from './notificationStore';
 import { loadPersistedStatus } from './statusPersistence';
 
 function reset() {
@@ -22,6 +24,11 @@ function reset() {
     contextUsage: {},
     rateLimits: {},
   });
+  // A failed spawn restores its undelivered text into the new-session draft,
+  // and a failure with no chip to carry it announces itself in the app-wide
+  // snackbar, so both stores are shared state these tests move too.
+  useComposerStore.setState({ drafts: {} });
+  useNotificationStore.setState({ errors: [] });
 }
 
 /**
@@ -700,14 +707,40 @@ describe('liveStore spawn tracking', () => {
   beforeEach(reset);
 
   function trackOne(sessionId = 'sess-spawn-1') {
+    // The submit hook drops the in-flight chip before it registers the spawn.
+    useLiveStore.getState().removeSending('local-new-session');
     useLiveStore.getState().trackSpawn({
       sessionId,
       threadId: 42,
       text: 'start a new session',
+      firstSendId: 7,
       workdir: '/work/dir',
       launchOptionIds: [],
       provider: 'claude',
       worktree: null,
+    });
+  }
+
+  /**
+   * The in-flight chip a new-session submit records before its
+   * `POST /api/sends` leaves. Its presence is what tells a `spawn_failed` for
+   * an id this client does not track apart from one whose registration is
+   * never coming at all — so every "the failure outran the POST" test has to
+   * put the client in that window first.
+   */
+  function beginNewSessionPost() {
+    useLiveStore.getState().beginSending({
+      id: 'local-new-session',
+      target: {
+        kind: 'new-session',
+        workdir: '/work/dir',
+        launchOptionIds: [],
+        provider: 'claude',
+        worktree: null,
+      },
+      text: 'start a new session',
+      status: 'sending',
+      createdAt: Date.now(),
     });
   }
 
@@ -721,6 +754,7 @@ describe('liveStore spawn tracking', () => {
       kind: 'spawn_failed',
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
+      unsent: [],
     });
 
     const spawn = useLiveStore.getState().spawns[0];
@@ -743,6 +777,7 @@ describe('liveStore spawn tracking', () => {
       sessionId: 'sess-spawn-codex',
       threadId: 42,
       text: 'start on codex',
+      firstSendId: 7,
       workdir: '/work/dir',
       launchOptionIds: [4],
       provider: 'codex',
@@ -753,6 +788,7 @@ describe('liveStore spawn tracking', () => {
       kind: 'spawn_failed',
       session_id: 'sess-spawn-codex',
       pane_token: 'pane-1',
+      unsent: [],
     });
 
     const spawn = useLiveStore.getState().spawns[0];
@@ -773,6 +809,7 @@ describe('liveStore spawn tracking', () => {
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       reason: 'git error: invalid reference: origin/nope',
+      unsent: [],
     });
 
     expect(useLiveStore.getState().spawns[0].reason).toBe(
@@ -781,11 +818,13 @@ describe('liveStore spawn tracking', () => {
   });
 
   it('carries the reason through a failure that outran its POST response', () => {
+    beginNewSessionPost();
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       reason: 'git error: worktree add failed',
+      unsent: [],
     });
     trackOne();
 
@@ -820,6 +859,7 @@ describe('liveStore spawn tracking', () => {
       kind: 'spawn_failed',
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
+      unsent: [],
     });
 
     useLiveStore.getState().applyEvent({
@@ -847,6 +887,7 @@ describe('liveStore spawn tracking', () => {
       kind: 'spawn_failed',
       session_id: 'sess-someone-elses',
       pane_token: 'pane-x',
+      unsent: [],
     });
     expect(useLiveStore.getState().spawns[0].status).toBe('spawning');
   });
@@ -856,10 +897,12 @@ describe('liveStore spawn tracking', () => {
     // broadcast can land before this client processes the response that
     // carries the spawn's ids. The failure must be buffered, not dropped, or
     // the chip spins forever (regression: it was dropped).
+    beginNewSessionPost();
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
+      unsent: [],
     });
     expect(useLiveStore.getState().spawns).toHaveLength(0);
 
@@ -882,10 +925,12 @@ describe('liveStore spawn tracking', () => {
   });
 
   it('drops a buffered early failure once that session registers', () => {
+    beginNewSessionPost();
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
       session_id: 'sess-foreign',
       pane_token: 'pane-x',
+      unsent: [],
     });
     expect(
       noticeOf(notices(), 'sess-foreign', 'spawn_failure_buffered'),
@@ -910,11 +955,13 @@ describe('liveStore spawn tracking', () => {
       kind: 'spawn_failed',
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
+      unsent: [],
     });
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
+      unsent: [],
     });
     expect(useLiveStore.getState().spawns[0].status).toBe('failed');
     expect(
@@ -928,6 +975,7 @@ describe('liveStore spawn tracking', () => {
       kind: 'spawn_failed',
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
+      unsent: [],
     });
 
     // A failed chip is terminal: an unrelated turn ending must not silently
@@ -944,6 +992,198 @@ describe('liveStore spawn tracking', () => {
     expect(useLiveStore.getState().spawns).toHaveLength(0);
   });
 
+  it('restores the unsent text of a failed launch into the new-session draft', () => {
+    // The server deletes a failed spawn's `send` rows, so the event is the last
+    // copy of what the user wrote. The spawn's own first prompt is excluded —
+    // the Retry chip re-sends exactly that — and everything typed after it,
+    // which has no other home, goes back into the composer in composition
+    // order. Nothing is re-sent.
+    trackOne();
+
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      unsent: [
+        { send_id: 7, text: 'start a new session' },
+        { send_id: 8, text: 'and one more' },
+        { send_id: 9, text: 'and another' },
+      ],
+    });
+
+    expect(
+      useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY],
+    ).toBe('and one more\n\nand another');
+    // Recorded on the chip, which is the only place that can tell the user
+    // where those two went — Retry re-sends the first prompt alone.
+    expect(useLiveStore.getState().spawns[0].restoredCount).toBe(2);
+  });
+
+  it('appends the unsent text below whatever the draft already held', () => {
+    // The user may have started typing on the new-session screen while the
+    // launch was failing. Assigning would destroy that newer text to restore
+    // the older, so the restored messages join it below.
+    trackOne();
+    useComposerStore
+      .getState()
+      .setDraft(NEW_SESSION_DRAFT_KEY, 'already typing this');
+
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      unsent: [
+        { send_id: 7, text: 'start a new session' },
+        { send_id: 8, text: 'and one more' },
+      ],
+    });
+
+    expect(
+      useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY],
+    ).toBe('already typing this\n\nand one more');
+  });
+
+  it('leaves the draft alone when only the first prompt went unsent', () => {
+    // The Retry chip holds that one message already; restoring it here too
+    // would put it on screen twice.
+    trackOne();
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      unsent: [{ send_id: 7, text: 'start a new session' }],
+    });
+
+    expect(
+      useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY],
+    ).toBeUndefined();
+  });
+
+  it('restores the unsent text of a failure that outran its POST response', () => {
+    // Which entry is the spawn's own first prompt is only knowable once
+    // `trackSpawn` supplies its send id, so while the POST is still travelling
+    // the buffered failure carries the list across and the restore happens
+    // there — exactly once, and without the first prompt the chip holds.
+    beginNewSessionPost();
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      unsent: [
+        { send_id: 7, text: 'start a new session' },
+        { send_id: 8, text: 'and one more' },
+      ],
+    });
+    expect(
+      useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY],
+    ).toBeUndefined();
+    // Nothing is announced either: the chip about to appear says it all.
+    expect(useNotificationStore.getState().errors).toEqual([]);
+
+    trackOne();
+
+    const spawn = useLiveStore.getState().spawns[0];
+    expect(spawn.status).toBe('failed');
+    expect(spawn.restoredCount).toBe(1);
+    expect(
+      useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY],
+    ).toBe('and one more');
+  });
+
+  it('restores an untracked failure whole and says so in the snackbar', () => {
+    // The reload story: the spawn registry lives in memory only, so a browser
+    // that reloaded during a slow launch knows nothing about the session it
+    // started — and no POST is on its way to teach it. The `send` rows are
+    // already deleted, so the event is the last copy of every message the user
+    // wrote. With no chip to hold the first prompt back, and none to show the
+    // reason, the whole list goes to the composer and the failure is announced.
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      reason: 'git error: worktree add failed',
+      unsent: [
+        { send_id: 7, text: 'start a new session' },
+        { send_id: 8, text: 'and one more' },
+      ],
+    });
+
+    expect(
+      useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY],
+    ).toBe('start a new session\n\nand one more');
+    expect(
+      useNotificationStore
+        .getState()
+        .errors.map(({ title, detail }) => ({ title, detail })),
+    ).toEqual([
+      {
+        title: 'The session failed to start',
+        detail:
+          'git error: worktree add failed — The 2 unsent messages were returned to the composer.',
+      },
+    ]);
+  });
+
+  it('appends an untracked failure’s text below whatever the draft held', () => {
+    useComposerStore
+      .getState()
+      .setDraft(NEW_SESSION_DRAFT_KEY, 'already typing this');
+
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      unsent: [{ send_id: 7, text: 'start a new session' }],
+    });
+
+    expect(
+      useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY],
+    ).toBe('already typing this\n\nstart a new session');
+    // No reason to report, so the headline stands alone with the account of
+    // where the text went.
+    expect(useNotificationStore.getState().errors[0].detail).toBe(
+      'The unsent message was returned to the composer.',
+    );
+  });
+
+  it('restores an untracked failure once, however often it repeats', () => {
+    const event = {
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      unsent: [{ send_id: 7, text: 'start a new session' }],
+    } as const;
+    useLiveStore.getState().applyEvent(event);
+    useLiveStore.getState().applyEvent(event);
+
+    expect(
+      useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY],
+    ).toBe('start a new session');
+    expect(useNotificationStore.getState().errors).toHaveLength(1);
+  });
+
+  it('does not restore an already-restored failure again when a spawn is tracked', () => {
+    // Belt and braces: the handled entry is flagged, so even if a registration
+    // did turn up for it, the same text could not go into the draft twice.
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      unsent: [
+        { send_id: 7, text: 'start a new session' },
+        { send_id: 8, text: 'and one more' },
+      ],
+    });
+    trackOne();
+
+    const spawn = useLiveStore.getState().spawns[0];
+    expect(spawn.status).toBe('failed');
+    expect(spawn.restoredCount).toBe(0);
+    expect(
+      useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY],
+    ).toBe('start a new session\n\nand one more');
+  });
+
   it('fails each spawn by its own id, leaving the others alone', () => {
     trackOne('sess-spawn-1');
     trackOne('sess-spawn-2');
@@ -952,6 +1192,7 @@ describe('liveStore spawn tracking', () => {
       kind: 'spawn_failed',
       session_id: 'sess-spawn-2',
       pane_token: 'pane-2',
+      unsent: [],
     });
 
     const byId = Object.fromEntries(

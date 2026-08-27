@@ -45,8 +45,8 @@ pub use ports::{
     GitRepoInfo, GitWorktree, MessageDisplayHook, NewSession, NullCommsLog, RateLimitWindow,
     RecentWorkdir, RemoteBranches, RepositoryCloneRow, SessionEndHook, SessionEvent,
     SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore, StatusSnapshot, StopHook,
-    TmuxDriver, Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
-    WorktreeStartPoint,
+    TmuxDriver, Transcript, TranscriptMessage, TranscriptRead, UnsentSend, UserPromptSubmitHook,
+    Workspace, WorktreeStartPoint,
 };
 pub use pull_request::{PullRequest, PullRequestLens, PullRequestList};
 pub use repository::{display_name, identity_key, worktree_dir_slug, Clone, Repository};

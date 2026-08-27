@@ -68,8 +68,9 @@ Response:
   `session_registered` either way). A spawning session is addressable like any
   other (its threads and open sends are queryable, so the browser can focus it
   and show its first prompt right away), but it is not open — nothing is bound
-  to it yet, so it reports `open: false` and nothing can be dispatched into it:
-  a send to it is refused with `409 session_spawning` (see
+  to it yet, so it reports `open: false` and nothing can be *dispatched* into
+  it. A plain send to it is still accepted, as a `queued` row typed once the
+  launch binds; only a branch send is refused, with `409 session_spawning` (see
   [sends.md](sends.md)). A launch that fails, and a Claude spawn that came up
   but never bound (reaped at its bind deadline), both have their row deleted, so
   the session disappears from this list again and the client hears

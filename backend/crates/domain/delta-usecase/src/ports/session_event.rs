@@ -265,6 +265,22 @@ pub enum SessionEvent {
         /// the only place that message can still reach the user, so the failed
         /// chip shows it under "failed to start".
         reason: Option<String>,
+        /// Every send this session had accepted but never delivered to an
+        /// agent, oldest first — the first prompt included.
+        ///
+        /// The rollback deletes the session row and the `send` rows go with it
+        /// (`send.session_id … ON DELETE CASCADE`), so this is the last moment
+        /// their text exists anywhere. A user who kept typing while a slow
+        /// launch was still checking out would otherwise lose every message
+        /// after the first (the failed chip's Retry holds only the first
+        /// prompt), so the text rides out here and the browser puts it back in
+        /// the composer for the user to send again deliberately — nothing is
+        /// re-sent automatically.
+        ///
+        /// Read *before* the cleanup deletes the rows, in id order. Empty only
+        /// when the session had nothing outstanding (a cold-start spawn with no
+        /// first prompt, or one whose sends were all cancelled).
+        unsent: Vec<UnsentSend>,
     },
     /// A chunk of the in-flight turn's assistant message, delivered live while
     /// the turn is still generating.
@@ -521,4 +537,15 @@ pub struct RateLimitWindow {
     pub used_percentage: Option<f64>,
     /// Unix epoch seconds at which the window resets.
     pub resets_at: Option<i64>,
+}
+
+/// One send that a failed launch never delivered, carried out on
+/// [`SessionEvent::SpawnFailed`] because the row itself is about to be deleted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnsentSend {
+    /// The deleted `send` row's id — how a client tells the spawn's own first
+    /// prompt apart from the messages typed after it.
+    pub send_id: i64,
+    /// The message the user composed, exactly as it was accepted.
+    pub text: String,
 }

@@ -2,6 +2,7 @@ use delta_model::Session;
 
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
+use crate::interactor::session_actor::input::SessionInput;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
@@ -26,6 +27,17 @@ where
     /// when the id was minted — and emits [`SessionEvent::SessionRegistered`].
     /// Any first prompt's `send` row was already written at spawn time, so no
     /// row writing happens at bind.
+    ///
+    /// It then posts a [`SessionInput::FlushQueuedSend`] to this actor's own
+    /// mailbox. A session accepts sends as `queued` rows for as long as it is
+    /// spawning, and binding is the moment they become dispatchable — but this
+    /// runs inside a hook that blocks `claude` until its handler returns, so
+    /// typing here would put the keystrokes into a TUI that is not yet
+    /// accepting input and lose them. Posting moves the dispatch to the next
+    /// mailbox iteration, after the hook has returned. A spawn that carried a
+    /// first prompt is `AwaitingEcho` at bind, so the posted flush is a no-op
+    /// there and the queue drains at that turn's `Stop`; the flush is what
+    /// covers the prompt-less spawn, which binds idle with no `Stop` coming.
     ///
     /// Returns:
     /// - `Ok(Some(session))` — this call bound the pending spawn and activated it.
@@ -52,6 +64,11 @@ where
             .core
             .register_session_row(self.id, cwd, transcript_path, events)
             .await?;
+        // Deliberately posted, not called: see the doc comment above. Weak,
+        // like every self-post, so a retired actor simply drops it.
+        if let Some(sender) = self.self_sender.upgrade() {
+            let _ = sender.send(SessionInput::FlushQueuedSend);
+        }
         Ok(Some(session))
     }
 }

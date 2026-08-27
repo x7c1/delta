@@ -17,7 +17,7 @@ import { startNewCodexSession } from './support/app';
  * response by 2.5 s, stretching the window between "the POST returned" and "the
  * session is live" wide enough to observe. Inside it the workspace must already
  * be ON the new session — the row is listed as `spawning`, so its card reads
- * `Starting`, its composer says the session is starting and offers no send, and
+ * `Starting`, its composer says a message sent now waits for the session, and
  * its first prompt sits in the pending strip. When `thread/start` finally
  * answers the same session becomes `Open` and the scripted reply arrives: one
  * continuous session, no hand-off the user can see.
@@ -57,7 +57,7 @@ test('a slow Codex launch is focused as a starting session, then comes up in pla
   const textbox = page.getByRole('textbox');
   await expect(textbox).toHaveAttribute(
     'placeholder',
-    'This session is starting…',
+    'Message sends when the session is ready…',
   );
   // A starting session was never closed, and no send resumes it, so the closed
   // notice must stay off it — it would contradict the placeholder.
@@ -74,11 +74,12 @@ test('a slow Codex launch is focused as a starting session, then comes up in pla
   // this one is not up yet.
   await expect(pending).toContainText('queued — sends when the session starts');
 
-  // A follow-up cannot be sent yet: the server would refuse it
-  // (`409 session_spawning`), so the composer does not offer one — even with a
-  // draft ready to go.
+  // A follow-up is offered even here: the server accepts a plain send to a
+  // starting session as a `queued` row and delivers it once the launch binds
+  // (the pane-backed twin sends one; this spec keeps its focus on the hand-off
+  // and only pins that the composer is live).
   await textbox.fill('a follow-up, once you are up');
-  await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled();
 
   // `thread/start` answers: the very same card flips to Open — no second
   // session, no return to the new-session screen — and the held first prompt is

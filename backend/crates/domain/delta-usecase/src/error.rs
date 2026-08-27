@@ -27,12 +27,14 @@ pub enum Error {
     #[error("session cannot be resumed (transcript missing): {0}")]
     ResumeUnavailable(String),
 
-    /// A send targeted a session whose launch has not bound yet: the row exists
-    /// (it is listed as `spawning` from the moment its first send was accepted)
-    /// but no pane is mapped to it, and its transcript does not exist yet — so
-    /// the resume path would launch a second agent against nothing. The send is
-    /// refused instead; the composer is disabled on a starting session, so this
-    /// only fires against a stale client. Surfaced as `409`.
+    /// A **branch** send targeted a session whose launch has not bound yet: the
+    /// row exists (it is listed as `spawning` from the moment its first send was
+    /// accepted) but the session has ingested no messages at all, so there is
+    /// nothing to branch from. A *plain* send in that window is not refused —
+    /// it is accepted as a `queued` row and flushed when the launch binds — so
+    /// this is the branch case alone, which the composer offers no way to
+    /// compose either (branching anchors on a message, and there is none):
+    /// today only an API client reaches it. Surfaced as `409`.
     #[error("session is still starting: {0}")]
     SessionSpawning(String),
 

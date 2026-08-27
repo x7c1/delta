@@ -52,6 +52,7 @@ async fn a_failed_codex_launch_reaps_the_row_and_reports_spawn_failed() {
         session_id: failed_id,
         pane_token,
         reason,
+        ..
     } = event
     else {
         panic!("expected SpawnFailed, got {event:?}");

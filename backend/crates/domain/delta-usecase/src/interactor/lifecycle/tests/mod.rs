@@ -1,5 +1,6 @@
 //! Session-lifecycle use-case tests.
 
+mod a_cancelled_first_prompt_still_flushes_the_codex_queue;
 mod a_codex_session_replies_before_the_worktree_is_built;
 mod a_failed_codex_launch_reaps_the_row_and_reports_spawn_failed;
 mod a_launch_preparation_that_outruns_its_deadline_reports_spawn_failed;
@@ -57,8 +58,7 @@ mod reap_stale_spawns_leaves_a_fresh_spawn_alone;
 mod reap_stale_spawns_reaps_an_expired_unbound_spawn;
 mod resume_window_requeue_drops_the_held_first_prompt;
 mod same_workdir_spawns_bind_to_their_own_session_each;
-mod send_during_a_codex_launch_is_refused;
-mod send_during_the_launch_window_is_refused;
+mod send_during_a_codex_launch_is_queued;
 mod session_start_during_the_pane_launch_binds_the_spawn;
 mod spawn_skips_tmux_session_names_already_in_use;
 mod the_bind_deadline_starts_at_the_launch_not_at_acceptance;
