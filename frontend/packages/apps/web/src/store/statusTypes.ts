@@ -31,3 +31,31 @@ export type RateLimitWindows = RateLimitWindow[];
  * persistence layer — a cycle the linter rejects).
  */
 export type RateLimitsByProvider = Partial<Record<AgentProvider, RateLimitWindows>>;
+
+/**
+ * Epoch-ms instants at which each provider's rate-limit windows were last
+ * observed, keyed the same way {@link RateLimitsByProvider} is.
+ *
+ * Used for two distinct jobs: the persistence layer expires each provider's
+ * windows against their OWN observation (see `statusPersistence`), and the
+ * footer dates the rows it restored from `localStorage` but has not yet seen
+ * confirmed live.
+ */
+export type RateLimitsObservedAt = Partial<Record<AgentProvider, number>>;
+
+/**
+ * When each piece of the status snapshot was observed (epoch ms), keyed
+ * exactly as the values themselves are: per session for context usage, per
+ * provider for rate limits.
+ *
+ * Per key, not per snapshot: every datum here expires on its own terms — a
+ * rate-limit window against its `resets_at` (or, lacking one, against its own
+ * observation), a context-usage entry against a long garbage-collection
+ * horizon — so a single "when was this written" stamp would let a session or
+ * provider that went quiet days ago inherit the freshness of whichever key
+ * happened to speak last.
+ */
+export interface StatusObservedAt {
+  contextUsage: Record<string, number>;
+  rateLimits: RateLimitsObservedAt;
+}
