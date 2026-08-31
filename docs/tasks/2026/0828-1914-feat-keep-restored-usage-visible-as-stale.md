@@ -159,13 +159,13 @@ Run `make check` and fix whatever it reports.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] Overnight dogfooding: after an evening of use, reload the next
+- [x] Overnight dogfooding: after an evening of use, reload the next
       morning — the 7d row is visible, de-emphasized, with its observed
       time; the (reset) 5h row is absent rather than 0%; the context bar
       of yesterday's focused session is visible, styled as usual; the
       first live snapshot returns the footer to normal styling without a
       reload.
-- [ ] The de-emphasized treatment is distinguishable from the live one in
+- [x] The de-emphasized treatment is distinguishable from the live one in
       dark, light, and sepia themes, without being unreadable.
 
 ## Out of scope
