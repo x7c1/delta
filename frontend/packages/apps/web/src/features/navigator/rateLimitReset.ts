@@ -37,6 +37,23 @@ export function formatResetCountdown(
   return `${pad(hours)}h${pad(minutes)}m`;
 }
 
+/**
+ * Format the instant (epoch ms) at which a restored rate-limit reading was
+ * last observed, as an absolute local date and time (`Aug 27, 2026, 10:32 PM`).
+ *
+ * Absolute rather than relative on purpose: the row already carries a relative
+ * reading in the `↻` countdown, and two relative durations pointing in
+ * opposite directions read as a puzzle. The question a de-emphasized row
+ * raises — "how old is this number?" — is answered most directly by naming the
+ * moment it was taken.
+ */
+export function formatObservedAt(observedAtMs: number): string {
+  return new Date(observedAtMs).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+
 /** Zero-pad a sub-100 unit to two digits so the label stays fixed-width. */
 function pad(value: number): string {
   return value.toString().padStart(2, '0');

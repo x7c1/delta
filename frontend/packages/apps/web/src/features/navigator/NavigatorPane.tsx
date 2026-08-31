@@ -18,6 +18,7 @@ import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
 import {
   computeBudgetLinePercentage,
+  formatObservedAt,
   formatResetCountdown,
 } from './rateLimitReset';
 import {
@@ -171,16 +172,31 @@ function SettingsIcon({ className }: { className?: string }) {
  * regardless of how many the account reports. Tabular-figures (`tabular-nums`)
  * alone equalises digit glyphs only, leaving symbols and letters at
  * proportional widths — so it is not sufficient here.
+ *
+ * `restoredObservedAt` (epoch ms) marks a row whose reading was restored from
+ * `localStorage` on reload, was already over an hour old at that point, and
+ * has not been restated by the server since. It is `null` — the row renders
+ * exactly like a live one — for a reading restored while still fresh, which a
+ * mid-work reload produces; `staleRateLimitsObservedAt` in `statusPersistence`
+ * owns that cut. A marked row is rendered de-emphasized and its Meter title
+ * names when the reading was taken, rather than being hidden: an unreset
+ * window's percentage is still a meaningful lower bound, since other devices
+ * can only have added to it. Only the PERCENTAGE is stale — the `↻` countdown
+ * and the budget line are derived from `resets_at` and the current clock at
+ * render time, so they stay exact on a restored row and are neither frozen nor
+ * hidden.
  */
 function RateLimitRow({
   window: rateWindow,
   fillClassName,
   meterClassName,
+  restoredObservedAt,
   testId,
 }: {
   window: RateLimitWindow;
   fillClassName: string;
   meterClassName?: string;
+  restoredObservedAt: number | null;
   testId: string;
 }) {
   // Both the label and the pacing come from the window's own duration, so a
@@ -217,10 +233,26 @@ function RateLimitRow({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  const restored = restoredObservedAt !== null;
+  // The tooltip is where the reading's age is reachable — the row itself has
+  // no column to spare, and its `↻` countdown means something else entirely.
+  const title = restored
+    ? `${label} rate limit: ${Math.round(percentage)}% used — last observed ${formatObservedAt(restoredObservedAt)}`
+    : `${label} rate limit: ${Math.round(percentage)}% used`;
   return (
     <div
-      className="flex items-center gap-1.5 font-mono text-code text-fg-muted"
+      className={cn(
+        'flex items-center gap-1.5 font-mono text-code text-fg-muted',
+        // Opacity rather than a dimmer colour token: it de-emphasizes the
+        // whole row — label, bar, percentage, countdown — by the same amount
+        // in dark, light and sepia alike, with no new per-theme value to keep
+        // readable.
+        restored && 'opacity-60',
+      )}
       data-testid={testId}
+      // Structural marker for the restored state, so tests and e2e can assert
+      // it without depending on the opacity class.
+      data-stale={restored ? 'true' : undefined}
     >
       <span className="w-5 shrink-0 text-fg-subtle">{label}</span>
       <div ref={trackRef} className="relative flex-1 min-w-0">
@@ -228,7 +260,7 @@ function RateLimitRow({
           value={percentage}
           fillClassName={fillClassName}
           className={meterClassName}
-          title={`${label} rate limit: ${Math.round(percentage)}% used`}
+          title={title}
         />
         {budgetLinePercentage !== null && trackWidth > 0 && (
           <span
@@ -349,6 +381,14 @@ export function NavigatorPane({
   // provider's limits never appear under another's session, and with nothing
   // focused there is no account to speak for and so no rows.
   const rateLimitsByProvider = useLiveStore((state) => state.rateLimits);
+  // The providers whose windows are still a restored guess — an observation
+  // over an hour old (a fresher restore is left looking live) that no live
+  // snapshot has restated — mapped to when each was observed. Drives the
+  // de-emphasized styling below; the map shrinks (never grows) as live
+  // snapshots land, so the rows return to normal without a reload.
+  const restoredRateLimitsObservedAt = useLiveStore(
+    (state) => state.restoredRateLimitsObservedAt,
+  );
   // Per-session notices (a pending permission request driving the row's badge)
   // are read inside each SessionNode with a narrow selector, not subscribed to
   // here: a notice arriving on any session must not re-render the whole pane —
@@ -363,12 +403,26 @@ export function NavigatorPane({
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   // Memoized because this pane re-renders on every scroll frame of the windowed
   // session list, and the lookup walks the whole loaded list.
-  const rateLimits = useMemo(() => {
+  const { rateLimits, rateLimitsObservedAt } = useMemo(() => {
     const provider = sessions.find(
       (item) => item.session.id === focusedSessionId,
     )?.session.provider;
-    return provider ? (rateLimitsByProvider[provider] ?? []) : [];
-  }, [sessions, focusedSessionId, rateLimitsByProvider]);
+    if (!provider) {
+      return { rateLimits: [], rateLimitsObservedAt: null };
+    }
+    return {
+      rateLimits: rateLimitsByProvider[provider] ?? [],
+      // Non-null only while this provider's windows are a restored guess; the
+      // whole row group shares one observation, since a provider's windows
+      // arrive (and are persisted) together.
+      rateLimitsObservedAt: restoredRateLimitsObservedAt[provider] ?? null,
+    };
+  }, [
+    sessions,
+    focusedSessionId,
+    rateLimitsByProvider,
+    restoredRateLimitsObservedAt,
+  ]);
   const settingsOpen = useNavStore((state) => state.settingsOpen);
   const openSettings = useNavStore((state) => state.openSettings);
   const startNewSession = useNavStore((state) => state.startNewSession);
@@ -444,6 +498,7 @@ export function NavigatorPane({
                     // leftward from the reset side without modifying the Meter
                     // primitive.
                     meterClassName="flex justify-end"
+                    restoredObservedAt={rateLimitsObservedAt}
                     testId={`rate-limit-${rowId}`}
                   />
                 );

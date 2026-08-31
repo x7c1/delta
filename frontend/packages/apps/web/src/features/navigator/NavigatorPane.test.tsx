@@ -7,7 +7,14 @@ import {
   expect,
   it,
 } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setupServer } from 'msw/node';
 import {
@@ -158,6 +165,8 @@ describe('NavigatorPane rate-limit meters', () => {
       notices: {},
       runningThreads: {},
       rateLimits: {},
+      // Live by default: the restored-from-localStorage cases opt in below.
+      restoredRateLimitsObservedAt: {},
     });
     // The footer shows the FOCUSED session's provider's limits, so every case
     // here focuses a session — an unfocused navigator speaks for no account and
@@ -405,6 +414,127 @@ describe('NavigatorPane rate-limit meters', () => {
     renderPane(items);
 
     expect(screen.queryByTestId('rate-limits')).not.toBeInTheDocument();
+  });
+
+  it('de-emphasizes restored rows and names when they were observed', () => {
+    // The overnight case: the 7d window was last seen last night and has not
+    // reset, so the row is shown — de-emphasized, and dated — rather than
+    // hidden until the next live snapshot happens to arrive.
+    const observedAt = Date.now() - 9 * 60 * 60 * 1000;
+    const now = Date.now() / 1000;
+    useLiveStore.setState({
+      rateLimits: {
+        claude: [window(SEVEN_DAYS, 41, now + 5 * 86400 + 4 * 3600 + 30)],
+      },
+      restoredRateLimitsObservedAt: { claude: observedAt },
+    });
+
+    renderPane();
+
+    const row = screen.getByTestId('rate-limit-7d');
+    expect(row).toHaveAttribute('data-stale', 'true');
+    expect(row.className).toContain('opacity-60');
+    // The observed time is reachable from the meter's tooltip.
+    const title = within(row).getByRole('meter').getAttribute('title');
+    expect(title).toContain('last observed');
+    expect(title).toContain(
+      new Date(observedAt).toLocaleString(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }),
+    );
+    // Only the PERCENTAGE is stale: the countdown and the budget line are
+    // derived from `resets_at` and the current clock at render time, so they
+    // stay exact on a restored row rather than being frozen or dropped.
+    expect(screen.getByTestId('rate-limit-7d-pct')).toHaveTextContent('41%');
+    expect(screen.getByTestId('rate-limit-7d-reset')).toHaveTextContent(
+      '↻ 05d04h',
+    );
+    expect(screen.getByTestId('rate-limit-7d-budget-line')).toBeInTheDocument();
+  });
+
+  it('returns a row to normal styling when the store clears the stale mark', () => {
+    // The one thing the stale/live cases either side of this cannot state:
+    // the footer un-dims WITHOUT a reload, the moment the first live snapshot
+    // for that provider lands. That only holds if the pane SUBSCRIBES to the
+    // provenance map (and keeps it in the memo's deps) rather than reading it
+    // once at mount — a wiring slip there leaves both neighbouring cases green.
+    const observedAt = Date.now() - 9 * 60 * 60 * 1000;
+    const resetsAt = Date.now() / 1000 + 5 * 86400 + 4 * 3600 + 30;
+    useLiveStore.setState({
+      rateLimits: { claude: [window(SEVEN_DAYS, 41, resetsAt)] },
+      restoredRateLimitsObservedAt: { claude: observedAt },
+    });
+
+    renderPane();
+    expect(screen.getByTestId('rate-limit-7d')).toHaveAttribute(
+      'data-stale',
+      'true',
+    );
+
+    // Clearing the provider's mark is the ONLY thing that changes here — the
+    // windows are left exactly as they were, so nothing but the provenance
+    // subscription can account for the row un-dimming. (The reducer step that
+    // clears the mark is covered end to end in liveStore.test.ts.)
+    act(() => {
+      useLiveStore.setState({ restoredRateLimitsObservedAt: {} });
+    });
+
+    const row = screen.getByTestId('rate-limit-7d');
+    expect(row).not.toHaveAttribute('data-stale');
+    expect(row.className).not.toContain('opacity-');
+    expect(within(row).getByRole('meter').getAttribute('title')).not.toContain(
+      'last observed',
+    );
+    // The numbers are untouched by the styling change.
+    expect(screen.getByTestId('rate-limit-7d-pct')).toHaveTextContent('41%');
+  });
+
+  it('renders live rows with no de-emphasis and no observed-at note', () => {
+    useLiveStore.setState({
+      rateLimits: { claude: [window(FIVE_HOURS, 37, null)] },
+      restoredRateLimitsObservedAt: {},
+    });
+
+    renderPane();
+
+    const row = screen.getByTestId('rate-limit-5h');
+    expect(row).not.toHaveAttribute('data-stale');
+    expect(row.className).not.toContain('opacity-');
+    expect(within(row).getByRole('meter')).toHaveAttribute(
+      'title',
+      '5h rate limit: 37% used',
+    );
+  });
+
+  it('de-emphasizes only the provider whose windows are still restored', () => {
+    // Claude has been restated live, Codex has not. Focus follows the session,
+    // and so does the treatment: nothing leaks across accounts here either.
+    const observedAt = Date.now() - 9 * 60 * 60 * 1000;
+    const items = [
+      makeItem(SESSION_ID, 1, 'claude'),
+      makeItem(SESSION_ID_2, SESSION_2_MAIN_THREAD_ID, 'codex'),
+    ];
+    useLiveStore.setState({
+      rateLimits: {
+        claude: [window(FIVE_HOURS, 37, null)],
+        codex: [window(SEVEN_DAYS, 8, null)],
+      },
+      restoredRateLimitsObservedAt: { codex: observedAt },
+    });
+
+    const { unmount } = renderPane(items);
+    expect(screen.getByTestId('rate-limit-5h')).not.toHaveAttribute(
+      'data-stale',
+    );
+    unmount();
+
+    useNavStore.setState({ focusedSessionId: SESSION_ID_2 });
+    renderPane(items);
+    expect(screen.getByTestId('rate-limit-7d')).toHaveAttribute(
+      'data-stale',
+      'true',
+    );
   });
 
   it('shows no rows while no session is focused', () => {

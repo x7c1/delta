@@ -8,7 +8,11 @@ import {
 } from './liveStore';
 import { NEW_SESSION_DRAFT_KEY, useComposerStore } from './composerStore';
 import { useNotificationStore } from './notificationStore';
-import { loadPersistedStatus } from './statusPersistence';
+import {
+  RATE_LIMIT_FRESHNESS_MS,
+  loadPersistedStatus,
+  staleRateLimitsObservedAt,
+} from './statusPersistence';
 
 function reset() {
   useLiveStore.setState({
@@ -23,6 +27,8 @@ function reset() {
     runningSubagents: {},
     contextUsage: {},
     rateLimits: {},
+    statusObservedAt: { contextUsage: {}, rateLimits: {} },
+    restoredRateLimitsObservedAt: {},
   });
   // A failed spawn restores its undelivered text into the new-session draft,
   // and a failure with no chip to carry it announces itself in the app-wide
@@ -2381,6 +2387,150 @@ describe('liveStore status_updated', () => {
       snapshot: statusSnapshot({ context_used_percentage: null }),
     });
     expect(useLiveStore.getState().contextUsage).toEqual({});
+  });
+});
+
+describe('liveStore restored status provenance', () => {
+  beforeEach(reset);
+
+  /** Roughly "last night", as an overnight reload would restore. */
+  const OBSERVED_AT = Date.now() - 9 * 60 * 60 * 1000;
+
+  /** The state a reload leaves behind: values restored, none confirmed live. */
+  function seedRestored() {
+    useLiveStore.setState({
+      contextUsage: { 'sess-1': 62 },
+      rateLimits: {
+        claude: [window(FIVE_HOURS, 30, 100)],
+        codex: [window(SEVEN_DAYS, 55, 500)],
+      },
+      statusObservedAt: {
+        contextUsage: { 'sess-1': OBSERVED_AT },
+        rateLimits: { claude: OBSERVED_AT, codex: OBSERVED_AT },
+      },
+      restoredRateLimitsObservedAt: { claude: OBSERVED_AT, codex: OBSERVED_AT },
+    });
+  }
+
+  // Which providers the seed marks is decided by `staleRateLimitsObservedAt`,
+  // and this exercises it there. The seed line itself runs once at module load
+  // (`createStatusSlice` reads the persisted snapshot at import time), so it is
+  // not reachable from a test that shares the store instance — the same reason
+  // `liveStore status persistence` below drives `loadPersistedStatus` directly
+  // rather than re-importing the store. The seed applies this function and
+  // nothing else.
+  it('seeds the stale mark only for providers observed past the freshness bound', () => {
+    const now = Date.now();
+    const overnight = now - 9 * 60 * 60 * 1000;
+    const justNow = now - 60 * 1000;
+
+    // Claude went quiet last night, so its percentage is a lower bound of
+    // unknown age and saying so is the point. Codex reported a minute ago and
+    // the user merely reloaded the tab: that reading is still exactly right,
+    // and dimming it would be a claim nothing could take back — the server
+    // replays no status on connect, so the mark would sit there until the
+    // user's next agent turn.
+    expect(
+      staleRateLimitsObservedAt({ claude: overnight, codex: justNow }, now),
+    ).toEqual({ claude: overnight });
+
+    // The bound itself still counts as fresh, exactly as the undated-window
+    // fallback in `statusPersistence` reads the same constant.
+    expect(
+      staleRateLimitsObservedAt({ claude: now - RATE_LIMIT_FRESHNESS_MS }, now),
+    ).toEqual({});
+    expect(
+      staleRateLimitsObservedAt(
+        { claude: now - RATE_LIMIT_FRESHNESS_MS - 1 },
+        now,
+      ),
+    ).toEqual({ claude: now - RATE_LIMIT_FRESHNESS_MS - 1 });
+  });
+
+  it('marks restored status stale until live data arrives for that key', () => {
+    seedRestored();
+
+    // The first live snapshot that STATES rate limits clears its own
+    // provider's mark and nobody else's: the Claude account speaking says
+    // nothing about the Codex one. It arrives on a different session than the
+    // restored context entry, which therefore stays untouched below.
+    useLiveStore.getState().applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-claude',
+      snapshot: statusSnapshot({ rate_limits: [window(FIVE_HOURS, 31, 100)] }),
+    });
+
+    expect(useLiveStore.getState().restoredRateLimitsObservedAt).toEqual({
+      codex: OBSERVED_AT,
+    });
+    // Context usage is deliberately never marked stale, so there is no
+    // per-session provenance map at all: a restored percentage belongs to a
+    // session, and a session emitting no snapshot has no agent running that
+    // could change it — a mark there would never be cleared and would sit
+    // greyed out indefinitely.
+    expect('restoredContextUsageObservedAt' in useLiveStore.getState()).toBe(
+      false,
+    );
+    expect(useLiveStore.getState().contextUsage).toEqual({ 'sess-1': 62 });
+  });
+
+  it('keeps a provider\'s stale mark through a token-usage-only frame', () => {
+    seedRestored();
+
+    // Codex reports usage and account limits on separate frames. A usage frame
+    // carries `rate_limits: null` — no statement about the account — so it must
+    // not vouch for the restored windows any more than it may overwrite them.
+    useLiveStore.getState().applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-codex',
+      snapshot: statusSnapshot({
+        provider: 'codex',
+        context_used_percentage: 25,
+      }),
+    });
+
+    expect(useLiveStore.getState().restoredRateLimitsObservedAt).toEqual({
+      claude: OBSERVED_AT,
+      codex: OBSERVED_AT,
+    });
+  });
+
+  it('stamps the observation time of what a snapshot stated, and only that', () => {
+    seedRestored();
+
+    useLiveStore.getState().applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-codex',
+      snapshot: statusSnapshot({
+        provider: 'codex',
+        context_used_percentage: 25,
+      }),
+    });
+
+    const observed = useLiveStore.getState().statusObservedAt;
+    // The session it spoke for is stamped now; the one it did not mention, and
+    // both accounts' windows, keep the times they were restored with. That is
+    // what lets each datum expire on its own terms after the next reload.
+    expect(observed.contextUsage['sess-codex']).toBeGreaterThan(OBSERVED_AT);
+    expect(observed.contextUsage['sess-1']).toBe(OBSERVED_AT);
+    expect(observed.rateLimits).toEqual({
+      claude: OBSERVED_AT,
+      codex: OBSERVED_AT,
+    });
+  });
+
+  it('forgets a session\'s observation time when its percentage goes null', () => {
+    seedRestored();
+
+    // `/compact` drops the entry; leaving its stamp behind would persist a
+    // dangling observation for a value that no longer exists.
+    useLiveStore.getState().applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-1',
+      snapshot: statusSnapshot({ context_used_percentage: null }),
+    });
+
+    expect(useLiveStore.getState().statusObservedAt.contextUsage).toEqual({});
   });
 });
 
