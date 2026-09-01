@@ -7,9 +7,23 @@ import react from '@vitejs/plugin-react';
 // backend on a dedicated port so it never collides with `make dev`.
 const backendPort = process.env.DELTA_PORT ?? '7878';
 
+// Content-Security-Policy, mirrored from the <meta http-equiv> in index.html
+// (keep the two in sync). The <meta> tag is the primary control that protects
+// the served document; this dev response header covers the header path during
+// `make dev` and, unlike a <meta> CSP, actually enforces `frame-ancestors`.
+// See index.html for the per-directive rationale.
+const contentSecurityPolicy =
+  "default-src 'self'; base-uri 'self'; img-src 'self' data:; " +
+  "font-src 'self' data:; connect-src 'self'; " +
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+  "style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; object-src 'none'";
+
 export default defineConfig({
   plugins: [react()],
   server: {
+    headers: {
+      'Content-Security-Policy': contentSecurityPolicy,
+    },
     // During real-backend dev, proxy the API and live channels to the local
     // Delta server (its default port; override with DELTA_PORT). Ignored in
     // mock mode (VITE_API_MOCK=1).

@@ -3,6 +3,52 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Content-Security-Policy. Assistant markdown is attacker-influenceable
+      (a prompt-injected or malicious agent can emit `![](https://evil/x.png)`
+      or an autolinked URL), so without a policy the browser would make an
+      outbound request to an arbitrary host — an exfiltration channel carrying
+      data in the request path/query. This is the primary control: it protects
+      the HTML document in every serving mode (the page is served by the Vite
+      dev server, not delta-server, so a backend response header would not
+      cover the document). The same policy is mirrored as a dev response header
+      in vite.config.ts (`server.headers`). Keep the two in sync.
+
+      Directive rationale:
+        default-src 'self'          — deny by default; only same-origin.
+        base-uri 'self'             — no <base> hijack of relative URLs.
+        img-src 'self' data:        — the security floor: blocks the external
+                                      image exfil channel while keeping inline
+                                      data-URI images working.
+        font-src 'self' data:       — xterm / data-URI glyphs.
+        connect-src 'self'          — the floor: /ws, /pty, /comms and the Vite
+                                      HMR socket are all same-origin, and this
+                                      also blocks agent output from fetch()-ing
+                                      or opening a socket to a foreign host.
+        script-src 'self' 'unsafe-inline' 'unsafe-eval'
+                                    — the inline theme bootstrap below plus, in
+                                      dev, Vite's injected HMR client / React
+                                      Refresh preamble (inline) and its use of
+                                      eval. A hash for the theme script is not
+                                      used because adding any hash makes the
+                                      browser ignore 'unsafe-inline', which
+                                      would break Vite's dev inline scripts.
+                                      Acceptable: this repo has no production
+                                      static-serving path (see task Out of
+                                      scope); if one is ever added, tighten it
+                                      there (nonce/hash, no 'unsafe-*').
+        style-src 'self' 'unsafe-inline'
+                                    — xterm and the Vite dev client inject
+                                      inline styles.
+        frame-ancestors 'none'      — the floor: no embedding (clickjacking).
+                                      Ignored in a <meta> CSP by spec, but the
+                                      mirrored dev response header enforces it.
+        object-src 'none'           — the floor: no plugins/embeds.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; object-src 'none'"
+    />
     <title>Delta</title>
     <script>
       // Set the active theme synchronously, before the module bundle loads, so

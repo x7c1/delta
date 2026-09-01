@@ -1,0 +1,10 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    {
+      "type": "reply",
+      "text": "Here is an image:\n\n![](https://example.invalid/x.png)\n\nEnd of message."
+    },
+    { "type": "stop" }
+  ]
+}
