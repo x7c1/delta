@@ -113,6 +113,39 @@ async fn a_repo_name_that_escapes_the_root_is_refused() {
 }
 
 #[tokio::test]
+async fn clone_repository_rejects_an_owner_beginning_with_a_dash() {
+    // The slug reaches `gh repo clone` as a positional argument, so an owner or
+    // name that begins with `-` (e.g. `-x`, `--upload-pack=…`) could be parsed
+    // as a flag. `check_path_segment` refuses it before any `gh` process starts.
+    let gh = Arc::new(FakeGhCli::cloning());
+    let (ix, _rx) = interactor_with_gh_and_event_sink(Arc::clone(&gh));
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().to_str().unwrap().to_owned();
+    ix.store().insert_clone_root(&root).await.unwrap();
+
+    // A dash-leading owner is refused...
+    let err = ix
+        .clone_repository("-x7c1", "delta", &root)
+        .await
+        .expect_err("a dash-leading owner is refused");
+    assert!(
+        matches!(&err, Error::InvalidRepositoryRef(_)),
+        "got: {err:?}"
+    );
+    // ...and so is a dash-leading repository name.
+    let err = ix
+        .clone_repository("x7c1", "--flag", &root)
+        .await
+        .expect_err("a dash-leading name is refused");
+    assert!(
+        matches!(&err, Error::InvalidRepositoryRef(_)),
+        "got: {err:?}"
+    );
+
+    assert!(gh.clone_calls().is_empty(), "no gh process may start");
+}
+
+#[tokio::test]
 async fn the_happy_path_clones_into_a_temp_dir_renames_it_and_announces_completion() {
     let gh = Arc::new(FakeGhCli::cloning());
     let (ix, mut rx) = interactor_with_gh_and_event_sink(Arc::clone(&gh));

@@ -133,11 +133,14 @@ impl GhCli for Gh {
         // `gh repo clone <owner>/<name> <dir>` rather than `git clone <url>`:
         // gh resolves the host and supplies the authenticated credentials, so a
         // private repository the account can see clones without Delta ever
-        // handling a token. `destination` is always an absolute path derived
-        // from a registered clone root, so it can never be mistaken for a flag.
+        // handling a token. The `--` separator ends gh's option parsing, so
+        // neither the slug nor `destination` can be taken for a flag even if a
+        // future caller passes one that begins with `-` (the domain layer also
+        // rejects such an owner/name via `check_path_segment`); `destination` is
+        // in any case an absolute path derived from a registered clone root.
         let slug = format!("{owner}/{name}");
         let output = Command::new("gh")
-            .args(["repo", "clone", &slug, destination])
+            .args(["repo", "clone", "--", &slug, destination])
             .output()
             .await
             .map_err(Error::from)?;

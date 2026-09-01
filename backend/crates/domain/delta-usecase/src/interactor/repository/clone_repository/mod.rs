@@ -302,13 +302,17 @@ fn join(root: &str, segment: &str) -> String {
 ///
 /// The destination is built by joining the repository name onto a clone root, so
 /// a name containing `/`, a `..` component, or a NUL would let a request write
-/// outside the root it named. The API surface never produces one (these come
+/// outside the root it named. A leading `-` is refused too: the slug reaches
+/// `gh repo clone` as a positional argument, so `-x`/`--flag` could be parsed as
+/// an option (argument injection) — the `--` separator at the call site is the
+/// belt, this is the suspenders. The API surface never produces one (these come
 /// from `gh`'s own PR rows), which is exactly why the check belongs here rather
 /// than in the transport: it holds for every caller, including a future one.
 fn check_path_segment(segment: &str) -> Result<()> {
     let invalid = segment.is_empty()
         || segment == "."
         || segment == ".."
+        || segment.starts_with('-')
         || segment.contains('/')
         || segment.contains('\\')
         || segment.contains('\0');
