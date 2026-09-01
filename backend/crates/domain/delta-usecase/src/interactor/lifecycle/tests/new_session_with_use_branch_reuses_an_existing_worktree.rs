@@ -6,8 +6,10 @@ use crate::{SendTarget, WorktreeSpec};
 /// mode, when the chosen branch is already checked out somewhere (here the main
 /// working tree), launches in that *existing* worktree directly: no new worktree
 /// is created (neither `add_worktree_checkout` nor `create_worktree` runs), the
-/// existing path is the tmux launch dir and the stored session cwd, and trust is
-/// seeded for it (idempotent, so reusing an already-trusted path is fine).
+/// existing path is the tmux launch dir and the stored session cwd. Trust is NOT
+/// seeded for it: the reused path is the user's own working tree, outside Delta's
+/// worktree base, so Claude Code shows its normal one-time dialog there rather
+/// than Delta silently pre-accepting it.
 #[tokio::test]
 async fn new_session_with_use_branch_reuses_an_existing_worktree() {
     let canonical = FakeWorkspace::canonical("/projects/app");
@@ -62,12 +64,10 @@ async fn new_session_with_use_branch_reuses_an_existing_worktree() {
         "the launch dir is the existing worktree path"
     );
 
-    // Trust seeded for the existing path.
-    let trusted = ix.git_worktree_fake().trusted.lock().unwrap().clone();
-    assert_eq!(
-        trusted,
-        vec![existing.clone()],
-        "trust seeded for the reused path"
+    // Trust is NOT seeded: the reused path is outside Delta's worktree base.
+    assert!(
+        ix.git_worktree_fake().trusted.lock().unwrap().is_empty(),
+        "the reused working tree outside the worktree base is not auto-trusted"
     );
 
     // The eager session row stored the existing worktree path as its cwd.

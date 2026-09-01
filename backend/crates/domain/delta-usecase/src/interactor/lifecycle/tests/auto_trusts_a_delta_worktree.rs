@@ -2,11 +2,13 @@ use crate::interactor::testing::*;
 use crate::ports::WorktreeStartPoint;
 use crate::{SendTarget, WorktreeSpec};
 
-/// A fresh session that creates a worktree pre-accepts Claude Code's
-/// workspace-trust dialog for the worktree path (a git working tree), so the
-/// interactive launch there is not blocked on the trust dialog.
+/// A fresh session whose worktree Delta creates under its own worktree base
+/// pre-accepts Claude Code's workspace-trust dialog for that worktree path — a
+/// directory Delta itself made, so seeding it never silently trusts a repo the
+/// user pointed Delta at. The interactive launch there is not blocked on the
+/// trust dialog.
 #[tokio::test]
-async fn new_session_with_worktree_seeds_trust_for_the_worktree_path() {
+async fn auto_trusts_a_delta_worktree() {
     let canonical = FakeWorkspace::canonical("/projects/app");
     let repo_root = "/projects/app/.git/..";
     let git = FakeGitWorktree::default()
@@ -35,12 +37,13 @@ async fn new_session_with_worktree_seeds_trust_for_the_worktree_path() {
     .unwrap();
 
     let session_id = ix.pending_session_ids().await.remove(0);
+    // The worktree Delta builds lands under its own worktree base.
     let expected_path = format!("{TEST_WORKTREE_BASE}/x7c1-delta-{}", session_id.as_str());
 
     let trusted = ix.git_worktree_fake().trusted.lock().unwrap().clone();
     assert_eq!(
         trusted,
         vec![expected_path],
-        "trust is seeded for the worktree path"
+        "trust is seeded for the Delta worktree under the worktree base"
     );
 }

@@ -2,16 +2,18 @@ use delta_model::SessionId;
 
 use crate::interactor::testing::*;
 
-/// Resuming a session whose stored cwd is a git repository (e.g. a worktree
-/// session, or any real-repo cwd) pre-accepts the workspace-trust dialog for
-/// that cwd before launching `claude --resume` there, so the resumed pane is not
-/// blocked on the trust dialog.
+/// Resuming a Delta worktree session — a git-repository cwd under Delta's own
+/// worktree base — pre-accepts the workspace-trust dialog for that cwd before
+/// launching `claude --resume` there, so the resumed pane is not blocked on the
+/// trust dialog.
 #[tokio::test]
 async fn open_session_seeds_trust_when_cwd_is_a_git_repo() {
-    // The session's cwd is a git repository the fake reports a root for.
-    let git = FakeGitWorktree::default().with_repo("/repo/wt", "/repo/wt");
+    // The session's cwd is a git repository under the worktree base (a worktree
+    // Delta created), which the fake reports a root for.
+    let wt = format!("{TEST_WORKTREE_BASE}/x7c1-delta-sess-R");
+    let git = FakeGitWorktree::default().with_repo(&wt, &wt);
     let ix = interactor_with_git(git);
-    ix.on_user_prompt_submit(submit_in("sess-R", "/repo/wt/t.jsonl", "/repo/wt", "seed"))
+    ix.on_user_prompt_submit(submit_in("sess-R", &format!("{wt}/t.jsonl"), &wt, "seed"))
         .await
         .unwrap();
     let id = SessionId::from("sess-R");
@@ -21,8 +23,8 @@ async fn open_session_seeds_trust_when_cwd_is_a_git_repo() {
     let trusted = ix.git_worktree_fake().trusted.lock().unwrap().clone();
     assert_eq!(
         trusted,
-        vec!["/repo/wt".to_owned()],
-        "the resumed git-repo cwd is seeded for trust"
+        vec![wt],
+        "the resumed Delta-worktree cwd is seeded for trust"
     );
 }
 
