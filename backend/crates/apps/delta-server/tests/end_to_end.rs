@@ -267,6 +267,9 @@ async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) 
             Request::builder()
                 .method("POST")
                 .uri(uri)
+                // A loopback `Host` satisfies the router's origin/host guard,
+                // just as the real curl/browser clients do in production.
+                .header("host", "127.0.0.1")
                 .header("content-type", "application/json")
                 .body(Body::from(body.to_string()))
                 .unwrap(),
@@ -279,7 +282,13 @@ async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) 
 async fn get(app: &Router, uri: &str) -> (StatusCode, Value) {
     let response = app
         .clone()
-        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri(uri)
+                .header("host", "127.0.0.1")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     json_response(response).await

@@ -17,7 +17,13 @@ async fn workdir_list_browses_a_real_directory() {
     // percent-encoding for this test.
     let uri = format!("/api/workdir/list?path={}", dir.path().to_str().unwrap());
     let response = router(test_state().await)
-        .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .header("host", "127.0.0.1")
+                .uri(&uri)
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -35,6 +41,7 @@ async fn workdir_list_rejects_a_missing_path_with_400() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/workdir/list?path=/no/such/path/here")
                 .body(Body::empty())
                 .unwrap(),
@@ -49,6 +56,7 @@ async fn workdir_recent_returns_an_empty_list_when_no_sessions() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/workdir/recent")
                 .body(Body::empty())
                 .unwrap(),
@@ -75,6 +83,7 @@ async fn workdir_git_rejects_a_blank_path() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/workdir/git?path=%20%20")
                 .body(Body::empty())
                 .unwrap(),
@@ -89,6 +98,7 @@ async fn workdir_git_branches_rejects_a_blank_path() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/workdir/git/branches?path=%20%20")
                 .body(Body::empty())
                 .unwrap(),
@@ -107,6 +117,7 @@ async fn open_cwd_rejects_a_path_not_in_the_allowlist_with_400() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/api/open-cwd")
                 .header("content-type", "application/json")
@@ -141,6 +152,7 @@ async fn open_cwd_rejects_an_unknown_handler_with_400() {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/hooks/user-prompt-submit")
                 .header("content-type", "application/json")
@@ -153,6 +165,7 @@ async fn open_cwd_rejects_an_unknown_handler_with_400() {
     let response = app
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/api/open-cwd")
                 .header("content-type", "application/json")
@@ -177,6 +190,7 @@ async fn open_cwd_rejects_a_blank_path_with_400() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/api/open-cwd")
                 .header("content-type", "application/json")

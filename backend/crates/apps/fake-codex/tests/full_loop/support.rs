@@ -196,6 +196,9 @@ pub(crate) async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCo
             Request::builder()
                 .method("POST")
                 .uri(uri)
+                // The router's Origin/Host guard rejects any non-loopback Host
+                // with 403, so every request that drives it needs a loopback Host.
+                .header("host", "127.0.0.1")
                 .header("content-type", "application/json")
                 .body(Body::from(body.to_string()))
                 .unwrap(),
@@ -208,7 +211,13 @@ pub(crate) async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCo
 pub(crate) async fn get(app: &Router, uri: &str) -> (StatusCode, Value) {
     let response = app
         .clone()
-        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri(uri)
+                .header("host", "127.0.0.1")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     json_response(response).await

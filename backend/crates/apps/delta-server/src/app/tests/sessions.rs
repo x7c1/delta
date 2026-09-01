@@ -10,6 +10,7 @@ async fn health_returns_ok() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/health")
                 .body(Body::empty())
                 .unwrap(),
@@ -28,6 +29,7 @@ async fn get_version_returns_a_version_string_shaped_like_v_prefixed() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/version")
                 .body(Body::empty())
                 .unwrap(),
@@ -51,6 +53,7 @@ async fn list_sessions_rejects_a_malformed_cursor() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/sessions?cursor=not-a-valid-cursor%21")
                 .body(Body::empty())
                 .unwrap(),
@@ -70,6 +73,7 @@ async fn comms_requires_a_session_id() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/comms")
                 .body(Body::empty())
                 .unwrap(),
@@ -90,6 +94,7 @@ async fn release_send_replies_conflict_with_the_stable_code_when_not_releasable(
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/api/sends/9999/release")
                 .body(Body::empty())

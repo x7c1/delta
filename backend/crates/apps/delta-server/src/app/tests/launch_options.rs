@@ -11,6 +11,7 @@ async fn list_launch_options(app: &axum::Router) -> Vec<serde_json::Value> {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/launch-options")
                 .body(Body::empty())
                 .unwrap(),
@@ -58,6 +59,7 @@ async fn create_then_list_and_delete_launch_option() {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/api/launch-options")
                 .header("content-type", "application/json")
@@ -93,6 +95,7 @@ async fn create_then_list_and_delete_launch_option() {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("DELETE")
                 .uri(format!("/api/launch-options/{id}"))
                 .body(Body::empty())
@@ -122,6 +125,7 @@ async fn delete_refuses_a_shipped_launch_option_but_not_the_users_own() {
         async move {
             app.oneshot(
                 Request::builder()
+                    .header("host", "127.0.0.1")
                     .method("DELETE")
                     .uri(format!("/api/launch-options/{id}"))
                     .body(Body::empty())
@@ -154,6 +158,7 @@ async fn delete_refuses_a_shipped_launch_option_but_not_the_users_own() {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/api/launch-options")
                 .header("content-type", "application/json")
@@ -185,6 +190,7 @@ async fn patch_flips_default_enabled_on_a_shipped_launch_option() {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("PATCH")
                 .uri(format!("/api/launch-options/{id}"))
                 .header("content-type", "application/json")
@@ -212,6 +218,7 @@ async fn create_launch_option_rejects_a_blank_name() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/api/launch-options")
                 .header("content-type", "application/json")

@@ -8,6 +8,7 @@
 mod clone_roots;
 mod hooks;
 mod launch_options;
+mod origin_guard;
 mod permissions;
 mod prompt_templates;
 mod providers;
