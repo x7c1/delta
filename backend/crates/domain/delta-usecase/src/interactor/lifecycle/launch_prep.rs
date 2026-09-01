@@ -181,7 +181,14 @@ where
         pane: &PaneLaunch,
         self_sender: &mpsc::WeakUnboundedSender<SessionInput>,
     ) -> Result<()> {
-        if pane.seed_trust {
+        // Pre-accept the trust dialog only for a git working tree (`seed_trust`)
+        // that also lives under Delta's own worktree base — i.e. a worktree
+        // Delta created. A user-selected repo is trust-eligible too, but seeding
+        // it would silently trust its checked-in automation in the user's plain
+        // `claude` sessions, so it gets Claude Code's normal dialog instead. See
+        // [`super::is_under_worktree_base`] for the trade-off.
+        if pane.seed_trust && super::is_under_worktree_base(&self.worktree_base, &launching.workdir)
+        {
             self.git_worktree
                 .ensure_dir_trusted(&launching.workdir)
                 .await?;
