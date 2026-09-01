@@ -29,10 +29,27 @@ use std::sync::Arc;
 /// baseline they deviate from.
 pub(super) const TEST_AUTH_TOKEN: &str = "delta-test-auth-token";
 
+/// The per-run hook secret every state built in these tests holds, so a request
+/// the tests drive at `/hooks/*` can present a valid secret and pass the hook
+/// auth guard. The hook group's negative case uses it as the baseline it
+/// deviates from.
+pub(super) const TEST_HOOK_SECRET: &str = "delta-test-hook-secret";
+
+/// The transcript root every state built in these tests confines hook-reported
+/// transcript paths to. The tests point their `transcript_path`s under `/tmp`,
+/// so this is `/tmp` (canonicalized to `/private/tmp` on macOS by the guard).
+pub(super) const TEST_TRANSCRIPT_ROOT: &str = "/tmp";
+
 /// The `Authorization` header value carrying [`TEST_AUTH_TOKEN`], so every
 /// router-driving request can attach a valid bearer token in one call.
 pub(super) fn bearer() -> String {
     format!("Bearer {TEST_AUTH_TOKEN}")
+}
+
+/// The `?hs=<secret>` query string carrying [`TEST_HOOK_SECRET`], appended to a
+/// `/hooks/*` path so a router-driving hook request clears the hook auth guard.
+pub(super) fn hook_query() -> String {
+    format!("?hs={TEST_HOOK_SECRET}")
 }
 
 async fn test_state() -> AppState {
@@ -42,6 +59,8 @@ async fn test_state() -> AppState {
         worktree_base: "/tmp/delta-test-worktrees".into(),
         tmux_socket: "delta-test".into(),
         auth_token: TEST_AUTH_TOKEN.into(),
+        hook_secret: TEST_HOOK_SECRET.into(),
+        transcript_root: TEST_TRANSCRIPT_ROOT.into(),
         port: 7878,
         launch: delta_usecase::LaunchConfig {
             // The permission-request hook test exercises the no-decision
@@ -106,6 +125,8 @@ async fn test_state_with_gh_stub() -> (AppState, Arc<AtomicUsize>) {
         worktree_base: "/tmp/delta-test-worktrees".into(),
         tmux_socket: "delta-test".into(),
         auth_token: TEST_AUTH_TOKEN.into(),
+        hook_secret: TEST_HOOK_SECRET.into(),
+        transcript_root: TEST_TRANSCRIPT_ROOT.into(),
         port: 7878,
         launch: delta_usecase::LaunchConfig::default(),
     };
@@ -114,7 +135,12 @@ async fn test_state_with_gh_stub() -> (AppState, Arc<AtomicUsize>) {
         .unwrap()
         .with_gh_cli(gh as Arc<dyn delta_usecase::GhCli>);
     (
-        AppState::from_interactor(interactor, &config.tmux_socket, &config.auth_token),
+        AppState::from_interactor(
+            interactor,
+            &config.tmux_socket,
+            &config.auth_token,
+            &config.hook_secret,
+        ),
         clone_calls,
     )
 }

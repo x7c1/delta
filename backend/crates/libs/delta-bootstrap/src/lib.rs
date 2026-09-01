@@ -146,6 +146,20 @@ pub struct Config {
     /// lifetime by `main.rs::config_from_env`; the frontend presents it on every
     /// request. Not a wire field and never rotated — see the auth guard.
     pub auth_token: String,
+    /// The per-run hook secret carried back on every hook URL as `?hs=<secret>`,
+    /// enforced by the server's hook auth guard. Minted once for the server's
+    /// lifetime by `main.rs::config_from_env` and rendered into the session
+    /// settings by [`render_session_settings`] so genuine Claude Code callbacks
+    /// present it and a forged local POST cannot. Not a wire field.
+    pub hook_secret: String,
+    /// The directory a hook-reported `transcript_path` must resolve under to be
+    /// persisted and read. Defaults to
+    /// `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects` (where real Claude Code
+    /// writes transcripts) and is overridable via `DELTA_TRANSCRIPT_ROOT` so the
+    /// fake harness — which writes elsewhere — still validates. Threaded into the
+    /// [`Interactor`] so `register_session` can reject a transcript path outside
+    /// it before it is ever read from disk.
+    pub transcript_root: String,
     /// TCP port the server listens on, used to render the session's hook URLs.
     pub port: u16,
     /// How sessions are launched (which binary) and how long the launch
@@ -158,7 +172,7 @@ impl Config {
     /// The Claude Code session settings JSON rendered for this configuration, so
     /// the hook URLs always match the running port.
     pub fn session_settings_json(&self) -> String {
-        render_session_settings(self.port)
+        render_session_settings(self.port, &self.hook_secret)
     }
 
     /// Delta-owned path the rendered settings JSON is written to and handed to
@@ -256,6 +270,7 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
         config.session_settings_path(),
     )
     .with_launch_config(config.launch.clone())
+    .with_transcript_root(config.transcript_root.clone())
     .with_gh_cli(gh_cli)
     .with_external_opener(external_opener)
     .with_adapter_factory(codex_adapter_factory)
@@ -306,6 +321,8 @@ mod tests {
             worktree_base: "/tmp/delta-worktrees".into(),
             tmux_socket: DEFAULT_TMUX_SOCKET.into(),
             auth_token: "test-token".into(),
+            hook_secret: "test-hook-secret".into(),
+            transcript_root: "/tmp".into(),
             port: 7878,
             launch: delta_usecase::LaunchConfig::default(),
         }

@@ -21,14 +21,16 @@
 //!
 //! ## Exemptions
 //!
-//! `/hooks/*` and `/health` are exempt by path prefix:
+//! `/hooks/*` and `/health` are exempt from *this* (bearer) guard by path
+//! prefix:
 //!
 //! - `/hooks/*` is the Claude Code control plane — `curl` POSTs from Claude
-//!   Code, not the browser, so there is no place to carry the token. It is
-//!   already loopback-guarded, and a per-session hook secret is a separate
-//!   change (see the task's Out of scope). Keeping it exempt means
-//!   `delta-bootstrap::settings` needs no change.
-//! - `/health` is an unauthenticated liveness probe.
+//!   Code, not the browser, so there is no place to carry a bearer token. It is
+//!   not left unauthenticated, though: it has its own per-run authentication in
+//!   [`crate::hook_auth_guard`], which requires the `hs` secret Delta renders
+//!   into the hook URLs. This guard defers hooks to that one rather than
+//!   demanding a bearer token they cannot carry.
+//! - `/health` is an unauthenticated liveness probe (exempt from both guards).
 //!
 //! ## Middleware order
 //!
@@ -50,9 +52,11 @@ use crate::state::AppState;
 /// exempt `/hooks/*` and `/health` paths. Everything else is passed to `next`.
 pub(crate) async fn guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let path = request.uri().path();
-    // Exempt the Claude Code control plane and the health probe (see module
+    // Defer the Claude Code control plane and the health probe (see module
     // docs): hooks are `curl`ed by Claude Code with no place to carry a bearer
-    // token and are already loopback-guarded; `/health` is a liveness probe.
+    // token, so they authenticate through their own `hs` secret in
+    // `crate::hook_auth_guard` instead; `/health` is an unauthenticated liveness
+    // probe.
     if path == "/health" || path.starts_with("/hooks/") {
         return next.run(request).await;
     }
@@ -94,7 +98,7 @@ fn token_from_query(uri: &Uri) -> Option<&str> {
 /// Constant-time byte-slice equality, so a wrong token cannot be recovered by
 /// timing the comparison. Returning early on a length mismatch only leaks the
 /// length, which is not secret (the token length is fixed for a run).
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }

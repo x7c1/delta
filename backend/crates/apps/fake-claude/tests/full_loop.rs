@@ -33,6 +33,11 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// the loop clears the router's per-run auth guard.
 const AUTH_TOKEN: &str = "delta-fake-claude-full-loop-auth-token";
 
+/// The hook secret the assembled backend holds. It is rendered into the hook
+/// URLs the fake reads from the settings file, so the fake's hook callbacks carry
+/// it and clear the hook auth guard with no fake-side change.
+const HOOK_SECRET: &str = "delta-fake-claude-full-loop-hook-secret";
+
 #[tokio::test]
 async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
     if !tmux_available() {
@@ -58,10 +63,14 @@ async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
     // so per-run configuration reaches the fake through a wrapper script that
     // pins its environment. This also keeps the test independent of the
     // environment the tmux server captured at boot.
+    // The fake writes its transcript under this directory, so the server must
+    // accept transcript paths rooted here — point `DELTA_TRANSCRIPT_ROOT` (via
+    // `Config::transcript_root`) at the same place the fake writes.
+    let transcript_dir = temp.path().join("transcripts");
     let claude_bin = write_wrapper_script(
         temp.path(),
         &scenario_path.to_string_lossy(),
-        &temp.path().join("transcripts").to_string_lossy(),
+        &transcript_dir.to_string_lossy(),
     );
 
     // A unique socket per run: parallel or leftover runs never collide, and
@@ -80,6 +89,8 @@ async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
         worktree_base: temp.path().join("worktrees").to_string_lossy().into_owned(),
         tmux_socket: tmux_socket.clone(),
         auth_token: AUTH_TOKEN.into(),
+        hook_secret: HOOK_SECRET.into(),
+        transcript_root: transcript_dir.to_string_lossy().into_owned(),
         port,
         launch: LaunchConfig {
             claude_bin: claude_bin.to_string_lossy().into_owned(),

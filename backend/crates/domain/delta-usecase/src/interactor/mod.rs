@@ -121,6 +121,18 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// worktree sessions; default per-token spawns still use
     /// [`Self::session_workdir_base`].
     pub(in crate::interactor) worktree_base: String,
+    /// The directory a hook-reported `transcript_path` must resolve under to be
+    /// registered (and therefore later read and surfaced to the browser).
+    ///
+    /// `Some(root)` turns on confinement: `register_session_row` canonicalizes
+    /// the incoming path and refuses anything that is not a `.jsonl` file under
+    /// this root, so a forged (or first, unvalidated) hook cannot point Delta's
+    /// transcript tailer at an arbitrary file. Production always wires it (from
+    /// `Config::transcript_root`); `None` — the default constructor used by the
+    /// domain tests, which register sessions with throwaway temp paths — skips
+    /// the check, exactly as the other unwired capabilities default to a
+    /// permissive stub. See [`Interactor::with_transcript_root`].
+    pub(in crate::interactor) transcript_root: Option<String>,
     /// The Claude Code settings JSON whose hooks point back at this server (and
     /// which pins the session theme). Rendered by the caller (with the running
     /// port) and held verbatim; written to [`Self::session_settings_path`] and
@@ -314,6 +326,7 @@ where
             git_worktree,
             session_workdir_base: session_workdir_base.into(),
             worktree_base: worktree_base.into(),
+            transcript_root: None,
             session_settings_json: session_settings_json.into(),
             session_settings_path: session_settings_path.into(),
             launch: LaunchConfig::default(),
@@ -347,6 +360,26 @@ where
             panic!("with_launch_config must be called before any session actor is spawned");
         };
         core.launch = launch;
+        let core = Arc::new(core);
+        let sessions = SessionRegistry::new(&core);
+        Self { core, sessions }
+    }
+
+    /// Confine hook-reported transcript paths to `root`.
+    ///
+    /// Turns on the confinement `register_session_row` enforces: an incoming
+    /// `transcript_path` must canonicalize to a `.jsonl` file under `root` or the
+    /// registration is refused with [`crate::Error::InvalidTranscriptPath`],
+    /// before the path is persisted or read. The composition root passes
+    /// `Config::transcript_root`; a configuration that never calls this (the
+    /// default constructor, the domain tests) leaves confinement off. Same
+    /// constraint as [`Self::with_launch_config`]: must run before any session
+    /// actor is spawned.
+    pub fn with_transcript_root(self, root: impl Into<String>) -> Self {
+        let Ok(mut core) = Arc::try_unwrap(self.core) else {
+            panic!("with_transcript_root must be called before any session actor is spawned");
+        };
+        core.transcript_root = Some(root.into());
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
         Self { core, sessions }

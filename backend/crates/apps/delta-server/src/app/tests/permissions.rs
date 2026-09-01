@@ -22,7 +22,7 @@ async fn register_session(state: &AppState) {
                 .header("host", "127.0.0.1")
                 .header("authorization", super::bearer())
                 .method("POST")
-                .uri("/hooks/user-prompt-submit")
+                .uri(format!("/hooks/user-prompt-submit{}", super::hook_query()))
                 .header("content-type", "application/json")
                 .body(Body::from(body))
                 .unwrap(),
@@ -54,7 +54,7 @@ async fn permission_request_hook_passes_through_on_timeout() {
                 .header("host", "127.0.0.1")
                 .header("authorization", super::bearer())
                 .method("POST")
-                .uri("/hooks/permission-request")
+                .uri(format!("/hooks/permission-request{}", super::hook_query()))
                 .header("content-type", "application/json")
                 .body(Body::from(body))
                 .unwrap(),
@@ -93,7 +93,7 @@ async fn permission_decision_resolves_the_blocked_hook() {
                     .header("host", "127.0.0.1")
                     .header("authorization", super::bearer())
                     .method("POST")
-                    .uri("/hooks/permission-request")
+                    .uri(format!("/hooks/permission-request{}", super::hook_query()))
                     .header("content-type", "application/json")
                     .body(Body::from(hook_body))
                     .unwrap(),
@@ -163,7 +163,7 @@ async fn the_claude_hook_envelope_is_unchanged_for_allow_and_deny() {
                         .header("host", "127.0.0.1")
                         .header("authorization", super::bearer())
                         .method("POST")
-                        .uri("/hooks/permission-request")
+                        .uri(format!("/hooks/permission-request{}", super::hook_query()))
                         .header("content-type", "application/json")
                         .body(Body::from(hook_body))
                         .unwrap(),
@@ -236,7 +236,7 @@ async fn a_session_scoped_decision_is_refused_for_a_provider_without_the_capabil
                     .header("host", "127.0.0.1")
                     .header("authorization", super::bearer())
                     .method("POST")
-                    .uri("/hooks/permission-request")
+                    .uri(format!("/hooks/permission-request{}", super::hook_query()))
                     .header("content-type", "application/json")
                     .body(Body::from(hook_body))
                     .unwrap(),

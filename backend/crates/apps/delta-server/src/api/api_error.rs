@@ -237,6 +237,11 @@ impl IntoResponse for ApiError {
                     // A user-selected directory that does not exist or is not a
                     // directory is a client error: the caller named a bad path.
                     Error::InvalidWorkdir(_) => (StatusCode::BAD_REQUEST, None),
+                    // A hook named a transcript path outside the allowed root (or
+                    // not a `.jsonl`): the request shape is invalid, so `400`. No
+                    // stable code — no browser path branches on it; a genuine
+                    // Claude Code callback never produces one.
+                    Error::InvalidTranscriptPath(_) => (StatusCode::BAD_REQUEST, None),
                     // The path exists but the server cannot read it: distinct
                     // from "bad path", so report `403` rather than `400`.
                     Error::WorkdirPermission(_) => (StatusCode::FORBIDDEN, None),
