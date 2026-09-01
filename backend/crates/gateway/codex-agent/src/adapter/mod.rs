@@ -174,6 +174,8 @@ pub const CODEX_CAPABILITIES: AgentCapabilities = AgentCapabilities {
 mod config_merge;
 mod launch_option_catalog;
 pub use launch_option_catalog::CODEX_LAUNCH_OPTION_CATALOG;
+mod launch_option_danger;
+pub use launch_option_danger::is_dangerous_launch_option;
 mod worktree_git_grant;
 
 use config_merge::{merge_config, ConfigSelection};

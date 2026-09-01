@@ -219,6 +219,149 @@ async fn patch_flips_default_enabled_on_a_shipped_launch_option() {
     assert_eq!(listed[0]["default_enabled"], serde_json::json!(true));
 }
 
+/// POST a launch option and hand back `(status, body)`.
+async fn post_launch_option(app: &axum::Router, body: &str) -> (StatusCode, serde_json::Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
+                .method("POST")
+                .uri("/api/launch-options")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_owned()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+/// PATCH a launch option's `default_enabled` and hand back `(status, body)`.
+async fn patch_default_enabled(
+    app: &axum::Router,
+    id: i64,
+    default_enabled: bool,
+) -> (StatusCode, serde_json::Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
+                .method("PATCH")
+                .uri(format!("/api/launch-options/{id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(format!(
+                    r#"{{"default_enabled":{default_enabled}}}"#
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+/// An option that turns the agent's own permission system off may be
+/// registered, but never pre-checked: a create asking for both is a `400`
+/// `launch_option_rejected`, while the same option undefaulted is created and
+/// listed — flagged `dangerous` so the browser can mark it.
+///
+/// The rule lives in the use case, so this pins the whole route honouring it:
+/// the composition root wiring the real per-provider predicate, the use case
+/// refusing, and the error mapping naming the case with its stable code.
+#[tokio::test]
+async fn create_rejects_creating_a_dangerous_option_as_default_enabled() {
+    let app = router(test_state().await);
+
+    let (status, body) = post_launch_option(
+        &app,
+        r#"{"name":"--dangerously-skip-permissions","default_enabled":true}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body["code"], "launch_option_rejected",
+        "the refusal names its case with a stable code: {body}"
+    );
+    assert!(
+        !list_launch_options(&app)
+            .await
+            .iter()
+            .any(|option| option["name"] == "--dangerously-skip-permissions"),
+        "a refused create registers nothing"
+    );
+
+    // Undefaulted, the very same option is registered — and marked.
+    let (status, created) =
+        post_launch_option(&app, r#"{"name":"--dangerously-skip-permissions"}"#).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created["dangerous"], serde_json::json!(true));
+    assert_eq!(created["default_enabled"], serde_json::json!(false));
+
+    let listed = list_launch_options(&app).await;
+    let row = listed
+        .iter()
+        .find(|option| option["name"] == "--dangerously-skip-permissions")
+        .expect("the undefaulted dangerous option is registered");
+    assert_eq!(row["dangerous"], serde_json::json!(true));
+    // A benign shipped row is not marked, so the flag is a verdict and not a
+    // constant.
+    assert!(
+        listed
+            .iter()
+            .any(|option| option["name"] == "--model" && option["dangerous"] == false),
+        "a benign shipped row is not marked: {listed:?}"
+    );
+}
+
+/// `PATCH` cannot turn `default_enabled` on for a dangerous option — including
+/// a Codex one whose danger is buried in a `config` value — but turning it off
+/// always works, which is how a row registered before this rule is disarmed.
+#[tokio::test]
+async fn patch_rejects_enabling_default_for_a_dangerous_option() {
+    let app = router(test_state().await);
+
+    let (status, created) = post_launch_option(
+        &app,
+        r#"{"name":"config","value":"{\"sandbox_mode\": \"danger-full-access\"}","provider":"codex"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(
+        created["dangerous"],
+        serde_json::json!(true),
+        "a `config` row stating the full-access sandbox is dangerous: {created}"
+    );
+    let id = created["id"].as_i64().unwrap();
+
+    let (status, body) = patch_default_enabled(&app, id, true).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "launch_option_rejected");
+    assert!(
+        list_launch_options(&app)
+            .await
+            .iter()
+            .any(|option| option["id"].as_i64() == Some(id) && option["default_enabled"] == false),
+        "the refused PATCH left the row undefaulted"
+    );
+
+    // Disabling is never refused, even on a dangerous row.
+    let (status, body) = patch_default_enabled(&app, id, false).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["default_enabled"], serde_json::json!(false));
+
+    // And an id nobody has is still a 404 rather than the new refusal: there is
+    // no row to classify.
+    let (status, _) = patch_default_enabled(&app, 9999, true).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn create_launch_option_rejects_a_blank_name() {
     let response = router(test_state().await)

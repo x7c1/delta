@@ -16,8 +16,8 @@ use delta_server::{router, AppState, CommsLogHub};
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{
-    AgentAdapterFactory, CommsLogSink, GitWorktree, Interactor, SessionEvent, TmuxDriver,
-    Transcript, Workspace,
+    AgentAdapterFactory, AgentProvider, CommsLogSink, GitWorktree, Interactor,
+    LaunchOptionDangerPolicy, SessionEvent, TmuxDriver, Transcript, Workspace,
 };
 use git_worktree::Git;
 use tmux_driver::Tmux;
@@ -182,12 +182,33 @@ pub(crate) fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (R
         "{}",
         "/tmp/delta-codex-full-loop-settings.json",
     )
-    .with_adapter_factory(factory);
+    .with_adapter_factory(factory)
+    // The launch-option registry's safety rules are part of the surface this
+    // suite drives through the real endpoints, so the policy is wired here too.
+    .with_launch_option_danger_policy(
+        Arc::new(CodexLaunchOptionDanger) as Arc<dyn LaunchOptionDangerPolicy>
+    );
 
     let state =
         AppState::from_interactor(interactor, "delta-codex-full-loop", AUTH_TOKEN, HOOK_SECRET)
             .with_comms_log(comms_log);
     (router(state.clone()), state)
+}
+
+/// The [`LaunchOptionDangerPolicy`] this suite's backend is wired with: Codex's
+/// gateway predicate, read through the port the domain consults.
+///
+/// A local adapter rather than the composition root's own, because this crate
+/// does not depend on it — and a harness that drives only Codex needs only
+/// Codex's vocabulary. The predicate itself is the production one, so a
+/// registry write refused here is refused for the same reason it would be in a
+/// real server.
+struct CodexLaunchOptionDanger;
+
+impl LaunchOptionDangerPolicy for CodexLaunchOptionDanger {
+    fn is_dangerous(&self, provider: AgentProvider, name: &str, value: Option<&str>) -> bool {
+        provider == AgentProvider::Codex && codex_agent::is_dangerous_launch_option(name, value)
+    }
 }
 
 /// The bearer token every backend this suite assembles holds, presented on each

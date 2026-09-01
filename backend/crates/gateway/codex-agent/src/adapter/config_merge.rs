@@ -249,6 +249,21 @@ fn is_writable_roots(path: &[String]) -> bool {
     )
 }
 
+/// Every setting one `config` object states, as `(canonical path, value)` pairs.
+///
+/// [`flatten`] with its merge bookkeeping dropped, for a caller that only needs
+/// to know *what a `config` value says* rather than how to merge two of them —
+/// the danger predicate in [`super::launch_option_danger`], which has to see
+/// through both of Codex's spellings exactly as the launch does. Exposed as a
+/// pair rather than as [`Stated`] so the spelling (which only rebuilding needs)
+/// stays private to this module.
+pub(super) fn stated_settings(object: &Map<String, Value>) -> Vec<(Vec<String>, Value)> {
+    flatten(object)
+        .into_iter()
+        .map(|stated| (stated.path, stated.value))
+        .collect()
+}
+
 /// Flatten one `config` object into the settings it states, splitting dotted
 /// keys and walking nested tables so that both spellings of one setting produce
 /// the same path.

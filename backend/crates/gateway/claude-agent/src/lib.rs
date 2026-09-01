@@ -97,6 +97,9 @@ pub const CLAUDE_CAPABILITIES: AgentCapabilities = AgentCapabilities {
 mod launch_option_catalog;
 pub use launch_option_catalog::CLAUDE_LAUNCH_OPTION_CATALOG;
 
+mod launch_option_danger;
+pub use launch_option_danger::is_dangerous_launch_option;
+
 /// The `claude` flag that loads Delta's session settings (hooks + theme) from a
 /// Delta-owned file. Mirrors the core's spawn path.
 const SETTINGS_FLAG: &str = "--settings";

@@ -13,6 +13,9 @@ mod settings;
 pub use error::{Error, Result};
 pub use settings::render_session_settings;
 
+mod launch_option_danger;
+pub use launch_option_danger::{is_launch_option_dangerous, GatewayLaunchOptionDanger};
+
 // Re-export the underlying store error so callers (the `delta-server` binary)
 // can pattern-match on its variants — notably `SchemaMismatch`, which it
 // surfaces with a clean message at startup — without taking a direct
@@ -35,7 +38,7 @@ use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{
     AgentAdapterFactory, AgentCapabilities, AgentProvider, BinaryDetector, BoxedInteractor,
-    CommsLogSink, ExternalOpener, GhCli, Interactor, LaunchOptionPreset,
+    CommsLogSink, ExternalOpener, GhCli, Interactor, LaunchOptionDangerPolicy, LaunchOptionPreset,
 };
 use external_opener::SystemOpener;
 use gh_cli::Gh;
@@ -275,7 +278,10 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     .with_external_opener(external_opener)
     .with_adapter_factory(codex_adapter_factory)
     .with_codex_bin(codex_bin)
-    .with_binary_detector(binary_detector);
+    .with_binary_detector(binary_detector)
+    .with_launch_option_danger_policy(
+        Arc::new(GatewayLaunchOptionDanger) as Arc<dyn LaunchOptionDangerPolicy>
+    );
     // Boot-time launch-option reconcile (see this function's doc), in the same
     // place as the send sweep above. The whole declared catalog in one call,
     // because reconciliation's closing sweep is registry-wide — see
@@ -405,6 +411,45 @@ mod tests {
             declared,
             "two shipped launch options share a key: {keys:?}"
         );
+    }
+
+    /// The wired policy is the gateway predicates, per provider — and it reads
+    /// the pair, not the name alone.
+    ///
+    /// Pinned through the port (not the free function) because the port is what
+    /// the domain consults; a `build` that forgot to inject it would leave the
+    /// permissive default in place with every gateway test still green.
+    #[tokio::test]
+    async fn build_wires_the_gateway_launch_option_danger_policy() {
+        let interactor = build(&test_config(), NullCommsLog::arc()).await.unwrap();
+        let dangerous = |provider, name: &str, value: Option<&str>| {
+            interactor.is_launch_option_pair_dangerous(provider, name, value)
+        };
+
+        assert!(dangerous(
+            AgentProvider::Claude,
+            "--dangerously-skip-permissions",
+            None
+        ));
+        assert!(dangerous(
+            AgentProvider::Codex,
+            "sandbox",
+            Some("danger-full-access")
+        ));
+        // The benign neighbours of both, so the policy is not simply "yes".
+        assert!(!dangerous(AgentProvider::Claude, "--model", Some("opus")));
+        assert!(!dangerous(
+            AgentProvider::Codex,
+            "sandbox",
+            Some("read-only")
+        ));
+        // And a Claude flag is read in Claude's vocabulary alone: the same text
+        // means nothing to Codex.
+        assert!(!dangerous(
+            AgentProvider::Codex,
+            "--dangerously-skip-permissions",
+            None
+        ));
     }
 
     /// [`build`] materializes every declared preset, so a shipped launch option

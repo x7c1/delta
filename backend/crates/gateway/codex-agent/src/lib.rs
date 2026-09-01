@@ -73,7 +73,8 @@ mod translate;
 pub mod wire;
 
 pub use adapter::{
-    thread_start_params, CodexAppServerAdapter, CODEX_CAPABILITIES, CODEX_LAUNCH_OPTION_CATALOG,
+    is_dangerous_launch_option, thread_start_params, CodexAppServerAdapter, CODEX_CAPABILITIES,
+    CODEX_LAUNCH_OPTION_CATALOG,
 };
 pub use content::{codex_content_source, CodexConversationSource};
 pub use factory::CodexAdapterFactory;

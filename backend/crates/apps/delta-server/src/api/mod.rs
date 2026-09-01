@@ -495,12 +495,25 @@ pub(crate) async fn workdir_git_branches(
 /// the ones the user registered, newest first. `builtin` tells the two apart.
 /// Selecting which to apply when starting a session is a separate concern
 /// handled elsewhere.
+///
+/// Every row also carries `dangerous`, resolved here through the provider's own
+/// predicate rather than read from storage, so a client can mark the row and
+/// never pre-check it — including a row that predates the rule and still says
+/// `default_enabled: true`, whose default control is the way to clear that stale
+/// flag.
 pub(crate) async fn list_launch_options(
     State(state): State<AppState>,
 ) -> Result<Json<WireLaunchOptionsResponse>, ApiError> {
-    let options = state.interactor().list_launch_options().await?;
+    let interactor = state.interactor();
+    let options = interactor.list_launch_options().await?;
     Ok(Json(WireLaunchOptionsResponse {
-        launch_options: options.into_iter().map(WireLaunchOption::from).collect(),
+        launch_options: options
+            .into_iter()
+            .map(|option| {
+                let dangerous = interactor.is_launch_option_dangerous(&option);
+                WireLaunchOption::new(option, dangerous)
+            })
+            .collect(),
     }))
 }
 
@@ -512,6 +525,12 @@ pub(crate) async fn list_launch_options(
 /// `thread/start` field for Codex — so the validation here is deliberately only
 /// "present and non-blank", and the message stays provider-neutral. Returns the
 /// created record so the client can render it without a refetch.
+///
+/// The one exception to that neutrality is the safety-bypass rule: an option that
+/// disables the agent's own safety mechanism can be registered, but not with
+/// `default_enabled: true` — that is a `400` `launch_option_rejected` from the
+/// use case (see `create_launch_option` there). The same option undefaulted is
+/// created normally and stays selectable per session.
 pub(crate) async fn create_launch_option(
     State(state): State<AppState>,
     Json(req): Json<WireCreateLaunchOptionRequest>,
@@ -541,11 +560,15 @@ pub(crate) async fn create_launch_option(
         .provider
         .map(AgentProvider::from)
         .unwrap_or(AgentProvider::Claude);
-    let option = state
-        .interactor()
+    let interactor = state.interactor();
+    let option = interactor
         .create_launch_option(label, name, value, req.default_enabled, provider)
         .await?;
-    Ok((StatusCode::CREATED, Json(WireLaunchOption::from(option))))
+    let dangerous = interactor.is_launch_option_dangerous(&option);
+    Ok((
+        StatusCode::CREATED,
+        Json(WireLaunchOption::new(option, dangerous)),
+    ))
 }
 
 /// `PATCH /api/launch-options/{id}` — set a launch option's `default_enabled`
@@ -560,17 +583,25 @@ pub(crate) async fn create_launch_option(
 /// three content fields are immutable *here* is precisely what lets startup
 /// refresh a shipped row's `label`/`name`/`value` from the declared catalog
 /// without ever overwriting something the user typed.
+///
+/// Turning the flag *on* for an option that disables the agent's own safety
+/// mechanism is a `400` `launch_option_rejected`, the same refusal the create
+/// path gives; turning it off is always allowed, which is how a row registered
+/// before that rule is disarmed.
 pub(crate) async fn update_launch_option(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(req): Json<WireUpdateLaunchOptionRequest>,
 ) -> Result<Json<WireLaunchOption>, ApiError> {
-    let option = state
-        .interactor()
+    let interactor = state.interactor();
+    let option = interactor
         .set_launch_option_default_enabled(id, req.default_enabled)
         .await?;
     match option {
-        Some(option) => Ok(Json(WireLaunchOption::from(option))),
+        Some(option) => {
+            let dangerous = interactor.is_launch_option_dangerous(&option);
+            Ok(Json(WireLaunchOption::new(option, dangerous)))
+        }
         None => Err(ApiError::NotFound(format!("no launch option with id {id}"))),
     }
 }

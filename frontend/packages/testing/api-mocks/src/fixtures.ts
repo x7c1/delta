@@ -771,6 +771,7 @@ export function seedData(): MockStore {
         created_at: '2026-01-01T00:00:00Z',
         provider: 'claude',
         builtin: true,
+        dangerous: false,
       },
       {
         id: 101,
@@ -782,6 +783,7 @@ export function seedData(): MockStore {
         created_at: '2026-01-01T00:00:00Z',
         provider: 'codex',
         builtin: true,
+        dangerous: false,
       },
       {
         id: 3,
@@ -792,6 +794,7 @@ export function seedData(): MockStore {
         created_at: '2026-01-03T00:00:00Z',
         provider: 'codex',
         builtin: false,
+        dangerous: false,
       },
       {
         id: 2,
@@ -802,6 +805,7 @@ export function seedData(): MockStore {
         created_at: '2026-01-02T00:00:00Z',
         provider: 'claude',
         builtin: false,
+        dangerous: false,
       },
       {
         id: 1,
@@ -812,6 +816,7 @@ export function seedData(): MockStore {
         created_at: '2026-01-01T00:00:00Z',
         provider: 'claude',
         builtin: false,
+        dangerous: false,
       },
     ],
     nextLaunchOptionId: 4,
