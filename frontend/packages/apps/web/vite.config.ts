@@ -1,11 +1,38 @@
 /// <reference types="vitest/config" />
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // The Delta server the dev server proxies to. DELTA_PORT lets a non-default
 // backend be targeted — used by the fake-mode e2e suite, which boots its
 // backend on a dedicated port so it never collides with `make dev`.
 const backendPort = process.env.DELTA_PORT ?? '7878';
+
+// Inject the per-run bearer token into the served HTML as a static
+// `<meta name="delta-auth-token">` tag, read from DELTA_AUTH_TOKEN. `dev.sh`
+// mints one token and exports it into both the backend and this dev server, so
+// the tag the page carries matches the token the server enforces. The frontend
+// reads the tag in `src/config.ts` (`authToken()`). When the env var is unset —
+// notably mock mode (`make mock` / `make e2e`), which never reaches a real
+// backend — nothing is injected, and the frontend treats the absent token as
+// "attach nothing". A static meta tag is permitted by the existing CSP.
+function injectAuthToken(): Plugin {
+  return {
+    name: 'delta-inject-auth-token',
+    transformIndexHtml() {
+      const token = process.env.DELTA_AUTH_TOKEN;
+      if (!token) {
+        return [];
+      }
+      return [
+        {
+          tag: 'meta',
+          attrs: { name: 'delta-auth-token', content: token },
+          injectTo: 'head' as const,
+        },
+      ];
+    },
+  };
+}
 
 // Content-Security-Policy, mirrored from the <meta http-equiv> in index.html
 // (keep the two in sync). The <meta> tag is the primary control that protects
@@ -19,7 +46,7 @@ const contentSecurityPolicy =
   "style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; object-src 'none'";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), injectAuthToken()],
   server: {
     headers: {
       'Content-Security-Policy': contentSecurityPolicy,

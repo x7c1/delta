@@ -14,6 +14,7 @@ async fn register_clone_root(app: &axum::Router, path: &str) {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/clone-roots")
                 .header("content-type", "application/json")
@@ -40,6 +41,7 @@ async fn repositories_returns_an_empty_list_when_no_sessions() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/repositories")
                 .body(Body::empty())
                 .unwrap(),
@@ -68,6 +70,7 @@ async fn clone_roots_round_trip_create_list_delete() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/clone-roots")
                 .body(Body::empty())
                 .unwrap(),
@@ -85,6 +88,7 @@ async fn clone_roots_round_trip_create_list_delete() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/clone-roots")
                 .header("content-type", "application/json")
@@ -105,6 +109,7 @@ async fn clone_roots_round_trip_create_list_delete() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/clone-roots")
                 .body(Body::empty())
                 .unwrap(),
@@ -122,6 +127,7 @@ async fn clone_roots_round_trip_create_list_delete() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/clone-roots")
                 .header("content-type", "application/json")
@@ -142,6 +148,7 @@ async fn clone_roots_round_trip_create_list_delete() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("DELETE")
                 .uri(format!("/api/clone-roots/{token}"))
                 .body(Body::empty())
@@ -156,6 +163,7 @@ async fn clone_roots_round_trip_create_list_delete() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/clone-roots")
                 .body(Body::empty())
                 .unwrap(),
@@ -179,6 +187,7 @@ async fn clone_repository_rejects_an_unregistered_clone_root_and_starts_no_job()
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/repositories/clone")
                 .header("content-type", "application/json")
@@ -217,6 +226,7 @@ async fn clone_repository_rejects_an_existing_destination_with_409_and_starts_no
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/repositories/clone")
                 .header("content-type", "application/json")
@@ -252,6 +262,7 @@ async fn clone_repository_accepts_a_registered_root_with_202() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/repositories/clone")
                 .header("content-type", "application/json")
@@ -274,6 +285,7 @@ async fn create_clone_root_rejects_a_non_absolute_path() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/clone-roots")
                 .header("content-type", "application/json")
@@ -297,6 +309,7 @@ async fn create_clone_root_rejects_a_blank_path() {
             .oneshot(
                 Request::builder()
                     .header("host", "127.0.0.1")
+                    .header("authorization", super::bearer())
                     .method("POST")
                     .uri("/api/clone-roots")
                     .header("content-type", "application/json")
@@ -321,6 +334,7 @@ async fn create_clone_root_accepts_the_filesystem_root() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/clone-roots")
                 .header("content-type", "application/json")
@@ -343,6 +357,7 @@ async fn create_clone_root_canonicalises_a_trailing_slash() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/clone-roots")
                 .header("content-type", "application/json")
@@ -367,6 +382,7 @@ async fn delete_unknown_clone_root_is_idempotent() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("DELETE")
                 .uri(format!("/api/clone-roots/{token}"))
                 .body(Body::empty())

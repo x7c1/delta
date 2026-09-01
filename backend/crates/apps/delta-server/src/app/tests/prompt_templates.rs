@@ -11,6 +11,7 @@ async fn prompt_templates_list_is_empty_on_a_fresh_store() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/prompt-templates")
                 .body(Body::empty())
                 .unwrap(),
@@ -40,6 +41,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/prompt-templates")
                 .header("content-type", "application/json")
@@ -73,6 +75,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/prompt-templates")
                 .body(Body::empty())
                 .unwrap(),
@@ -91,6 +94,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("PATCH")
                 .uri(format!("/api/prompt-templates/{id}"))
                 .header("content-type", "application/json")
@@ -118,6 +122,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/prompt-templates")
                 .body(Body::empty())
                 .unwrap(),
@@ -136,6 +141,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("DELETE")
                 .uri(format!("/api/prompt-templates/{id}"))
                 .body(Body::empty())
@@ -151,6 +157,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("DELETE")
                 .uri(format!("/api/prompt-templates/{id}"))
                 .body(Body::empty())
@@ -165,6 +172,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/prompt-templates")
                 .body(Body::empty())
                 .unwrap(),
@@ -193,6 +201,7 @@ async fn create_prompt_template_rejects_blank_label_or_text() {
             .oneshot(
                 Request::builder()
                     .header("host", "127.0.0.1")
+                    .header("authorization", super::bearer())
                     .method("POST")
                     .uri("/api/prompt-templates")
                     .header("content-type", "application/json")
@@ -218,6 +227,7 @@ async fn update_prompt_template_of_an_unknown_id_is_404() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("PATCH")
                 .uri("/api/prompt-templates/9999")
                 .header("content-type", "application/json")

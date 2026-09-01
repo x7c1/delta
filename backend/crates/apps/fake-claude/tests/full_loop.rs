@@ -29,6 +29,10 @@ const WAIT_DEADLINE: Duration = Duration::from_secs(20);
 /// Poll interval between REST probes.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
+/// The bearer token the assembled backend holds, presented on every request so
+/// the loop clears the router's per-run auth guard.
+const AUTH_TOKEN: &str = "delta-fake-claude-full-loop-auth-token";
+
 #[tokio::test]
 async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
     if !tmux_available() {
@@ -75,6 +79,7 @@ async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
         session_workdir_base: temp.path().join("workdirs").to_string_lossy().into_owned(),
         worktree_base: temp.path().join("worktrees").to_string_lossy().into_owned(),
         tmux_socket: tmux_socket.clone(),
+        auth_token: AUTH_TOKEN.into(),
         port,
         launch: LaunchConfig {
             claude_bin: claude_bin.to_string_lossy().into_owned(),
@@ -120,6 +125,8 @@ async fn drive_loop(app: &axum::Router, workdir: &std::path::Path) -> Result<(),
                 // The router's Origin/Host guard rejects any non-loopback Host
                 // with 403, so every request that drives it needs a loopback Host.
                 .header("host", "127.0.0.1")
+                // A valid bearer token clears the per-run auth guard.
+                .header("authorization", format!("Bearer {AUTH_TOKEN}"))
                 .header("content-type", "application/json")
                 .body(Body::from(send_body.to_string()))
                 .map_err(|e| e.to_string())?,
@@ -172,6 +179,7 @@ async fn wait_for<T>(
             .oneshot(
                 Request::get(path)
                     .header("host", "127.0.0.1")
+                    .header("authorization", format!("Bearer {AUTH_TOKEN}"))
                     .body(Body::empty())
                     .map_err(|e| e.to_string())?,
             )

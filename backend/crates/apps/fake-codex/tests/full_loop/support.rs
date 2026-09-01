@@ -184,10 +184,14 @@ pub(crate) fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (R
     )
     .with_adapter_factory(factory);
 
-    let state =
-        AppState::from_interactor(interactor, "delta-codex-full-loop").with_comms_log(comms_log);
+    let state = AppState::from_interactor(interactor, "delta-codex-full-loop", AUTH_TOKEN)
+        .with_comms_log(comms_log);
     (router(state.clone()), state)
 }
+
+/// The bearer token every backend this suite assembles holds, presented on each
+/// request the helpers drive so they clear the router's per-run auth guard.
+pub(crate) const AUTH_TOKEN: &str = "delta-codex-full-loop-auth-token";
 
 pub(crate) async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
     let response = app
@@ -199,6 +203,8 @@ pub(crate) async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCo
                 // The router's Origin/Host guard rejects any non-loopback Host
                 // with 403, so every request that drives it needs a loopback Host.
                 .header("host", "127.0.0.1")
+                // A valid bearer token clears the per-run auth guard.
+                .header("authorization", format!("Bearer {AUTH_TOKEN}"))
                 .header("content-type", "application/json")
                 .body(Body::from(body.to_string()))
                 .unwrap(),
@@ -215,6 +221,7 @@ pub(crate) async fn get(app: &Router, uri: &str) -> (StatusCode, Value) {
             Request::builder()
                 .uri(uri)
                 .header("host", "127.0.0.1")
+                .header("authorization", format!("Bearer {AUTH_TOKEN}"))
                 .body(Body::empty())
                 .unwrap(),
         )

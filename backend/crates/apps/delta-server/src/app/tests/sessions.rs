@@ -11,6 +11,7 @@ async fn health_returns_ok() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/health")
                 .body(Body::empty())
                 .unwrap(),
@@ -30,6 +31,7 @@ async fn get_version_returns_a_version_string_shaped_like_v_prefixed() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/version")
                 .body(Body::empty())
                 .unwrap(),
@@ -54,6 +56,7 @@ async fn list_sessions_rejects_a_malformed_cursor() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/sessions?cursor=not-a-valid-cursor%21")
                 .body(Body::empty())
                 .unwrap(),
@@ -74,6 +77,7 @@ async fn comms_requires_a_session_id() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/comms")
                 .body(Body::empty())
                 .unwrap(),
@@ -95,6 +99,7 @@ async fn release_send_replies_conflict_with_the_stable_code_when_not_releasable(
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/sends/9999/release")
                 .body(Body::empty())

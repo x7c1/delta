@@ -54,6 +54,14 @@ import path from 'node:path';
 /** The default backend port; kept in sync with `playwright.fake.config.ts`. */
 const BACKEND_PORT = Number(process.env.E2E_FAKE_BACKEND_PORT ?? 7899);
 
+/**
+ * The per-run bearer token every backend generation this fixture spawns is
+ * given. It must match the token `playwright.fake.config.ts` injects into the
+ * page (its `AUTH_TOKEN`), so the real frontend the fake suite drives presents
+ * the token the backend enforces.
+ */
+const AUTH_TOKEN = 'delta-e2e-fake-auth-token';
+
 /** Recognisable prefixes so the startup sweep can find a previous run's leaks. */
 const TMP_PREFIX = 'delta-e2e-fake.';
 const SOCKET_PREFIX = 'delta-e2e-fake-';
@@ -348,6 +356,7 @@ export async function bootServer(): Promise<ServerHandle> {
           ...process.env,
           RUST_LOG: SERVER_RUST_LOG,
           DELTA_PORT: String(BACKEND_PORT),
+          DELTA_AUTH_TOKEN: AUTH_TOKEN,
           DELTA_DB_PATH: dbPath,
           DELTA_SESSION_WORKDIR: workdir,
           DELTA_TMUX_SOCKET: tmuxSocket,

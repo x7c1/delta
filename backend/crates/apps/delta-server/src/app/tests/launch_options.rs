@@ -12,6 +12,7 @@ async fn list_launch_options(app: &axum::Router) -> Vec<serde_json::Value> {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/launch-options")
                 .body(Body::empty())
                 .unwrap(),
@@ -60,6 +61,7 @@ async fn create_then_list_and_delete_launch_option() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/launch-options")
                 .header("content-type", "application/json")
@@ -96,6 +98,7 @@ async fn create_then_list_and_delete_launch_option() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("DELETE")
                 .uri(format!("/api/launch-options/{id}"))
                 .body(Body::empty())
@@ -126,6 +129,7 @@ async fn delete_refuses_a_shipped_launch_option_but_not_the_users_own() {
             app.oneshot(
                 Request::builder()
                     .header("host", "127.0.0.1")
+                    .header("authorization", super::bearer())
                     .method("DELETE")
                     .uri(format!("/api/launch-options/{id}"))
                     .body(Body::empty())
@@ -159,6 +163,7 @@ async fn delete_refuses_a_shipped_launch_option_but_not_the_users_own() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/launch-options")
                 .header("content-type", "application/json")
@@ -191,6 +196,7 @@ async fn patch_flips_default_enabled_on_a_shipped_launch_option() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("PATCH")
                 .uri(format!("/api/launch-options/{id}"))
                 .header("content-type", "application/json")
@@ -219,6 +225,7 @@ async fn create_launch_option_rejects_a_blank_name() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/launch-options")
                 .header("content-type", "application/json")

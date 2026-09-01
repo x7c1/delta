@@ -24,6 +24,7 @@ async fn test_state_with_only_claude_present() -> AppState {
         session_workdir_base: "/tmp/delta-test-session".into(),
         worktree_base: "/tmp/delta-test-worktrees".into(),
         tmux_socket: "delta-test".into(),
+        auth_token: super::TEST_AUTH_TOKEN.into(),
         port: 7878,
         launch: delta_usecase::LaunchConfig::default(),
     };
@@ -32,7 +33,7 @@ async fn test_state_with_only_claude_present() -> AppState {
         .unwrap()
         .with_codex_bin("codex")
         .with_binary_detector(Arc::new(ClaudeOnly) as Arc<dyn delta_usecase::BinaryDetector>);
-    AppState::from_interactor(interactor, &config.tmux_socket)
+    AppState::from_interactor(interactor, &config.tmux_socket, &config.auth_token)
 }
 
 #[tokio::test]
@@ -44,6 +45,7 @@ async fn providers_reports_availability_per_provider() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/providers")
                 .body(Body::empty())
                 .unwrap(),

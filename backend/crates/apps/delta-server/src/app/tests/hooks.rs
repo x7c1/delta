@@ -19,6 +19,7 @@ async fn user_prompt_submit_hook_registers_and_responds() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/hooks/user-prompt-submit")
                 .header("content-type", "application/json")
@@ -54,6 +55,7 @@ async fn pre_tool_use_hook_returns_ok() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/hooks/user-prompt-submit")
                 .header("content-type", "application/json")
@@ -75,6 +77,7 @@ async fn pre_tool_use_hook_returns_ok() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/hooks/pre-tool-use")
                 .header("content-type", "application/json")
@@ -103,6 +106,7 @@ async fn session_start_hook_returns_ok() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/hooks/session-start")
                 .header("content-type", "application/json")
@@ -128,6 +132,7 @@ async fn session_end_hook_returns_ok() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/hooks/session-end")
                 .header("content-type", "application/json")

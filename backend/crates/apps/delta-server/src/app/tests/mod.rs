@@ -5,6 +5,7 @@
 //! `test_state_with_gh_stub`, and `pull_requests` calls its
 //! `test_state_with_unavailable_gh` wrapper.
 
+mod auth;
 mod clone_roots;
 mod hooks;
 mod launch_options;
@@ -22,12 +23,25 @@ use delta_bootstrap::Config;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+/// The bearer token every state built in these tests holds, so a request the
+/// tests drive through the router can present a valid token and pass the auth
+/// guard. The `origin_guard` group's no-token / wrong-token cases use it as the
+/// baseline they deviate from.
+pub(super) const TEST_AUTH_TOKEN: &str = "delta-test-auth-token";
+
+/// The `Authorization` header value carrying [`TEST_AUTH_TOKEN`], so every
+/// router-driving request can attach a valid bearer token in one call.
+pub(super) fn bearer() -> String {
+    format!("Bearer {TEST_AUTH_TOKEN}")
+}
+
 async fn test_state() -> AppState {
     AppState::build(&Config {
         database_path: ":memory:".into(),
         session_workdir_base: "/tmp/delta-test-session".into(),
         worktree_base: "/tmp/delta-test-worktrees".into(),
         tmux_socket: "delta-test".into(),
+        auth_token: TEST_AUTH_TOKEN.into(),
         port: 7878,
         launch: delta_usecase::LaunchConfig {
             // The permission-request hook test exercises the no-decision
@@ -91,6 +105,7 @@ async fn test_state_with_gh_stub() -> (AppState, Arc<AtomicUsize>) {
         session_workdir_base: "/tmp/delta-test-session".into(),
         worktree_base: "/tmp/delta-test-worktrees".into(),
         tmux_socket: "delta-test".into(),
+        auth_token: TEST_AUTH_TOKEN.into(),
         port: 7878,
         launch: delta_usecase::LaunchConfig::default(),
     };
@@ -99,7 +114,7 @@ async fn test_state_with_gh_stub() -> (AppState, Arc<AtomicUsize>) {
         .unwrap()
         .with_gh_cli(gh as Arc<dyn delta_usecase::GhCli>);
     (
-        AppState::from_interactor(interactor, &config.tmux_socket),
+        AppState::from_interactor(interactor, &config.tmux_socket, &config.auth_token),
         clone_calls,
     )
 }

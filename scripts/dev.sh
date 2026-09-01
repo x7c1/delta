@@ -140,6 +140,18 @@ require() {
   command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH. $2"
 }
 
+# Mint a random per-run bearer token (64 hex chars). `openssl` is preferred; the
+# `/dev/urandom` fallback keeps this portable across macOS and Linux where
+# openssl is not guaranteed. `dd`+`od` consume their whole input, so no SIGPIPE
+# trips `set -o pipefail` the way a `head -c` on a pipe would.
+mint_auth_token() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+  else
+    dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'
+  fi
+}
+
 # Whether something is already listening on 127.0.0.1:$1. Best-effort: tries the
 # common tools and reports "not listening" if none are available.
 port_in_use() {
@@ -286,6 +298,17 @@ up() {
 
   mkdir -p "$LOG_DIR"
 
+  # Mint ONE per-run bearer token here, outside both processes, and export the
+  # SAME value into the backend and the frontend dev server below. Minting it
+  # here (rather than letting the server mint its own) avoids a startup race: the
+  # page Vite serves must carry the exact token the server enforces. The server
+  # reads DELTA_AUTH_TOKEN; Vite reads it too and injects it into the page as the
+  # `delta-auth-token` meta tag (see vite.config.ts), which the frontend then
+  # presents on every request. Honor a value the caller already exported.
+  local auth_token
+  auth_token="${DELTA_AUTH_TOKEN:-$(mint_auth_token)}"
+  log "Minted a per-run auth token (the frontend presents it on every request)."
+
   # --- 1. delta-server. It owns the claude session lifecycle. ---
   ln -sf "$(basename "$SERVER_LOG")" "$SERVER_LOG_LATEST"
   log "Starting delta-server (DELTA_PORT=$DELTA_PORT) ..."
@@ -295,6 +318,7 @@ up() {
     DELTA_PORT="$DELTA_PORT" \
       DELTA_SESSION_WORKDIR="$workdir" \
       DELTA_TMUX_SOCKET="$DELTA_TMUX_SOCKET" \
+      DELTA_AUTH_TOKEN="$auth_token" \
       cargo run -p delta-server >"$SERVER_LOG" 2>&1
   ) &
   local server_pid=$!
@@ -305,6 +329,7 @@ up() {
   log "Frontend log: $FRONTEND_LOG (latest -> $FRONTEND_LOG_LATEST)"
   (
     cd "$FRONTEND_DIR"
+    export DELTA_AUTH_TOKEN="$auth_token"
     pnpm install >"$FRONTEND_LOG" 2>&1
     pnpm -r build >>"$FRONTEND_LOG" 2>&1
     # `--force` re-optimizes deps so the dev server always serves the libraries

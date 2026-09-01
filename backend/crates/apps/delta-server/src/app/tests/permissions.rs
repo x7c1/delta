@@ -20,6 +20,7 @@ async fn register_session(state: &AppState) {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/hooks/user-prompt-submit")
                 .header("content-type", "application/json")
@@ -51,6 +52,7 @@ async fn permission_request_hook_passes_through_on_timeout() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/hooks/permission-request")
                 .header("content-type", "application/json")
@@ -89,6 +91,7 @@ async fn permission_decision_resolves_the_blocked_hook() {
             .oneshot(
                 Request::builder()
                     .header("host", "127.0.0.1")
+                    .header("authorization", super::bearer())
                     .method("POST")
                     .uri("/hooks/permission-request")
                     .header("content-type", "application/json")
@@ -106,6 +109,7 @@ async fn permission_decision_resolves_the_blocked_hook() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/permissions/1/decision")
                 .header("content-type", "application/json")
@@ -157,6 +161,7 @@ async fn the_claude_hook_envelope_is_unchanged_for_allow_and_deny() {
                 .oneshot(
                     Request::builder()
                         .header("host", "127.0.0.1")
+                        .header("authorization", super::bearer())
                         .method("POST")
                         .uri("/hooks/permission-request")
                         .header("content-type", "application/json")
@@ -172,6 +177,7 @@ async fn the_claude_hook_envelope_is_unchanged_for_allow_and_deny() {
             .oneshot(
                 Request::builder()
                     .header("host", "127.0.0.1")
+                    .header("authorization", super::bearer())
                     .method("POST")
                     .uri("/api/permissions/1/decision")
                     .header("content-type", "application/json")
@@ -228,6 +234,7 @@ async fn a_session_scoped_decision_is_refused_for_a_provider_without_the_capabil
             .oneshot(
                 Request::builder()
                     .header("host", "127.0.0.1")
+                    .header("authorization", super::bearer())
                     .method("POST")
                     .uri("/hooks/permission-request")
                     .header("content-type", "application/json")
@@ -244,6 +251,7 @@ async fn a_session_scoped_decision_is_refused_for_a_provider_without_the_capabil
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/permissions/1/decision")
                 .header("content-type", "application/json")
@@ -277,6 +285,7 @@ async fn a_session_scoped_decision_is_refused_for_a_provider_without_the_capabil
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/permissions/1/decision")
                 .header("content-type", "application/json")
@@ -302,6 +311,7 @@ async fn permission_decision_for_an_unknown_request_is_a_conflict() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .method("POST")
                 .uri("/api/permissions/999/decision")
                 .header("content-type", "application/json")

@@ -23,6 +23,13 @@ import { defineConfig, devices } from '@playwright/test';
 const PORT = Number(process.env.E2E_FAKE_PORT ?? 5198);
 const BACKEND_PORT = Number(process.env.E2E_FAKE_BACKEND_PORT ?? 7899);
 
+// A fixed per-run bearer token for the fake suite. This config passes it to the
+// Vite dev server (which injects it into the page as the `delta-auth-token`
+// meta tag) and the server fixture (`e2e-fake/support/server.ts`) passes the
+// SAME value to every backend it spawns, so the page's token matches the
+// backend's. The two must stay in sync — see that file's `AUTH_TOKEN`.
+const AUTH_TOKEN = 'delta-e2e-fake-auth-token';
+
 export default defineConfig({
   testDir: './e2e-fake',
   forbidOnly: !!process.env.CI,
@@ -46,6 +53,12 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   use: {
     baseURL: `http://localhost:${PORT}`,
+    // Specs that read server state directly through `page.request` (see
+    // support/rest.ts) bypass the app's ApiClient, which is the only thing
+    // that attaches the bearer token. Set it as a default header on the whole
+    // context so those direct calls carry it and are not rejected with 401
+    // (the browser app's own fetches already send it and simply override this).
+    extraHTTPHeaders: { authorization: `Bearer ${AUTH_TOKEN}` },
     // These failures surface only in CI and don't reproduce locally, so a
     // failing run must leave behind enough evidence to diagnose it after the
     // fact. With retries: 0 (kept deliberately, so flakes stay visible rather
@@ -65,7 +78,7 @@ export default defineConfig({
   ],
   webServer: {
     command: `pnpm exec vite --port ${PORT} --strictPort`,
-    env: { DELTA_PORT: String(BACKEND_PORT) },
+    env: { DELTA_PORT: String(BACKEND_PORT), DELTA_AUTH_TOKEN: AUTH_TOKEN },
     url: `http://localhost:${PORT}`,
     // Locally, adopt a server already bound to the port: a hard-killed run
     // (Ctrl-C storm, kill -9) leaks its Vite child, and with strict mode the

@@ -49,6 +49,13 @@ export interface ApiClientOptions {
   baseUrl?: string;
   /** Injectable fetch, primarily for tests. Defaults to the global `fetch`. */
   fetchFn?: typeof fetch;
+  /**
+   * The per-run bearer token the server requires on every API call. When set,
+   * it is sent as `Authorization: Bearer <token>` on every request. Omitted
+   * (or empty) in mock mode, where no real backend is reached — absence just
+   * means "attach nothing".
+   */
+  token?: string;
 }
 
 /**
@@ -177,15 +184,35 @@ async function readError(response: Response): Promise<ParsedError> {
 export class ApiClient {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
+  private readonly token: string;
 
   constructor(options: ApiClientOptions = {}) {
     // Normalise away any trailing slash so we can concatenate paths directly.
     this.baseUrl = (options.baseUrl ?? '').replace(/\/$/, '');
     this.fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
+    this.token = options.token ?? '';
+  }
+
+  /**
+   * Merge the per-run bearer token into a request's headers. This is the single
+   * chokepoint every REST call passes through, so setting it here covers the
+   * whole surface. When no token is configured (mock mode) the request goes out
+   * unchanged — absence means "attach nothing".
+   */
+  private authorized(init?: RequestInit): RequestInit | undefined {
+    if (!this.token) {
+      return init;
+    }
+    const headers = new Headers(init?.headers);
+    headers.set('Authorization', `Bearer ${this.token}`);
+    return { ...init, headers };
   }
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await this.fetchFn(`${this.baseUrl}${path}`, init);
+    const response = await this.fetchFn(
+      `${this.baseUrl}${path}`,
+      this.authorized(init),
+    );
     if (!response.ok) {
       const { message, code } = await readError(response);
       throw new ApiError(response.status, message, code);
@@ -198,7 +225,10 @@ export class ApiClient {
     path: string,
     init?: RequestInit,
   ): Promise<void> {
-    const response = await this.fetchFn(`${this.baseUrl}${path}`, init);
+    const response = await this.fetchFn(
+      `${this.baseUrl}${path}`,
+      this.authorized(init),
+    );
     if (!response.ok) {
       const { message, code } = await readError(response);
       throw new ApiError(response.status, message, code);
