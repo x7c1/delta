@@ -224,6 +224,12 @@ impl IntoResponse for ApiError {
                     // so this only fires against a hand-crafted request: `400`
                     // with no code, since no UI branches on it.
                     Error::InvalidRepositoryRef(_) => (StatusCode::BAD_REQUEST, None),
+                    // A remote branch/ref name git could parse as a flag (leading
+                    // `-`) or carrying whitespace/control chars. The picker never
+                    // produces one (names come from git's own branch listing), so
+                    // this only fires against a hand-crafted request: `400` with
+                    // no code, since no UI branches on it.
+                    Error::InvalidBranchName(_) => (StatusCode::BAD_REQUEST, None),
                     // The browser's selection could not be turned into a key
                     // sequence (malformed, or an unsupported sub-case): the
                     // caller sent a bad answer, so `400`.

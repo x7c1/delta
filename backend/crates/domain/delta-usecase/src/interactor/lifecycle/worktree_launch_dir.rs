@@ -13,7 +13,7 @@
 //! Planning is cheap: the new-branch start points are pure string work, and
 //! only `UseRemoteBranch` consults git at all (a `git worktree list`).
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::interactor::InteractorCore;
 use crate::ports::{
     GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace, WorktreeStartPoint,
@@ -93,6 +93,19 @@ where
         repository_display_name: Option<&str>,
         spec: &WorktreeSpec,
     ) -> Result<PlannedLaunchDir> {
+        // Reject a flag-shaped or malformed remote branch name here, at the
+        // accept-phase funnel every worktree start point passes through, so it
+        // never reaches the `git` subprocess in the gateway (`RemoteBranch` /
+        // `UseRemoteBranch` names flow to `git fetch` / `git worktree add` as
+        // positional arguments). This runs before the `UseRemoteBranch` branch's
+        // `git worktree list`, so a bad name spawns no git at all.
+        match &spec.start_point {
+            WorktreeStartPoint::Head => {}
+            WorktreeStartPoint::RemoteBranch(name) | WorktreeStartPoint::UseRemoteBranch(name) => {
+                check_ref_name(name)?;
+            }
+        }
+
         let default_path = self.default_worktree_path(session_id, repository_display_name);
         let planned = match &spec.start_point {
             WorktreeStartPoint::Head | WorktreeStartPoint::RemoteBranch(_) => PlannedLaunchDir {
@@ -175,5 +188,65 @@ where
             }
         };
         Ok(effective_path)
+    }
+}
+
+/// Reject a remote branch/ref short name that `git` could misparse as an option
+/// or that carries characters an argument must not.
+///
+/// The name reaches `git fetch <remote> <name>` and `git worktree add … <name>`
+/// as a positional argument with no `--` guard (git does not accept `--` for
+/// those positions), so a name beginning with `-` — e.g. `--upload-pack=/tmp/x`
+/// — would be parsed by git as a flag rather than a ref: argument injection,
+/// even though the subprocess is spawned without a shell. Rejecting the leading
+/// `-` is the point; whitespace / ASCII control chars (NUL included) are refused
+/// too as neither can be a legitimate ref short name. This is deliberately not a
+/// full `git check-ref-format`.
+fn check_ref_name(name: &str) -> Result<()> {
+    let invalid = name.is_empty()
+        || name.starts_with('-')
+        || name
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_ascii_control());
+    if invalid {
+        return Err(Error::InvalidBranchName(name.to_owned()));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_ref_name_rejects_a_ref_name_beginning_with_a_dash() {
+        // A leading `-` is the argument-injection vector: git would parse
+        // `--upload-pack=/tmp/x` as a flag on `git fetch`/`git worktree add`.
+        let err = check_ref_name("--upload-pack=/tmp/x").unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidBranchName(_)),
+            "a dash-leading ref name is rejected, got: {err}"
+        );
+        assert!(matches!(
+            check_ref_name("-x").unwrap_err(),
+            Error::InvalidBranchName(_)
+        ));
+    }
+
+    #[test]
+    fn check_ref_name_rejects_blank_whitespace_and_control_chars() {
+        for bad in ["", "a b", "a\tb", "a\nb", "a\0b"] {
+            assert!(
+                matches!(check_ref_name(bad), Err(Error::InvalidBranchName(_))),
+                "expected {bad:?} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn check_ref_name_accepts_ordinary_branch_names() {
+        for ok in ["main", "feature/x", "release-1.2", "user/fix_bug"] {
+            assert!(check_ref_name(ok).is_ok(), "expected {ok:?} to be accepted");
+        }
     }
 }

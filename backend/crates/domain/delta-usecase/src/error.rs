@@ -123,11 +123,22 @@ pub enum Error {
     CloneDestinationExists(String),
 
     /// A clone request named an owner or repository that cannot be part of a
-    /// path: blank, or carrying a path separator, a `..` segment, or a NUL.
-    /// Refused as `400` — the destination is built by joining the name onto the
-    /// clone root, so accepting one would let a request write outside the root.
+    /// path: blank, beginning with `-`, or carrying a path separator, a `..`
+    /// segment, or a NUL. Refused as `400` — the destination is built by joining
+    /// the name onto the clone root (so accepting one would let a request write
+    /// outside the root), and the slug reaches `gh` as a positional argument (so
+    /// a leading `-` could be parsed as a flag).
     #[error("invalid repository reference: {0}")]
     InvalidRepositoryRef(String),
+
+    /// A worktree request named a remote branch/ref whose short name git could
+    /// mistake for a flag or that carries characters an argument must not: blank,
+    /// beginning with `-`, or containing whitespace, an ASCII control character,
+    /// or a NUL. The name reaches `git fetch`/`git worktree add` as a positional
+    /// argument, so a leading `-` (e.g. `--upload-pack=…`) would be parsed as an
+    /// option — argument injection. Refused as `400` before any `git` runs.
+    #[error("invalid branch name: {0}")]
+    InvalidBranchName(String),
 
     /// A prompt template was submitted with a blank `label` or a blank `text`
     /// (blank meaning empty once surrounding whitespace is trimmed). Surfaced as
