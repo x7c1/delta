@@ -88,6 +88,30 @@ other row's. `builtin` marks these rows. Building on one means duplicating it
 into a row of your own; there is no endpoint for editing, adding to or hiding
 the catalog.
 
+A few options do not configure the agent so much as switch its own safety
+mechanisms off — Claude's `--dangerously-skip-permissions` (or
+`--permission-mode bypassPermissions`), Codex's `sandbox = danger-full-access`,
+`approvalPolicy = never` (including the granular object form with its
+sandbox/rules gates off), and the same two settings written inside a `config`
+value, in either of Codex's spellings. Those rows are flagged **`dangerous:
+true`** on every response that carries a launch option. They stay perfectly
+registrable and selectable per session; what they may never be is *silent*:
+
+- the server refuses to set `default_enabled` on such a row — both `POST` (with
+  `default_enabled: true`) and `PATCH` (turning it on) answer `400`,
+  `code: launch_option_rejected`. Turning it *off* is always allowed, so a row
+  registered before this rule can be disarmed;
+- no shipped built-in is dangerous, so startup reconciliation — which preserves
+  `default_enabled` — can never resurrect a pre-checked bypass;
+- a client is expected to mark the row and **never pre-check it** — including
+  when a stored row still says `default_enabled: true` — and to offer its
+  default-enabled control only as the way to clear such a stale flag, never as a
+  way to set one.
+
+`dangerous` is derived per response from `(provider, name, value)` read in the
+provider's own vocabulary rather than stored, so a row registered before a
+spelling was recognised starts being flagged as soon as the server learns it.
+
 One selection rule is provider-specific and worth knowing before ticking two
 rows that set the same thing. For Codex, `name` is a session-start request
 field, and a field can only be set once — so selecting two rows with the same
@@ -136,7 +160,8 @@ the user adds or removes their own rows.
         "default_enabled": true,
         "created_at": "2026-01-01T00:00:00Z",
         "provider": "claude",
-        "builtin": false
+        "builtin": false,
+        "dangerous": false
       }
     ]
   }
@@ -146,7 +171,10 @@ the user adds or removes their own rows.
   `value`). `default_enabled` marks the option to start pre-checked in the
   session-start picker. `provider` is `claude` or `codex`. `builtin` is `true`
   for a row Delta ships and `false` for one the user registered; the catalog key
-  behind a built-in is internal and never on the wire.
+  behind a built-in is internal and never on the wire. `dangerous` is `true` for
+  an option that switches the agent's own safety mechanism off (see above): mark
+  it, never pre-check it, and let its default-enabled control clear a stale flag
+  but never set one.
 
 ### `POST /api/launch-options`
 
@@ -191,14 +219,19 @@ string.
     "default_enabled": true,
     "created_at": "2026-01-01T00:00:00Z",
     "provider": "claude",
-    "builtin": false
+    "builtin": false,
+    "dangerous": false
   }
   ```
 
   `builtin` is always `false` here: anything registered through this endpoint is
-  the user's own row. There is no way to create a built-in.
+  the user's own row. There is no way to create a built-in. `dangerous` is the
+  server's verdict on the `(provider, name, value)` just registered.
 
 - **400** — a blank `name`.
+- **400** (`code: launch_option_rejected`) — `default_enabled: true` on an option
+  that switches the agent's own safety mechanism off (see above). The same option
+  with `default_enabled: false` (or omitted) is created normally.
 
 ### `PATCH /api/launch-options/{id}`
 
@@ -218,7 +251,11 @@ Request:
 ```
 
 - **200** — the updated record, in the same shape as the create response.
-- **404** — no launch option with that id.
+- **400** (`code: launch_option_rejected`) — `default_enabled: true` on an option
+  flagged `dangerous` (see above). `false` is always accepted, which is how such
+  a row is disarmed.
+- **404** — no launch option with that id. An unknown id answers `404` even for
+  `default_enabled: true`: there is no row to classify.
 
 ### `DELETE /api/launch-options/{id}`
 

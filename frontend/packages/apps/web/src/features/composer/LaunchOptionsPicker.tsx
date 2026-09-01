@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useLaunchOptionsQuery } from '@delta/api-client';
 import type { AgentProvider } from '@delta/wire-gen';
 import { useApiClient } from '../../data/apiContext';
+import { DangerousBadge } from '../../launchOptions';
 import { useComposerStore } from '../../store/composerStore';
 
 /**
@@ -33,6 +34,13 @@ import { useComposerStore } from '../../store/composerStore';
  * the selection to the new provider's `default_enabled` options — dropping any
  * selection that belonged to the previous provider, so a send never carries an
  * option id from a different provider.
+ *
+ * An option the server flags `dangerous` — one that switches the agent's own
+ * safety mechanism off — is treated differently in two ways. It is **never**
+ * seeded, even if its stored row still says `default_enabled` (the server
+ * refuses to set that now, but a row registered before the rule can carry it),
+ * so a safety bypass is never pre-checked. And ticking one reveals an inline
+ * warning naming it: it stays selectable, it just never happens quietly.
  */
 export function LaunchOptionsPicker() {
   const client = useApiClient();
@@ -55,9 +63,21 @@ export function LaunchOptionsPicker() {
     [options, provider],
   );
 
+  // Dangerous options are filtered out rather than trusted to be undefaulted:
+  // the server refuses to *set* `default_enabled` on one, but a row stored
+  // before that rule can still carry it.
   const defaultEnabledIds = useMemo(
-    () => providerOptions.filter((o) => o.default_enabled).map((o) => o.id),
+    () =>
+      providerOptions
+        .filter((o) => o.default_enabled && !o.dangerous)
+        .map((o) => o.id),
     [providerOptions],
+  );
+
+  // The dangerous options the user has actually ticked, in list order, so the
+  // warning below can name them.
+  const selectedDangerous = providerOptions.filter(
+    (o) => o.dangerous && selected.includes(o.id),
   );
 
   // Seed the initial selection from the selected provider's `default_enabled`
@@ -143,10 +163,28 @@ export function LaunchOptionsPicker() {
                   <span className="text-fg-subtle"> {option.value}</span>
                 )}
               </span>
+              {/* Marked in the picker too, not just in Settings: this is where
+                  the option is actually applied to a session. */}
+              {option.dangerous && <DangerousBadge />}
             </label>
           </li>
         ))}
       </ul>
+      {selectedDangerous.length > 0 && (
+        // Revealed on selection rather than shown always, and inline rather
+        // than as a blocking dialog: selecting a launch option is not a
+        // confirmable act, so the warning belongs beside the checkbox that
+        // caused it. `role="alert"` so a screen reader hears it the moment it
+        // appears.
+        <p role="alert" className="text-caption text-warning">
+          {selectedDangerous
+            .map((option) => option.label ?? option.name)
+            .join(', ')}{' '}
+          {selectedDangerous.length === 1 ? 'turns off' : 'turn off'} the agent's
+          own safety mechanism for this session: it will act without asking for
+          permission.
+        </p>
+      )}
     </section>
   );
 }

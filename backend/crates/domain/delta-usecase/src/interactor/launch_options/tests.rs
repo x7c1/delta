@@ -400,3 +400,135 @@ async fn delete_refuses_a_shipped_option() {
     // An unknown id is still a silent no-op, not a refusal.
     ix.delete_launch_option(9999).await.unwrap();
 }
+
+/// A [`LaunchOptionDangerPolicy`] for the domain's own tests: one named option
+/// is dangerous, everything else is not.
+///
+/// The real vocabulary lives in the gateway adapters (and is tested there), so
+/// what these tests need is only *a* dangerous option — a stub keeps the
+/// use-case rule under test without dragging Claude's or Codex's spellings into
+/// the domain.
+///
+/// [`LaunchOptionDangerPolicy`]: crate::agent::LaunchOptionDangerPolicy
+struct OneDangerousOption;
+
+/// The name [`OneDangerousOption`] classifies as dangerous.
+const DANGEROUS_NAME: &str = "--dangerously-skip-permissions";
+
+impl crate::agent::LaunchOptionDangerPolicy for OneDangerousOption {
+    fn is_dangerous(
+        &self,
+        _provider: crate::AgentProvider,
+        name: &str,
+        _value: Option<&str>,
+    ) -> bool {
+        name == DANGEROUS_NAME
+    }
+}
+
+/// A test interactor wired with [`OneDangerousOption`].
+fn interactor_with_a_dangerous_option() -> TestInteractor {
+    interactor().with_launch_option_danger_policy(std::sync::Arc::new(OneDangerousOption))
+}
+
+/// A dangerous option can be registered, but never as default-enabled: the
+/// create is refused with [`Error::LaunchOptionRejected`] and nothing is stored,
+/// while the same option undefaulted is created normally.
+///
+/// [`Error::LaunchOptionRejected`]: crate::Error::LaunchOptionRejected
+#[tokio::test]
+async fn create_refuses_a_dangerous_option_as_default_enabled() {
+    let ix = interactor_with_a_dangerous_option();
+
+    let err = ix
+        .create_launch_option(
+            None,
+            DANGEROUS_NAME,
+            None,
+            true,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, crate::Error::LaunchOptionRejected(message)
+            if message.contains(DANGEROUS_NAME)),
+        "the refusal must name the offending option, got {err:?}"
+    );
+    assert!(
+        ix.list_launch_options().await.unwrap().is_empty(),
+        "a refused create stores nothing"
+    );
+
+    // Undefaulted it is an ordinary row, and still marked as dangerous.
+    let created = ix
+        .create_launch_option(
+            None,
+            DANGEROUS_NAME,
+            None,
+            false,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    assert!(!created.default_enabled);
+    assert!(ix.is_launch_option_dangerous(&created));
+
+    // A benign option may still be default-enabled.
+    let benign = ix
+        .create_launch_option(
+            None,
+            "--model",
+            Some("opus"),
+            true,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    assert!(benign.default_enabled);
+    assert!(!ix.is_launch_option_dangerous(&benign));
+}
+
+/// `default_enabled` cannot be turned on for a dangerous row, but turning it
+/// off always works, which is how a row that predates the rule is disarmed.
+#[tokio::test]
+async fn set_default_enabled_refuses_a_dangerous_option() {
+    let ix = interactor_with_a_dangerous_option();
+    // Undefaulted, which is the only shape the create path lets a dangerous
+    // option in as.
+    let dangerous = ix
+        .create_launch_option(
+            None,
+            DANGEROUS_NAME,
+            None,
+            false,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+
+    let err = ix
+        .set_launch_option_default_enabled(dangerous.id, true)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, crate::Error::LaunchOptionRejected(message)
+            if message.contains(DANGEROUS_NAME)),
+        "expected a rejection naming the option, got {err:?}"
+    );
+
+    // Disabling is allowed, and an id nobody has is still a `None` (a 404 at the
+    // REST layer) rather than a rejection.
+    assert!(
+        !ix.set_launch_option_default_enabled(dangerous.id, false)
+            .await
+            .unwrap()
+            .expect("the row exists")
+            .default_enabled
+    );
+    assert!(ix
+        .set_launch_option_default_enabled(9999, true)
+        .await
+        .unwrap()
+        .is_none());
+}

@@ -19,6 +19,18 @@
 //! The registry is session-independent — the user manages it once and later
 //! multi-selects which options to apply when starting a session.
 //!
+//! There is one exception to that pass-through, and it is a *classification*
+//! rather than a validation. A short, closed set of `(name, value)` pairs does
+//! not configure the agent so much as switch its safety mechanisms off —
+//! Claude's `--dangerously-skip-permissions`, a Codex `danger-full-access`
+//! sandbox. Those stay perfectly registrable and selectable; what they may never
+//! be is *silent*, so [`Self::default_enabled`] cannot be set on one (the use
+//! case refuses the write) and the REST layer marks such a row so the UI can
+//! warn. Recognising them still needs the provider's vocabulary, so the
+//! predicate lives in the gateway adapters and reaches the use case through a
+//! port — nothing about it is stored on this struct, and an unrecognised
+//! spelling is simply not classified, exactly as before.
+//!
 //! Most rows are the user's own. A row whose `builtin_key` is set is one Delta
 //! *ships* — materialized from a [`crate::LaunchOptionPreset`] at startup so
 //! the short list of combinations in daily use is already there — and its
@@ -54,6 +66,14 @@ pub struct LaunchOption {
     /// Whether this option starts pre-checked in the session-start picker. The
     /// user can still uncheck it in place for an individual session; this only
     /// seeds the initial selection.
+    ///
+    /// Cannot be turned *on* for an option that switches the agent's own safety
+    /// mechanisms off (see this module's docs): both write paths refuse it,
+    /// because a pre-checked bypass would disarm every new session without the
+    /// user saying so once. That is a rule about the writes, not an invariant on
+    /// the field — a row stored before the rule existed can still carry `true`,
+    /// and clearing it is always allowed — so a reader that must never pre-check
+    /// a bypass checks the danger verdict rather than trusting this flag.
     ///
     /// On a shipped row ([`Self::builtin_key`] non-null) this is the one field
     /// that stays entirely the user's business: reconciliation never touches it.

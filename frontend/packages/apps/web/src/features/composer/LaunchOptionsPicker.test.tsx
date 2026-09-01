@@ -181,4 +181,88 @@ describe('LaunchOptionsPicker', () => {
       expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([]);
     });
   });
+
+  describe('a dangerous option', () => {
+    /**
+     * A registry holding one dangerous Claude option that still says
+     * `default_enabled: true` — the shape a row registered before that rule can
+     * have — beside one benign default-enabled option.
+     */
+    function serveADangerousDefaultEnabledOption() {
+      server.use(
+        http.get('*/api/launch-options', () =>
+          HttpResponse.json({
+            launch_options: [
+              {
+                id: 7,
+                label: 'Skip permissions',
+                name: '--dangerously-skip-permissions',
+                value: null,
+                default_enabled: true,
+                created_at: '2026-01-05T00:00:00Z',
+                provider: 'claude',
+                builtin: false,
+                dangerous: true,
+              },
+              {
+                id: 8,
+                label: 'Opus',
+                name: '--model',
+                value: 'opus',
+                default_enabled: true,
+                created_at: '2026-01-05T00:00:00Z',
+                provider: 'claude',
+                builtin: false,
+                dangerous: false,
+              },
+            ],
+          }),
+        ),
+      );
+    }
+
+    it('does not auto-check a dangerous option even when its stored row is default_enabled', async () => {
+      serveADangerousDefaultEnabledOption();
+      renderPicker();
+
+      const dangerous = await screen.findByTestId('launch-option-7');
+      const benign = screen.getByTestId('launch-option-8');
+      // The benign default *is* seeded, so the seeding itself ran — the
+      // dangerous option is filtered out of it rather than the seed having been
+      // skipped altogether.
+      await waitFor(() => {
+        expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([
+          8,
+        ]);
+      });
+      expect(dangerous).not.toBeChecked();
+      expect(benign).toBeChecked();
+      // Marked, so the user can see why it was left alone.
+      expect(screen.getByText('Dangerous')).toBeInTheDocument();
+      // And nothing is warned about until something is actually selected.
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('reveals an inline warning naming the option once it is checked', async () => {
+      serveADangerousDefaultEnabledOption();
+      renderPicker();
+      const dangerous = await screen.findByTestId('launch-option-7');
+
+      fireEvent.click(dangerous);
+      await waitFor(() => {
+        expect(useComposerStore.getState().newSessionLaunchOptionIds).toContain(
+          7,
+        );
+      });
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('Skip permissions');
+      expect(alert).toHaveTextContent('safety mechanism');
+
+      // Unchecking it takes the warning away again.
+      fireEvent.click(dangerous);
+      await waitFor(() => {
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      });
+    });
+  });
 });

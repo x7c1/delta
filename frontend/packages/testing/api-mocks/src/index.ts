@@ -5,6 +5,7 @@ export {
   mockApi,
   type MockApi,
 } from './handlers';
+export { isDangerousLaunchOption } from './launchOptionDanger';
 export {
   FakeEventSource,
   defaultScript,

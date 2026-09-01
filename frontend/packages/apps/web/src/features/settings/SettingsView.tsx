@@ -32,6 +32,11 @@ import type {
 } from '@delta/wire-gen';
 import { Badge, Button, cn, Dialog, ProviderName, Spinner } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
+import {
+  DANGEROUS_OPTION_DISARM_HINT,
+  DANGEROUS_OPTION_HINT,
+  DangerousBadge,
+} from '../../launchOptions';
 import { useThemeContext } from '../../hooks/themeContext';
 import { useNavStore } from '../../store/navStore';
 import {
@@ -531,8 +536,17 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
           Enabled by default (pre-checked when starting a session)
         </label>
         {createLaunchOption.isError && (
+          // The server's own message when it sent one: this form's one
+          // *rule-based* refusal is a safety-bypassing option asked to be
+          // enabled by default, and "please try again" would send the user round
+          // the same loop instead of telling them to untick the box. Whether a
+          // typed name is such an option is only knowable server-side, so the
+          // control cannot be pre-disabled the way a registered row's is.
           <p className="text-caption text-danger" role="alert">
-            Could not add the launch option. Please try again.
+            {settingsMutationErrorMessage(
+              createLaunchOption.error,
+              'Could not add the launch option.',
+            )}
           </p>
         )}
         <div className="flex justify-end">
@@ -620,13 +634,17 @@ interface PromptTemplateDraft {
 }
 
 /**
- * The message shown for a failed prompt-template mutation. The server's own
+ * The message shown for a failed settings mutation. The server's own
  * explanation is appended when it sent one — {@link ApiError} carries the
  * parsed `error` field — so a user is told *why* rather than only that
  * something failed. A transport failure or an opaque status leaves just the
  * fallback sentence.
+ *
+ * Shared by the prompt-template editor and the launch-option add form: both
+ * have refusals the caller can act on (a blank field, an option that may not be
+ * enabled by default) whose reason only the server knows.
  */
-function promptTemplateErrorMessage(error: unknown, fallback: string): string {
+function settingsMutationErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError && error.message.length > 0) {
     return `${fallback} ${error.message}`;
   }
@@ -870,7 +888,7 @@ function PromptTemplatesSection({ active }: { active: boolean }) {
               role="alert"
               data-testid="prompt-template-save-error"
             >
-              {promptTemplateErrorMessage(
+              {settingsMutationErrorMessage(
                 saveError,
                 'Could not save the prompt template.',
               )}
@@ -927,7 +945,7 @@ function PromptTemplatesSection({ active }: { active: boolean }) {
               role="alert"
               data-testid="prompt-template-delete-error"
             >
-              {promptTemplateErrorMessage(
+              {settingsMutationErrorMessage(
                 deleteTemplate.error,
                 'Could not delete the prompt template.',
               )}
@@ -1414,6 +1432,24 @@ interface LaunchOptionRowProps {
  * `409`. The `default_enabled` checkbox stays live on those rows: ticking a
  * shipped option is the point of shipping it.
  *
+ * A row the server flags `dangerous` — one that switches the agent's own safety
+ * mechanism off — carries a warning badge and has its `default_enabled` checkbox
+ * **disabled**, because turning that flag on is the one write the server refuses
+ * on such a row (`400 launch_option_rejected`), and offering a control that can
+ * only fail is worse than not offering it. Disabled rather than omitted, unlike
+ * the delete button on a shipped row: this control sits in a column every other
+ * row fills, so removing it would read as a rendering gap rather than a rule —
+ * its `title` says which rule. The row is otherwise ordinary: still deletable,
+ * and still selectable per session from the composer.
+ *
+ * The one dangerous row whose control stays live is one that *already* says
+ * `default_enabled`, which a row registered before this rule can. Clearing the
+ * flag is the write the server always accepts, and it is the only way to get rid
+ * of a stored default the picker now ignores — locking the checkbox shut there
+ * would leave deleting the row as the sole way out. Such a row also says beside
+ * the tick that it is no longer pre-checked: the tick alone would promise
+ * something that stopped being true.
+ *
  * Every row shows its value in full, wrapped, however long it is: saying what
  * the row will pass to the agent is the row's whole purpose, so there is nothing
  * to gain by putting that behind a click. It stays selectable, so a registered
@@ -1427,6 +1463,9 @@ function LaunchOptionRow({
   deleting,
   onDuplicate,
 }: LaunchOptionRowProps) {
+  // Only *setting* the flag is refused, so the checkbox is locked only where
+  // ticking it is what it would do (see this component's doc).
+  const defaultLocked = option.dangerous && !option.default_enabled;
   return (
     <li
       className="flex flex-col gap-2 rounded-lg border border-border-default px-3 py-2"
@@ -1454,6 +1493,9 @@ function LaunchOptionRow({
                 Built-in
               </Badge>
             )}
+            {/* Beside the Built-in badge, for the same reason: a dangerous row
+                is not guaranteed a label either. Both can appear at once. */}
+            {option.dangerous && <DangerousBadge />}
           </div>
           <div
             className="truncate font-mono text-code text-fg"
@@ -1463,16 +1505,34 @@ function LaunchOptionRow({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          <label className="flex items-center gap-1.5 text-caption text-fg-muted">
+          <label
+            className={cn(
+              'flex items-center gap-1.5 text-caption text-fg-muted',
+              defaultLocked && 'cursor-not-allowed',
+            )}
+            title={
+              option.dangerous
+                ? defaultLocked
+                  ? DANGEROUS_OPTION_HINT
+                  : DANGEROUS_OPTION_DISARM_HINT
+                : undefined
+            }
+          >
             <input
               type="checkbox"
               checked={option.default_enabled}
               onChange={(event) => onToggleDefault(event.target.checked)}
-              disabled={toggling}
+              disabled={toggling || defaultLocked}
               aria-label={`Enable launch option ${option.name} by default`}
               className="h-3.5 w-3.5"
             />
             Default
+            {/* Without this the `title` is the only place saying the tick is
+                inert (see this component's doc); the wording negates what the
+                add form's own checkbox promises. */}
+            {option.dangerous && option.default_enabled && (
+              <span className="text-warning">(no longer pre-checked)</span>
+            )}
           </label>
           <Button
             size="sm"

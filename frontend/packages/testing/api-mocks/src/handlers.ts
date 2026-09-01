@@ -52,10 +52,27 @@ import {
   workdirListing,
   type MockStore,
 } from './fixtures';
+import { isDangerousLaunchOption } from './launchOptionDanger';
 
 /** Discriminate a `POST /api/sends` body: new-session spawn vs thread target. */
 function isNewSessionSend(body: SendRequest): body is SendToNewSession {
   return 'new_session' in body && body.new_session === true;
+}
+
+/**
+ * The refusal both launch-option write paths answer when a dangerous option is
+ * asked to be default-enabled — one function here as on the real server, so the
+ * two cannot state the same rule differently. The `code` is the stable one, so
+ * the add form's copy path is drivable.
+ */
+function dangerousDefaultRejected(name: string) {
+  return HttpResponse.json(
+    {
+      error: `\`${name}\` turns off the agent's own safety mechanism, so it cannot be enabled by default`,
+      code: 'launch_option_rejected',
+    },
+    { status: 400 },
+  );
 }
 
 /**
@@ -831,19 +848,29 @@ export function createMockApi(): MockApi {
       }
       const trimmedLabel = payload.label?.trim();
       const trimmedValue = payload.value?.trim();
+      // Omitted `provider` defaults to Claude, matching the real server's
+      // back-compat behavior.
+      const provider = payload.provider ?? 'claude';
+      const value = trimmedValue ? trimmedValue : null;
+      const dangerous = isDangerousLaunchOption(provider, name, value);
+      if (dangerous && payload.default_enabled === true) {
+        // An option that disables the agent's own safety mechanism may be
+        // registered but never pre-checked, exactly as the real server refuses
+        // it.
+        return dangerousDefaultRejected(name);
+      }
       const option: LaunchOption = {
         id: store.nextLaunchOptionId++,
         label: trimmedLabel ? trimmedLabel : null,
         name,
-        value: trimmedValue ? trimmedValue : null,
+        value,
         default_enabled: payload.default_enabled === true,
         created_at: new Date().toISOString(),
-        // Omitted `provider` defaults to Claude, matching the real server's
-        // back-compat behavior.
-        provider: payload.provider ?? 'claude',
+        provider,
         // Anything registered through the API is the user's own; only Delta's
         // startup reconcile writes a shipped row.
         builtin: false,
+        dangerous,
       };
       store.launchOptions.push(option);
       return HttpResponse.json(option, { status: 201 });
@@ -859,6 +886,11 @@ export function createMockApi(): MockApi {
           { error: `no launch option with id ${id}` },
           { status: 404 },
         );
+      }
+      if (option.dangerous && payload.default_enabled === true) {
+        // The same refusal the create path gives; disabling stays allowed, so a
+        // row that predates the rule can still be disarmed.
+        return dangerousDefaultRejected(option.name);
       }
       option.default_enabled = payload.default_enabled === true;
       return HttpResponse.json(option);

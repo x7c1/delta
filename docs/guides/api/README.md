@@ -82,7 +82,10 @@ status codes and error bodies — is documented here only.
     mutated), or `launch_option_rejected` from
     [`POST /api/sends`](sends.md#post-apisends) (a selected launch option the
     provider's adapter will not apply; the message names the offending field or
-    config key path).
+    config key path) and from
+    [`POST /api/launch-options`](settings.md#post-apilaunch-options) /
+    [`PATCH /api/launch-options/{id}`](settings.md#patch-apilaunch-optionsid)
+    (a dangerous option may not be default-enabled).
   - `403 Forbidden` — a path the server is not permitted to read, as opposed to
     one that does not exist. Returned by the directory browse
     ([workdirs.md — `GET /api/workdir/list`](workdirs.md#get-apiworkdirlist)).

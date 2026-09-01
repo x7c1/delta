@@ -10,7 +10,8 @@ import type { AgentProvider } from "./AgentProvider";
  * `default_enabled` marks it to start pre-checked in the session-start picker.
  * `provider` is the provider the option applies to; the session-start picker
  * only offers options matching the new session's provider.
- * `builtin` marks a row Delta ships rather than one the user registered.
+ * `builtin` marks a row Delta ships rather than one the user registered, and
+ * `dangerous` a row that disables the agent's own safety mechanism.
  */
 export type LaunchOption = { id: number, label: string | null, name: string, value: string | null, default_enabled: boolean, created_at: string, provider: AgentProvider, 
 /**
@@ -23,4 +24,24 @@ export type LaunchOption = { id: number, label: string | null, name: string, val
  * thing a client does with this is badge the row and drop its delete
  * control, so exposing the key would be a contract nobody needs.
  */
-builtin: boolean, };
+builtin: boolean, 
+/**
+ * Whether this option switches the agent's own safety mechanism off —
+ * Claude's `--dangerously-skip-permissions`, a Codex `danger-full-access`
+ * sandbox, and the handful of other spellings that mean "stop asking".
+ *
+ * **Derived, never stored**: the answer is a function of `(provider, name,
+ * value)` read in the provider's own vocabulary, so it is computed per
+ * response from the gateway that owns that vocabulary rather than persisted
+ * beside the row — a row registered before a spelling was recognised is
+ * marked the moment the predicate learns it, with no migration.
+ *
+ * Such an option stays selectable per session; what it may never be is
+ * silent. The server refuses to *set* `default_enabled` on it (`400`
+ * `launch_option_rejected`) while always accepting it being cleared, so a
+ * client is expected to mark the row and never pre-check it — including when
+ * a row registered before that rule still says `default_enabled: true` —
+ * and to offer the default control only as the way to clear such a stale
+ * flag.
+ */
+dangerous: boolean, };
