@@ -687,6 +687,129 @@ fn a_task_notification_carrying_only_tool_use_id_still_completes() {
 }
 
 #[test]
+fn a_task_output_retrieval_completes_the_background_launch_it_names() {
+    // The parent retrieved the background task's result itself (`TaskOutput`
+    // with `block: true`), so the harness injects NO `<task-notification>` —
+    // the retrieval's own successful, `completed` result is the only signal
+    // that the task is over. It correlates by `task_id` (a retrieval never
+    // names the launching tool_use id) and must emit `SubagentCompleted` so
+    // the running indicator clears.
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::new(MAIN, None),
+        vec![
+            background_tool_use_line("a-launch", "toolu-bg"),
+            tool_result_with_agent_id_line("u-ack", "toolu-bg", "agent-xyz"),
+            task_output_tool_use_line("a-read", "toolu-read", "agent-xyz"),
+            task_output_result_line("u-read", "toolu-read", "agent-xyz", "completed", false),
+        ],
+    );
+
+    assert!(
+        outcome.effects.contains(&Effect::SubagentCompleted {
+            tool_use_id: "toolu-bg".into(),
+        }),
+        "the retrieval completes the launch it read, got {:?}",
+        outcome.effects
+    );
+    assert!(outcome.state.launched_threads.is_empty());
+    // A retrieval is not a launch: it lights no indicator and records nothing.
+    assert!(
+        !outcome.effects.iter().any(|e| matches!(
+            e,
+            Effect::SubagentIndicatorStarted { tool_use_id, .. }
+                | Effect::SubagentLaunched { tool_use_id, .. }
+                if tool_use_id == "toolu-read"
+        )),
+        "a TaskOutput retrieval must never register as a launch, got {:?}",
+        outcome.effects
+    );
+    // The carrier line attributes exactly as any `tool_result` does.
+    assert_eq!(message(&outcome, "u-read").thread_id, MAIN);
+}
+
+#[test]
+fn a_task_output_retrieval_folded_after_its_tool_use_window_still_completes() {
+    // The real ordering for a BLOCKING retrieval: the assistant's `TaskOutput`
+    // `tool_use` line is flushed to the JSONL as soon as the message
+    // completes, while its `tool_result` lands only when the task finishes —
+    // routinely a later sync window, since the ambient tail polls throughout.
+    // Nothing in-memory can bridge that gap, so the retrieval report's own
+    // `<task_id>` must carry the correlation.
+    let mut launched = std::collections::BTreeMap::new();
+    launched.insert(
+        "toolu-bg".to_owned(),
+        SubagentLaunch {
+            thread_id: CHILD,
+            task_id: Some("agent-xyz".to_owned()),
+        },
+    );
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::with_launches(MAIN, None, launched),
+        vec![task_output_result_line(
+            "u-read",
+            "toolu-read",
+            "agent-xyz",
+            "completed",
+            false,
+        )],
+    );
+
+    assert!(
+        outcome.effects.contains(&Effect::SubagentCompleted {
+            tool_use_id: "toolu-bg".into(),
+        }),
+        "a retrieval report alone still completes its launch, got {:?}",
+        outcome.effects
+    );
+    assert!(outcome.state.launched_threads.is_empty());
+    // Thread attribution is untouched: the carrier inherits `carry_thread`,
+    // NOT the launching thread (that is the notification path's job).
+    assert_eq!(message(&outcome, "u-read").thread_id, MAIN);
+    assert_eq!(outcome.state.carry_thread, MAIN);
+}
+
+#[test]
+fn a_running_or_errored_task_output_retrieval_leaves_the_launch_running() {
+    // A non-blocking poll of a task still working (`<status>running</status>`)
+    // and a retrieval that itself failed (`is_error: true`) both say nothing
+    // about the task being over: the launch — and its running indicator —
+    // must survive.
+    for (uuid, status, is_error) in [
+        ("u-poll", "running", false),
+        ("u-failed-read", "completed", true),
+    ] {
+        let outcome = attribute_lines(
+            &session(),
+            MAIN,
+            AttributionState::new(MAIN, None),
+            vec![
+                background_tool_use_line("a-launch", "toolu-bg"),
+                tool_result_with_agent_id_line("u-ack", "toolu-bg", "agent-xyz"),
+                task_output_tool_use_line("a-read", "toolu-read", "agent-xyz"),
+                task_output_result_line(uuid, "toolu-read", "agent-xyz", status, is_error),
+            ],
+        );
+
+        assert!(
+            !outcome
+                .effects
+                .iter()
+                .any(|e| matches!(e, Effect::SubagentCompleted { .. })),
+            "status={status} is_error={is_error} must not complete the launch, got {:?}",
+            outcome.effects
+        );
+        assert!(
+            outcome.state.launched_threads.contains_key("toolu-bg"),
+            "status={status} is_error={is_error} leaves the launch recorded"
+        );
+    }
+}
+
+#[test]
 fn an_unknown_background_completion_falls_back_to_inheriting_carry() {
     // A `<task-notification>` whose `<tool-use-id>` is not in the launch map
     // (its launch fell in a window no longer seeded) must not regress: it

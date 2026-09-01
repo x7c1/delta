@@ -29,8 +29,10 @@ where
     ///   prompt is still held awaiting `SessionStart(source=resume)`). The
     ///   resume ended before readiness, so it is the same failure: the resuming
     ///   entry is dropped, its pane torn down, any held prompt cancelled, and a
-    ///   `SpawnFailed` emitted. A resume records no pending spawn, so without
-    ///   this it would be misread as a normal end.
+    ///   `SpawnFailed` emitted — followed by the same
+    ///   lingering-background-subagent sweep the normal end runs, since this
+    ///   process is just as gone. A resume records no pending spawn, so
+    ///   without this it would be misread as a normal end.
     /// - **Normal end**: neither — the session is already-ready/bound, or
     ///   unknown. The launch succeeded and is simply ending; this handler does
     ///   **not** touch close/teardown semantics (owned by `close_session`), it
@@ -87,7 +89,7 @@ where
             // which cancels the held first prompt's outstanding send (if any)
             // so its row does not shadow correlation on a later re-resume.
             let _ = self.apply_turn_input(crate::turn::TurnInput::Close).await;
-            return Ok(vec![SessionEvent::SpawnFailed {
+            let mut events = vec![SessionEvent::SpawnFailed {
                 session_id: hook.session_id,
                 pane_token: Some(resuming.token.as_str().to_owned()),
                 reason: None,
@@ -95,7 +97,14 @@ where
                 // `Close` above requeued the held prompt rather than deleting
                 // it, so there is nothing to hand back to the composer.
                 unsent: Vec::new(),
-            }]);
+            }];
+            // The process is gone here too, so a BACKGROUND subagent still
+            // running from a turn BEFORE this resume window can never have its
+            // completion folded — the same leak the normal-end path sweeps
+            // (see `sweep_running_subagents_on_process_gone`). The `Close`
+            // above cleared only the foreground entries.
+            events.extend(self.sweep_running_subagents_on_process_gone().await?);
+            return Ok(events);
         }
 
         // Normal end (or an unrelated id): the session was ready/bound or unknown.

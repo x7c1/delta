@@ -7,14 +7,15 @@
 //! this sweep is the only thing that can clear it once the process is gone). A
 //! FOREGROUND entry is swept when the turn returns to idle; a BACKGROUND entry
 //! deliberately outlives its launching turn and is cleared only when its
-//! completion `<task-notification>` is folded (`Effect::SubagentCompleted` →
-//! [`SessionRuntime::finish_subagent`]). That notification-driven clear works
-//! only while the process is alive to keep producing transcript lines.
+//! completion is folded — the harness-injected `<task-notification>`, or the
+//! parent's own `TaskOutput` retrieval of the result (`Effect::SubagentCompleted`
+//! → [`SessionRuntime::finish_subagent`]). That fold-driven clear works only
+//! while the process is alive to keep producing transcript lines.
 //!
 //! Once the process is gone no more of this session's transcript is ingested,
-//! so a background entry's notification can never be folded — its indicator
-//! would stay lit forever. This helper is invoked from the two graceful
-//! "process gone" signals (`on_session_end`'s normal-end path and
+//! so a background entry's completion can never be folded — its indicator
+//! would stay lit forever. This helper is invoked from every graceful "process
+//! gone" signal (`on_session_end`'s normal-end AND failed-resume paths, and
 //! `close_session`) to clear whatever running entries remain, emitting the
 //! events and dropping the persisted state a live-only clear would have.
 //!
@@ -61,8 +62,8 @@ where
     /// Clearing the launch row here therefore removes the last trace, and there
     /// is no path that would re-light a swept entry on resume.
     ///
-    /// This is the shared body behind both process-gone call sites; keeping it
-    /// in one place ensures they emit and persist identically.
+    /// This is the shared body behind all three process-gone call sites;
+    /// keeping it in one place ensures they emit and persist identically.
     pub(in crate::interactor) async fn sweep_running_subagents_on_process_gone(
         &mut self,
     ) -> Result<Vec<SessionEvent>> {

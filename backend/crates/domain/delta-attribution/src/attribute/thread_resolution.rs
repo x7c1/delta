@@ -169,14 +169,8 @@ pub(super) fn resolve_line_thread(
         let by_tool_use_id = notification_tool_use_id
             .filter(|id| state.launched_threads.contains_key(*id))
             .map(str::to_owned);
-        let resolved = by_tool_use_id.or_else(|| {
-            let task_id = notification_task_id?;
-            state
-                .launched_threads
-                .iter()
-                .find(|(_, launch)| launch.task_id.as_deref() == Some(task_id))
-                .map(|(tool_use_id, _)| tool_use_id.clone())
-        });
+        let resolved =
+            by_tool_use_id.or_else(|| state.launch_key_by_task_id(notification_task_id?));
         match resolved.and_then(|key| {
             state
                 .launched_threads

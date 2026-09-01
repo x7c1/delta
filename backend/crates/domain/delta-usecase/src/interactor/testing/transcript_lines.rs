@@ -357,6 +357,55 @@ pub(crate) fn task_notification_line_task_id_only(uuid: &str, task_id: &str) -> 
     )
 }
 
+/// An assistant line RETRIEVING a background task's result: a `TaskOutput`
+/// `tool_use` naming the task (`task_id`, the launch's `agentId`) and blocking
+/// until it finishes. When the parent consumes a background task this way the
+/// harness injects NO `<task-notification>`, so the retrieval's own result —
+/// see [`task_output_result_line`] — is the task's only completion signal.
+pub(crate) fn task_output_tool_use_line(
+    uuid: &str,
+    tool_use_id: &str,
+    task_id: &str,
+) -> TranscriptMessage {
+    TranscriptMessage {
+        content: vec![ContentBlock::ToolUse {
+            id: tool_use_id.into(),
+            name: "TaskOutput".into(),
+            input: serde_json::json!({ "task_id": task_id, "block": true }),
+        }],
+        ..assistant_line(uuid, "")
+    }
+}
+
+/// The `tool_result` carrier of a `TaskOutput` retrieval, in the real body
+/// shape: a PLAIN STRING content (not the array of text blocks a
+/// model-authored result uses) carrying `<retrieval_status>` (did the
+/// retrieval itself work), then the retrieved task's `<task_id>`,
+/// `<task_type>` and `<status>` — `completed`/`failed`/`killed` for a finished
+/// task, `running` for a non-blocking poll of one still working.
+pub(crate) fn task_output_result_line(
+    uuid: &str,
+    tool_use_id: &str,
+    task_id: &str,
+    status: &str,
+    is_error: bool,
+) -> TranscriptMessage {
+    TranscriptMessage {
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: tool_use_id.into(),
+            content: serde_json::json!(format!(
+                "<retrieval_status>success</retrieval_status>\n\n\
+                 <task_id>{task_id}</task_id>\n\n\
+                 <task_type>local_agent</task_type>\n\n\
+                 <status>{status}</status>\n\n\
+                 <output>\nthe agent's report\n</output>"
+            )),
+            is_error,
+        }],
+        ..user_line(uuid, "")
+    }
+}
+
 /// A `<task-notification>` body that carries NEITHER `<tool-use-id>` nor
 /// `<task-id>` — the future-Claude-Code shape we want the fold to log a
 /// warning for. Used by the tracing-warn test.

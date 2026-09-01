@@ -9,6 +9,12 @@
 mod forked_skill_launch;
 pub use forked_skill_launch::{forked_skill_launch, has_forked_skill_launch, ForkedSkillLaunch};
 
+mod task_output;
+pub use task_output::{
+    is_task_output_result, is_terminal_task_status, task_output_status, task_output_task_id,
+    RUNNING_TASK_STATUS, TASK_OUTPUT_TOOL_NAME,
+};
+
 /// Prefix Claude Code writes to the transcript when the user interrupts the
 /// in-flight turn. It appears as a `role: user` line whose only text block is
 /// either `[Request interrupted by user]` (plain mid-response interrupt) or
@@ -338,18 +344,52 @@ pub fn task_notification_task_id(prompt: &str) -> Option<&str> {
 
 /// Inner-text extractor shared by [`task_notification_tool_use_id`] and
 /// [`task_notification_task_id`]. The body is gated on the task-notification
-/// prefix, then scanned for `<name>...</name>` — a minimal lookup that suits a
-/// flat, harness-generated block without pulling in a full XML parse.
+/// prefix, then scanned for `<name>...</name>`.
 fn task_notification_element<'a>(prompt: &'a str, name: &str) -> Option<&'a str> {
     if !is_task_notification(prompt) {
         return None;
     }
+    element_inner_text(prompt, name)
+}
+
+/// The inner text of the first `<name>...</name>` element in `text`, trimmed.
+///
+/// A minimal element scan, not an XML parse: every body it is used on (the
+/// harness-injected `<task-notification>`, a `TaskOutput` retrieval report) is
+/// a flat, generated block whose element values never contain markup.
+fn element_inner_text<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     let open = format!("<{name}>");
     let close = format!("</{name}>");
-    let start = prompt.find(&open)? + open.len();
-    let rest = &prompt[start..];
+    let start = text.find(&open)? + open.len();
+    let rest = &text[start..];
     let end = rest.find(&close)?;
     Some(rest[..end].trim())
+}
+
+/// Apply `scan` to each text a `tool_result` `content` payload carries,
+/// returning the first hit.
+///
+/// Accepts the three shapes `content` realistically takes: an array of
+/// `{ "type": "text", "text": "..." }` blocks (the typical Claude shape), a
+/// single such object, or a plain JSON string. Anything else degrades to
+/// `None`.
+fn scan_tool_result_text<'a>(
+    content: &'a serde_json::Value,
+    scan: impl Fn(&'a str) -> Option<&'a str>,
+) -> Option<&'a str> {
+    if let Some(text) = content.as_str() {
+        return scan(text);
+    }
+    if let Some(blocks) = content.as_array() {
+        return blocks
+            .iter()
+            .filter_map(|block| block.get("text").and_then(serde_json::Value::as_str))
+            .find_map(scan);
+    }
+    content
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .and_then(scan)
 }
 
 /// Fallback used during fold to capture the `agentId: <id>` substring from
@@ -365,29 +405,11 @@ fn task_notification_element<'a>(prompt: &'a str, name: &str) -> Option<&'a str>
 /// `task_id` upgrade the live `PostToolUse(Agent)` hook records — needed when
 /// a `<task-notification>` body ships only `<task-id>`.
 ///
-/// Accepts the three shapes `content` realistically takes: an array of
-/// `{ "type": "text", "text": "..." }` blocks (the typical Claude shape), a
-/// single such object, or a plain JSON string. Anything else degrades to
-/// `None`. The id token is `[A-Za-z0-9_-]+`; the first `agentId: ` occurrence
-/// wins.
+/// Accepts every shape [`scan_tool_result_text`] does; anything else degrades
+/// to `None`. The id token is `[A-Za-z0-9_-]+`; the first `agentId: `
+/// occurrence wins.
 pub fn agent_id_from_tool_result_content(content: &serde_json::Value) -> Option<&str> {
-    if let Some(s) = content.as_str() {
-        return extract_agent_id_from_text(s);
-    }
-    if let Some(arr) = content.as_array() {
-        for block in arr {
-            if let Some(text) = block.get("text").and_then(serde_json::Value::as_str) {
-                if let Some(id) = extract_agent_id_from_text(text) {
-                    return Some(id);
-                }
-            }
-        }
-        return None;
-    }
-    content
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .and_then(extract_agent_id_from_text)
+    scan_tool_result_text(content, extract_agent_id_from_text)
 }
 
 /// Scan a plain text string for the first `agentId: <id>` token and return

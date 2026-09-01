@@ -7,9 +7,12 @@
 //! large per-line phases it delegates to — `content_blocks` (permission /
 //! background-launch / indicator handling for a line's content blocks) and
 //! `thread_resolution` (the thread the line is attributed to, and the send /
-//! subagent effects that follow) — plus `forked_skill`, the harness-launched
-//! background agent a slash command's skill runs as, which writes no
-//! `tool_use` block for `content_blocks` to see.
+//! subagent effects that follow) — plus two signals that need their own
+//! resolution: `forked_skill`, the harness-launched background agent a slash
+//! command's skill runs as, which writes no `tool_use` block for
+//! `content_blocks` to see, and `task_output_retrieval`, the parent's own read
+//! of a background task's result, for which the harness injects no
+//! `<task-notification>`.
 
 mod attribute_lines;
 mod attributed;
@@ -19,6 +22,7 @@ mod forked_skill;
 mod outstanding_send;
 mod state;
 mod subagent_launch;
+mod task_output_retrieval;
 mod thread_resolution;
 
 pub use attribute_lines::attribute_lines;

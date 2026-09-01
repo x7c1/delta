@@ -62,6 +62,14 @@ use super::{Attributed, AttributionState, Effect};
 /// persist; the matching notification later clears it via
 /// [`Effect::SubagentCompleted`].
 ///
+/// A background task the parent RETRIEVES itself — a `TaskOutput` tool call,
+/// typically `block: true` — gets no `<task-notification>` at all, so the
+/// retrieval's own `tool_result` is that task's only completion signal. It is
+/// folded into the same [`Effect::SubagentCompleted`] when it reports a
+/// terminal `<status>` (see `resolve_task_output_retrieval`), leaving thread
+/// attribution untouched: the carrier line inherits `carry_thread` like any
+/// other `tool_result`.
+///
 /// A **forked skill** — the background agent the CLI harness starts for a slash
 /// command whose skill runs in the background — reaches the same effects from a
 /// different signal: it writes no `tool_use` block at all, only a
@@ -127,7 +135,7 @@ pub fn attribute_lines(
             && matches!(line.role, Role::User)
             && !trimmed_content.is_empty();
 
-        process_content_blocks(&mut state, &mut effects, &line.content);
+        process_content_blocks(session_id, &mut state, &mut effects, &line.content);
 
         // A forked skill writes no `tool_use` block, so the pass above cannot
         // see it — only its `<forked-skill-launch>` element can. Pass the
