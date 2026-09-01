@@ -184,14 +184,20 @@ pub(crate) fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (R
     )
     .with_adapter_factory(factory);
 
-    let state = AppState::from_interactor(interactor, "delta-codex-full-loop", AUTH_TOKEN)
-        .with_comms_log(comms_log);
+    let state =
+        AppState::from_interactor(interactor, "delta-codex-full-loop", AUTH_TOKEN, HOOK_SECRET)
+            .with_comms_log(comms_log);
     (router(state.clone()), state)
 }
 
 /// The bearer token every backend this suite assembles holds, presented on each
 /// request the helpers drive so they clear the router's per-run auth guard.
 pub(crate) const AUTH_TOKEN: &str = "delta-codex-full-loop-auth-token";
+
+/// The hook secret this suite's backend holds. Codex sessions never POST the
+/// `/hooks/*` control plane (they drive the terminal-less adapter), so nothing
+/// presents it here — it exists only to satisfy the state constructor.
+pub(crate) const HOOK_SECRET: &str = "delta-codex-full-loop-hook-secret";
 
 pub(crate) async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
     let response = app

@@ -25,6 +25,8 @@ async fn test_state_with_only_claude_present() -> AppState {
         worktree_base: "/tmp/delta-test-worktrees".into(),
         tmux_socket: "delta-test".into(),
         auth_token: super::TEST_AUTH_TOKEN.into(),
+        hook_secret: super::TEST_HOOK_SECRET.into(),
+        transcript_root: super::TEST_TRANSCRIPT_ROOT.into(),
         port: 7878,
         launch: delta_usecase::LaunchConfig::default(),
     };
@@ -33,7 +35,12 @@ async fn test_state_with_only_claude_present() -> AppState {
         .unwrap()
         .with_codex_bin("codex")
         .with_binary_detector(Arc::new(ClaudeOnly) as Arc<dyn delta_usecase::BinaryDetector>);
-    AppState::from_interactor(interactor, &config.tmux_socket, &config.auth_token)
+    AppState::from_interactor(
+        interactor,
+        &config.tmux_socket,
+        &config.auth_token,
+        &config.hook_secret,
+    )
 }
 
 #[tokio::test]

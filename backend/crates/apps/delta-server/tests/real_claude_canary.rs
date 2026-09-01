@@ -210,8 +210,14 @@ impl ClaudeSession {
         // capture server instead of a delta-server, so the canary observes the
         // raw POSTs claude makes.
         let settings_path = run_dir.join("settings.json");
-        std::fs::write(&settings_path, render_session_settings(hook_port))
-            .expect("write rendered settings");
+        // The capture server does not verify the hook secret (it observes the
+        // raw POSTs), but production rendering now always embeds one, so pass a
+        // fixed value to keep the rendered settings identical in shape.
+        std::fs::write(
+            &settings_path,
+            render_session_settings(hook_port, "canary-hook-secret"),
+        )
+        .expect("write rendered settings");
 
         let session_id = uuid::Uuid::now_v7().to_string();
         let claude_bin = std::env::var("DELTA_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_owned());

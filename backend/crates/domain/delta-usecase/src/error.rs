@@ -43,6 +43,15 @@ pub enum Error {
     #[error("invalid working directory: {0}")]
     InvalidWorkdir(String),
 
+    /// A hook reported a `transcript_path` that does not resolve to a `.jsonl`
+    /// file under the configured transcript root. Every hook payload names the
+    /// JSONL Delta then tails and surfaces to the browser, so an unconfined path
+    /// would let a forged (or first, unvalidated) hook point Delta's reader at an
+    /// arbitrary file (e.g. `~/.ssh/id_rsa`). Rejected at `register_session` so
+    /// the path is never persisted nor read. Surfaced as `400`.
+    #[error("invalid transcript path: {0}")]
+    InvalidTranscriptPath(String),
+
     /// A directory could not be read because the process lacks permission.
     /// Surfaced as `403`.
     #[error("permission denied: {0}")]

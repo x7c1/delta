@@ -13,6 +13,7 @@ mod app;
 mod auth_guard;
 mod comms;
 mod comms_log;
+mod hook_auth_guard;
 mod hooks;
 mod origin_guard;
 mod pty;

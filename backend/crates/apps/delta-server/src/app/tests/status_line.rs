@@ -45,7 +45,7 @@ async fn status_line_post_broadcasts_a_status_updated_event() {
                 .header("host", "127.0.0.1")
                 .header("authorization", super::bearer())
                 .method("POST")
-                .uri("/hooks/status-line")
+                .uri(format!("/hooks/status-line{}", super::hook_query()))
                 .header("content-type", "application/json")
                 .body(Body::from(body))
                 .unwrap(),
@@ -123,7 +123,7 @@ async fn status_line_pre_api_shape_deserializes_with_all_optionals_absent() {
                 .header("host", "127.0.0.1")
                 .header("authorization", super::bearer())
                 .method("POST")
-                .uri("/hooks/status-line")
+                .uri(format!("/hooks/status-line{}", super::hook_query()))
                 .header("content-type", "application/json")
                 .body(Body::from(body))
                 .unwrap(),
@@ -171,7 +171,7 @@ async fn status_line_tolerates_an_unknown_top_level_field() {
                 .header("host", "127.0.0.1")
                 .header("authorization", super::bearer())
                 .method("POST")
-                .uri("/hooks/status-line")
+                .uri(format!("/hooks/status-line{}", super::hook_query()))
                 .header("content-type", "application/json")
                 .body(Body::from(body))
                 .unwrap(),
@@ -203,7 +203,7 @@ async fn status_line_without_a_session_id_is_dropped_with_no_event() {
                 .header("host", "127.0.0.1")
                 .header("authorization", super::bearer())
                 .method("POST")
-                .uri("/hooks/status-line")
+                .uri(format!("/hooks/status-line{}", super::hook_query()))
                 .header("content-type", "application/json")
                 .body(Body::from(body))
                 .unwrap(),

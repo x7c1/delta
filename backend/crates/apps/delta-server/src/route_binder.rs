@@ -69,23 +69,31 @@ impl RouteBinder {
     /// [`assert_mounts_the_declared_surface`].
     pub(crate) fn finish(self, state: AppState) -> Router {
         assert_mounts_the_declared_surface(&self.mounted);
-        // Two guards wrap the whole surface. Layers apply outermost-last, so a
-        // request flows through the bearer-token guard first, then the
-        // origin/host guard, then the handler:
+        // Three guards wrap the whole surface. Layers apply outermost-last, so a
+        // request flows through the bearer-token guard first, then the hook
+        // guard, then the origin/host guard, then the handler:
         //
-        //   auth_guard (per-run bearer token) → origin_guard (Origin/Host) → handler
+        //   auth_guard (bearer token) → hook_auth_guard (hs secret)
+        //     → origin_guard (Origin/Host) → handler
         //
         // The bearer guard is outermost deliberately: it is the coarser gate (a
         // local non-browser caller with no token is refused before its origin is
         // even inspected), and it keeps the origin guard independently testable —
         // the origin tests present a valid token, so a foreign origin still fails
-        // at the origin check with 403, not 401. The origin/host guard covers
-        // every path; the bearer guard exempts `/hooks/*` and `/health`. See
-        // [`crate::auth_guard`] and [`crate::origin_guard`].
+        // at the origin check with 403, not 401. The two auth guards partition
+        // the surface by path: the bearer guard covers everything except
+        // `/hooks/*` and `/health`, while the hook guard covers `/hooks/*` (and
+        // passes everything else through), so a hook needs the `hs` secret but no
+        // bearer token, and an `/api/*` request the reverse. The origin/host
+        // guard covers every path. See [`crate::auth_guard`],
+        // [`crate::hook_auth_guard`], and [`crate::origin_guard`].
         let auth = axum::middleware::from_fn_with_state(state.clone(), crate::auth_guard::guard);
+        let hook_auth =
+            axum::middleware::from_fn_with_state(state.clone(), crate::hook_auth_guard::guard);
         self.router
             .with_state(state)
             .layer(axum::middleware::from_fn(crate::origin_guard::guard))
+            .layer(hook_auth)
             .layer(auth)
     }
 }

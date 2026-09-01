@@ -256,7 +256,7 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf, AppState) {
         "/tmp/delta-e2e-settings.json",
     );
 
-    let state = AppState::from_interactor(interactor, "delta-e2e", AUTH_TOKEN);
+    let state = AppState::from_interactor(interactor, "delta-e2e", AUTH_TOKEN, HOOK_SECRET);
     (router(state.clone()), tmux, transcript_path, state)
 }
 
@@ -264,7 +264,19 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf, AppState) {
 /// helpers drive so they clear the router's per-run auth guard.
 const AUTH_TOKEN: &str = "delta-e2e-auth-token";
 
+/// The hook secret this test's `AppState` holds. `post_json` appends it as
+/// `?hs=<secret>` to every `/hooks/*` request so the hook auth guard lets the
+/// callback through, exactly as the rendered hook URLs carry it in production.
+const HOOK_SECRET: &str = "delta-e2e-hook-secret";
+
 async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
+    // A hook callback authenticates through the `hs` secret in its URL, not the
+    // bearer token, so attach it for the `/hooks/*` paths the driver POSTs.
+    let uri = if uri.starts_with("/hooks/") {
+        format!("{uri}?hs={HOOK_SECRET}")
+    } else {
+        uri.to_owned()
+    };
     let response = app
         .clone()
         .oneshot(

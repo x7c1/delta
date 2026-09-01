@@ -18,8 +18,17 @@
 use serde_json::json;
 
 /// Render the session settings JSON for hooks pointing at `127.0.0.1:<port>`.
-pub fn render_session_settings(port: u16) -> String {
-    let url = |path: &str| format!("http://127.0.0.1:{port}/hooks/{path}");
+///
+/// `hook_secret` is the per-run secret carried back to the server as an `hs`
+/// query parameter on every hook URL, so the hook auth guard (see
+/// `delta-server`'s `hook_auth_guard`) can tell a genuine Claude Code callback
+/// apart from a forged local POST. It rides in the URL — not a header — because
+/// Claude Code's native `http` hooks have no proven way to set request headers
+/// here, and the URL form works uniformly for both the `http` hooks and the
+/// `command` (`curl`) hook. The secret is hex text (URL-safe), so it needs no
+/// percent-encoding.
+pub fn render_session_settings(port: u16, hook_secret: &str) -> String {
+    let url = |path: &str| format!("http://127.0.0.1:{port}/hooks/{path}?hs={hook_secret}");
     let http_hook = |path: &str| {
         json!({
             "hooks": [
@@ -137,7 +146,7 @@ mod tests {
 
     #[test]
     fn embeds_the_port_in_every_hook_url() {
-        let rendered = render_session_settings(9999);
+        let rendered = render_session_settings(9999, "sekret");
         let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
 
         // The embedded terminal is dark, so the session's theme is forced dark.
@@ -145,29 +154,29 @@ mod tests {
 
         assert_eq!(
             parsed["hooks"]["UserPromptSubmit"][0]["hooks"][0]["url"],
-            "http://127.0.0.1:9999/hooks/user-prompt-submit"
+            "http://127.0.0.1:9999/hooks/user-prompt-submit?hs=sekret"
         );
         assert_eq!(
             parsed["hooks"]["Stop"][0]["hooks"][0]["url"],
-            "http://127.0.0.1:9999/hooks/stop"
+            "http://127.0.0.1:9999/hooks/stop?hs=sekret"
         );
         assert_eq!(
             parsed["hooks"]["MessageDisplay"][0]["hooks"][0]["url"],
-            "http://127.0.0.1:9999/hooks/message-display"
+            "http://127.0.0.1:9999/hooks/message-display?hs=sekret"
         );
         assert_eq!(
             parsed["hooks"]["PreToolUse"][0]["hooks"][0]["url"],
-            "http://127.0.0.1:9999/hooks/pre-tool-use"
+            "http://127.0.0.1:9999/hooks/pre-tool-use?hs=sekret"
         );
         assert_eq!(parsed["hooks"]["PreToolUse"][0]["matcher"], "*");
         assert_eq!(
             parsed["hooks"]["PostToolUse"][0]["hooks"][0]["url"],
-            "http://127.0.0.1:9999/hooks/post-tool-use"
+            "http://127.0.0.1:9999/hooks/post-tool-use?hs=sekret"
         );
         assert_eq!(parsed["hooks"]["PostToolUse"][0]["matcher"], "*");
         assert_eq!(
             parsed["hooks"]["PermissionRequest"][0]["hooks"][0]["url"],
-            "http://127.0.0.1:9999/hooks/permission-request"
+            "http://127.0.0.1:9999/hooks/permission-request?hs=sekret"
         );
         // SessionStart is a `command` hook (Claude Code does not deliver it over
         // http), curling the same server endpoint and forwarding the stdin
@@ -180,19 +189,21 @@ mod tests {
         let session_start_command = parsed["hooks"]["SessionStart"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();
-        assert!(session_start_command.contains("http://127.0.0.1:9999/hooks/session-start"));
+        assert!(
+            session_start_command.contains("http://127.0.0.1:9999/hooks/session-start?hs=sekret")
+        );
         assert!(session_start_command.contains("--data-binary @-"));
         assert!(session_start_command.contains("-o /dev/null"));
 
         assert_eq!(
             parsed["hooks"]["SessionEnd"][0]["hooks"][0]["url"],
-            "http://127.0.0.1:9999/hooks/session-end"
+            "http://127.0.0.1:9999/hooks/session-end?hs=sekret"
         );
     }
 
     #[test]
     fn emits_a_status_line_command_targeting_the_same_port() {
-        let rendered = render_session_settings(9999);
+        let rendered = render_session_settings(9999, "sekret");
         let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
 
         // `statusLine` is a top-level `command` entry (not a hook): Claude Code
@@ -203,7 +214,7 @@ mod tests {
         // empty.
         assert_eq!(parsed["statusLine"]["type"], "command");
         let command = parsed["statusLine"]["command"].as_str().unwrap();
-        assert!(command.contains("http://127.0.0.1:9999/hooks/status-line"));
+        assert!(command.contains("http://127.0.0.1:9999/hooks/status-line?hs=sekret"));
         assert!(command.contains("--data-binary @-"));
         assert!(command.contains("-o /dev/null"));
     }

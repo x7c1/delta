@@ -362,6 +362,14 @@ export async function bootServer(): Promise<ServerHandle> {
           DELTA_TMUX_SOCKET: tmuxSocket,
           DELTA_CLAUDE_BIN: wrapper,
           DELTA_CODEX_BIN: codexWrapper,
+          // Confine hook-reported transcript paths to where the fake actually
+          // writes them (the same dir exported to the wrapper as
+          // FAKE_CLAUDE_TRANSCRIPT_DIR); without this the backend would reject
+          // the fake's transcript path as outside the default ~/.claude/projects
+          // root and never ingest a turn. The backend mints its own hook secret
+          // and renders it into the hook URLs the fake reads, so no hook-secret
+          // env is needed here.
+          DELTA_TRANSCRIPT_ROOT: transcripts,
           DELTA_LAUNCH_DEADLINE_MS: '3000',
           DELTA_PERMISSION_DECISION_TIMEOUT_MS: '3000',
           // The echo watchdog stays near its production generosity for the

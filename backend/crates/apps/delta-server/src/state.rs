@@ -44,6 +44,13 @@ pub struct AppState {
     /// lifetime — see `main.rs::config_from_env` — and never rotated. Held as an
     /// `Arc<str>` mirroring [`Self::tmux_socket`], so cloning the state is cheap.
     auth_token: Arc<str>,
+    /// The per-run hook secret every `/hooks/*` request must carry as an `?hs=`
+    /// query parameter, enforced by [`crate::hook_auth_guard`]. Minted (or
+    /// handed in) once for the server's lifetime alongside [`Self::auth_token`]
+    /// — see `main.rs::config_from_env` — and rendered into the session settings
+    /// so genuine Claude Code callbacks present it. Held as an `Arc<str>`
+    /// mirroring [`Self::auth_token`], so cloning the state is cheap.
+    hook_secret: Arc<str>,
     /// The per-session comms log the `/comms` stream serves.
     ///
     /// The same instance the adapters record into (it is handed to the
@@ -66,10 +73,13 @@ impl AppState {
         let comms_log = Arc::new(CommsLogHub::new());
         let interactor =
             delta_bootstrap::build(config, Arc::clone(&comms_log) as Arc<dyn CommsLogSink>).await?;
-        Ok(
-            Self::from_interactor(interactor, &config.tmux_socket, &config.auth_token)
-                .with_comms_log(comms_log),
+        Ok(Self::from_interactor(
+            interactor,
+            &config.tmux_socket,
+            &config.auth_token,
+            &config.hook_secret,
         )
+        .with_comms_log(comms_log))
     }
 
     /// Build the shared state from an already-wired Interactor.
@@ -79,7 +89,12 @@ impl AppState {
     /// transcript, a no-op tmux driver) and still produce this exact
     /// [`AppState`] type — no generics leak into the transport layer. The spawn
     /// configuration (base workdir, hook settings) lives inside the Interactor.
-    pub fn from_interactor(interactor: AppInteractor, tmux_socket: &str, auth_token: &str) -> Self {
+    pub fn from_interactor(
+        interactor: AppInteractor,
+        tmux_socket: &str,
+        auth_token: &str,
+        hook_secret: &str,
+    ) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         // Wire the interactor's async event seam here — before the interactor is
         // shared (`Arc`-wrapped) and any session actor spawns, which
@@ -95,6 +110,7 @@ impl AppState {
             async_events: Arc::new(std::sync::Mutex::new(Some(async_rx))),
             tmux_socket: Arc::from(tmux_socket),
             auth_token: Arc::from(auth_token),
+            hook_secret: Arc::from(hook_secret),
             // An unwired log: `/comms` then serves an always-idle stream, which
             // is exactly right for a state whose interactor records nowhere.
             // `build` (and any test that wants live frames) replaces it via
@@ -136,6 +152,14 @@ impl AppState {
     /// router.
     pub fn token(&self) -> &str {
         &self.auth_token
+    }
+
+    /// The per-run hook secret every `/hooks/*` request must present as an `?hs=`
+    /// query parameter. Read by [`crate::hook_auth_guard`] to authorize a hook
+    /// callback, and by the integration tests to attach a valid secret to the
+    /// hook requests they drive through the router.
+    pub fn hook_secret(&self) -> &str {
+        &self.hook_secret
     }
 
     /// The wired Interactor.

@@ -161,7 +161,7 @@ async fn open_cwd_rejects_an_unknown_handler_with_400() {
                 .header("host", "127.0.0.1")
                 .header("authorization", super::bearer())
                 .method("POST")
-                .uri("/hooks/user-prompt-submit")
+                .uri(format!("/hooks/user-prompt-submit{}", super::hook_query()))
                 .header("content-type", "application/json")
                 .body(Body::from(submit))
                 .unwrap(),

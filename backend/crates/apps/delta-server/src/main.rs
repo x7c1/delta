@@ -91,6 +91,8 @@ fn config_from_env() -> Config {
         tmux_socket: std::env::var("DELTA_TMUX_SOCKET")
             .unwrap_or_else(|_| delta_bootstrap::DEFAULT_TMUX_SOCKET.to_owned()),
         auth_token: auth_token_from_env(),
+        hook_secret: hook_secret_from_env(),
+        transcript_root: transcript_root_from_env(),
         port: env_port(),
         launch: launch_from_env(),
     }
@@ -115,6 +117,59 @@ fn auth_token_from_env() -> String {
                 uuid::Uuid::new_v4().simple()
             )
         })
+}
+
+/// The per-run hook secret every `/hooks/*` callback must carry as `?hs=`.
+///
+/// Minted here like [`auth_token_from_env`] and rendered into the session's hook
+/// URLs, so genuine Claude Code callbacks present it and a forged local POST is
+/// refused. `DELTA_HOOK_SECRET` overrides it (kept as a seam symmetrical with
+/// `DELTA_AUTH_TOKEN`); a bare run mints a random fallback — the server must
+/// always hold a non-empty secret, since an empty one would authenticate every
+/// hook request. The fallback is two concatenated random (v4) UUIDs: 244 bits of
+/// entropy as 64 hex characters.
+fn hook_secret_from_env() -> String {
+    std::env::var("DELTA_HOOK_SECRET")
+        .ok()
+        .filter(|secret| !secret.is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "{}{}",
+                uuid::Uuid::new_v4().simple(),
+                uuid::Uuid::new_v4().simple()
+            )
+        })
+}
+
+/// The directory a hook-reported `transcript_path` must resolve under.
+///
+/// Real Claude Code writes transcripts under its config directory's `projects/`
+/// subdirectory, so the default is `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects`.
+/// `DELTA_TRANSCRIPT_ROOT` overrides it so the fake harness (and tests), which
+/// write transcripts elsewhere, still validate. When `HOME` is unset — only in
+/// degenerate environments — fall back to a temp-dir-based path so the server
+/// still starts, mirroring [`default_worktree_base`].
+fn transcript_root_from_env() -> String {
+    if let Some(root) = std::env::var("DELTA_TRANSCRIPT_ROOT")
+        .ok()
+        .filter(|root| !root.is_empty())
+    {
+        return root;
+    }
+    let config_dir = match std::env::var("CLAUDE_CONFIG_DIR")
+        .ok()
+        .filter(|dir| !dir.is_empty())
+    {
+        Some(dir) => std::path::PathBuf::from(dir),
+        None => {
+            let home = match std::env::var_os("HOME") {
+                Some(home) => std::path::PathBuf::from(home),
+                None => std::env::temp_dir(),
+            };
+            home.join(".claude")
+        }
+    };
+    config_dir.join("projects").to_string_lossy().into_owned()
 }
 
 /// Default base directory for per-session git worktrees: `$HOME/.delta/worktrees`.

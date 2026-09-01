@@ -108,12 +108,14 @@ async fn accepts_a_websocket_upgrade_with_a_token_query_param() {
 }
 
 #[tokio::test]
-async fn exempts_hooks_and_health_from_the_token() {
-    // `/health` (a liveness probe) and `/hooks/*` (the Claude Code control
-    // plane, `curl`ed with no place to carry a bearer token) are exempt: they
-    // must be reachable with no token at all — never 401. `/health` answers 200;
-    // the hook endpoint here is POSTed an empty body, so it does not 401 (it
-    // may 4xx on the body, but the token guard has already let it through).
+async fn exempts_hooks_and_health_from_the_bearer_token() {
+    // `/health` (a liveness probe) is exempt from both guards, and `/hooks/*`
+    // (the Claude Code control plane, `curl`ed with no place to carry a bearer
+    // token) is exempt from *this* bearer guard — it authenticates through its
+    // own `hs` secret instead (see the `hooks` group's `rejects_a_hook_without_
+    // the_secret`). So each must be reachable with no bearer token — never 401.
+    // `/health` answers 200; the hook endpoint here presents a valid `hs` and a
+    // trivial body, so the guards let it through to the handler.
     let health = router(test_state().await)
         .oneshot(
             Request::builder()
@@ -131,7 +133,7 @@ async fn exempts_hooks_and_health_from_the_token() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/hooks/status-line")
+                .uri(format!("/hooks/status-line{}", hook_query()))
                 .header("host", "127.0.0.1")
                 .header("content-type", "application/json")
                 .body(Body::from("{}"))
@@ -142,7 +144,7 @@ async fn exempts_hooks_and_health_from_the_token() {
     assert_ne!(
         hook.status(),
         StatusCode::UNAUTHORIZED,
-        "/hooks/* is exempt from the token",
+        "/hooks/* with a valid `hs` needs no bearer token",
     );
     // Prove the response body was consumed from the handler, not the guard.
     let _ = to_bytes(hook.into_body(), usize::MAX).await.unwrap();
