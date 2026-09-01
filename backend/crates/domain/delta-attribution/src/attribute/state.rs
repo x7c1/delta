@@ -50,7 +50,10 @@ pub struct AttributionState {
     /// this survives across sync windows by being seeded from a persisted
     /// store at batch start and mutated through effects: a launch is recorded
     /// ([`Effect::SubagentLaunched`]) when first seen and cleared
-    /// ([`Effect::SubagentCompleted`]) when its notification is folded.
+    /// ([`Effect::SubagentCompleted`]) by whichever of its three completion
+    /// signals is folded: the harness-injected `<task-notification>`, the
+    /// parent's own `TaskOutput` retrieval of the result, or the launching
+    /// `tool_result` reporting the launch never started at all.
     /// `BTreeMap` keeps the seed-from-store ↔ fold round-trip deterministic.
     pub launched_threads: BTreeMap<String, SubagentLaunch>,
     /// The `promptId`s of the slash/local-command groups seen in this fold. A
@@ -88,6 +91,17 @@ impl AttributionState {
             launched_threads: BTreeMap::new(),
             local_command_prompts: HashSet::new(),
         }
+    }
+
+    /// The `launched_threads` key of the launch whose `task_id` is `task_id`,
+    /// if any — the fallback correlation both completion signals share: a
+    /// `<task-notification>` body that carries only `<task-id>`, and a
+    /// `TaskOutput` retrieval, which never names a `tool_use_id` at all.
+    pub(super) fn launch_key_by_task_id(&self, task_id: &str) -> Option<String> {
+        self.launched_threads
+            .iter()
+            .find(|(_, launch)| launch.task_id.as_deref() == Some(task_id))
+            .map(|(tool_use_id, _)| tool_use_id.clone())
     }
 
     /// Seed a batch with the outstanding background-launch map alongside the

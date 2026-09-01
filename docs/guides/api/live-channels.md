@@ -383,8 +383,9 @@ which frames arrive, and a client must handle each event whenever it lands.
   foreground subagent finishes with its matching `PostToolUse`, while a
   `run_in_background: true` one — and every forked skill, which is always
   background — returns immediately at launch and finishes only when its
-  completion notification is folded during transcript sync, so the client must
-  not sweep it at turn end.
+  completion is folded during transcript sync (its `<task-notification>`, or
+  the parent's own `TaskOutput` retrieval of the result, which suppresses the
+  notification), so the client must not sweep it at turn end.
 - `subagent_finished` — the subagent correlated by `tool_use_id` finished. It
   carries no thread; the client maps the id back to the `subagent_started` that
   named one. A finish for an id that was never tracked, or was already cleared,

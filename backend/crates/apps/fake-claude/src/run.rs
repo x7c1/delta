@@ -113,6 +113,12 @@ pub fn run() -> Result<(), String> {
     }
 }
 
+/// The tool Claude Code calls to RETRIEVE a background task's result. Mirrors
+/// `delta_attribution::claude_format::TASK_OUTPUT_TOOL_NAME`; the fake-claude
+/// crate deliberately does not depend on the domain crate (it speaks only the
+/// wire contract), so the name is restated here.
+const TASK_OUTPUT_TOOL_NAME: &str = "TaskOutput";
+
 /// Whether a `tool_use` step should be treated as a background launch — i.e.
 /// the launch returns immediately and a `<task-notification>` later reports
 /// completion, so an `agentId` is minted alongside the tool_use id.
@@ -158,8 +164,9 @@ struct ToolUse {
     /// reports for an `Agent` launched with `run_in_background: true`. Minted
     /// at `tool_use` time so the following `post_tool_use` step can include it
     /// in `tool_response.agentId`, and a later `task_notification` step can
-    /// emit it in the `<task-id>` element. `None` when the call is not a
-    /// background subagent.
+    /// emit it in the `<task-id>` element. A `TaskOutput` retrieval carries
+    /// over the id of the task it read, so a following retrieval step can name
+    /// the same task; `None` for every other call.
     task_id: Option<String>,
 }
 
@@ -379,6 +386,72 @@ impl Engine {
                 )?;
                 self.transcript
                     .task_notification(&tool_use.id, task_id, *drop_tool_use_id)
+            }
+            Step::TaskOutput { status } => {
+                // The parent reading a background task's result ITSELF: a
+                // `TaskOutput` call naming the task minted at launch, blocking
+                // until it finishes. Claude Code injects NO
+                // `<task-notification>` for a task consumed this way, so the
+                // retrieval's own `tool_result` — written below — is the only
+                // signal the server can clear the running indicator from.
+                let task_id = self
+                    .last_tool_use
+                    .as_ref()
+                    .ok_or("task_output step without a preceding tool_use")?
+                    .task_id
+                    .clone()
+                    .ok_or(
+                        "task_output step requires the preceding tool_use to be a background \
+                         Agent (async by default, or run_in_background: true) so a task_id \
+                         was minted",
+                    )?;
+                let id = format!("toolu_fake_{:04}", self.tool_use_seq);
+                self.tool_use_seq += 1;
+                let input = json!({ "task_id": task_id, "block": true });
+                self.transcript.assistant_blocks(vec![json!({
+                    "type": "tool_use",
+                    "id": id,
+                    "name": TASK_OUTPUT_TOOL_NAME,
+                    "input": input,
+                })])?;
+                self.fire(
+                    "PreToolUse",
+                    &self.endpoints.pre_tool_use,
+                    &PreToolUsePayload {
+                        session_id: self.session_id.clone(),
+                        tool_name: TASK_OUTPUT_TOOL_NAME.to_owned(),
+                        tool_input: input.clone(),
+                        tool_use_id: id.clone(),
+                        transcript_path: self.transcript_path.clone(),
+                    },
+                );
+                self.fire(
+                    "PostToolUse",
+                    &self.endpoints.post_tool_use,
+                    &PostToolUsePayload {
+                        session_id: self.session_id.clone(),
+                        tool_name: TASK_OUTPUT_TOOL_NAME.to_owned(),
+                        tool_use_id: id.clone(),
+                        // A retrieval is not a launch, so its response carries
+                        // no `agentId`.
+                        tool_response: Value::Null,
+                        transcript_path: self.transcript_path.clone(),
+                    },
+                );
+                self.transcript.task_output_result(&id, &task_id, status)?;
+                // The retrieval is now the most recent tool call, exactly as
+                // the real transcript records it. It keeps the task it read,
+                // so a FOLLOWING `task_output` step retrieves the same task
+                // again — the poll-then-finished sequence `status: "running"`
+                // exists for, which would otherwise fail for want of a
+                // preceding launch.
+                self.last_tool_use = Some(ToolUse {
+                    id,
+                    name: TASK_OUTPUT_TOOL_NAME.to_owned(),
+                    input,
+                    task_id: Some(task_id),
+                });
+                Ok(())
             }
             Step::Stop { stop_reason } => {
                 self.fire(

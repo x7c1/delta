@@ -1,17 +1,20 @@
 //! The content-block phase of the per-line fold: resolve permissions from
-//! `tool_result` blocks, record background-launch correlations, and light the
-//! running-subagent indicator.
+//! `tool_result` blocks, record background-launch correlations, hand
+//! `TaskOutput` retrievals to [`task_output_retrieval`](super::task_output_retrieval),
+//! and light the running-subagent indicator.
 
-use delta_model::ContentBlock;
+use delta_model::{ContentBlock, SessionId};
 
 use crate::claude_format;
 
+use super::task_output_retrieval::resolve_task_output_retrieval;
 use super::{AttributionState, Effect, SubagentLaunch};
 
 /// Process one line's content blocks. Pushes effects and mutates
-/// `state.launched_threads` exactly as the inline loop did; reads
-/// `state.carry_thread` as the launching thread. Returns nothing.
+/// `state.launched_threads`; reads `state.carry_thread` as the launching
+/// thread. Returns nothing.
 pub(super) fn process_content_blocks(
+    session_id: &SessionId,
     state: &mut AttributionState,
     effects: &mut Vec<Effect>,
     content: &[ContentBlock],
@@ -34,6 +37,17 @@ pub(super) fn process_content_blocks(
                     tool_use_id: tool_use_id.clone(),
                     allowed: !is_error,
                 });
+                // A `TaskOutput` retrieval's own result — the OTHER way a
+                // background subagent's running indicator is cleared (see
+                // `resolve_task_output_retrieval`).
+                resolve_task_output_retrieval(
+                    session_id,
+                    state,
+                    effects,
+                    tool_use_id,
+                    *is_error,
+                    content,
+                );
                 if *is_error {
                     // A denied/errored LAUNCH: the `tool_result` reports the
                     // background `Agent`/`Task` never actually started (e.g.
@@ -130,8 +144,10 @@ pub(super) fn process_content_blocks(
         // transcript ingest — NOT from the `PreToolUse` hook. Every
         // `Agent`/`Task` tool_use written to the parent's JSONL lights the
         // indicator (foreground OR background), and is cleared later by the
-        // matching `PostToolUse` (foreground) or `<task-notification>`
-        // (background). A NESTED subagent's `Agent`/`Task` tool_use is
+        // matching `PostToolUse` (foreground) or, for a background one, by
+        // whichever completion signal arrives: the harness-injected
+        // `<task-notification>`, or the parent's own `TaskOutput` retrieval
+        // of the result. A NESTED subagent's `Agent`/`Task` tool_use is
         // written to the SUBAGENT's JSONL, never the parent's, so this
         // branch is the natural filter: nested launches never produce a
         // parent indicator and can never get stuck.

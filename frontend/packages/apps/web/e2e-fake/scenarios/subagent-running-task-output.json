@@ -1,0 +1,22 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    {
+      "type": "tool_use",
+      "name": "Agent",
+      "input": {
+        "subagent_type": "general-purpose",
+        "description": "Probe in the background and hand back the result",
+        "prompt": "Run ls and count entries",
+        "run_in_background": true
+      }
+    },
+    { "type": "post_tool_use" },
+    { "type": "reply", "text": "Launched the background subagent." },
+    { "type": "stop" },
+    { "type": "await_prompt" },
+    { "type": "task_output" },
+    { "type": "reply", "text": "The background subagent finished." },
+    { "type": "stop" }
+  ]
+}

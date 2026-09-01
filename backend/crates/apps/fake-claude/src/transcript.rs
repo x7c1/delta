@@ -137,6 +137,47 @@ impl TranscriptWriter {
         self.user_text(&body)
     }
 
+    /// Append the `tool_result` carrier of a `TaskOutput` retrieval: the
+    /// report Claude Code writes when the parent reads a background task's
+    /// result itself. `<retrieval_status>` says whether the retrieval worked;
+    /// `<task_id>` names the task read (note the UNDERSCORE — the
+    /// harness-injected `<task-notification>` spells the same id `<task-id>`)
+    /// and `<status>` its state (`completed`/`failed`/`killed` when finished,
+    /// `running` for a non-blocking poll of one still working).
+    ///
+    /// No `<task-notification>` follows a retrieval, so this line is the only
+    /// evidence the retrieved task is over.
+    ///
+    /// The bytes mirror a real retrieval report: the block's `content` is a
+    /// PLAIN STRING (not the array of text blocks a model-authored result
+    /// uses), the elements are separated by blank lines, and `<task_type>`
+    /// sits between the id and the status — so the e2e exercises the same
+    /// shape the server parses in production.
+    pub fn task_output_result(
+        &mut self,
+        tool_use_id: &str,
+        task_id: &str,
+        status: &str,
+    ) -> Result<(), String> {
+        let body = format!(
+            "<retrieval_status>success</retrieval_status>\n\n\
+             <task_id>{task_id}</task_id>\n\n\
+             <task_type>local_agent</task_type>\n\n\
+             <status>{status}</status>\n\n\
+             <output>\nfake-claude background agent output\n</output>"
+        );
+        let message = json!({
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": body,
+                "is_error": false,
+            }],
+        });
+        self.append("user", json!({ "message": message }))
+    }
+
     /// Write the four-line group Claude Code produces when `/compact` runs
     /// (auto- or manually-triggered): a leading `<local-command-caveat>` user
     /// line flagged `isMeta`, the bare command-name line (`/compact`), the

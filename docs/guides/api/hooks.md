@@ -212,8 +212,10 @@ Fires when a tool call completes, carrying the same `tool_use_id` its
 subagent's running window is closed and `subagent_finished` broadcast, while a
 background launch — whose call returns immediately, so this fires long before the
 work ends — instead has the `agentId` from its `tool_response` recorded as the
-fallback correlation key its completion notification is matched by. Every other
-tool's `PostToolUse` changes no runtime state.
+fallback correlation key its completion is matched by: the `<task-id>` of a
+`<task-notification>`, or the `<task_id>` of a `TaskOutput` retrieval report
+when the parent collects the result itself (no notification fires then). Every
+other tool's `PostToolUse` changes no runtime state.
 
 Request:
 
