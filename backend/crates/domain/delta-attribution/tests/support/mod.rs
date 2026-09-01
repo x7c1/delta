@@ -1,7 +1,7 @@
 //! Shared helpers for the attribution test binaries.
 //!
-//! Each file under `tests/` is its own crate and compiles its own copy of
-//! this module, using a different subset of it — hence the dead-code allow.
+//! Each test target under `tests/` is its own crate and compiles its own copy
+//! of this module, using a different subset of it — hence the dead-code allow.
 #![allow(dead_code)]
 
 pub mod corpus;
