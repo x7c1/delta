@@ -45,6 +45,10 @@ async function expectReconnected(page: Page): Promise<void> {
 test('a turn that completes during a socket outage is resynced on reconnect', async ({
   page,
 }) => {
+  // The server-truth wait below may legitimately span the echo watchdog's
+  // 60s recovery (see that wait's comment), so this test needs more than the
+  // default per-test budget.
+  test.setTimeout(150_000);
   await interceptLiveSocket(page);
   await page.goto('/');
   // Scenario `ws-reconnect`: an echo loop — every prompt gets a reply and a
@@ -71,15 +75,20 @@ test('a turn that completes during a socket outage is resynced on reconnect', as
 
   // Observe over REST (not the page) that the whole turn ran server-side:
   // both transcript lines landed, the open-send list drained, the turn ended.
-  // The window is generous because the turn runs through the real loop
-  // (keystrokes → tmux → the fake → transcript → tail), whose latency a loaded
-  // CI runner stretches; this waits on settled server truth, never a sleep.
+  // The window must outlast the system's own worst-case recovery, not just a
+  // loaded runner's latency: the turn runs through the real loop (keystrokes →
+  // tmux → the fake → transcript → tail), and a keystroke a loaded runner
+  // swallows is only re-typed when the echo watchdog fires — 60s in the shared
+  // suite (`DELTA_ECHO_DEADLINE_MS` in support/server.ts). A shorter window
+  // gives up on a send the server itself still recovers, which is exactly how
+  // this wait flaked in CI at 20s. This waits on settled server truth, never a
+  // sleep, so the generosity costs nothing when the first keystroke lands.
   await expect(async () => {
     expect(await fetchMessageCount(page, session.mainThreadId)).toBeGreaterThanOrEqual(4);
     const sends = await fetchSends(page, session.id);
     expect(sends.sends).toHaveLength(0);
     expect(sends.turn.state).toBe('idle');
-  }).toPass({ timeout: 20_000 });
+  }).toPass({ timeout: 90_000 });
 
   // The page is provably stale: it still shows the pre-outage transcript and
   // a chip for a send whose turn is already over.
