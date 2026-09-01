@@ -10,7 +10,7 @@ check_command: 'make check && test -f frontend/packages/apps/web/e2e-fake/subage
 assignee: null
 branch: task/0901-0457-fix-clear-background-subagent-on-task-output-retrieval
 created_at: 2026-09-01T04:57:49Z
-updated_at: 2026-09-01T07:18:40Z
+updated_at: 2026-09-01T07:45:10Z
 ---
 
 # fix(attribution): clear a background subagent's running indicator when its result is retrieved via `TaskOutput`
@@ -149,9 +149,14 @@ Run `make check` and fix whatever it reports.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] On a real Claude Code session, launch a background subagent, retrieve
+- [x] On a real Claude Code session, launch a background subagent, retrieve
       its result with a blocking `TaskOutput` (no task-notification fires),
       and confirm the navigator spinner clears once the retrieval folds.
+      Verified 2026-09-01 against a real `claude` (2.1.252) on this branch's
+      build: the transcript carried the `TaskOutput(block: true)` retrieval
+      and zero `<task-notification>` lines, and the session's
+      `running_subagents` lit during the run and emptied once the retrieval
+      folded (turn `idle`), which is the state the navigator spinner renders.
 
 ## Out of scope
 
