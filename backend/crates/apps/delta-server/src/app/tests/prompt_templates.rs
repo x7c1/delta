@@ -10,6 +10,7 @@ async fn prompt_templates_list_is_empty_on_a_fresh_store() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/prompt-templates")
                 .body(Body::empty())
                 .unwrap(),
@@ -38,6 +39,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/api/prompt-templates")
                 .header("content-type", "application/json")
@@ -70,6 +72,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/prompt-templates")
                 .body(Body::empty())
                 .unwrap(),
@@ -87,6 +90,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("PATCH")
                 .uri(format!("/api/prompt-templates/{id}"))
                 .header("content-type", "application/json")
@@ -113,6 +117,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/prompt-templates")
                 .body(Body::empty())
                 .unwrap(),
@@ -130,6 +135,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("DELETE")
                 .uri(format!("/api/prompt-templates/{id}"))
                 .body(Body::empty())
@@ -144,6 +150,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("DELETE")
                 .uri(format!("/api/prompt-templates/{id}"))
                 .body(Body::empty())
@@ -157,6 +164,7 @@ async fn create_then_list_update_and_delete_prompt_template() {
     let list = app
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/prompt-templates")
                 .body(Body::empty())
                 .unwrap(),
@@ -184,6 +192,7 @@ async fn create_prompt_template_rejects_blank_label_or_text() {
             .clone()
             .oneshot(
                 Request::builder()
+                    .header("host", "127.0.0.1")
                     .method("POST")
                     .uri("/api/prompt-templates")
                     .header("content-type", "application/json")
@@ -208,6 +217,7 @@ async fn update_prompt_template_of_an_unknown_id_is_404() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("PATCH")
                 .uri("/api/prompt-templates/9999")
                 .header("content-type", "application/json")

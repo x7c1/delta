@@ -13,6 +13,7 @@ mod app;
 mod comms;
 mod comms_log;
 mod hooks;
+mod origin_guard;
 mod pty;
 mod route_binder;
 mod state;

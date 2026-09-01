@@ -69,7 +69,12 @@ impl RouteBinder {
     /// [`assert_mounts_the_declared_surface`].
     pub(crate) fn finish(self, state: AppState) -> Router {
         assert_mounts_the_declared_surface(&self.mounted);
-        self.router.with_state(state)
+        // The origin/host guard wraps the whole surface — `/api/*`, `/ws`,
+        // `/pty`, `/comms`, `/hooks/*`, and `/health` alike — so no route can
+        // be reached from a foreign web origin. See [`crate::origin_guard`].
+        self.router
+            .with_state(state)
+            .layer(axum::middleware::from_fn(crate::origin_guard::guard))
     }
 }
 

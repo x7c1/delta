@@ -18,6 +18,7 @@ async fn user_prompt_submit_hook_registers_and_responds() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/hooks/user-prompt-submit")
                 .header("content-type", "application/json")
@@ -52,6 +53,7 @@ async fn pre_tool_use_hook_returns_ok() {
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/hooks/user-prompt-submit")
                 .header("content-type", "application/json")
@@ -72,6 +74,7 @@ async fn pre_tool_use_hook_returns_ok() {
     let response = app
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/hooks/pre-tool-use")
                 .header("content-type", "application/json")
@@ -99,6 +102,7 @@ async fn session_start_hook_returns_ok() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/hooks/session-start")
                 .header("content-type", "application/json")
@@ -123,6 +127,7 @@ async fn session_end_hook_returns_ok() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/hooks/session-end")
                 .header("content-type", "application/json")

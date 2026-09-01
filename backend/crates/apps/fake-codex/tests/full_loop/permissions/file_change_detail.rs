@@ -163,6 +163,7 @@ async fn codex_file_change_approval_reaches_the_browser_with_its_paths_and_diff(
             Request::builder()
                 .method("POST")
                 .uri(format!("/api/permissions/{request_id}/decision"))
+                .header("host", "127.0.0.1")
                 .header("content-type", "application/json")
                 .body(Body::from(json!({ "decision": "allow" }).to_string()))
                 .unwrap(),

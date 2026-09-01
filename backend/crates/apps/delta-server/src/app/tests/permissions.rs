@@ -19,6 +19,7 @@ async fn register_session(state: &AppState) {
     let response = router(state.clone())
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/hooks/user-prompt-submit")
                 .header("content-type", "application/json")
@@ -49,6 +50,7 @@ async fn permission_request_hook_passes_through_on_timeout() {
     let response = router(state)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/hooks/permission-request")
                 .header("content-type", "application/json")
@@ -86,6 +88,7 @@ async fn permission_decision_resolves_the_blocked_hook() {
         hook_router
             .oneshot(
                 Request::builder()
+                    .header("host", "127.0.0.1")
                     .method("POST")
                     .uri("/hooks/permission-request")
                     .header("content-type", "application/json")
@@ -102,6 +105,7 @@ async fn permission_decision_resolves_the_blocked_hook() {
     let decision = api_router
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/api/permissions/1/decision")
                 .header("content-type", "application/json")
@@ -152,6 +156,7 @@ async fn the_claude_hook_envelope_is_unchanged_for_allow_and_deny() {
             hook_router
                 .oneshot(
                     Request::builder()
+                        .header("host", "127.0.0.1")
                         .method("POST")
                         .uri("/hooks/permission-request")
                         .header("content-type", "application/json")
@@ -166,6 +171,7 @@ async fn the_claude_hook_envelope_is_unchanged_for_allow_and_deny() {
         let response = api_router
             .oneshot(
                 Request::builder()
+                    .header("host", "127.0.0.1")
                     .method("POST")
                     .uri("/api/permissions/1/decision")
                     .header("content-type", "application/json")
@@ -221,6 +227,7 @@ async fn a_session_scoped_decision_is_refused_for_a_provider_without_the_capabil
         hook_router
             .oneshot(
                 Request::builder()
+                    .header("host", "127.0.0.1")
                     .method("POST")
                     .uri("/hooks/permission-request")
                     .header("content-type", "application/json")
@@ -236,6 +243,7 @@ async fn a_session_scoped_decision_is_refused_for_a_provider_without_the_capabil
         .clone()
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/api/permissions/1/decision")
                 .header("content-type", "application/json")
@@ -268,6 +276,7 @@ async fn a_session_scoped_decision_is_refused_for_a_provider_without_the_capabil
     let response = api_router
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/api/permissions/1/decision")
                 .header("content-type", "application/json")
@@ -292,6 +301,7 @@ async fn permission_decision_for_an_unknown_request_is_a_conflict() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/api/permissions/999/decision")
                 .header("content-type", "application/json")

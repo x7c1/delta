@@ -13,6 +13,7 @@ async fn prs_returns_empty_with_gh_unavailable() {
     let response = router(test_state_with_unavailable_gh().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/prs?lens=reviewer")
                 .body(Body::empty())
                 .unwrap(),
@@ -34,6 +35,7 @@ async fn prs_accepts_the_author_lens_too() {
     let response = router(test_state_with_unavailable_gh().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/prs?lens=author")
                 .body(Body::empty())
                 .unwrap(),
@@ -55,6 +57,7 @@ async fn prs_rejects_an_unknown_lens_with_400() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/prs?lens=everyone")
                 .body(Body::empty())
                 .unwrap(),
@@ -71,6 +74,7 @@ async fn prs_rejects_a_missing_lens_with_400() {
     let response = router(test_state().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/prs")
                 .body(Body::empty())
                 .unwrap(),

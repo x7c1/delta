@@ -43,6 +43,7 @@ async fn providers_reports_availability_per_provider() {
     let response = router(test_state_with_only_claude_present().await)
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .uri("/api/providers")
                 .body(Body::empty())
                 .unwrap(),

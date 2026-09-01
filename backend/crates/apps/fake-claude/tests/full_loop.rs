@@ -117,6 +117,9 @@ async fn drive_loop(app: &axum::Router, workdir: &std::path::Path) -> Result<(),
         .clone()
         .oneshot(
             Request::post("/api/sends")
+                // The router's Origin/Host guard rejects any non-loopback Host
+                // with 403, so every request that drives it needs a loopback Host.
+                .header("host", "127.0.0.1")
                 .header("content-type", "application/json")
                 .body(Body::from(send_body.to_string()))
                 .map_err(|e| e.to_string())?,
@@ -168,6 +171,7 @@ async fn wait_for<T>(
             .clone()
             .oneshot(
                 Request::get(path)
+                    .header("host", "127.0.0.1")
                     .body(Body::empty())
                     .map_err(|e| e.to_string())?,
             )

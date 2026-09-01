@@ -42,6 +42,7 @@ async fn status_line_post_broadcasts_a_status_updated_event() {
     let response = app
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/hooks/status-line")
                 .header("content-type", "application/json")
@@ -118,6 +119,7 @@ async fn status_line_pre_api_shape_deserializes_with_all_optionals_absent() {
     let response = app
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/hooks/status-line")
                 .header("content-type", "application/json")
@@ -164,6 +166,7 @@ async fn status_line_tolerates_an_unknown_top_level_field() {
     let response = app
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/hooks/status-line")
                 .header("content-type", "application/json")
@@ -194,6 +197,7 @@ async fn status_line_without_a_session_id_is_dropped_with_no_event() {
     let response = app
         .oneshot(
             Request::builder()
+                .header("host", "127.0.0.1")
                 .method("POST")
                 .uri("/hooks/status-line")
                 .header("content-type", "application/json")
