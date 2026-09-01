@@ -700,4 +700,55 @@ describe('ApiClient', () => {
     expect(url).toBe('http://localhost/api/prompt-templates/7');
     expect(init.method).toBe('DELETE');
   });
+
+  describe('bearer token', () => {
+    it('sends Authorization: Bearer on a GET when configured with a token', async () => {
+      const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ providers: [] }));
+      const client = new ApiClient({
+        baseUrl: 'http://localhost',
+        fetchFn,
+        token: 'secret-token',
+      });
+
+      await client.getProviders();
+
+      const [, init] = fetchFn.mock.calls[0];
+      expect(new Headers(init.headers).get('Authorization')).toBe(
+        'Bearer secret-token',
+      );
+    });
+
+    it('merges the token with a request that already sets its own headers', async () => {
+      const fetchFn = vi.fn().mockResolvedValue(
+        jsonResponse({ id: 1, label: 'x', text: 'y' }, 201),
+      );
+      const client = new ApiClient({
+        baseUrl: 'http://localhost',
+        fetchFn,
+        token: 'secret-token',
+      });
+
+      await client.createPromptTemplate({ label: 'x', text: 'y' });
+
+      const [, init] = fetchFn.mock.calls[0];
+      const headers = new Headers(init.headers);
+      // Both the endpoint's own Content-Type and the injected token survive.
+      expect(headers.get('Content-Type')).toBe('application/json');
+      expect(headers.get('Authorization')).toBe('Bearer secret-token');
+    });
+
+    it('omits Authorization when no token is configured (mock mode)', async () => {
+      const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ providers: [] }));
+      const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+      await client.getProviders();
+
+      const [, init] = fetchFn.mock.calls[0];
+      // A bare GET carries no init at all — nothing is attached.
+      const authorization = init
+        ? new Headers(init.headers).get('Authorization')
+        : null;
+      expect(authorization).toBeNull();
+    });
+  });
 });

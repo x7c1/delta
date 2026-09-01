@@ -79,6 +79,10 @@ async fn codex_interrupt_settles_the_in_flight_turn_over_the_full_stack() {
                 .method("POST")
                 .uri(format!("/api/sessions/{session_id}/interrupt"))
                 .header("host", "127.0.0.1")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", crate::support::AUTH_TOKEN),
+                )
                 .body(Body::empty())
                 .unwrap(),
         )

@@ -141,6 +141,11 @@ pub struct Config {
     pub worktree_base: String,
     /// The dedicated tmux socket Delta's sessions live on (`tmux -L <socket>`).
     pub tmux_socket: String,
+    /// The per-run bearer token the API and live sockets require, enforced by
+    /// the server's auth guard. Minted (or handed in) once for the server's
+    /// lifetime by `main.rs::config_from_env`; the frontend presents it on every
+    /// request. Not a wire field and never rotated — see the auth guard.
+    pub auth_token: String,
     /// TCP port the server listens on, used to render the session's hook URLs.
     pub port: u16,
     /// How sessions are launched (which binary) and how long the launch
@@ -300,6 +305,7 @@ mod tests {
             session_workdir_base: "/tmp/delta-session".into(),
             worktree_base: "/tmp/delta-worktrees".into(),
             tmux_socket: DEFAULT_TMUX_SOCKET.into(),
+            auth_token: "test-token".into(),
             port: 7878,
             launch: delta_usecase::LaunchConfig::default(),
         }

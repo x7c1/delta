@@ -53,6 +53,13 @@ WEB_PORT="${E2E_REAL_PORT:-5197}"
 CLAUDE_BIN="${DELTA_CLAUDE_BIN:-claude}"
 TMUX_SOCKET="delta-e2e-real-$$"
 
+# A fixed per-run bearer token for the real suite. Exported so BOTH the backend
+# (which enforces it) and the Vite dev server the Playwright config launches
+# (which injects it into the page as the `delta-auth-token` meta tag, inheriting
+# it from this exported process env) use the same value — the same pattern as
+# the fake suite's `playwright.fake.config.ts` / `e2e-fake/support/server.ts`.
+export DELTA_AUTH_TOKEN="${DELTA_AUTH_TOKEN:-delta-e2e-real-auth-token}"
+
 log() { printf '\033[1;35m[e2e-real]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[e2e-real]\033[0m %s\n' "$*" >&2; exit 1; }
 
@@ -148,6 +155,7 @@ DELTA_PORT="$BACKEND_PORT" \
   DELTA_SESSION_WORKDIR="$WORKDIR" \
   DELTA_TMUX_SOCKET="$TMUX_SOCKET" \
   DELTA_CLAUDE_BIN="$CLAUDE_BIN" \
+  DELTA_AUTH_TOKEN="$DELTA_AUTH_TOKEN" \
   env -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID \
       -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_EXECPATH -u CLAUDE_EFFORT -u AI_AGENT \
   "$BACKEND_DIR/target/debug/delta-server" >"$RUN_DIR/server.log" 2>&1 &

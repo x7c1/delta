@@ -23,6 +23,10 @@ async fn rejects_a_cross_site_origin_on_a_rest_route() {
         .oneshot(
             get("/api/providers")
                 .header("host", "127.0.0.1")
+                // A valid token, so the request clears the (outer) auth guard
+                // and reaches the origin check under test — a foreign origin
+                // must fail there with 403, not short-circuit at auth as 401.
+                .header("authorization", bearer())
                 .header("origin", "https://evil.example")
                 .body(Body::empty())
                 .unwrap(),
@@ -47,6 +51,10 @@ async fn rejects_a_cross_site_origin_on_the_websocket_upgrades() {
             .oneshot(
                 get(uri)
                     .header("host", "127.0.0.1")
+                    // A valid token so the request reaches the origin check (see
+                    // the REST case above for why); the auth guard accepts it in
+                    // a header here as well as via a `token=` query param.
+                    .header("authorization", bearer())
                     .header("origin", "https://evil.example")
                     .body(Body::empty())
                     .unwrap(),
@@ -67,6 +75,9 @@ async fn rejects_a_non_loopback_host() {
         .oneshot(
             get("/api/providers")
                 .header("host", "evil.example")
+                // A valid token so a non-loopback Host fails at the host check
+                // with 403 rather than short-circuiting at auth as 401.
+                .header("authorization", bearer())
                 .body(Body::empty())
                 .unwrap(),
         )

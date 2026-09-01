@@ -154,6 +154,10 @@ async fn codex_parallel_approvals_are_all_answerable_and_gate_the_turn() {
                     .method("POST")
                     .uri(format!("/api/permissions/{request_id}/decision"))
                     .header("host", "127.0.0.1")
+                    .header(
+                        "authorization",
+                        format!("Bearer {}", crate::support::AUTH_TOKEN),
+                    )
                     .header("content-type", "application/json")
                     .body(Body::from(json!({ "decision": decision }).to_string()))
                     .unwrap(),

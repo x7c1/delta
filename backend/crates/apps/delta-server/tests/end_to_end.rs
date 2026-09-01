@@ -256,9 +256,13 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf, AppState) {
         "/tmp/delta-e2e-settings.json",
     );
 
-    let state = AppState::from_interactor(interactor, "delta-e2e");
+    let state = AppState::from_interactor(interactor, "delta-e2e", AUTH_TOKEN);
     (router(state.clone()), tmux, transcript_path, state)
 }
+
+/// The bearer token this test's `AppState` holds, presented on every request the
+/// helpers drive so they clear the router's per-run auth guard.
+const AUTH_TOKEN: &str = "delta-e2e-auth-token";
 
 async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
     let response = app
@@ -270,6 +274,8 @@ async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) 
                 // A loopback `Host` satisfies the router's origin/host guard,
                 // just as the real curl/browser clients do in production.
                 .header("host", "127.0.0.1")
+                // A valid bearer token clears the per-run auth guard.
+                .header("authorization", format!("Bearer {AUTH_TOKEN}"))
                 .header("content-type", "application/json")
                 .body(Body::from(body.to_string()))
                 .unwrap(),
@@ -286,6 +292,7 @@ async fn get(app: &Router, uri: &str) -> (StatusCode, Value) {
             Request::builder()
                 .uri(uri)
                 .header("host", "127.0.0.1")
+                .header("authorization", format!("Bearer {AUTH_TOKEN}"))
                 .body(Body::empty())
                 .unwrap(),
         )

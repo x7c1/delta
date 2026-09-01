@@ -90,9 +90,31 @@ fn config_from_env() -> Config {
             .unwrap_or_else(|_| default_worktree_base()),
         tmux_socket: std::env::var("DELTA_TMUX_SOCKET")
             .unwrap_or_else(|_| delta_bootstrap::DEFAULT_TMUX_SOCKET.to_owned()),
+        auth_token: auth_token_from_env(),
         port: env_port(),
         launch: launch_from_env(),
     }
+}
+
+/// The per-run bearer token the API and live sockets require.
+///
+/// `scripts/dev.sh` mints one token and exports `DELTA_AUTH_TOKEN` into both the
+/// backend and the Vite dev server, so the two agree without a startup race. A
+/// bare `cargo run -p delta-server` sets nothing, so mint a random fallback here
+/// — the server must always hold a token, and an empty one would let every
+/// request through. The fallback is two concatenated random (v4) UUIDs: 244 bits
+/// of entropy rendered as 64 hex characters.
+fn auth_token_from_env() -> String {
+    std::env::var("DELTA_AUTH_TOKEN")
+        .ok()
+        .filter(|token| !token.is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "{}{}",
+                uuid::Uuid::new_v4().simple(),
+                uuid::Uuid::new_v4().simple()
+            )
+        })
 }
 
 /// Default base directory for per-session git worktrees: `$HOME/.delta/worktrees`.

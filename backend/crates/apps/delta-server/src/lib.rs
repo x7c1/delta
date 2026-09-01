@@ -10,6 +10,7 @@
 
 mod api;
 mod app;
+mod auth_guard;
 mod comms;
 mod comms_log;
 mod hooks;

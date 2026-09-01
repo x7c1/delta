@@ -14,6 +14,7 @@ async fn prs_returns_empty_with_gh_unavailable() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/prs?lens=reviewer")
                 .body(Body::empty())
                 .unwrap(),
@@ -36,6 +37,7 @@ async fn prs_accepts_the_author_lens_too() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/prs?lens=author")
                 .body(Body::empty())
                 .unwrap(),
@@ -58,6 +60,7 @@ async fn prs_rejects_an_unknown_lens_with_400() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/prs?lens=everyone")
                 .body(Body::empty())
                 .unwrap(),
@@ -75,6 +78,7 @@ async fn prs_rejects_a_missing_lens_with_400() {
         .oneshot(
             Request::builder()
                 .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
                 .uri("/api/prs")
                 .body(Body::empty())
                 .unwrap(),

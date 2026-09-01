@@ -1,6 +1,6 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import { ApiClient } from '@delta/api-client';
-import { apiBaseUrl } from '../config';
+import { apiBaseUrl, authToken } from '../config';
 
 const ApiContext = createContext<ApiClient | null>(null);
 
@@ -11,7 +11,8 @@ export interface ApiProviderProps {
 
 /** Provides the singleton {@link ApiClient} (the only fetch holder) to the tree. */
 export function ApiProvider({ client, children }: ApiProviderProps) {
-  const value = client ?? new ApiClient({ baseUrl: apiBaseUrl() });
+  const value =
+    client ?? new ApiClient({ baseUrl: apiBaseUrl(), token: authToken() });
   return <ApiContext.Provider value={value}>{children}</ApiContext.Provider>;
 }
 

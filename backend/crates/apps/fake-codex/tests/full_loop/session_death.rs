@@ -167,6 +167,10 @@ async fn codex_app_server_death_settles_the_turn_and_its_pending_approvals() {
                 .method("POST")
                 .uri(format!("/api/permissions/{}/decision", requested[0]))
                 .header("host", "127.0.0.1")
+                .header(
+                    "authorization",
+                    format!("Bearer {}", crate::support::AUTH_TOKEN),
+                )
                 .header("content-type", "application/json")
                 .body(Body::from(json!({ "decision": "allow" }).to_string()))
                 .unwrap(),
