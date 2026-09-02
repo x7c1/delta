@@ -5,6 +5,7 @@ export { type Provider, PROVIDER_DISPLAY_NAMES } from './provider';
 export { ProviderName, type ProviderNameProps } from './ProviderName';
 export { Panel, type PanelProps } from './Panel';
 export { Collapsible, type CollapsibleProps } from './Collapsible';
+export { Card, type CardProps } from './Card';
 export { ErrorBoundary, type ErrorBoundaryProps } from './ErrorBoundary';
 export {
   Breadcrumb,

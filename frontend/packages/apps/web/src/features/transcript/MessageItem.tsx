@@ -1,6 +1,6 @@
 import { memo, useCallback } from 'react';
 import type { Message } from '@delta/wire-gen';
-import { Badge, Collapsible } from '@delta/ui-kit';
+import { Badge, Card, Collapsible } from '@delta/ui-kit';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { blockSummary, stringifyContent } from './blockSummary';
@@ -41,10 +41,12 @@ export interface MessageItemProps {
  *
  * Assistant text is Markdown-rendered; user text is rendered verbatim so
  * newlines and any Markdown-like characters the user typed are preserved as
- * plain text. `thinking` and tool blocks are collapsed by default with a
- * one-line summary; a message that renders only such cards — a tool turn, or a
- * reasoning message a provider delivers on its own — is laid out bare, without
- * the prose bubble. Selecting a text range emits the quote for branching.
+ * plain text. Tool blocks are collapsed by default behind a one-line summary,
+ * while a `thinking` block is an always-visible card — its reasoning is meant
+ * to be read in the flow of the conversation, so there is nothing to click. A
+ * message that renders only such cards — a tool turn, or a reasoning message a
+ * provider delivers on its own — is laid out bare, without the prose bubble.
+ * Selecting a text range emits the quote for branching.
  *
  * Claude's transcript delivers tool results as `role: "user"` lines, so a
  * user-role message that carries no human-authored text is a tool-result
@@ -221,17 +223,21 @@ export const MessageItem = memo(function MessageItem({
       case 'thinking':
         // Claude Code records a signed reference for thinking but leaves
         // the plaintext empty in the transcript, so a thinking block
-        // usually has no body. A collapsible that always expands to
-        // nothing is noise — render only when there is text to show.
+        // usually has no body. An empty card is noise — render only when
+        // there is text to show.
         if (!block.thinking.trim()) {
           return null;
         }
         return (
-          <Collapsible key={index} summary={blockSummary(block)}>
+          <Card
+            key={index}
+            summary={blockSummary(block)}
+            testId="thinking-block"
+          >
             <pre className="whitespace-pre-wrap text-fg-muted">
               {block.thinking}
             </pre>
-          </Collapsible>
+          </Card>
         );
       case 'tool_use': {
         // A tool call renders together with its result (resolved by id via

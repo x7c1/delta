@@ -36,8 +36,8 @@ function makeMessage(role: MessageRole, text: string): Message {
 /**
  * The rendered message's prose bubble, or `null` when it was laid out bare.
  * The bubble is data-tagged so the layout can be asserted structurally — its
- * background class is shared with the collapsible cards, which are exactly what
- * a bare layout leaves unwrapped.
+ * background class is shared with the block cards, which are exactly what a
+ * bare layout leaves unwrapped.
  */
 function proseBubble(): HTMLElement | null {
   return screen
@@ -213,7 +213,7 @@ describe('MessageItem', () => {
 
   it('omits an empty thinking block', () => {
     // Claude Code leaves the thinking plaintext empty (only a signature), so
-    // an empty thinking block must not render a click-to-empty collapsible.
+    // an empty thinking block must not render a card with an empty body.
     const message = makeMessageWithContent('assistant', [
       { type: 'thinking', thinking: '   ' },
       { type: 'text', text: 'the answer' },
@@ -235,12 +235,19 @@ describe('MessageItem', () => {
     expect(screen.queryByTestId('message-item')).toBeNull();
   });
 
-  it('renders a thinking block that has text', () => {
+  it('renders a thinking block that has text, open and with nothing to click', () => {
+    // Reasoning is meant to be read in the flow of the conversation, so the
+    // card shows its body straight away and offers no toggle at all.
     const message = makeMessageWithContent('assistant', [
       { type: 'thinking', thinking: 'let me reason' },
     ]);
     render(<MessageItem message={message} />);
-    expect(screen.getByText('thinking')).toBeInTheDocument();
+
+    const card = screen.getByTestId('thinking-block');
+    expect(within(card).getByText('thinking')).toBeInTheDocument();
+    expect(within(card).getByText('let me reason')).toBeInTheDocument();
+    expect(card.querySelector('button')).toBeNull();
+    expect(card.querySelector('[aria-expanded]')).toBeNull();
   });
 
   describe('the prose bubble', () => {

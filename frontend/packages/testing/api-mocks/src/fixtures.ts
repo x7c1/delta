@@ -21,8 +21,8 @@ import type {
  * session, and the per-session thread tree:
  *
  * - `sess-mock-1` — **open**. A trunk `main` thread with a multi-turn
- *   conversation (a tool call and a thinking block to exercise the collapsible
- *   blocks) plus one child branch thread sprouting from an assistant message.
+ *   conversation (a tool call and a thinking block, to exercise both card
+ *   shapes) plus one child branch thread sprouting from an assistant message.
  * - `sess-mock-2` — **closed**. A separate session with its own `main` thread,
  *   a short transcript, and one child branch thread. It is on page 1 but is not
  *   the auto-focused session (the open `sess-mock-1` is), so it exercises a
