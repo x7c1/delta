@@ -3,10 +3,10 @@
 use delta_model::{
     AgentProvider, ContentBlock, Message, MessageUuid, Role, SessionId, SessionStatus, ThreadId,
 };
-use delta_usecase::{NewSession, SessionPageCursor};
+use delta_usecase::{NewSession, SessionPageCursor, SpawningSession};
 
 use super::super::SqliteStore;
-use super::{new_session, new_session_with};
+use super::{new_session, new_session_with, spawning_session};
 
 #[tokio::test]
 async fn session_looks_up_by_id() {
@@ -53,16 +53,7 @@ async fn a_spawning_session_round_trips_provider_fields() {
     // A Claude spawn (every existing caller) reads back as Claude with no
     // provider ids — the behaviour before this change.
     store
-        .insert_spawning_session(
-            &SessionId::from("claude-1"),
-            "/work",
-            None,
-            None,
-            None,
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(spawning_session(&SessionId::from("claude-1"), "/work"))
         .await
         .unwrap();
     let claude = store
@@ -78,16 +69,10 @@ async fn a_spawning_session_round_trips_provider_fields() {
     // at spawn (NULL) and are filled in later via `set_provider_ids`.
     let codex_id = SessionId::from("codex-1");
     store
-        .insert_spawning_session(
-            &codex_id,
-            "/work",
-            None,
-            None,
-            None,
-            None,
-            AgentProvider::Codex,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            provider: AgentProvider::Codex,
+            ..spawning_session(&codex_id, "/work")
+        })
         .await
         .unwrap();
     let spawned = store.session(&codex_id).await.unwrap().unwrap();
@@ -253,16 +238,14 @@ async fn a_spawning_session_round_trips_its_pull_request_number() {
 
     let from_pr = SessionId::from("sess-pr");
     let (inserted, _main) = store
-        .insert_spawning_session(
-            &from_pr,
-            "/work",
-            Some("feat/repo-tab"),
-            Some("/work"),
-            Some("/work"),
-            Some("x7c1/delta"),
-            AgentProvider::Claude,
-            Some(138),
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("feat/repo-tab"),
+            repo_root: Some("/work"),
+            requested_workdir: Some("/work"),
+            repository_display_name: Some("x7c1/delta"),
+            pull_request_number: Some(138),
+            ..spawning_session(&from_pr, "/work")
+        })
         .await
         .unwrap();
     assert_eq!(
@@ -273,16 +256,7 @@ async fn a_spawning_session_round_trips_its_pull_request_number() {
 
     let from_directory = SessionId::from("sess-dir");
     store
-        .insert_spawning_session(
-            &from_directory,
-            "/work",
-            None,
-            None,
-            None,
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(spawning_session(&from_directory, "/work"))
         .await
         .unwrap();
 
@@ -327,16 +301,12 @@ async fn recent_workdirs_returns_requested_workdir_not_worktree_cwd() {
     // must surface the user-selected dir, not the worktree path.
     let id = SessionId::from("sess-worktree");
     store
-        .insert_spawning_session(
-            &id,
-            "/var/delta/worktrees/delta-sess-worktree",
-            Some("delta-sess-worktree"),
-            Some("/user-chosen"),
-            Some("/user-chosen"),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("delta-sess-worktree"),
+            repo_root: Some("/user-chosen"),
+            requested_workdir: Some("/user-chosen"),
+            ..spawning_session(&id, "/var/delta/worktrees/delta-sess-worktree")
+        })
         .await
         .unwrap();
 
@@ -465,16 +435,7 @@ async fn list_sessions_page_lists_message_less_spawning_sessions() {
     session_active_at(&store, "sess-live", "2026-01-01T00:00:00Z").await;
     let spawning = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(
-            &spawning,
-            "/work",
-            None,
-            None,
-            None,
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(spawning_session(&spawning, "/work"))
         .await
         .unwrap();
 
@@ -529,16 +490,7 @@ async fn spawning_session_inserts_then_activates_on_register() {
     // The eager insert: status `spawning`, no transcript path yet, and the
     // main thread already created so a first send can target real ids.
     let (session, main) = store
-        .insert_spawning_session(
-            &id,
-            "/work",
-            None,
-            None,
-            None,
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(spawning_session(&id, "/work"))
         .await
         .unwrap();
     assert_eq!(session.status, SessionStatus::Spawning);
@@ -639,16 +591,7 @@ async fn mark_session_failed_flips_only_a_spawning_session() {
     // A spawning session fails.
     let id = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(
-            &id,
-            "/work",
-            None,
-            None,
-            None,
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(spawning_session(&id, "/work"))
         .await
         .unwrap();
     store.mark_session_failed(&id).await.unwrap();
@@ -672,58 +615,40 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
     // session is outside any git repo (no repo_root) and must be excluded.
     let s1 = SessionId::from("sess-1");
     store
-        .insert_spawning_session(
-            &s1,
-            "/repo-a/wt-1",
-            Some("main"),
-            Some("/repo-a"),
-            Some("/repo-a"),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some("/repo-a"),
+            requested_workdir: Some("/repo-a"),
+            ..spawning_session(&s1, "/repo-a/wt-1")
+        })
         .await
         .unwrap();
     let s2 = SessionId::from("sess-2");
     store
-        .insert_spawning_session(
-            &s2,
-            "/repo-a/wt-2",
-            Some("feature/x"),
-            Some("/repo-a"),
-            Some("/repo-a"),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("feature/x"),
+            repo_root: Some("/repo-a"),
+            requested_workdir: Some("/repo-a"),
+            ..spawning_session(&s2, "/repo-a/wt-2")
+        })
         .await
         .unwrap();
     let s3 = SessionId::from("sess-3");
     store
-        .insert_spawning_session(
-            &s3,
-            "/repo-a-mirror",
-            Some("main"),
-            Some("/repo-a"),
-            Some("/repo-a-mirror"),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some("/repo-a"),
+            requested_workdir: Some("/repo-a-mirror"),
+            ..spawning_session(&s3, "/repo-a-mirror")
+        })
         .await
         .unwrap();
     let s4 = SessionId::from("sess-4");
     store
-        .insert_spawning_session(
-            &s4,
-            "/scratch",
-            None,
-            None,
-            Some("/scratch"),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            requested_workdir: Some("/scratch"),
+            ..spawning_session(&s4, "/scratch")
+        })
         .await
         .unwrap();
 

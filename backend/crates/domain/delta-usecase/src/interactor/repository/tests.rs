@@ -4,7 +4,7 @@
 //! and assert the aggregated Repository tree round-trips correctly.
 
 use crate::interactor::testing::*;
-use delta_model::{AgentProvider, ContentBlock, Message, MessageUuid, Role, SessionId, ThreadId};
+use delta_model::{ContentBlock, Message, MessageUuid, Role, SessionId, ThreadId};
 
 /// Build a minimal user-role message whose only purpose is to stamp a
 /// session's `last_activity_at` to `created_at`. The other Message fields are
@@ -54,42 +54,30 @@ async fn repositories_bundle_clones_with_the_same_origin() {
     let ix = interactor_with_git(git);
 
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s1"),
-            EXISTING_DIR,
-            Some("main"),
-            Some(EXISTING_DIR),
-            Some(EXISTING_DIR),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some(EXISTING_DIR),
+            requested_workdir: Some(EXISTING_DIR),
+            ..spawning_session(&SessionId::from("s1"), EXISTING_DIR)
+        })
         .await
         .unwrap();
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s2"),
-            EXISTING_DIR_2,
-            Some("feature/x"),
-            Some(EXISTING_DIR_2),
-            Some(EXISTING_DIR_2),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("feature/x"),
+            repo_root: Some(EXISTING_DIR_2),
+            requested_workdir: Some(EXISTING_DIR_2),
+            ..spawning_session(&SessionId::from("s2"), EXISTING_DIR_2)
+        })
         .await
         .unwrap();
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s3"),
-            EXISTING_DIR_3,
-            Some("main"),
-            Some(EXISTING_DIR_3),
-            Some(EXISTING_DIR_3),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some(EXISTING_DIR_3),
+            requested_workdir: Some(EXISTING_DIR_3),
+            ..spawning_session(&SessionId::from("s3"), EXISTING_DIR_3)
+        })
         .await
         .unwrap();
 
@@ -132,29 +120,19 @@ async fn clones_without_origin_stand_alone_by_path() {
     // the clone path itself, so two such clones never collapse.
     let ix = interactor_with_git(FakeGitWorktree::default());
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s1"),
-            EXISTING_DIR,
-            Some("main"),
-            Some(EXISTING_DIR),
-            None,
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some(EXISTING_DIR),
+            ..spawning_session(&SessionId::from("s1"), EXISTING_DIR)
+        })
         .await
         .unwrap();
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s2"),
-            EXISTING_DIR_2,
-            Some("main"),
-            Some(EXISTING_DIR_2),
-            None,
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some(EXISTING_DIR_2),
+            ..spawning_session(&SessionId::from("s2"), EXISTING_DIR_2)
+        })
         .await
         .unwrap();
 
@@ -176,29 +154,21 @@ async fn lazy_gc_drops_clones_whose_paths_no_longer_exist() {
         .with_origin_url(MISSING_DIR, "git@github.com:x7c1/gone");
     let ix = interactor_with_git(git);
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s1"),
-            EXISTING_DIR,
-            Some("main"),
-            Some(EXISTING_DIR),
-            Some(EXISTING_DIR),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some(EXISTING_DIR),
+            requested_workdir: Some(EXISTING_DIR),
+            ..spawning_session(&SessionId::from("s1"), EXISTING_DIR)
+        })
         .await
         .unwrap();
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s2"),
-            MISSING_DIR,
-            Some("main"),
-            Some(MISSING_DIR),
-            Some(MISSING_DIR),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some(MISSING_DIR),
+            requested_workdir: Some(MISSING_DIR),
+            ..spawning_session(&SessionId::from("s2"), MISSING_DIR)
+        })
         .await
         .unwrap();
 
@@ -221,16 +191,10 @@ async fn sessions_outside_a_git_repo_never_contribute() {
     // tab) is where those surface.
     let ix = interactor_with_git(FakeGitWorktree::default());
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s1"),
-            EXISTING_DIR,
-            None,
-            None,
-            Some(EXISTING_DIR),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            requested_workdir: Some(EXISTING_DIR),
+            ..spawning_session(&SessionId::from("s1"), EXISTING_DIR)
+        })
         .await
         .unwrap();
 
@@ -250,16 +214,12 @@ async fn deferred_per_clone_fields_are_empty_by_default() {
     let git = FakeGitWorktree::default().with_origin_url(EXISTING_DIR, "git@github.com:x7c1/delta");
     let ix = interactor_with_git(git);
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s1"),
-            EXISTING_DIR,
-            Some("main"),
-            Some(EXISTING_DIR),
-            Some(EXISTING_DIR),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some(EXISTING_DIR),
+            requested_workdir: Some(EXISTING_DIR),
+            ..spawning_session(&SessionId::from("s1"), EXISTING_DIR)
+        })
         .await
         .unwrap();
 
@@ -286,42 +246,30 @@ async fn recency_ordering_uses_max_across_a_repos_clones() {
     // then s_new. The repo bundling A wins because its newest clone
     // (s_new) is the latest insertion.
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s_old"),
-            EXISTING_DIR_2,
-            Some("main"),
-            Some(EXISTING_DIR_2),
-            Some(EXISTING_DIR_2),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some(EXISTING_DIR_2),
+            requested_workdir: Some(EXISTING_DIR_2),
+            ..spawning_session(&SessionId::from("s_old"), EXISTING_DIR_2)
+        })
         .await
         .unwrap();
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s_b"),
-            EXISTING_DIR_3,
-            Some("main"),
-            Some(EXISTING_DIR_3),
-            Some(EXISTING_DIR_3),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some(EXISTING_DIR_3),
+            requested_workdir: Some(EXISTING_DIR_3),
+            ..spawning_session(&SessionId::from("s_b"), EXISTING_DIR_3)
+        })
         .await
         .unwrap();
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s_new"),
-            EXISTING_DIR,
-            Some("main"),
-            Some(EXISTING_DIR),
-            Some(EXISTING_DIR),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some(EXISTING_DIR),
+            requested_workdir: Some(EXISTING_DIR),
+            ..spawning_session(&SessionId::from("s_new"), EXISTING_DIR)
+        })
         .await
         .unwrap();
 
@@ -399,16 +347,12 @@ async fn session_and_scan_clones_with_the_same_identity_key_union() {
         .with_origin_url(&scan_clone, "git@github.com:x7c1/delta");
     let ix = interactor_with_git(git);
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s1"),
-            EXISTING_DIR,
-            Some("main"),
-            Some(EXISTING_DIR),
-            Some(EXISTING_DIR),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some(EXISTING_DIR),
+            requested_workdir: Some(EXISTING_DIR),
+            ..spawning_session(&SessionId::from("s1"), EXISTING_DIR)
+        })
         .await
         .unwrap();
     ix.store()
@@ -447,16 +391,12 @@ async fn scan_clone_already_in_session_history_is_not_added_twice() {
     let git = FakeGitWorktree::default().with_origin_url(&clone_path, "git@github.com:x7c1/delta");
     let ix = interactor_with_git(git);
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s1"),
-            &clone_path,
-            Some("main"),
-            Some(&clone_path),
-            Some(&clone_path),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("main"),
+            repo_root: Some(&clone_path),
+            requested_workdir: Some(&clone_path),
+            ..spawning_session(&SessionId::from("s1"), &clone_path)
+        })
         .await
         .unwrap();
     ix.store()
@@ -531,16 +471,12 @@ async fn same_clone_path_with_different_repo_roots_dedups_keeping_newest() {
     // Insert s_old first: its message stamps `last_activity_at` to the
     // earlier timestamp.
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s_old"),
-            EXISTING_DIR,
-            Some("old"),
-            Some(EXISTING_DIR_2),
-            Some(EXISTING_DIR),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("old"),
+            repo_root: Some(EXISTING_DIR_2),
+            requested_workdir: Some(EXISTING_DIR),
+            ..spawning_session(&SessionId::from("s_old"), EXISTING_DIR)
+        })
         .await
         .unwrap();
     let s_old_thread = ix
@@ -560,16 +496,12 @@ async fn same_clone_path_with_different_repo_roots_dedups_keeping_newest() {
 
     // Then s_new: more recent activity, distinct repo_root, same clone path.
     ix.store()
-        .insert_spawning_session(
-            &SessionId::from("s_new"),
-            EXISTING_DIR,
-            Some("new"),
-            Some(EXISTING_DIR_3),
-            Some(EXISTING_DIR),
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(SpawningSession {
+            branch_at_launch: Some("new"),
+            repo_root: Some(EXISTING_DIR_3),
+            requested_workdir: Some(EXISTING_DIR),
+            ..spawning_session(&SessionId::from("s_new"), EXISTING_DIR)
+        })
         .await
         .unwrap();
     let s_new_thread = ix
@@ -656,32 +588,24 @@ async fn generated_paths_have_independent_cap_from_user_paths() {
     let mut idx = 0;
     for p in &user_paths {
         ix.store()
-            .insert_spawning_session(
-                &SessionId::from(format!("s-user-{idx}").as_str()),
-                p,
-                Some("main"),
-                Some(repo_root.as_str()),
-                Some(p),
-                None,
-                AgentProvider::Claude,
-                None,
-            )
+            .insert_spawning_session(SpawningSession {
+                branch_at_launch: Some("main"),
+                repo_root: Some(repo_root.as_str()),
+                requested_workdir: Some(p),
+                ..spawning_session(&SessionId::from(format!("s-user-{idx}").as_str()), p)
+            })
             .await
             .unwrap();
         idx += 1;
     }
     for p in &generated_paths {
         ix.store()
-            .insert_spawning_session(
-                &SessionId::from(format!("s-gen-{idx}").as_str()),
-                p,
-                Some("main"),
-                Some(repo_root.as_str()),
-                Some(p),
-                None,
-                AgentProvider::Claude,
-                None,
-            )
+            .insert_spawning_session(SpawningSession {
+                branch_at_launch: Some("main"),
+                repo_root: Some(repo_root.as_str()),
+                requested_workdir: Some(p),
+                ..spawning_session(&SessionId::from(format!("s-gen-{idx}").as_str()), p)
+            })
             .await
             .unwrap();
         idx += 1;
@@ -739,16 +663,12 @@ async fn active_repo_limit_drops_oldest_repositories() {
     for (i, p) in paths.iter().enumerate() {
         let sid = SessionId::from(format!("s-{i:03}").as_str());
         ix.store()
-            .insert_spawning_session(
-                &sid,
-                p,
-                Some("main"),
-                Some(p),
-                Some(p),
-                None,
-                AgentProvider::Claude,
-                None,
-            )
+            .insert_spawning_session(SpawningSession {
+                branch_at_launch: Some("main"),
+                repo_root: Some(p),
+                requested_workdir: Some(p),
+                ..spawning_session(&sid, p)
+            })
             .await
             .unwrap();
         // Stamp a message timestamp that grows with i, so repo i is strictly

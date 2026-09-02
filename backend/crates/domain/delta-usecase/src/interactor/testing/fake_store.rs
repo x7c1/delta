@@ -11,7 +11,9 @@ use delta_model::{
 };
 
 use crate::error::{Error, Result};
-use crate::ports::{CloneRoot, NewSession, RepositoryCloneRow, SessionPageRow, SessionStore};
+use crate::ports::{
+    CloneRoot, NewSession, RepositoryCloneRow, SessionPageRow, SessionStore, SpawningSession,
+};
 use crate::SessionPageCursor;
 
 /// The creation timestamp every fake-created row carries. Fixed so assertions
@@ -138,18 +140,20 @@ impl SessionStore for FakeStore {
         Ok((session, main_id))
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn insert_spawning_session(
         &self,
-        id: &SessionId,
-        cwd: &str,
-        branch_at_launch: Option<&str>,
-        repo_root: Option<&str>,
-        requested_workdir: Option<&str>,
-        repository_display_name: Option<&str>,
-        provider: AgentProvider,
-        pull_request_number: Option<i64>,
+        spawning: SpawningSession<'_>,
     ) -> Result<(Session, ThreadId)> {
+        let SpawningSession {
+            id,
+            cwd,
+            branch_at_launch,
+            repo_root,
+            requested_workdir,
+            repository_display_name,
+            provider,
+            pull_request_number,
+        } = spawning;
         let mut g = self.inner.lock().unwrap();
         assert!(
             !g.sessions.iter().any(|s| &s.id == id),

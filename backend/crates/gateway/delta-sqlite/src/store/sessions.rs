@@ -6,6 +6,7 @@ use rusqlite::{named_params, params, Connection, OptionalExtension, Row};
 use delta_model::{AgentProvider, Session, SessionId, SessionStatus, ThreadId};
 use delta_usecase::{
     NewSession, RecentWorkdir, RepositoryCloneRow, SessionPageCursor, SessionPageRow,
+    SpawningSession,
 };
 
 use crate::error::{Error, Result};
@@ -142,18 +143,20 @@ impl SqliteStore {
         Ok((session, main_id))
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) async fn insert_spawning_session(
         &self,
-        id: &SessionId,
-        cwd: &str,
-        branch_at_launch: Option<&str>,
-        repo_root: Option<&str>,
-        requested_workdir: Option<&str>,
-        repository_display_name: Option<&str>,
-        provider: AgentProvider,
-        pull_request_number: Option<i64>,
+        spawning: SpawningSession<'_>,
     ) -> std::result::Result<(Session, ThreadId), delta_usecase::Error> {
+        let SpawningSession {
+            id,
+            cwd,
+            branch_at_launch,
+            repo_root,
+            requested_workdir,
+            repository_display_name,
+            provider,
+            pull_request_number,
+        } = spawning;
         let conn = self.conn.lock().await;
         let now = now_iso8601();
         // A plain INSERT: the id is a freshly-minted UUID v7, so a conflict is

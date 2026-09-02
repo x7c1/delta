@@ -12,7 +12,8 @@ mod sessions;
 mod subagents;
 mod threads;
 
-use delta_usecase::NewSession;
+use delta_model::{AgentProvider, SessionId};
+use delta_usecase::{NewSession, SpawningSession};
 
 fn new_session() -> NewSession {
     NewSession {
@@ -33,5 +34,21 @@ fn new_session_with(id: &str) -> NewSession {
         branch_at_launch: None,
         repo_root: None,
         repository_display_name: None,
+    }
+}
+
+/// A `spawning` insert with no launch context: a Claude session started in
+/// `cwd`, with no git snapshot, no user-selected workdir and no originating
+/// pull request. Tests name only the fields their assertion depends on.
+fn spawning_session<'a>(id: &'a SessionId, cwd: &'a str) -> SpawningSession<'a> {
+    SpawningSession {
+        id,
+        cwd,
+        branch_at_launch: None,
+        repo_root: None,
+        requested_workdir: None,
+        repository_display_name: None,
+        provider: AgentProvider::Claude,
+        pull_request_number: None,
     }
 }

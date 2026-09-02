@@ -12,6 +12,7 @@ use delta_model::{
 
 use crate::error::Result;
 use crate::ports::new_session::NewSession;
+use crate::ports::spawning_session::SpawningSession;
 use crate::session_page::SessionPageCursor;
 
 /// One row of a session-list page: the stored session plus its `last_activity_at`
@@ -86,54 +87,10 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// row via [`Self::register_session`]). The id is freshly minted, so an
     /// existing row with the same id is an error, not an upsert.
     ///
-    /// `branch_at_launch` and `repo_root` are the spawn-time git snapshot —
-    /// the local branch checked out at `cwd`, and the repository root the
-    /// spawn resolved against the dir the user picked: for a worktree spawn
-    /// that is the repository the worktree was cut from, which does not
-    /// contain `cwd`. Both are `None` when the launch directory is not inside a git
-    /// repository (or HEAD is detached). They are persisted once here and
-    /// never updated later: see [`Session::branch_at_launch`] /
-    /// [`Session::repo_root`] for the spawn-snapshot semantics.
-    ///
-    /// `requested_workdir` is the dir the user picked before any worktree
-    /// resolution. It is `None` when no workdir was selected (the default
-    /// per-token scratch dir is used). For a worktree-on spawn it holds the
-    /// user-selected dir (the worktree's repo root), while `cwd` holds the
-    /// auto-generated worktree path; for a plain spawn with a user-selected
-    /// workdir it equals `cwd`. See [`Session::requested_workdir`].
-    ///
-    /// `repository_display_name` is the cross-worktree repository identity
-    /// label (`org/repo` from the `origin` URL, or the working-tree basename
-    /// when no origin is set). It is `None` when the launch directory is not
-    /// inside a git repository. Persisted once here and never updated later:
-    /// see [`Session::repository_display_name`] for the spawn-snapshot
-    /// semantics.
-    ///
-    /// `pull_request_number` is the GitHub pull request the session was opened
-    /// from (the new-session screen's PR tab), or `None` for every other origin.
-    /// Like the git snapshot above it is written once here and never updated on
-    /// resume: see [`Session::pull_request_number`].
-    ///
-    /// `provider` is the AI-agent backend the session runs on, recorded in the
-    /// `session.provider` column. Every Claude spawn passes
-    /// [`AgentProvider::Claude`] (the historical default); a structured
-    /// provider such as Codex passes its own value. The provider-minted
-    /// conversation ids are not known yet at spawn time — they are learned from
-    /// the provider's launch response and written later via
-    /// [`Self::set_provider_ids`].
-    // Each parameter is a distinct spawn-time column; bundling them into a
-    // struct would not clarify the call sites (mirrors `Interactor::new`).
-    #[allow(clippy::too_many_arguments)]
+    /// The [`SpawningSession`] fields document each column of the snapshot.
     async fn insert_spawning_session(
         &self,
-        id: &SessionId,
-        cwd: &str,
-        branch_at_launch: Option<&str>,
-        repo_root: Option<&str>,
-        requested_workdir: Option<&str>,
-        repository_display_name: Option<&str>,
-        provider: AgentProvider,
-        pull_request_number: Option<i64>,
+        spawning: SpawningSession<'_>,
     ) -> Result<(Session, ThreadId)>;
 
     /// Record the provider-minted conversation identifiers for a session: the
@@ -773,30 +730,11 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self).register_session(new).await
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn insert_spawning_session(
         &self,
-        id: &SessionId,
-        cwd: &str,
-        branch_at_launch: Option<&str>,
-        repo_root: Option<&str>,
-        requested_workdir: Option<&str>,
-        repository_display_name: Option<&str>,
-        provider: AgentProvider,
-        pull_request_number: Option<i64>,
+        spawning: SpawningSession<'_>,
     ) -> Result<(Session, ThreadId)> {
-        (**self)
-            .insert_spawning_session(
-                id,
-                cwd,
-                branch_at_launch,
-                repo_root,
-                requested_workdir,
-                repository_display_name,
-                provider,
-                pull_request_number,
-            )
-            .await
+        (**self).insert_spawning_session(spawning).await
     }
 
     async fn set_provider_ids(

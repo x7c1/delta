@@ -17,9 +17,10 @@
 //! carries.
 
 use delta_model::{AgentProvider, ContentBlock, Message, MessageUuid, Role, SendStatus, SessionId};
+use delta_usecase::SpawningSession;
 
 use super::super::SqliteStore;
-use super::new_session;
+use super::{new_session, spawning_session};
 use crate::migrations::{migrate, Step, UNDO_HELD_AT_RENAME};
 use crate::SCHEMA_VERSION;
 
@@ -512,16 +513,11 @@ async fn a_v6_database_gains_pull_request_number_and_keeps_its_sessions() {
     // The new column is usable: a spawn started from a PR records its number
     // and reads it straight back through the normal path.
     let (spawned, _main) = store
-        .insert_spawning_session(
-            &SessionId::from("sess-2"),
-            "/work",
-            None,
-            None,
-            None,
-            Some("x7c1/delta"),
-            AgentProvider::Claude,
-            Some(138),
-        )
+        .insert_spawning_session(SpawningSession {
+            repository_display_name: Some("x7c1/delta"),
+            pull_request_number: Some(138),
+            ..spawning_session(&SessionId::from("sess-2"), "/work")
+        })
         .await
         .unwrap();
     assert_eq!(spawned.pull_request_number, Some(138));

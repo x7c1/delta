@@ -34,6 +34,8 @@ mod session_store;
 pub use session_store::{
     CloneRoot, RecentWorkdir, RepositoryCloneRow, SessionPageRow, SessionStore,
 };
+mod spawning_session;
+pub use spawning_session::SpawningSession;
 mod stop_hook;
 pub use stop_hook::StopHook;
 mod tmux_driver;

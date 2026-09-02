@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use delta_model::{AgentProvider, SessionId};
+use delta_model::SessionId;
 
 use crate::interactor::session_actor::runtime::PENDING_SPAWN_DEADLINE;
 use crate::interactor::testing::*;
@@ -20,16 +20,7 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
     // spawn stamped one second past its deadline, with a live tmux session so
     // the reaper actually issues (and we can observe) the kill.
     ix.store()
-        .insert_spawning_session(
-            &session_id,
-            "/work",
-            None,
-            None,
-            None,
-            None,
-            AgentProvider::Claude,
-            None,
-        )
+        .insert_spawning_session(spawning_session(&session_id, "/work"))
         .await
         .unwrap();
     ix.push_pending_spawn_at(

@@ -15,6 +15,7 @@ mod fake_tmux;
 mod fake_transcript;
 mod fake_workspace;
 mod hooks;
+mod spawning;
 mod targets;
 mod transcript_lines;
 
@@ -38,6 +39,7 @@ pub(crate) use fake_tmux::{FakeTmux, PaneInput, TmuxGate};
 pub(crate) use fake_transcript::FakeTranscript;
 pub(crate) use fake_workspace::FakeWorkspace;
 pub(crate) use hooks::{session_start, submit, submit_for, submit_in};
+pub(crate) use spawning::spawning_session;
 pub(crate) use targets::{branch_off, to};
 pub(crate) use transcript_lines::{
     agent_tool_use_line, api_error_line, assistant_line, assistant_line_at,
@@ -52,5 +54,6 @@ pub(crate) use transcript_lines::{
 
 // Re-exported so test files can call `SessionStore` methods on `ix.store()`
 // (e.g. `main_thread_id`, `create_thread`) via the `testing::*` glob without
-// each importing the trait directly.
-pub(crate) use crate::ports::SessionStore;
+// each importing the trait directly, and build the argument to
+// `insert_spawning_session` from the [`spawning_session`] default.
+pub(crate) use crate::ports::{SessionStore, SpawningSession};
