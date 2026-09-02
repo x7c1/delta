@@ -443,7 +443,7 @@ export const SessionNode = memo(function SessionNode({
               </span>
             ) : (
               <a
-                className="col-start-2 row-start-2 ml-2 self-end text-caption tabular-nums text-fg-subtle hover:text-secondary hover:underline"
+                className="col-start-2 row-start-2 ml-2 self-end text-caption tabular-nums text-fg-subtle hover:text-fg hover:underline"
                 data-testid="session-pull-request"
                 href={pullRequestHref}
                 target="_blank"
