@@ -310,7 +310,19 @@ export const SessionNode = memo(function SessionNode({
             : 'border-border-default hover:border-border-strong',
         )}
       >
-        <div className="flex items-center gap-2 px-2 py-2">
+        {/* The header is a 2-row × 3-column grid, not a flex row. The focus
+            button spans both rows of the first two columns and joins the grid
+            as a SUBGRID, so its own two lines are placed on the parent's
+            tracks: line 1 (the branch) stretches across columns 1–2, line 2
+            (the repo) takes column 1 and leaves column 2 to the PR link,
+            which is a sibling of the button. A plain flex row cannot do this:
+            a sibling there occupies its column for the full row height, so
+            line 1 was being truncated by the PR link's width even though the
+            link only sits under line 2. Column 2 is `auto` and collapses to
+            nothing when there is no PR; the inter-column spacing lives on the
+            link and the menu as margins (a grid gap would still open beside an
+            empty column). */}
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-y-0.5 px-2 py-2">
           <button
             type="button"
             // Focus this session and return to its main thread. The main thread
@@ -320,11 +332,11 @@ export const SessionNode = memo(function SessionNode({
             // which also covers re-clicking the already-focused session while
             // viewing one of its sub-threads.
             onClick={() => selectThread(item.main_thread_id)}
-            className="flex min-w-0 flex-1 flex-col gap-0.5 text-left text-secondary"
+            className="col-span-2 row-span-2 grid min-w-0 grid-cols-subgrid grid-rows-subgrid text-left text-secondary"
             aria-current={isFocused ? 'true' : undefined}
             data-testid="session-node"
           >
-            <span className="flex min-w-0 items-center gap-2">
+            <span className="col-span-2 flex min-w-0 items-center gap-2">
               {/* `Starting` is a third state alongside Open and Closed: it must
                   not read as `Closed`, which invites a resume the server would
                   refuse. It is a status the user waits out (a second or so),
@@ -397,7 +409,7 @@ export const SessionNode = memo(function SessionNode({
                 neither yields a usable label. The line's right-hand slot holds
                 the originating PR, which is rendered OUTSIDE this button — see
                 the sibling below. */}
-            <span className="flex items-baseline gap-2 text-caption text-fg-subtle">
+            <span className="col-start-1 row-start-2 flex min-w-0 items-baseline text-caption text-fg-subtle">
               {repoLabel && (
                 <span
                   className="min-w-0 flex-1 truncate text-left [direction:rtl]"
@@ -409,9 +421,9 @@ export const SessionNode = memo(function SessionNode({
               )}
             </span>
           </button>
-          {/* The originating pull request, sitting in line 2's right-hand slot
-              (`self-end` bottom-aligns it against the two-line block). It is a
-              SIBLING of the focus button, never a descendant: a link inside a
+          {/* The originating pull request, placed on the grid at line 2's
+              right-hand cell (column 2, row 2 — see the header comment). It is
+              a SIBLING of the focus button, never a descendant: a link inside a
               button is invalid HTML, and nesting it would also focus the
               session on the way to GitHub. Without a usable `org/repo` label
               there is no URL to link to, so the number renders as plain text
@@ -419,7 +431,7 @@ export const SessionNode = memo(function SessionNode({
           {pullRequest !== null &&
             (pullRequestHref === null ? (
               <span
-                className="shrink-0 self-end pb-px text-caption tabular-nums text-fg-subtle"
+                className="col-start-2 row-start-2 ml-2 self-end text-caption tabular-nums text-fg-subtle"
                 data-testid="session-pull-request"
                 title={`Pull request #${pullRequest}`}
               >
@@ -427,7 +439,7 @@ export const SessionNode = memo(function SessionNode({
               </span>
             ) : (
               <a
-                className="shrink-0 self-end pb-px text-caption tabular-nums text-fg-subtle hover:text-secondary hover:underline"
+                className="col-start-2 row-start-2 ml-2 self-end text-caption tabular-nums text-fg-subtle hover:text-secondary hover:underline"
                 data-testid="session-pull-request"
                 href={pullRequestHref}
                 target="_blank"
@@ -441,7 +453,8 @@ export const SessionNode = memo(function SessionNode({
                 {`#${pullRequest}`}
               </a>
             ))}
-          {/* Fixed-width slot, vertically centered against the two-line block.
+          {/* Column 3, spanning both rows and vertically centered against the
+              two-line block.
               The trigger's dots are tinted in the provider hue — this IS the
               card's provider marker (an inline mark disturbed whichever text
               line it sat on, and colored the existing glyph instead). Color
@@ -449,6 +462,7 @@ export const SessionNode = memo(function SessionNode({
               name carries the provider, and the two hues stay distinguishable
               from the resting text tone. */}
           <Menu
+            className="col-start-3 row-span-2 ml-2 self-center"
             label={`Session actions for ${label} (${PROVIDER_METADATA[item.session.provider].label} session)`}
             triggerClassName={PROVIDER_TRIGGER_TINT[item.session.provider]}
             onOpenChange={setMenuOpen}
