@@ -96,6 +96,7 @@ export function useSubmitSend(): (args: {
             launchOptionIds: target.launchOptionIds,
             provider: target.provider,
             worktree: target.worktree,
+            pullRequestNumber: target.pullRequestNumber,
           });
           // The server wrote the session row before it launched anything, so
           // the list is already stale: refetch it now rather than waiting for

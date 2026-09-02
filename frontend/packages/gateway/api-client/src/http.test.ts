@@ -31,6 +31,7 @@ describe('ApiClient', () => {
               provider: 'claude',
               provider_session_id: null,
               provider_thread_id: null,
+              pull_request_number: null,
             },
             open: true,
             main_thread_id: 1,

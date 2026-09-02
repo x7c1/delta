@@ -56,6 +56,13 @@ export interface SendToNewSession {
    * sends it only for a non-default provider.
    */
   provider?: AgentProvider;
+  /**
+   * The GitHub pull request the fresh session is being opened from — the number
+   * picked on the new-session screen's PR tab. Honored only for a new-session
+   * send; when omitted the session records no PR origin. The server stores it
+   * as a spawn-time snapshot and rejects a non-positive number with a 400.
+   */
+  pull_request_number?: number;
 }
 
 /** Request body for `POST /api/sends` — a discriminated send target. */

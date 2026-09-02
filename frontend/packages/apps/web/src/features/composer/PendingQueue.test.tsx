@@ -679,6 +679,7 @@ const failedSpawn: SpawnItem = {
   launchOptionIds: [2, 5],
   provider: 'claude',
   worktree: null,
+  pullRequestNumber: null,
   status: 'failed',
 };
 
@@ -785,13 +786,15 @@ describe('PendingQueue failed spawn', () => {
     expect(locals[0].sessionId).toBe(mockSpawnSessionId(1));
   });
 
-  it('Retry re-sends the provider and the worktree the failed launch used', async () => {
+  it('Retry re-sends the provider, the worktree and the PR the failed launch used', async () => {
     // The whole point of Retry is "the same session, again". A Codex launch
     // started from a PR fails in the launch preparation more often than any
     // other (the adapter handshake, the worktree checkout), and retrying it as
     // a Claude session in the plain workdir would start something the user
     // never asked for — silently, since the chip says nothing about which
-    // session it is about to start.
+    // session it is about to start. The PR origin rides along for the same
+    // reason: a retried session whose card no longer names its PR has quietly
+    // lost the provenance the first attempt had.
     let captured: unknown;
     server.use(
       http.post('*/api/sends', async ({ request }) => {
@@ -823,6 +826,7 @@ describe('PendingQueue failed spawn', () => {
           worktree: {
             start_point: { kind: 'use_remote_branch', name: 'feature/x' },
           },
+          pullRequestNumber: 138,
         },
       ],
     });
@@ -840,6 +844,7 @@ describe('PendingQueue failed spawn', () => {
           start_point: { kind: 'use_remote_branch', name: 'feature/x' },
         },
         provider: 'codex',
+        pull_request_number: 138,
       });
     });
     // …and the freshly tracked spawn keeps them too, so a second failure can
@@ -849,6 +854,7 @@ describe('PendingQueue failed spawn', () => {
     expect(fresh.worktree).toEqual({
       start_point: { kind: 'use_remote_branch', name: 'feature/x' },
     });
+    expect(fresh.pullRequestNumber).toBe(138);
   });
 });
 

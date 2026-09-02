@@ -118,6 +118,13 @@ pub struct WireSession {
     /// providers that map a session 1:1 onto a thread. `null` for Claude and
     /// for rows that predate provider persistence.
     pub provider_thread_id: Option<String>,
+    /// Spawn-time snapshot of the GitHub pull request the session was opened
+    /// from (the new-session screen's PR tab). `null` for a session started
+    /// from the Repository/Directory tab, for an externally-started `claude`,
+    /// and for rows that predate this field. The navigator renders it as
+    /// `#<number>` on the session card, linking to
+    /// `https://github.com/<repository_display_name>/pull/<number>`.
+    pub pull_request_number: Option<i64>,
 }
 
 impl From<Session> for WireSession {
@@ -135,6 +142,7 @@ impl From<Session> for WireSession {
             provider: session.provider.into(),
             provider_session_id: session.provider_session_id,
             provider_thread_id: session.provider_thread_id,
+            pull_request_number: session.pull_request_number,
         }
     }
 }
@@ -161,6 +169,7 @@ mod tests {
             provider: AgentProvider::Claude,
             provider_session_id: None,
             provider_thread_id: None,
+            pull_request_number: Some(138),
         };
         assert_eq!(
             serde_json::to_value(WireSession::from(session)).unwrap(),
@@ -177,6 +186,7 @@ mod tests {
                 "provider": "claude",
                 "provider_session_id": null,
                 "provider_thread_id": null,
+                "pull_request_number": 138,
             }),
         );
     }
@@ -197,11 +207,17 @@ mod tests {
             provider: AgentProvider::Codex,
             provider_session_id: Some("thr_abc".into()),
             provider_thread_id: Some("thr_abc".into()),
+            pull_request_number: None,
         };
         let value = serde_json::to_value(WireSession::from(session)).unwrap();
         assert_eq!(value["provider"], serde_json::json!("codex"));
         assert_eq!(value["provider_session_id"], serde_json::json!("thr_abc"));
         assert_eq!(value["provider_thread_id"], serde_json::json!("thr_abc"));
+        assert_eq!(
+            value["pull_request_number"],
+            serde_json::Value::Null,
+            "a session started from a directory carries no PR number"
+        );
     }
 
     #[test]

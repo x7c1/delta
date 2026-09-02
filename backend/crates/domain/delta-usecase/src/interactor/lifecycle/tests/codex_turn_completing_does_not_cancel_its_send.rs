@@ -19,6 +19,7 @@ async fn codex_turn_completing_does_not_cancel_its_send() {
     let (send, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: None,
                 launch_option_ids: Vec::new(),

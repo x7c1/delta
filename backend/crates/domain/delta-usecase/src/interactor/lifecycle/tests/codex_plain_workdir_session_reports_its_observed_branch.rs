@@ -33,6 +33,7 @@ async fn codex_plain_workdir_session_reports_its_observed_branch() {
     let (send, _events) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),
@@ -85,6 +86,7 @@ async fn a_session_outside_a_git_working_tree_reports_no_branch() {
 
     ix.enqueue_send(
         SendTarget::NewSession {
+            pull_request_number: None,
             provider: AgentProvider::Codex,
             workdir: None,
             launch_option_ids: Vec::new(),
@@ -132,6 +134,7 @@ async fn a_failing_git_degrades_the_branch_instead_of_failing_the_spawn() {
     let (send, _events) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),

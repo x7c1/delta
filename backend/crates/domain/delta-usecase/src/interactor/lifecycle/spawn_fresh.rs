@@ -134,6 +134,7 @@ where
         workdir: Option<String>,
         launch_option_ids: Vec<i64>,
         worktree: Option<WorktreeSpec>,
+        pull_request_number: Option<i64>,
     ) -> Result<FreshSpawn> {
         let session_id = self.id.clone();
         // Validate a user-selected workdir before minting or launching anything,
@@ -340,6 +341,10 @@ where
                 repository_display_name.as_deref(),
                 // The fresh-spawn path drives Claude Code (tmux PTY + hooks).
                 AgentProvider::Claude,
+                // The PR this session was opened from, when the composer's
+                // origin was the PR tab. A spawn-time snapshot like the git
+                // columns above: written here, never updated on resume.
+                pull_request_number,
             )
             .await?;
         let first_send = match first_prompt.as_deref() {

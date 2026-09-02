@@ -58,6 +58,7 @@ async fn codex_closed_session_send_resumes_across_restart() {
     let (first, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: None,
                 launch_option_ids: Vec::new(),

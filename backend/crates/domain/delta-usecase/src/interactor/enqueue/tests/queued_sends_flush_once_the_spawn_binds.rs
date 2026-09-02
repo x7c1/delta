@@ -29,6 +29,7 @@ async fn a_queued_send_flushes_at_the_first_turn_end() {
     let (first, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
                 workdir: None,
                 launch_option_ids: Vec::new(),

@@ -56,7 +56,9 @@ where
                 // `insert_spawning_session` and is left untouched here. For
                 // an externally-started `claude` (the fresh-insert side of
                 // `register_session`) Delta likewise has no launch git
-                // context, so all three stay `None`.
+                // context, so all three stay `None`. The same holds for the
+                // session's `pull_request_number`, which this path does not
+                // carry at all: it is written only by the spawning insert.
                 branch_at_launch: None,
                 repo_root: None,
                 repository_display_name: None,

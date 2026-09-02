@@ -40,6 +40,7 @@ async fn a_codex_session_replies_before_the_worktree_is_built() {
     let (send, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),

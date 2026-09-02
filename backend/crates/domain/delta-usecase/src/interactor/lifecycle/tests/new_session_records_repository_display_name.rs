@@ -29,6 +29,7 @@ async fn new_session_records_repository_display_name_from_origin_url() {
     let (send, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),
@@ -74,6 +75,7 @@ async fn new_session_records_repository_display_name_from_basename_when_origin_u
     let (send, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
                 workdir: Some("/projects/local-only".to_owned()),
                 launch_option_ids: Vec::new(),
@@ -113,6 +115,7 @@ async fn new_session_in_a_non_git_dir_records_no_repository_display_name() {
     let (send, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
                 workdir: Some("/scratch".to_owned()),
                 launch_option_ids: Vec::new(),

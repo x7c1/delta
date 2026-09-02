@@ -26,6 +26,7 @@ async fn new_session_with_worktree_launches_in_the_worktree() {
 
     ix.enqueue_send(
         SendTarget::NewSession {
+            pull_request_number: None,
             provider: crate::AgentProvider::Claude,
             workdir: Some("/projects/app".to_owned()),
             launch_option_ids: Vec::new(),

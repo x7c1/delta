@@ -29,6 +29,7 @@ struct SessionParts {
     provider: String,
     provider_session_id: Option<String>,
     provider_thread_id: Option<String>,
+    pull_request_number: Option<i64>,
 }
 
 fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
@@ -46,6 +47,7 @@ fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
         provider: row.get(10)?,
         provider_session_id: row.get(11)?,
         provider_thread_id: row.get(12)?,
+        pull_request_number: row.get(13)?,
     })
 }
 
@@ -64,6 +66,7 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
         provider: AgentProvider::parse(&parts.provider)?,
         provider_session_id: parts.provider_session_id,
         provider_thread_id: parts.provider_thread_id,
+        pull_request_number: parts.pull_request_number,
     })
 }
 
@@ -74,9 +77,9 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
 fn page_row_from_row(row: &Row<'_>) -> Result<SessionPageRow> {
     let session = session_from_parts(map_session(row)?)?;
     // `last_activity_at` follows the `SESSION_COLS` block, so its positional
-    // index is the column count of `SESSION_COLS` (13) — the first column after
+    // index is the column count of `SESSION_COLS` (14) — the first column after
     // the session fields.
-    let last_activity_at: Option<String> = row.get(13)?;
+    let last_activity_at: Option<String> = row.get(14)?;
     Ok((session, last_activity_at))
 }
 
@@ -98,7 +101,7 @@ fn query_session_by_id(conn: &Connection, id: &SessionId) -> Result<Option<Sessi
 
 const SESSION_COLS: &str = "id, cwd, transcript_path, title, status, created_at, \
      branch_at_launch, repo_root, requested_workdir, repository_display_name, \
-     provider, provider_session_id, provider_thread_id";
+     provider, provider_session_id, provider_thread_id, pull_request_number";
 
 impl SqliteStore {
     pub(super) async fn register_session(
@@ -114,11 +117,12 @@ impl SqliteStore {
         // `active` and the hook-reported transcript path (unknown at mint time)
         // is filled in. An already-active/ended row is left untouched.
         //
-        // `branch_at_launch`, `repo_root`, and `repository_display_name` are
-        // NOT touched on the activate path: the eager spawn has already
-        // recorded the launch-time snapshot via `insert_spawning_session`, and
-        // an externally-started `claude` (the fresh-insert path here) has no
-        // Delta-known launch git context, so all three stay NULL for it.
+        // `branch_at_launch`, `repo_root`, `repository_display_name` and
+        // `pull_request_number` are NOT touched on the activate path: the eager
+        // spawn has already recorded the launch-time snapshot via
+        // `insert_spawning_session`, and an externally-started `claude` (the
+        // fresh-insert path here) has no Delta-known launch context at all, so
+        // all four stay NULL for it.
         conn.execute(
             "INSERT INTO session (id, cwd, transcript_path, title, status, created_at)
              VALUES (?1, ?2, ?3, NULL, 'active', ?4)
@@ -148,6 +152,7 @@ impl SqliteStore {
         requested_workdir: Option<&str>,
         repository_display_name: Option<&str>,
         provider: AgentProvider,
+        pull_request_number: Option<i64>,
     ) -> std::result::Result<(Session, ThreadId), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
@@ -156,15 +161,17 @@ impl SqliteStore {
         // spawn-time git snapshot (`branch_at_launch`, `repo_root`,
         // `repository_display_name`) and the user-selected `requested_workdir`
         // are written once here and never updated later — see the doc on
-        // `Session`. `provider` records the backend; the provider-minted
-        // conversation ids are unknown until launch returns, so they stay NULL
-        // here and are filled later via `set_provider_ids`.
+        // `Session`. `pull_request_number` is the same kind of snapshot: the PR
+        // the session was opened from, NULL for every other origin. `provider`
+        // records the backend; the provider-minted conversation ids are unknown
+        // until launch returns, so they stay NULL here and are filled later via
+        // `set_provider_ids`.
         conn.execute(
             "INSERT INTO session
              (id, cwd, transcript_path, title, status, created_at,
               branch_at_launch, repo_root, requested_workdir, repository_display_name,
-              provider)
-             VALUES (?1, ?2, NULL, NULL, 'spawning', ?3, ?4, ?5, ?6, ?7, ?8)",
+              provider, pull_request_number)
+             VALUES (?1, ?2, NULL, NULL, 'spawning', ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 id.as_str(),
                 cwd,
@@ -174,6 +181,7 @@ impl SqliteStore {
                 requested_workdir,
                 repository_display_name,
                 provider.as_str(),
+                pull_request_number,
             ],
         )
         .map_err(Error::from)?;
@@ -193,6 +201,7 @@ impl SqliteStore {
                 provider,
                 provider_session_id: None,
                 provider_thread_id: None,
+                pull_request_number,
             },
             main_id,
         ))

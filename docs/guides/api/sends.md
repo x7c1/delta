@@ -79,7 +79,8 @@ Request (new session):
   "workdir": "/work/delta",
   "provider": "claude",
   "launch_option_ids": [1, 4],
-  "worktree": { "start_point": { "kind": "head" } }
+  "worktree": { "start_point": { "kind": "head" } },
+  "pull_request_number": 138
 }
 ```
 
@@ -112,6 +113,10 @@ only with `new_session: true` and are ignored on a thread send:
   `HEAD`), `remote_branch` (branch off `origin/<name>`, fetched first), or
   `use_remote_branch` (work on `<name>` itself in the worktree); the latter two
   carry `name`, the branch short name with no `origin/` prefix.
+- `pull_request_number` (optional) — the GitHub pull request the session is
+  being opened from. Stored as a spawn-time snapshot on the session row (see
+  [shapes.md — `Session`](shapes.md#session)) and never updated afterwards.
+  Omitted for a session started from anywhere but the PR tab.
 
 Response:
 
@@ -189,7 +194,8 @@ Response:
   `thread_id` nor `new_session` given, both given, or `new_session` combined with
   a branch (`semantic_parent_uuid`). Also a `workdir` that does not exist or is
   not a directory, a `worktree` requested without a `workdir` or for a directory
-  that is not a git repository, and a selected launch option the provider's
+  that is not a git repository, a non-positive `pull_request_number` (pull
+  requests are numbered from 1), and a selected launch option the provider's
   adapter refuses (body `code: "launch_option_rejected"` — it names a field
   Delta sets itself, names the same field twice, or two selected Codex `config`
   rows disagree about one setting inside the object they merge into; the message

@@ -647,6 +647,10 @@ async fn new_session_send_spawns_and_persists_first_prompt() {
         sessions[0]["last_activity_at"].is_null(),
         "a session that has ingested nothing has no activity yet"
     );
+    assert!(
+        sessions[0]["session"]["pull_request_number"].is_null(),
+        "a new-session send with no PR origin records none"
+    );
 
     // Nothing can be *dispatched* into it while it is starting — no pane is
     // bound and its transcript does not exist — but a plain send is still
@@ -707,6 +711,91 @@ async fn new_session_send_spawns_and_persists_first_prompt() {
         tmux.sent.load(Ordering::SeqCst),
         0,
         "the fresh spawn submits the prompt at launch, not via send_line"
+    );
+
+    let _ = std::fs::remove_file(&transcript_path);
+}
+
+/// A new-session send carrying `pull_request_number` records it on the session,
+/// and `GET /api/sessions` serves it **while the row is still `spawning`** — the
+/// navigator card shows the PR from the moment the session is listed — and
+/// still after the launch's first hook registers the session, because the
+/// number is a spawn-time snapshot the activate path never touches.
+#[tokio::test]
+async fn new_session_send_records_the_pull_request_it_was_opened_from() {
+    let (app, _tmux, transcript_path, _state) = build_app();
+    let transcript_str = transcript_path.to_str().unwrap().to_owned();
+
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({
+            "new_session": true,
+            "text": "resume PR work",
+            "pull_request_number": 138,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let session_id = body["send"]["session_id"]
+        .as_str()
+        .expect("a real session id")
+        .to_owned();
+
+    let (status, list) = get(&app, "/api/sessions").await;
+    assert_eq!(status, StatusCode::OK);
+    let sessions = list["sessions"].as_array().expect("sessions array");
+    assert_eq!(sessions[0]["session"]["status"], "spawning");
+    assert_eq!(
+        sessions[0]["session"]["pull_request_number"], 138,
+        "the card can show the PR before the launch has bound"
+    );
+
+    // The launch's first hook activates the row. That path rewrites `cwd` and
+    // `transcript_path`; the PR snapshot must survive it untouched.
+    let (status, _) = post_json(
+        &app,
+        "/hooks/user-prompt-submit",
+        json!({
+            "prompt": "resume PR work",
+            "session_id": session_id,
+            "transcript_path": transcript_str,
+            "cwd": "/work/delta",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, list) = get(&app, "/api/sessions").await;
+    assert_eq!(status, StatusCode::OK);
+    let sessions = list["sessions"].as_array().expect("sessions array");
+    assert_eq!(sessions[0]["session"]["status"], "active");
+    assert_eq!(
+        sessions[0]["session"]["pull_request_number"], 138,
+        "registering the session must not clear its PR origin"
+    );
+
+    let _ = std::fs::remove_file(&transcript_path);
+}
+
+/// Pull requests are numbered from 1, so a zero or negative `pull_request_number`
+/// is a malformed request rather than "no PR": it is refused before anything is
+/// spawned.
+#[tokio::test]
+async fn new_session_send_with_a_non_positive_pull_request_number_is_bad_request() {
+    let (app, tmux, transcript_path, _state) = build_app();
+
+    let (status, _) = post_json(
+        &app,
+        "/api/sends",
+        json!({ "new_session": true, "text": "go", "pull_request_number": 0 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        tmux.created.load(Ordering::SeqCst),
+        0,
+        "a rejected request spawns nothing"
     );
 
     let _ = std::fs::remove_file(&transcript_path);

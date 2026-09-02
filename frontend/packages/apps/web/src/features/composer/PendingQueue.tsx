@@ -375,14 +375,15 @@ export function PendingQueue({
                           // Re-attempt the identical launch: the same text plus
                           // the whole configuration the target retained (chosen
                           // directory, selected launch options, provider,
-                          // worktree). Then drop the failed chip so only the
-                          // fresh attempt shows.
+                          // worktree, PR origin). Then drop the failed chip so
+                          // only the fresh attempt shows.
                           retrySpawn({
                             text: entry.item.text,
                             workdir: target.workdir,
                             launchOptionIds: target.launchOptionIds,
                             provider: target.provider,
                             worktree: target.worktree,
+                            pullRequestNumber: target.pullRequestNumber,
                           });
                           removeSending(entry.item.id);
                         }}
@@ -422,6 +423,7 @@ export function PendingQueue({
                         launchOptionIds: entry.spawn.launchOptionIds,
                         provider: entry.spawn.provider,
                         worktree: entry.spawn.worktree,
+                        pullRequestNumber: entry.spawn.pullRequestNumber,
                       });
                       clearSpawn(entry.spawn.sessionId);
                     }}

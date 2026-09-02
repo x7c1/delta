@@ -28,6 +28,7 @@ async fn codex_second_send_dispatches_over_the_adapter() {
     let (first, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: None,
                 launch_option_ids: Vec::new(),
@@ -126,6 +127,7 @@ async fn codex_branch_send_injects_context_and_reuses_branch_bookkeeping() {
     let (first, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: None,
                 launch_option_ids: Vec::new(),

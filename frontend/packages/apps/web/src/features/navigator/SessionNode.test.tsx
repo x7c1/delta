@@ -115,6 +115,7 @@ const item: SessionListItem = {
     provider: 'claude',
     provider_session_id: null,
     provider_thread_id: null,
+    pull_request_number: null,
   },
   open: true,
   main_thread_id: 1,
@@ -307,16 +308,96 @@ describe('SessionNode repo line', () => {
 
     expect(screen.queryByTestId('session-repo')).not.toBeInTheDocument();
   });
+});
 
-  it('renders the last-activity time with condensed font-stretch', () => {
-    // The timestamp is shown in tabular-nums plus a `font-stretch: condensed`
-    // hint so timestamps stay compact next to the repo label on a narrow row.
-    // The class is honoured only by variable fonts that ship a condensed axis;
-    // it is a no-op fallback otherwise, but the explicit hint stays.
-    renderNode({});
+describe('SessionNode pull request', () => {
+  /** The row as it looks for a session started from the PR tab. */
+  function itemFromPr(
+    pullRequestNumber: number | null,
+    repositoryDisplayName: string | null = 'x7c1/delta',
+  ): SessionListItem {
+    return {
+      ...item,
+      session: {
+        ...item.session,
+        repository_display_name: repositoryDisplayName,
+        pull_request_number: pullRequestNumber,
+      },
+    };
+  }
 
-    const lastActivity = screen.getByTestId('session-last-activity');
-    expect(lastActivity.className).toContain('[font-stretch:condensed]');
+  it('links the PR number to GitHub in a new tab', () => {
+    renderNode({ item: itemFromPr(138) });
+
+    const link = screen.getByTestId('session-pull-request');
+    expect(link).toHaveTextContent('#138');
+    expect(link).toHaveAttribute(
+      'href',
+      'https://github.com/x7c1/delta/pull/138',
+    );
+    expect(link).toHaveAttribute('target', '_blank');
+    // `noopener` is what keeps the opened tab from reaching back into the app.
+    expect(link.getAttribute('rel')).toContain('noopener');
+    // `#138` alone names nothing outside the card, so the accessible name (and
+    // the hover title) spell the destination out.
+    expect(link).toHaveAccessibleName('Open pull request #138 on GitHub');
+    expect(link.getAttribute('title')).toBe(
+      'Open pull request #138 on GitHub',
+    );
+  });
+
+  it('keeps the link out of the card focus button', () => {
+    // Interactive content inside a `<button>` is invalid HTML, and a nested
+    // link would also focus the session on the way to GitHub. The link must be
+    // a sibling of the focus button, not a descendant.
+    renderNode({ item: itemFromPr(138) });
+
+    const button = screen.getByTestId('session-node');
+    const link = screen.getByTestId('session-pull-request');
+    expect(button.contains(link)).toBe(false);
+    expect(link.closest('button')).toBeNull();
+  });
+
+  it('renders the number as plain text when no GitHub repo can be named', () => {
+    // A clone with no `origin` falls back to a working-tree basename, which
+    // names no GitHub repository — show the number, never an invented URL.
+    renderNode({ item: itemFromPr(138, 'delta') });
+
+    const slot = screen.getByTestId('session-pull-request');
+    expect(slot).toHaveTextContent('#138');
+    expect(slot.tagName).toBe('SPAN');
+    expect(slot).not.toHaveAttribute('href');
+  });
+
+  it('renders the number as plain text when the session has no repo label', () => {
+    renderNode({ item: itemFromPr(138, null) });
+
+    const slot = screen.getByTestId('session-pull-request');
+    expect(slot).toHaveTextContent('#138');
+    expect(slot.tagName).toBe('SPAN');
+  });
+
+  it('renders nothing in the slot for a session not started from a PR', () => {
+    renderNode({ item: itemFromPr(null) });
+
+    expect(
+      screen.queryByTestId('session-pull-request'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the PR while the session is still starting', () => {
+    // The row is listed from the moment the send is accepted, and the number is
+    // written on that same eager row — so a `spawning` card already names it.
+    renderNode({
+      item: {
+        ...spawningItem,
+        session: { ...spawningItem.session, pull_request_number: 138 },
+      },
+    });
+
+    expect(screen.getByTestId('session-pull-request')).toHaveTextContent(
+      '#138',
+    );
   });
 });
 

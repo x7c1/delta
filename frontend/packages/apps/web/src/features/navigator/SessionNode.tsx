@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, type CSSProperties, type Ref } from 'react';
-import { displayBranch, type ThreadId } from '@delta/model';
+import { displayBranch, pullRequestUrl, type ThreadId } from '@delta/model';
 import type { SessionListItem } from '@delta/wire-gen';
 import {
   useCloseSessionMutation,
@@ -14,7 +14,6 @@ import {
 } from '../open-cwd/useOpenCwd';
 import { noticeOf, threadIsRunning, useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
-import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { ThreadTree } from './ThreadTree';
 
 export interface SessionNodeProps {
@@ -86,15 +85,16 @@ const PROVIDER_TRIGGER_TINT = {
  * short `repository_display_name` label, e.g. `org/repo`, and falling back to
  * the cwd basename — both paths RTL-truncate ("left-end truncate") so a long
  * `org/repo` keeps its repo name and a long local path keeps its meaningful
- * tail; omitted entirely when both yield no name) and, on the right, the
- * last-activity time) plus the kebab actions menu in a fixed-width slot at
- * the right end — its dots tinted in the session's provider hue, doubling as
- * the card's provider marker. The menu always offers
- * `Copy session ID` (useful even for a closed session — copying its id, e.g. to
- * feed `claude --resume`, does not require the session to be running) and
- * additionally exposes `Close` while the session is open (never on a session
- * that is still starting — there is no bound pane to close). The focused card is
- * lifted with an indigo border, tint, and ring.
+ * tail; omitted entirely when both yield no name)) plus, in line 2's right-hand
+ * slot, the pull request the session was opened from (`#<number>`, linking to
+ * GitHub in a new tab; omitted for a session not started from the PR tab) and
+ * the kebab actions menu in a fixed-width slot at the right end — its dots
+ * tinted in the session's provider hue, doubling as the card's provider marker.
+ * The menu always offers `Copy session ID` (useful even for a closed session —
+ * copying its id, e.g. to feed `claude --resume`, does not require the session
+ * to be running) and additionally exposes `Close` while the session is open
+ * (never on a session that is still starting — there is no bound pane to
+ * close). The focused card is lifted with an indigo border, tint, and ring.
  *
  * Every session that has branched into sub-threads shows its {@link ThreadTree}
  * expanded by default — focused or not — so the whole visible list reads as a
@@ -195,7 +195,6 @@ export const SessionNode = memo(function SessionNode({
   const threadsQuery = useSessionThreadsQuery(client, item.session.id);
   const threads = threadsQuery.data?.threads;
 
-  const lastActivity = formatLocalDateTime(item.last_activity_at);
   const label = sessionLabel(item);
   // Line 1: the local branch checked out in the launch directory at spawn time,
   // captured once by the backend on `insert_spawning_session`. Falls back to
@@ -231,6 +230,16 @@ export const SessionNode = memo(function SessionNode({
   const cwd = item.session.cwd;
   const repoLabel = repositoryDisplayName ?? basename(cwd);
   const repoTooltip = repositoryDisplayName ? (repoRoot ?? cwd) : cwd;
+  // Line 2 right: the pull request this session was opened from, a spawn-time
+  // snapshot the backend records when the workdir was picked on the PR tab;
+  // `null` for every other origin, and the slot then stays empty. The href is
+  // rebuilt from `repository_display_name` plus the number, and is itself
+  // `null` when that label names no GitHub repository — see `pullRequestUrl`.
+  const pullRequest = item.session.pull_request_number;
+  const pullRequestHref =
+    pullRequest === null
+      ? null
+      : pullRequestUrl(repositoryDisplayName, pullRequest);
   // Show the sub-thread list only once the session has branched. The main
   // thread itself is never listed (it is reached by clicking this card's
   // header — see NavigatorPane); a session with no sub-threads shows no tree at
@@ -379,14 +388,15 @@ export const SessionNode = memo(function SessionNode({
                 </span>
               )}
             </span>
-            {/* Line 2: the launch-time repository identity on the left and
-                the last-activity time on the right.
+            {/* Line 2: the launch-time repository identity.
                 Both the primary (the backend's short `repository_display_name`)
                 and the fallback (cwd basename) paths RTL-truncate ("left-end
                 truncate") so the meaningful tail is preserved — `org/repo`
                 clips the org and keeps the repo, a long local path keeps
                 `…/projects/delta`. The repo span is omitted entirely when
-                neither yields a usable label. */}
+                neither yields a usable label. The line's right-hand slot holds
+                the originating PR, which is rendered OUTSIDE this button — see
+                the sibling below. */}
             <span className="flex items-baseline gap-2 text-caption text-fg-subtle">
               {repoLabel && (
                 <span
@@ -397,16 +407,40 @@ export const SessionNode = memo(function SessionNode({
                   {repoLabel}
                 </span>
               )}
-              {lastActivity && (
-                <span
-                  className="ml-auto shrink-0 tabular-nums [font-stretch:condensed]"
-                  data-testid="session-last-activity"
-                >
-                  {lastActivity}
-                </span>
-              )}
             </span>
           </button>
+          {/* The originating pull request, sitting in line 2's right-hand slot
+              (`self-end` bottom-aligns it against the two-line block). It is a
+              SIBLING of the focus button, never a descendant: a link inside a
+              button is invalid HTML, and nesting it would also focus the
+              session on the way to GitHub. Without a usable `org/repo` label
+              there is no URL to link to, so the number renders as plain text
+              instead of pointing somewhere invented. */}
+          {pullRequest !== null &&
+            (pullRequestHref === null ? (
+              <span
+                className="shrink-0 self-end pb-px text-caption tabular-nums text-fg-subtle"
+                data-testid="session-pull-request"
+                title={`Pull request #${pullRequest}`}
+              >
+                {`#${pullRequest}`}
+              </span>
+            ) : (
+              <a
+                className="shrink-0 self-end pb-px text-caption tabular-nums text-fg-subtle hover:text-secondary hover:underline"
+                data-testid="session-pull-request"
+                href={pullRequestHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                // `#138` alone is not a name outside the card's visual
+                // context, so spell the destination out for assistive tech —
+                // the same sentence the hover title carries.
+                aria-label={`Open pull request #${pullRequest} on GitHub`}
+                title={`Open pull request #${pullRequest} on GitHub`}
+              >
+                {`#${pullRequest}`}
+              </a>
+            ))}
           {/* Fixed-width slot, vertically centered against the two-line block.
               The trigger's dots are tinted in the provider hue — this IS the
               card's provider marker (an inline mark disturbed whichever text

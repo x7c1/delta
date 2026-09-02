@@ -27,6 +27,7 @@ async fn session_start_during_the_pane_launch_binds_the_spawn() {
     let (send, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
                 workdir: None,
                 launch_option_ids: Vec::new(),

@@ -75,7 +75,7 @@ test('each card tints its kebab trigger in its provider hue', async ({
   // The tint replaces the resting subtle tone: the trigger's color must differ
   // from the meta line's own text color on the same card.
   const lineColor = await claudeRow
-    .getByTestId('session-last-activity')
+    .getByTestId('session-repo')
     .evaluate((el) => getComputedStyle(el).color);
   expect(claudeColor).not.toBe(lineColor);
 

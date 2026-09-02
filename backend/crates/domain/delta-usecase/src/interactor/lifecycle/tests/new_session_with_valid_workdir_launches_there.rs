@@ -16,6 +16,7 @@ async fn new_session_with_valid_workdir_launches_there() {
 
     ix.enqueue_send(
         SendTarget::NewSession {
+            pull_request_number: None,
             provider: crate::AgentProvider::Claude,
             workdir: Some("/projects/app".to_owned()),
             launch_option_ids: Vec::new(),

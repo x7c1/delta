@@ -80,4 +80,14 @@ worktree?: WorktreeSpec,
  * so an existing client that never sets it is unaffected. `"codex"` starts
  * a terminal-less Codex session over `codex app-server`.
  */
-provider?: AgentProvider, };
+provider?: AgentProvider, 
+/**
+ * The GitHub pull request a fresh session is being opened from — the
+ * number the user picked on the new-session screen's PR tab. Only
+ * meaningful with `new_session: true`; for a thread send the session's
+ * origin is already fixed, so this is ignored exactly like `workdir`. When
+ * omitted, the session records no PR origin. It is stored as a spawn-time
+ * snapshot and rendered on the session card; a non-positive number is a
+ * shape error (`400`), because no such pull request can exist.
+ */
+pull_request_number?: number, };

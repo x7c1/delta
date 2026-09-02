@@ -68,5 +68,10 @@ pub enum SendTarget {
         /// byte-for-byte. A [`AgentProvider::Codex`] session is launched
         /// terminal-less over `codex app-server` instead of a tmux pane.
         provider: AgentProvider,
+        /// The GitHub pull request this session is being opened from, when the
+        /// user started it from the new-session screen's PR tab. Recorded once
+        /// on the spawning insert as `Session::pull_request_number` and never
+        /// updated afterwards; `None` for every other origin.
+        pull_request_number: Option<i64>,
     },
 }

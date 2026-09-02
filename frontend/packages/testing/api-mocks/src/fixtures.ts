@@ -91,6 +91,9 @@ export const mockSession: Session = {
   provider: 'claude',
   provider_session_id: null,
   provider_thread_id: null,
+  // Started from the PR tab: the navigator card links this number to
+  // `https://github.com/dev/delta/pull/138`.
+  pull_request_number: 138,
 };
 
 export const mockSession2: Session = {
@@ -106,6 +109,8 @@ export const mockSession2: Session = {
   provider: 'claude',
   provider_session_id: null,
   provider_thread_id: null,
+  // Started from a directory pick: no PR slot on the card.
+  pull_request_number: null,
 };
 
 export const mockSession3: Session = {
@@ -123,6 +128,7 @@ export const mockSession3: Session = {
   provider: 'claude',
   provider_session_id: null,
   provider_thread_id: null,
+  pull_request_number: null,
 };
 
 export const mockSession4: Session = {
@@ -145,6 +151,7 @@ export const mockSession4: Session = {
   provider: 'codex',
   provider_session_id: null,
   provider_thread_id: null,
+  pull_request_number: null,
 };
 
 export const mockThreads: Thread[] = [
@@ -695,6 +702,7 @@ function buildFillerSessions(): MockStore['sessions'] {
         provider: 'claude',
         provider_session_id: null,
         provider_thread_id: null,
+        pull_request_number: null,
       },
       open: false,
       mainThreadId: threadId,

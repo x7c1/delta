@@ -28,6 +28,7 @@ async fn ensure_session_is_idempotent_while_a_launch_is_in_flight() {
     // A composer-first send accepts a session whose worktree build is held.
     ix.enqueue_send(
         SendTarget::NewSession {
+            pull_request_number: None,
             provider: crate::AgentProvider::Claude,
             workdir: Some("/projects/app".to_owned()),
             launch_option_ids: Vec::new(),

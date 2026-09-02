@@ -24,6 +24,7 @@ async fn new_session_with_worktree_uses_repo_identity_in_dir_name() {
 
     ix.enqueue_send(
         SendTarget::NewSession {
+            pull_request_number: None,
             provider: crate::AgentProvider::Claude,
             workdir: Some("/projects/app".to_owned()),
             launch_option_ids: Vec::new(),
