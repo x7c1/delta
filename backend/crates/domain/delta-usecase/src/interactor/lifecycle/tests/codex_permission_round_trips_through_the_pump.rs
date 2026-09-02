@@ -59,6 +59,7 @@ async fn codex_permission_round_trips_through_the_pump() {
     let (send, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: None,
                 launch_option_ids: Vec::new(),
@@ -150,6 +151,7 @@ async fn deciding_an_unknown_codex_permission_is_a_conflict() {
     let (send, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: None,
                 launch_option_ids: Vec::new(),
@@ -184,6 +186,7 @@ async fn session_with_a_pending_approval(
     let (send, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: None,
                 launch_option_ids: Vec::new(),

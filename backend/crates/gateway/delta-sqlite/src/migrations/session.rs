@@ -67,10 +67,22 @@
 //!   `provider_session_id`; it is kept as a distinct column so a future
 //!   many-threads-per-session provider has a home for it. NULL for Claude and
 //!   for rows that predate the column.
+//! - `pull_request_number` is a spawn-time snapshot of the GitHub pull request
+//!   the session was opened from — the number the user picked on the new-session
+//!   screen's PR tab. Like `branch_at_launch` / `repository_display_name` it is
+//!   written once, by the spawning insert, and never updated on resume. NULL for
+//!   a session started from the Repository/Directory tab, for a session created
+//!   by a hook-registered `claude` that Delta did not spawn (that path knows no
+//!   launch context at all), and for every row that predates the column. There
+//!   is no backfill: nothing records which PR a historical session came from.
+//!   Only the number is stored — the PR's web URL is rebuilt from
+//!   `repository_display_name`, which for a PR-picked session names the very
+//!   same GitHub repository (Delta's PR listing is `github.com`-only).
 
 use super::Step;
 
-/// The `session` table's history: the v3 baseline table, then its recency index.
+/// The `session` table's history: the v3 baseline table, its recency index, and
+/// the v7 pull-request snapshot column.
 pub(super) const STEPS: &[Step] = &[
     Step::additive(
         3,
@@ -98,5 +110,13 @@ CREATE TABLE IF NOT EXISTS session (
         "\
 CREATE INDEX IF NOT EXISTS ix_session_recency
   ON session(COALESCE(last_activity_at, created_at) DESC, created_at DESC, id DESC);",
+    ),
+    // v7: the PR a session was opened from. Nullable with no default, so every
+    // existing row reads NULL — "this session was not started from a PR (or
+    // predates the column)", which is exactly what the navigator renders as an
+    // empty slot.
+    Step::additive(
+        7,
+        "ALTER TABLE session ADD COLUMN pull_request_number INTEGER;",
     ),
 ];

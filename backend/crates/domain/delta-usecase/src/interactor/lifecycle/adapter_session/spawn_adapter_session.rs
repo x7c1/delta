@@ -99,6 +99,7 @@ where
         workdir: Option<String>,
         launch_option_ids: Vec<i64>,
         worktree: Option<WorktreeSpec>,
+        pull_request_number: Option<i64>,
     ) -> Result<FreshSpawn> {
         let session_id = self.id.clone();
 
@@ -229,6 +230,10 @@ where
                 requested_workdir.as_deref(),
                 repository_display_name.as_deref(),
                 provider,
+                // The PR this session was opened from, when the composer's
+                // origin was the PR tab — the same spawn-time snapshot
+                // `spawn_fresh` records.
+                pull_request_number,
             )
             .await?;
 

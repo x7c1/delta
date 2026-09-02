@@ -37,7 +37,6 @@ import { applySessionEvent } from '../../data/applySessionEvent';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { useLiveStore } from '../../store/liveStore';
-import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { WorkspaceScreen } from './WorkspaceScreen';
 
 // The live event source opens a real WebSocket outside mock mode, and the
@@ -583,6 +582,7 @@ describe('WorkspaceScreen multi-session', () => {
                 provider: 'claude',
                 provider_session_id: null,
                 provider_thread_id: null,
+                pull_request_number: null,
               },
               open: false,
               main_thread_id: SESSION_2_MAIN_THREAD_ID,
@@ -602,6 +602,7 @@ describe('WorkspaceScreen multi-session', () => {
                 provider: 'claude',
                 provider_session_id: null,
                 provider_thread_id: null,
+                pull_request_number: null,
               },
               open: false,
               main_thread_id: 1,
@@ -675,6 +676,7 @@ describe('WorkspaceScreen multi-session', () => {
                 provider: 'claude',
                 provider_session_id: null,
                 provider_thread_id: null,
+                pull_request_number: null,
               },
               open: true,
               main_thread_id: MAIN_THREAD_ID,
@@ -801,9 +803,9 @@ describe('WorkspaceScreen multi-session', () => {
     // The row's two-line header identifies a session by its launch context:
     // line 1 carries the *launch-time* local git branch (captured once on
     // spawn, never updated on resume), and line 2 left carries the basename of
-    // the launch-time repository root with the time on the right. Both spans
-    // are hover-titled with their full value; the per-span tooltips replace
-    // the old card-wide cwd hover.
+    // the launch-time repository root, with the originating pull request in the
+    // slot on the right. Both spans are hover-titled with their full value; the
+    // per-span tooltips replace the old card-wide cwd hover.
     const lastActivityAt = '2026-01-01T00:00:02Z';
     server.use(
       http.get('*/api/sessions', () =>
@@ -823,6 +825,7 @@ describe('WorkspaceScreen multi-session', () => {
                 provider: 'claude',
                 provider_session_id: null,
                 provider_thread_id: null,
+                pull_request_number: null,
               },
               open: true,
               main_thread_id: 1,
@@ -846,12 +849,12 @@ describe('WorkspaceScreen multi-session', () => {
     expect(repo).toHaveTextContent('delta');
     expect(repo.getAttribute('title')).toBe('/home/dev/projects/delta');
 
-    // The last-activity time is still visible on line 2 (right-aligned).
-    // Derive it the same way the component does so the assertion is
-    // timezone-agnostic.
-    const formattedTime = formatLocalDateTime(lastActivityAt);
-    expect(formattedTime).not.toBeNull();
-    expect(screen.getByText(formattedTime as string)).toBeInTheDocument();
+    // Line 2 right: this session was not started from a PR, so the slot that
+    // once held the last-activity time is empty. The list is ordered by
+    // recency, so the timestamp said nothing the ordering did not.
+    expect(
+      screen.queryByTestId('session-pull-request'),
+    ).not.toBeInTheDocument();
   });
 
   // A single-session `/api/sessions` override for a given provider, so a test
@@ -885,6 +888,7 @@ describe('WorkspaceScreen multi-session', () => {
                 provider,
                 provider_session_id: null,
                 provider_thread_id: null,
+                pull_request_number: null,
               },
               open,
               main_thread_id: mainThreadId,
@@ -1278,6 +1282,7 @@ describe('WorkspaceScreen multi-session', () => {
                 provider: 'claude',
                 provider_session_id: null,
                 provider_thread_id: null,
+                pull_request_number: null,
               },
               open: true,
               main_thread_id: 1,

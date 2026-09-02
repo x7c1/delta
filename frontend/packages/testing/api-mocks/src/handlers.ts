@@ -563,6 +563,11 @@ export function createMockApi(): MockApi {
             provider: 'claude',
             provider_session_id: null,
             provider_thread_id: null,
+            // The real server snapshots the PR the send named onto the eager
+            // `spawning` row, so the card shows it before the launch binds.
+            // Mirror that here, or the mocked list would drop the origin the
+            // send just carried.
+            pull_request_number: payload.pull_request_number ?? null,
           },
           open: false,
           spawning: true,

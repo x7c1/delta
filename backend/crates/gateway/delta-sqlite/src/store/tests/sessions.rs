@@ -61,6 +61,7 @@ async fn a_spawning_session_round_trips_provider_fields() {
             None,
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -85,6 +86,7 @@ async fn a_spawning_session_round_trips_provider_fields() {
             None,
             None,
             AgentProvider::Codex,
+            None,
         )
         .await
         .unwrap();
@@ -241,6 +243,80 @@ async fn recent_workdirs_falls_back_to_created_at_for_message_less_sessions() {
     );
 }
 
+/// The PR a session was opened from is persisted by the spawning insert and
+/// read back by both session read paths — the single-session `get` and the
+/// recency-ordered list the navigator renders. A spawn with no PR origin stores
+/// NULL, which is what the card renders as an empty slot.
+#[tokio::test]
+async fn a_spawning_session_round_trips_its_pull_request_number() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    let from_pr = SessionId::from("sess-pr");
+    let (inserted, _main) = store
+        .insert_spawning_session(
+            &from_pr,
+            "/work",
+            Some("feat/repo-tab"),
+            Some("/work"),
+            Some("/work"),
+            Some("x7c1/delta"),
+            AgentProvider::Claude,
+            Some(138),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        inserted.pull_request_number,
+        Some(138),
+        "the returned row carries the number without a re-read"
+    );
+
+    let from_directory = SessionId::from("sess-dir");
+    store
+        .insert_spawning_session(
+            &from_directory,
+            "/work",
+            None,
+            None,
+            None,
+            None,
+            AgentProvider::Claude,
+            None,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store
+            .session(&from_pr)
+            .await
+            .unwrap()
+            .unwrap()
+            .pull_request_number,
+        Some(138),
+    );
+    assert_eq!(
+        store
+            .session(&from_directory)
+            .await
+            .unwrap()
+            .unwrap()
+            .pull_request_number,
+        None,
+        "a session started from a directory records no PR origin"
+    );
+
+    // The list page is the navigator's own read path, so it must carry the
+    // number too — the card is rendered from a list row, never from a `get`.
+    let page = store.list_sessions_page(None, 10).await.unwrap();
+    let numbers: Vec<(&str, Option<i64>)> = page
+        .iter()
+        .map(|(session, _)| (session.id.as_str(), session.pull_request_number))
+        .collect();
+    assert!(numbers.contains(&("sess-pr", Some(138))), "{numbers:?}");
+    assert!(numbers.contains(&("sess-dir", None)), "{numbers:?}");
+}
+
 #[tokio::test]
 async fn recent_workdirs_returns_requested_workdir_not_worktree_cwd() {
     let store = SqliteStore::open_in_memory().unwrap();
@@ -259,6 +335,7 @@ async fn recent_workdirs_returns_requested_workdir_not_worktree_cwd() {
             Some("/user-chosen"),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -396,6 +473,7 @@ async fn list_sessions_page_lists_message_less_spawning_sessions() {
             None,
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -451,7 +529,16 @@ async fn spawning_session_inserts_then_activates_on_register() {
     // The eager insert: status `spawning`, no transcript path yet, and the
     // main thread already created so a first send can target real ids.
     let (session, main) = store
-        .insert_spawning_session(&id, "/work", None, None, None, None, AgentProvider::Claude)
+        .insert_spawning_session(
+            &id,
+            "/work",
+            None,
+            None,
+            None,
+            None,
+            AgentProvider::Claude,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(session.status, SessionStatus::Spawning);
@@ -552,7 +639,16 @@ async fn mark_session_failed_flips_only_a_spawning_session() {
     // A spawning session fails.
     let id = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(&id, "/work", None, None, None, None, AgentProvider::Claude)
+        .insert_spawning_session(
+            &id,
+            "/work",
+            None,
+            None,
+            None,
+            None,
+            AgentProvider::Claude,
+            None,
+        )
         .await
         .unwrap();
     store.mark_session_failed(&id).await.unwrap();
@@ -584,6 +680,7 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("/repo-a"),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -597,6 +694,7 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("/repo-a"),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -610,6 +708,7 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("/repo-a-mirror"),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -623,6 +722,7 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("/scratch"),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();

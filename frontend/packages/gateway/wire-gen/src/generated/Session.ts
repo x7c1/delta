@@ -65,4 +65,13 @@ provider_session_id: string | null,
  * providers that map a session 1:1 onto a thread. `null` for Claude and
  * for rows that predate provider persistence.
  */
-provider_thread_id: string | null, };
+provider_thread_id: string | null, 
+/**
+ * Spawn-time snapshot of the GitHub pull request the session was opened
+ * from (the new-session screen's PR tab). `null` for a session started
+ * from the Repository/Directory tab, for an externally-started `claude`,
+ * and for rows that predate this field. The navigator renders it as
+ * `#<number>` on the session card, linking to
+ * `https://github.com/<repository_display_name>/pull/<number>`.
+ */
+pull_request_number: number | null, };

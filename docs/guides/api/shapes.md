@@ -24,7 +24,8 @@ name. Conventions (timestamps, id types, error bodies) are in
   "repository_display_name": "x7c1/delta",
   "provider": "claude",
   "provider_session_id": null,
-  "provider_thread_id": null
+  "provider_thread_id": null,
+  "pull_request_number": 138
 }
 ```
 
@@ -42,6 +43,12 @@ name. Conventions (timestamps, id types, error bodies) are in
 - `provider` is `claude` or `codex`. `provider_session_id` and
   `provider_thread_id` carry the provider's own ids when the provider (not
   Delta) mints them, and are `null` for a Claude session.
+- `pull_request_number` is another spawn-time snapshot: the GitHub pull request
+  the session was opened from (the new-session screen's PR tab), `null` for
+  every other origin. Only the number is carried; its web URL is
+  `https://github.com/<repository_display_name>/pull/<number>`, since Delta's PR
+  flow is `github.com`-only and a PR-picked session's display name is that
+  repository.
 
 ## `Thread`
 

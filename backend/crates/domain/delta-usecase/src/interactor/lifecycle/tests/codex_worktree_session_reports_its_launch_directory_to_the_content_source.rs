@@ -44,6 +44,7 @@ async fn codex_worktree_session_reports_its_launch_directory_to_the_content_sour
     let (send, _events) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),

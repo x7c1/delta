@@ -61,9 +61,18 @@ test('picking a PR with a local clone pre-fills the composer and a Send carries 
       // `use_remote_branch` mode) rather than branching off it.
       start_point: { kind: 'use_remote_branch', name: 'feat/repo-tab' },
     },
+    // The picked PR's number rides the same body: the backend snapshots it on
+    // the session row so the navigator card can name the PR the session is on.
+    pull_request_number: 174,
   });
 
   await expect(page.getByTestId('pending-item')).toHaveCount(1);
+
+  // The spawned session's card names the PR it was opened from, from the
+  // moment the (still `spawning`) row is listed.
+  await expect(
+    page.getByTestId('session-pull-request').filter({ hasText: '#174' }),
+  ).toHaveCount(1);
 });
 
 test('picking a PR with Codex selected sends provider "codex" alongside the worktree request', async ({
@@ -109,6 +118,7 @@ test('picking a PR with Codex selected sends provider "codex" alongside the work
     // The chosen provider rides the same send body as the worktree request —
     // this is the whole point of the fix.
     provider: 'codex',
+    pull_request_number: 174,
   });
 
   await expect(page.getByTestId('pending-item')).toHaveCount(1);

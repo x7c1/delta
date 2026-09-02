@@ -40,6 +40,7 @@ async fn a_refused_codex_launch_option_fails_the_send_itself() {
     let err = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: None,
                 launch_option_ids: vec![refused.id],

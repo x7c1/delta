@@ -28,6 +28,7 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
             None,
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();

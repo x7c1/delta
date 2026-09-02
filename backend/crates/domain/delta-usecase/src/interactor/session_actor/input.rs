@@ -58,6 +58,10 @@ pub(in crate::interactor) enum SessionInput {
         /// provider (e.g. [`AgentProvider::Codex`]) takes the terminal-less
         /// adapter path (`spawn_adapter_session`).
         provider: AgentProvider,
+        /// The GitHub pull request the session is being opened from, when the
+        /// composer's origin was the new-session screen's PR tab. Recorded on
+        /// the eager `spawning` row; `None` for every other origin.
+        pull_request_number: Option<i64>,
         reply: Reply<FreshSpawn>,
     },
     /// The background launch preparation of a freshly-accepted session reached

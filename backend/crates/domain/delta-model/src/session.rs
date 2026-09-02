@@ -104,4 +104,19 @@ pub struct Session {
     /// many-threads-per-session provider has a home for it. `None` for Claude
     /// and for rows that predate the column.
     pub provider_thread_id: Option<String>,
+    /// The GitHub pull request this session was opened from — the number the
+    /// user picked on the new-session screen's PR tab.
+    ///
+    /// A **spawn-time snapshot**, like [`Self::branch_at_launch`] and
+    /// [`Self::repository_display_name`]: written once when the session row is
+    /// first inserted and never updated on resume. `None` for a session started
+    /// from the Repository/Directory tab, for a session an external
+    /// (hook-registered) `claude` created — that path knows no Delta launch
+    /// context — and for any row that predates the column.
+    ///
+    /// Only the number is stored. Delta's PR flow is `github.com`-only, and a
+    /// PR-picked session's [`Self::repository_display_name`] names the very
+    /// repository the PR lives in, so the PR's web URL is rebuilt from the two
+    /// where it is rendered rather than persisted alongside.
+    pub pull_request_number: Option<i64>,
 }

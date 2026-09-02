@@ -415,6 +415,9 @@ describe('PRTab → new-session send (provider threading)', () => {
           start_point: { kind: 'use_remote_branch', name: 'feat/repo-tab' },
         },
         provider: 'codex',
+        // The picked PR's number rides the same body, so the spawned
+        // session's card can name the PR it was opened from.
+        pull_request_number: 174,
       });
     });
   });
@@ -443,6 +446,7 @@ describe('PRTab → new-session send (provider threading)', () => {
         worktree: {
           start_point: { kind: 'use_remote_branch', name: 'feat/repo-tab' },
         },
+        pull_request_number: 174,
       });
     });
   });

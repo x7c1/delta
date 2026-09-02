@@ -85,6 +85,16 @@ pub struct WireCreateSendRequest {
     #[serde(default)]
     #[ts(optional)]
     pub provider: Option<WireAgentProvider>,
+    /// The GitHub pull request a fresh session is being opened from — the
+    /// number the user picked on the new-session screen's PR tab. Only
+    /// meaningful with `new_session: true`; for a thread send the session's
+    /// origin is already fixed, so this is ignored exactly like `workdir`. When
+    /// omitted, the session records no PR origin. It is stored as a spawn-time
+    /// snapshot and rendered on the session card; a non-positive number is a
+    /// shape error (`400`), because no such pull request can exist.
+    #[serde(default)]
+    #[ts(optional)]
+    pub pull_request_number: Option<i64>,
 }
 
 /// Why a [`WireCreateSendRequest`] could not be resolved to a [`SendTarget`].
@@ -100,6 +110,9 @@ pub enum SendTargetError {
     /// `new_session: true` was combined with a branch (`semantic_parent_uuid`),
     /// which has no message to branch from yet.
     BranchOnNewSession,
+    /// `pull_request_number` was given as zero or a negative number. Pull
+    /// requests are numbered from 1, so nothing could ever resolve it.
+    NonPositivePullRequestNumber,
 }
 
 impl SendTargetError {
@@ -112,6 +125,9 @@ impl SendTargetError {
             SendTargetError::Conflicting => "`thread_id` and `new_session` are mutually exclusive",
             SendTargetError::BranchOnNewSession => {
                 "`new_session` cannot be combined with a branch (`semantic_parent_uuid`)"
+            }
+            SendTargetError::NonPositivePullRequestNumber => {
+                "`pull_request_number` must be a positive pull request number"
             }
         }
     }
@@ -131,6 +147,12 @@ impl WireCreateSendRequest {
                 if self.semantic_parent_uuid.is_some() {
                     return Err(SendTargetError::BranchOnNewSession);
                 }
+                // Pull requests are numbered from 1, so a zero or negative
+                // number is a malformed request rather than "no PR" — reject it
+                // instead of persisting a snapshot nothing can ever link to.
+                if self.pull_request_number.is_some_and(|number| number <= 0) {
+                    return Err(SendTargetError::NonPositivePullRequestNumber);
+                }
                 SendTarget::NewSession {
                     workdir: self.workdir,
                     launch_option_ids: self.launch_option_ids.unwrap_or_default(),
@@ -141,6 +163,7 @@ impl WireCreateSendRequest {
                         .provider
                         .map(Into::into)
                         .unwrap_or(AgentProvider::Claude),
+                    pull_request_number: self.pull_request_number,
                 }
             }
         };
@@ -166,6 +189,7 @@ mod tests {
             launch_option_ids: None,
             worktree: None,
             provider: None,
+            pull_request_number: None,
         };
         let (target, text, quote) = req.into_target().expect("a plain thread send is valid");
         assert!(
@@ -196,6 +220,7 @@ mod tests {
             launch_option_ids: None,
             worktree: None,
             provider: None,
+            pull_request_number: None,
         };
         let (target, _, _) = req.into_target().expect("a branch send is valid");
         match target {
@@ -229,6 +254,7 @@ mod tests {
             launch_option_ids: None,
             worktree: None,
             provider: None,
+            pull_request_number: None,
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(matches!(
@@ -255,6 +281,7 @@ mod tests {
             launch_option_ids: None,
             worktree: None,
             provider: None,
+            pull_request_number: None,
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(
@@ -278,6 +305,7 @@ mod tests {
             launch_option_ids: None,
             worktree: None,
             provider: None,
+            pull_request_number: None,
         };
         let (target, _, _) = req.into_target().expect("a plain thread send is valid");
         assert!(matches!(
@@ -303,6 +331,7 @@ mod tests {
             launch_option_ids: None,
             worktree: None,
             provider: None,
+            pull_request_number: None,
         };
         assert_eq!(req.into_target().unwrap_err(), SendTargetError::Unspecified);
     }
@@ -322,6 +351,7 @@ mod tests {
             launch_option_ids: None,
             worktree: None,
             provider: None,
+            pull_request_number: None,
         };
         assert_eq!(req.into_target().unwrap_err(), SendTargetError::Conflicting);
     }
@@ -341,6 +371,7 @@ mod tests {
             launch_option_ids: None,
             worktree: None,
             provider: None,
+            pull_request_number: None,
         };
         assert_eq!(
             req.into_target().unwrap_err(),
@@ -383,6 +414,7 @@ mod tests {
             launch_option_ids: Some(vec![3, 1, 2]),
             worktree: None,
             provider: None,
+            pull_request_number: None,
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(
@@ -455,6 +487,97 @@ mod tests {
         );
     }
 
+    /// A `new_session` send carrying a `pull_request_number` maps it onto the
+    /// `NewSession` target, where it is persisted as the session's spawn-time
+    /// PR origin.
+    #[test]
+    fn new_session_with_a_pull_request_number_carries_it() {
+        let req: WireCreateSendRequest = serde_json::from_str(
+            r#"{"new_session":true,"text":"resume PR work","pull_request_number":138}"#,
+        )
+        .unwrap();
+        let (target, _, _) = req.into_target().expect("a new-session send is valid");
+        assert!(
+            matches!(
+                target,
+                SendTarget::NewSession {
+                    pull_request_number: Some(138),
+                    ..
+                }
+            ),
+            "the picked PR number rides on the NewSession target"
+        );
+    }
+
+    /// A `new_session` send without the field records no PR origin: the target
+    /// carries `None`, which the store writes as NULL.
+    #[test]
+    fn new_session_without_a_pull_request_number_carries_none() {
+        let req: WireCreateSendRequest =
+            serde_json::from_str(r#"{"new_session":true,"text":"go"}"#).unwrap();
+        assert_eq!(req.pull_request_number, None);
+        let (target, _, _) = req.into_target().expect("a new-session send is valid");
+        assert!(matches!(
+            target,
+            SendTarget::NewSession {
+                pull_request_number: None,
+                ..
+            }
+        ));
+    }
+
+    /// A `pull_request_number` on a thread send is ignored: the session's origin
+    /// was fixed when it was spawned, so the request resolves to a plain
+    /// `Thread` target exactly as `workdir` does.
+    #[test]
+    fn pull_request_number_is_ignored_for_a_thread_send() {
+        let req = WireCreateSendRequest {
+            thread_id: Some(5),
+            new_session: false,
+            semantic_parent_uuid: None,
+            text: "hi".into(),
+            locator_quote: None,
+            workdir: None,
+            launch_option_ids: None,
+            worktree: None,
+            provider: None,
+            pull_request_number: Some(138),
+        };
+        let (target, _, _) = req.into_target().expect("a plain thread send is valid");
+        assert!(matches!(
+            target,
+            SendTarget::Thread {
+                thread_id: ThreadId(5),
+                branch_from: None,
+            }
+        ));
+    }
+
+    /// Pull requests are numbered from 1, so zero and negative numbers are shape
+    /// errors (the API maps them to 400) rather than a silently dropped origin.
+    #[test]
+    fn a_non_positive_pull_request_number_is_rejected() {
+        for number in [0, -1] {
+            let req = WireCreateSendRequest {
+                thread_id: None,
+                new_session: true,
+                semantic_parent_uuid: None,
+                text: "go".into(),
+                locator_quote: None,
+                workdir: None,
+                launch_option_ids: None,
+                worktree: None,
+                provider: None,
+                pull_request_number: Some(number),
+            };
+            assert_eq!(
+                req.into_target().unwrap_err(),
+                SendTargetError::NonPositivePullRequestNumber,
+                "pull request #{number} cannot exist"
+            );
+        }
+    }
+
     /// A `worktree` on a thread send is dropped: an existing thread's session is
     /// already running, so the request resolves to a plain `Thread` target.
     #[test]
@@ -471,6 +594,7 @@ mod tests {
                 start_point: super::super::worktree_spec::WireWorktreeStartPoint::Head,
             }),
             provider: None,
+            pull_request_number: None,
         };
         let (target, _, _) = req.into_target().expect("a plain thread send is valid");
         assert!(matches!(

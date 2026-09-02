@@ -109,6 +109,11 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// see [`Session::repository_display_name`] for the spawn-snapshot
     /// semantics.
     ///
+    /// `pull_request_number` is the GitHub pull request the session was opened
+    /// from (the new-session screen's PR tab), or `None` for every other origin.
+    /// Like the git snapshot above it is written once here and never updated on
+    /// resume: see [`Session::pull_request_number`].
+    ///
     /// `provider` is the AI-agent backend the session runs on, recorded in the
     /// `session.provider` column. Every Claude spawn passes
     /// [`AgentProvider::Claude`] (the historical default); a structured
@@ -128,6 +133,7 @@ pub trait SessionStore: std::marker::Send + Sync {
         requested_workdir: Option<&str>,
         repository_display_name: Option<&str>,
         provider: AgentProvider,
+        pull_request_number: Option<i64>,
     ) -> Result<(Session, ThreadId)>;
 
     /// Record the provider-minted conversation identifiers for a session: the
@@ -777,6 +783,7 @@ impl SessionStore for Box<dyn SessionStore> {
         requested_workdir: Option<&str>,
         repository_display_name: Option<&str>,
         provider: AgentProvider,
+        pull_request_number: Option<i64>,
     ) -> Result<(Session, ThreadId)> {
         (**self)
             .insert_spawning_session(
@@ -787,6 +794,7 @@ impl SessionStore for Box<dyn SessionStore> {
                 requested_workdir,
                 repository_display_name,
                 provider,
+                pull_request_number,
             )
             .await
     }

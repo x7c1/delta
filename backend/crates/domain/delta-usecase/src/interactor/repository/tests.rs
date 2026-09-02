@@ -62,6 +62,7 @@ async fn repositories_bundle_clones_with_the_same_origin() {
             Some(EXISTING_DIR),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -74,6 +75,7 @@ async fn repositories_bundle_clones_with_the_same_origin() {
             Some(EXISTING_DIR_2),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -86,6 +88,7 @@ async fn repositories_bundle_clones_with_the_same_origin() {
             Some(EXISTING_DIR_3),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -137,6 +140,7 @@ async fn clones_without_origin_stand_alone_by_path() {
             None,
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -149,6 +153,7 @@ async fn clones_without_origin_stand_alone_by_path() {
             None,
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -179,6 +184,7 @@ async fn lazy_gc_drops_clones_whose_paths_no_longer_exist() {
             Some(EXISTING_DIR),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -191,6 +197,7 @@ async fn lazy_gc_drops_clones_whose_paths_no_longer_exist() {
             Some(MISSING_DIR),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -222,6 +229,7 @@ async fn sessions_outside_a_git_repo_never_contribute() {
             Some(EXISTING_DIR),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -250,6 +258,7 @@ async fn deferred_per_clone_fields_are_empty_by_default() {
             Some(EXISTING_DIR),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -285,6 +294,7 @@ async fn recency_ordering_uses_max_across_a_repos_clones() {
             Some(EXISTING_DIR_2),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -297,6 +307,7 @@ async fn recency_ordering_uses_max_across_a_repos_clones() {
             Some(EXISTING_DIR_3),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -309,6 +320,7 @@ async fn recency_ordering_uses_max_across_a_repos_clones() {
             Some(EXISTING_DIR),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -395,6 +407,7 @@ async fn session_and_scan_clones_with_the_same_identity_key_union() {
             Some(EXISTING_DIR),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -442,6 +455,7 @@ async fn scan_clone_already_in_session_history_is_not_added_twice() {
             Some(&clone_path),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -525,6 +539,7 @@ async fn same_clone_path_with_different_repo_roots_dedups_keeping_newest() {
             Some(EXISTING_DIR),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -553,6 +568,7 @@ async fn same_clone_path_with_different_repo_roots_dedups_keeping_newest() {
             Some(EXISTING_DIR),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -648,6 +664,7 @@ async fn generated_paths_have_independent_cap_from_user_paths() {
                 Some(p),
                 None,
                 AgentProvider::Claude,
+                None,
             )
             .await
             .unwrap();
@@ -663,6 +680,7 @@ async fn generated_paths_have_independent_cap_from_user_paths() {
                 Some(p),
                 None,
                 AgentProvider::Claude,
+                None,
             )
             .await
             .unwrap();
@@ -729,6 +747,7 @@ async fn active_repo_limit_drops_oldest_repositories() {
                 Some(p),
                 None,
                 AgentProvider::Claude,
+                None,
             )
             .await
             .unwrap();

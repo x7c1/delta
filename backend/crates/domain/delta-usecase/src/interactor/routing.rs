@@ -135,6 +135,7 @@ where
                 launch_option_ids,
                 worktree,
                 provider,
+                pull_request_number,
             } => {
                 // `locator_quote` is intentionally dropped here, not forwarded
                 // to the spawn: a brand-new session has no earlier passage to
@@ -149,6 +150,7 @@ where
                         launch_option_ids,
                         worktree,
                         provider,
+                        pull_request_number,
                         reply,
                     })
                     .await?;
@@ -178,6 +180,9 @@ where
                 // ever created from a composer-initiated new session (which
                 // carries a first prompt and its own provider selection).
                 provider: delta_model::AgentProvider::Claude,
+                // A cold start has no PR origin: the PR tab lives on the
+                // composer-initiated new-session path alone.
+                pull_request_number: None,
                 reply,
             })
             .await?;

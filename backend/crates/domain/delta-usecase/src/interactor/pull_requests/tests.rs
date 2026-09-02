@@ -79,6 +79,7 @@ async fn has_local_clone_is_set_only_for_registered_repos() {
             Some(EXISTING_DIR),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();
@@ -170,8 +171,8 @@ async fn search_results_are_memoised_per_lens() {
 #[tokio::test]
 async fn scan_only_repos_satisfy_the_local_clone_check() {
     // The umbrella-session motivation: the user has never launched a session
-    // in `<atelier>/repos/x7c1/zatto`, but a clone root is registered at
-    // `<atelier>/repos/x7c1` and the child `.git` makes the clone discoverable.
+    // in `<clone-root>/x7c1/zatto`, but a clone root is registered at
+    // `<clone-root>/x7c1` and the child `.git` makes the clone discoverable.
     // The PR tab must report `has_local_clone: true` for that PR even though
     // no session row points at the sub-repo.
     let tmp = tempfile::tempdir().unwrap();
@@ -226,6 +227,7 @@ async fn path_keyed_repos_do_not_satisfy_the_local_clone_check() {
             Some(EXISTING_DIR_2),
             None,
             AgentProvider::Claude,
+            None,
         )
         .await
         .unwrap();

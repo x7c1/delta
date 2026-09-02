@@ -34,6 +34,7 @@ async fn new_session_with_launch_option_value_expands_leading_tilde() {
 
     ix.enqueue_send(
         SendTarget::NewSession {
+            pull_request_number: None,
             provider: crate::AgentProvider::Claude,
             workdir: None,
             launch_option_ids: vec![plugin_dir.id],

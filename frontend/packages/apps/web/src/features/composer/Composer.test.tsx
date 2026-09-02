@@ -874,6 +874,70 @@ describe('Composer', () => {
     });
   });
 
+  it('includes the PR number when the workdir was picked from a pull request', async () => {
+    // Only the PR tab sets a `pr` workdir source, so it is exactly the signal
+    // for "this session is being opened from a pull request". The backend
+    // snapshots the number and the navigator card renders it.
+    useComposerStore.setState({
+      newSessionWorkdir: '/home/dev/projects/delta',
+      newSessionWorkdirSource: {
+        kind: 'pr',
+        url: 'https://github.com/x7c1/delta/pull/138',
+        number: 138,
+        repo_owner: 'x7c1',
+        repo_name: 'delta',
+        head_ref: 'feat/thing',
+      },
+    });
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'resume PR work' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'resume PR work',
+        workdir: '/home/dev/projects/delta',
+        pull_request_number: 138,
+      });
+    });
+  });
+
+  it('omits the PR number after the workdir is re-picked as a directory', async () => {
+    // A directory pick resets the provenance, so a stale PR must not ride along
+    // on a send that no longer has anything to do with it.
+    useComposerStore.setState({
+      newSessionWorkdirSource: {
+        kind: 'pr',
+        url: 'https://github.com/x7c1/delta/pull/138',
+        number: 138,
+        repo_owner: 'x7c1',
+        repo_name: 'delta',
+        head_ref: 'feat/thing',
+      },
+    });
+    act(() => {
+      useComposerStore
+        .getState()
+        .setNewSessionWorkdir('/home/dev/projects/other');
+    });
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'plain start' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'plain start',
+        workdir: '/home/dev/projects/other',
+      });
+    });
+  });
+
   it('sends provider: "codex" on a new-session send when Codex is selected', async () => {
     useComposerStore.setState({
       newSessionWorkdir: '/home/dev/projects/delta',

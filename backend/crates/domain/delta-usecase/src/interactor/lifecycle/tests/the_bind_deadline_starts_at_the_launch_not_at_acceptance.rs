@@ -35,6 +35,7 @@ async fn the_bind_deadline_starts_at_the_launch_not_at_acceptance() {
     let (send, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),

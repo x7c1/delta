@@ -21,3 +21,4 @@ export {
   type ThreadNamed,
 } from './thread-name';
 export { displayBranch } from './display-branch';
+export { pullRequestUrl } from './pull-request-url';

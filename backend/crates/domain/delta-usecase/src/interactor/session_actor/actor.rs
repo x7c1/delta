@@ -157,6 +157,7 @@ where
             launch_option_ids,
             worktree,
             provider,
+            pull_request_number,
             reply,
         } => {
             // Provider dispatch lives in composition, never in the core's turn
@@ -170,8 +171,14 @@ where
             // here.
             let result = match provider {
                 delta_model::AgentProvider::Claude => {
-                    ctx.spawn_fresh(first_prompt, workdir, launch_option_ids, worktree)
-                        .await
+                    ctx.spawn_fresh(
+                        first_prompt,
+                        workdir,
+                        launch_option_ids,
+                        worktree,
+                        pull_request_number,
+                    )
+                    .await
                 }
                 provider => {
                     ctx.spawn_adapter_session(
@@ -180,6 +187,7 @@ where
                         workdir,
                         launch_option_ids,
                         worktree,
+                        pull_request_number,
                     )
                     .await
                 }

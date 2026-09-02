@@ -122,6 +122,7 @@ impl SessionStore for FakeStore {
             provider: AgentProvider::Claude,
             provider_session_id: None,
             provider_thread_id: None,
+            pull_request_number: None,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -147,6 +148,7 @@ impl SessionStore for FakeStore {
         requested_workdir: Option<&str>,
         repository_display_name: Option<&str>,
         provider: AgentProvider,
+        pull_request_number: Option<i64>,
     ) -> Result<(Session, ThreadId)> {
         let mut g = self.inner.lock().unwrap();
         assert!(
@@ -167,6 +169,7 @@ impl SessionStore for FakeStore {
             provider,
             provider_session_id: None,
             provider_thread_id: None,
+            pull_request_number,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;

@@ -103,6 +103,7 @@ async fn codex_session_in_flight(
     let (send, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: None,
                 launch_option_ids: Vec::new(),
@@ -296,6 +297,7 @@ async fn a_send_after_a_death_resumes_the_session_and_runs_a_fresh_turn() {
     let (first, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: None,
                 launch_option_ids: Vec::new(),

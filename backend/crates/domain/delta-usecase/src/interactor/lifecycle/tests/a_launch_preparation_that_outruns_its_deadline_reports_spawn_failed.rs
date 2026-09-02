@@ -37,6 +37,7 @@ async fn a_launch_preparation_that_outruns_its_deadline_reports_spawn_failed() {
     let (send, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),

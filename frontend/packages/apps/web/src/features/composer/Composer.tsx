@@ -123,6 +123,12 @@ export function Composer({ mode }: ComposerProps) {
   const newSessionProvider = useComposerStore(
     (state) => state.newSessionProvider,
   );
+  // Where the selected directory came from. Only the PR tab produces a `pr`
+  // source, and picking a directory resets it, so `kind === 'pr'` at Send time
+  // is exactly "this session is being opened from a pull request".
+  const newSessionWorkdirSource = useComposerStore(
+    (state) => state.newSessionWorkdirSource,
+  );
 
   const sendInFlight = useLiveStore((state) =>
     state.sending.some((item) => item.status === 'sending'),
@@ -179,6 +185,13 @@ export function Composer({ mode }: ComposerProps) {
           newSessionWorkdir &&
           newSessionWorktreeStartPoint.kind !== 'pending_remote_branch'
             ? { start_point: newSessionWorktreeStartPoint }
+            : null,
+        // The session's PR origin, recorded by the backend as a spawn-time
+        // snapshot and rendered on the navigator card. A later directory pick
+        // resets the provenance to `directory`, so it is `null` again.
+        pullRequestNumber:
+          newSessionWorkdirSource.kind === 'pr'
+            ? newSessionWorkdirSource.number
             : null,
       };
 
@@ -240,6 +253,7 @@ export function Composer({ mode }: ComposerProps) {
       newSessionWorktreeEnabled,
       newSessionWorktreeStartPoint,
       newSessionProvider,
+      newSessionWorkdirSource,
       clearDraft,
       submitSend,
       setBranchOrigin,

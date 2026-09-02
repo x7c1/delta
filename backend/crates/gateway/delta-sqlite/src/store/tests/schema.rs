@@ -265,10 +265,17 @@ async fn a_session_written_before_a_later_step_stays_a_claude_row() {
 /// then re-applies a step whose effect is still present and fails loudly (a
 /// duplicate column, a table that already exists).
 fn downgrade_sql(version: u32) -> String {
+    let mut sql = String::new();
+    // v7 added the session's PR-origin snapshot column.
+    if version < 7 {
+        sql.push_str("ALTER TABLE session DROP COLUMN pull_request_number;\n");
+    }
     // v6 renamed the send table's hold marker to `held_at`. The name it had
     // before lives with the step that retired it — spelling it anywhere else
     // is what the rename was for — so the undo comes from there.
-    let mut sql = format!("{UNDO_HELD_AT_RENAME}\n");
+    if version < 6 {
+        sql.push_str(&format!("{UNDO_HELD_AT_RENAME}\n"));
+    }
     // v5 added `launch_option.builtin_key` plus its unique index.
     if version < 5 {
         sql.push_str(
@@ -465,6 +472,67 @@ async fn a_v5_database_renames_the_hold_marker_and_keeps_a_held_row_held() {
         backup_files(dir.path()),
         ["v5.sqlite.bak-v5"],
         "a destructive step snapshots the database it is about to rewrite",
+    );
+}
+
+/// A database written at version 6 — the generation before the session's
+/// PR-origin column — is migrated forward on open: `pull_request_number`
+/// arrives, the file is re-stamped, and the session that was already there
+/// reads back with the column NULL. There is no backfill, so "this row predates
+/// the column" and "this session was not started from a PR" are deliberately
+/// the same value, and the navigator renders both as an empty slot.
+#[tokio::test]
+async fn a_v6_database_gains_pull_request_number_and_keeps_its_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v6.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    {
+        let store = SqliteStore::open(path_str).unwrap();
+        store.register_session(new_session()).await.unwrap();
+        let conn = store.conn.lock().await;
+        conn.execute_batch(&downgrade_sql(6)).unwrap();
+    }
+    assert_eq!(read_user_version(path_str), 6);
+
+    let store = SqliteStore::open(path_str).unwrap();
+    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
+
+    let session = store
+        .session(&SessionId::from("sess-1"))
+        .await
+        .unwrap()
+        .expect("the pre-existing session survives the migration");
+    assert_eq!(session.cwd, "/work", "and keeps everything it had");
+    assert_eq!(
+        session.pull_request_number, None,
+        "a row that predates the column reads NULL, never a fabricated number"
+    );
+
+    // The new column is usable: a spawn started from a PR records its number
+    // and reads it straight back through the normal path.
+    let (spawned, _main) = store
+        .insert_spawning_session(
+            &SessionId::from("sess-2"),
+            "/work",
+            None,
+            None,
+            None,
+            Some("x7c1/delta"),
+            AgentProvider::Claude,
+            Some(138),
+        )
+        .await
+        .unwrap();
+    assert_eq!(spawned.pull_request_number, Some(138));
+    assert_eq!(
+        store
+            .session(&SessionId::from("sess-2"))
+            .await
+            .unwrap()
+            .unwrap()
+            .pull_request_number,
+        Some(138),
     );
 }
 

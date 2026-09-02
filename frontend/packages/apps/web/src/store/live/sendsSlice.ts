@@ -29,6 +29,14 @@ export interface NewSessionLaunch {
   provider: AgentProvider;
   /** The opt-in worktree request, or `null` to launch in `workdir` itself. */
   worktree: WorktreeSpec | null;
+  /**
+   * The pull request the session is being opened from, when the workdir was
+   * picked on the new-session screen's PR tab; `null` for every other origin.
+   * The backend stores it as a spawn-time snapshot and the navigator card
+   * renders it, so it has to survive a failed launch's Retry like the rest of
+   * the configuration.
+   */
+  pullRequestNumber: number | null;
 }
 
 /**

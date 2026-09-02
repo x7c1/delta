@@ -40,6 +40,7 @@ impl SessionStore for SqliteStore {
         requested_workdir: Option<&str>,
         repository_display_name: Option<&str>,
         provider: AgentProvider,
+        pull_request_number: Option<i64>,
     ) -> std::result::Result<(Session, ThreadId), delta_usecase::Error> {
         self.insert_spawning_session(
             id,
@@ -49,6 +50,7 @@ impl SessionStore for SqliteStore {
             requested_workdir,
             repository_display_name,
             provider,
+            pull_request_number,
         )
         .await
     }

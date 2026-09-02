@@ -45,6 +45,7 @@ async fn send_during_a_codex_launch_is_queued() {
     let (first, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                pull_request_number: None,
                 provider: AgentProvider::Codex,
                 workdir: None,
                 launch_option_ids: Vec::new(),
