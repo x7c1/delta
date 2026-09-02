@@ -8,5 +8,10 @@ repository.workspace = true
 [dependencies]
 delta-usecase = { workspace = true }
 async-trait = { workspace = true }
+# For O_NOFOLLOW on the fixed-config open (see `write_conf`).
+libc = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

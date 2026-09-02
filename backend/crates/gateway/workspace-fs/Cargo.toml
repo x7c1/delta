@@ -8,6 +8,8 @@ repository.workspace = true
 [dependencies]
 delta-usecase = { workspace = true }
 async-trait = { workspace = true }
+# For O_NOFOLLOW on the settings-file open (see `write_private_file`).
+libc = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 

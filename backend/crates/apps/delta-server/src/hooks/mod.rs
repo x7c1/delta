@@ -71,8 +71,14 @@ pub async fn user_prompt_submit(
 
     match state.interactor().on_user_prompt_submit(hook).await {
         Ok((events, additional_context)) => {
+            // Log that context was injected, never the context itself: the
+            // string is a framed *verbatim conversation excerpt* (the locator
+            // quote / thread-switch frame), so printing it would spill
+            // conversation text into the server log. The length is enough to
+            // tell an empty frame from a real one while staying content-free.
             tracing::info!(
-                additional_context = additional_context.as_deref().unwrap_or("<none>"),
+                injected = additional_context.is_some(),
+                additional_context_len = additional_context.as_deref().map(str::len),
                 "UserPromptSubmit: additionalContext returned to Claude Code"
             );
             state.broadcast(events);
