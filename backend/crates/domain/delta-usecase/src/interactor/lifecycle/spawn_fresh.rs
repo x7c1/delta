@@ -10,7 +10,9 @@ use crate::interactor::session_actor::runtime::{
     LaunchTarget, LaunchingSpawn, PaneLaunch, PlannedWorktree,
 };
 use crate::pane_token::PaneToken;
-use crate::ports::{pane_for, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{
+    pane_for, GitWorktree, SessionStore, SpawningSession, TmuxDriver, Transcript, Workspace,
+};
 use crate::repository::{display_name, identity_key};
 use crate::send_target::WorktreeSpec;
 
@@ -332,20 +334,20 @@ where
         // Recent dirs.
         let (_session, main_thread_id) = self
             .store
-            .insert_spawning_session(
-                &session_id,
-                &workdir,
-                branch_at_launch.as_deref(),
-                launch_repo_root.as_deref(),
-                requested_workdir_recorded.as_deref(),
-                repository_display_name.as_deref(),
+            .insert_spawning_session(SpawningSession {
+                id: &session_id,
+                cwd: &workdir,
+                branch_at_launch: branch_at_launch.as_deref(),
+                repo_root: launch_repo_root.as_deref(),
+                requested_workdir: requested_workdir_recorded.as_deref(),
+                repository_display_name: repository_display_name.as_deref(),
                 // The fresh-spawn path drives Claude Code (tmux PTY + hooks).
-                AgentProvider::Claude,
+                provider: AgentProvider::Claude,
                 // The PR this session was opened from, when the composer's
                 // origin was the PR tab. A spawn-time snapshot like the git
                 // columns above: written here, never updated on resume.
                 pull_request_number,
-            )
+            })
             .await?;
         let first_send = match first_prompt.as_deref() {
             Some(text) => Some(

@@ -12,7 +12,7 @@ use crate::interactor::session_actor::runtime::{
     AdapterLaunch, LaunchTarget, LaunchingSpawn, PlannedWorktree,
 };
 use crate::pane_token::PaneToken;
-use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionStore, SpawningSession, TmuxDriver, Transcript, Workspace};
 use crate::repository::{display_name, identity_key};
 use crate::send_target::WorktreeSpec;
 
@@ -222,19 +222,19 @@ where
         // stay NULL, as before.
         let (_session, main_thread_id) = self
             .store
-            .insert_spawning_session(
-                &session_id,
-                &cwd,
-                branch_at_launch.as_deref(),
-                launch_repo_root.as_deref(),
-                requested_workdir.as_deref(),
-                repository_display_name.as_deref(),
+            .insert_spawning_session(SpawningSession {
+                id: &session_id,
+                cwd: &cwd,
+                branch_at_launch: branch_at_launch.as_deref(),
+                repo_root: launch_repo_root.as_deref(),
+                requested_workdir: requested_workdir.as_deref(),
+                repository_display_name: repository_display_name.as_deref(),
                 provider,
                 // The PR this session was opened from, when the composer's
                 // origin was the PR tab — the same spawn-time snapshot
                 // `spawn_fresh` records.
                 pull_request_number,
-            )
+            })
             .await?;
 
         // The first prompt is recorded `queued`, not `dispatched`: no provider

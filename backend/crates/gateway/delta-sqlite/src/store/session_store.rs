@@ -16,7 +16,7 @@ use delta_model::{
 };
 use delta_usecase::{
     CloneRoot, NewSession, RecentWorkdir, RepositoryCloneRow, SessionPageCursor, SessionPageRow,
-    SessionStore,
+    SessionStore, SpawningSession,
 };
 
 use super::SqliteStore;
@@ -30,29 +30,11 @@ impl SessionStore for SqliteStore {
         self.register_session(new).await
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn insert_spawning_session(
         &self,
-        id: &SessionId,
-        cwd: &str,
-        branch_at_launch: Option<&str>,
-        repo_root: Option<&str>,
-        requested_workdir: Option<&str>,
-        repository_display_name: Option<&str>,
-        provider: AgentProvider,
-        pull_request_number: Option<i64>,
+        spawning: SpawningSession<'_>,
     ) -> std::result::Result<(Session, ThreadId), delta_usecase::Error> {
-        self.insert_spawning_session(
-            id,
-            cwd,
-            branch_at_launch,
-            repo_root,
-            requested_workdir,
-            repository_display_name,
-            provider,
-            pull_request_number,
-        )
-        .await
+        self.insert_spawning_session(spawning).await
     }
 
     async fn set_provider_ids(
