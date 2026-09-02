@@ -180,7 +180,16 @@ pub(crate) fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (R
             .to_string_lossy()
             .into_owned(),
         "{}",
-        "/tmp/delta-codex-full-loop-settings.json",
+        // Per-process, not a fixed shared path: the settings file is now written
+        // 0600, so a leftover owned by another user on a shared host would make
+        // every later run of this suite fail to open it.
+        std::env::temp_dir()
+            .join(format!(
+                "delta-codex-full-loop-settings-{}.json",
+                std::process::id()
+            ))
+            .to_string_lossy()
+            .into_owned(),
     )
     .with_adapter_factory(factory)
     // The launch-option registry's safety rules are part of the surface this

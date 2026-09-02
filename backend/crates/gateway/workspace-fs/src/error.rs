@@ -17,6 +17,12 @@ pub enum Error {
     /// A directory could not be read because the process lacks permission.
     #[error("permission denied: {0}")]
     Permission(String),
+
+    /// A Delta-owned path the settings file is written through is not safe to
+    /// use (e.g. its parent directory exists as a symlink, so writing would
+    /// land somewhere another local user chose).
+    #[error("unsafe settings path: {0}")]
+    UnsafePath(String),
 }
 
 /// Convenience result alias for this crate.
@@ -25,8 +31,11 @@ pub type Result<T> = std::result::Result<T, Error>;
 impl From<Error> for delta_usecase::Error {
     fn from(value: Error) -> Self {
         match value {
-            // I/O during settings writes is still an internal workspace failure.
-            Error::Io(_) => delta_usecase::Error::Workspace(value.to_string()),
+            // I/O during settings writes is still an internal workspace
+            // failure, as is a refusal to write through an unsafe path.
+            Error::Io(_) | Error::UnsafePath(_) => {
+                delta_usecase::Error::Workspace(value.to_string())
+            }
             Error::InvalidWorkdir(msg) => delta_usecase::Error::InvalidWorkdir(msg),
             Error::Permission(msg) => delta_usecase::Error::WorkdirPermission(msg),
         }

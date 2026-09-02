@@ -8,8 +8,10 @@ boundary: any process or web page on the same host can still reach the port.
 Delta therefore treats **reaching the loopback port as the trust boundary**
 ("unauthenticated-by-port") and layers explicit guards on top of it. This
 document states what each guard covers, the one deliberate trade-off in how
-Delta pre-accepts Claude Code's workspace-trust dialog, and how Delta handles the
-launch options that switch an agent's own safety mechanisms off.
+Delta pre-accepts Claude Code's workspace-trust dialog, how the files Delta
+writes into the system temp directory are protected, what its logs deliberately
+leave out, and how Delta handles the launch options that switch an agent's own
+safety mechanisms off.
 
 This is a living document: it describes the guards in place today, and later
 hardening work will extend it.
@@ -67,6 +69,62 @@ The gate is a strict "is this path under Delta's worktree base?" check:
 directories are canonicalized (so a `/tmp` vs `/private/tmp` symlink or a `..`
 cannot disguise a path) and compared by path components (so a sibling like
 `<base>-evil` is not mistaken for a child of `<base>`).
+
+## Temp-file hardening
+
+Delta writes two files into the system temp directory, both at paths an outsider
+can predict:
+
+- **The session settings file** — `<temp>/delta-<port>/settings.json`, the
+  settings Claude Code is launched with. It embeds the per-run hook secret in
+  every hook URL, and its `statusLine` / `SessionStart` entries are commands
+  Claude Code executes. So it is a secret-read surface *and* a command-injection
+  surface.
+- **The tmux config** — `<temp>/delta-tmux-<socket>.conf`, handed to tmux with
+  `-f`. It holds no secret, but tmux executes every directive in it, so it is a
+  directive-injection surface.
+
+The realistic exposure is a **multi-user Linux host**: `/tmp` is world-writable,
+so another local user can pre-create either path, or plant a symlink standing in
+for it, and either read what Delta writes or choose where the write lands. On
+macOS the platform already covers this — `$TMPDIR` is per-user and mode 0700 —
+which is why the fix stays cheap rather than relocating the files.
+
+Delta therefore creates the settings directory with mode **0700** and both files
+with mode **0600**, and opens each file with `O_NOFOLLOW` so a symlink makes the
+`open(2)` fail instead of redirecting the write. A settings directory that
+already exists *as a symlink* is refused outright, since hardening only the file
+would leave the directory as the swap target. An existing real directory is left
+as it is: the ancestors may be system-owned (`/tmp` itself) and are not Delta's
+to tighten. The permission bits are re-applied on every write, because the
+creation mode does not touch a file left behind by an earlier Delta run.
+
+That leaves one case open by construction: a `delta-<port>` directory another
+local user pre-created — a real directory, not a symlink — is used as it stands.
+What Delta writes there is still unreadable to them (0600), but the directory is
+theirs to unlink from, so a file swapped in between Delta's write and Claude
+Code's read would be the settings Claude Code launches with. Closing that would
+mean refusing a settings directory Delta does not own, which Delta does not do
+today.
+
+Both files are still rewritten on every run — the settings file must be, so that
+the hook URLs carry the current run's secret.
+
+## Log hygiene
+
+Server logs are a control-plane record, not a transcript: **a log line reports a
+decision and its shape, never the content it acted on**. The `UserPromptSubmit`
+hook response used to break that rule — it logged the `additionalContext` string
+it returns to Claude Code, a verbatim excerpt of the conversation. It now logs
+only whether context was injected and how long it was.
+
+Two diagnostics in `delta-usecase` still print prompt text deliberately, and they
+are the known exceptions: the prompt/send mismatch line in
+`on_user_prompt_submit` (`expected` / `got`) and the transcript-echo mismatch
+warning in `sync_transcript` (`sent` / `recorded`). Both fire only when Claude
+Code rewrote a text Delta itself dispatched, where naming both spellings *is* the
+diagnostic. New logging around hook, prompt, or transcript handling follows the
+rule rather than those exceptions.
 
 ## Safety-bypassing launch options
 
