@@ -10,7 +10,7 @@ check_command: 'make check && grep -q "thinking-block" frontend/packages/apps/we
 assignee: null
 branch: task/0902-1450-feat-show-thinking-blocks-expanded
 created_at: 2026-09-02T14:50:22Z
-updated_at: 2026-09-02T15:24:53Z
+updated_at: 2026-09-02T15:29:00Z
 ---
 
 # feat(transcript): always show thinking blocks instead of collapsing them
@@ -130,12 +130,12 @@ identically whatever state the session is in.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] On a real Delta run, a Claude Code session whose transcript carries a
+- [x] On a real Delta run, a Claude Code session whose transcript carries a
       thinking block with text shows the reasoning open in the conversation
       pane without any click, under the `thinking` caption, with the same
       frame and indent as before; a Codex session's reasoning message shows
       the same way.
-- [ ] In the same sessions, tool cards still start collapsed, and a reply
+- [x] In the same sessions, tool cards still start collapsed, and a reply
       that carries both text and thinking still sits inside its prose
       bubble as before.
 
