@@ -10,7 +10,7 @@ check_command: 'make check && ! grep -q "session-last-activity" frontend/package
 assignee: null
 branch: task/0902-0948-feat-show-origin-pull-request-on-session-card
 created_at: 2026-09-02T09:48:21Z
-updated_at: 2026-09-02T11:08:04Z
+updated_at: 2026-09-02T11:19:35Z
 ---
 
 # feat(navigator): show the originating pull request on the session card instead of last activity
@@ -221,12 +221,12 @@ untouched.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] On a real Delta run, start a session from the PR tab and confirm the
+- [x] On a real Delta run, start a session from the PR tab and confirm the
       card shows `#<number>` from the moment it appears (still `Starting`),
       that clicking it opens the PR in a new browser tab without changing
       the focused session, and that a session started from the Directory
       tab shows nothing in that slot.
-- [ ] Pre-existing sessions (rows written before this change) render with
+- [x] Pre-existing sessions (rows written before this change) render with
       an empty right-hand slot and the list still orders by recency.
 
 ## Out of scope
