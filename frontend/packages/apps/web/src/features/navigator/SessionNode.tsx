@@ -318,11 +318,15 @@ export const SessionNode = memo(function SessionNode({
             which is a sibling of the button. A plain flex row cannot do this:
             a sibling there occupies its column for the full row height, so
             line 1 was being truncated by the PR link's width even though the
-            link only sits under line 2. Column 2 is `auto` and collapses to
+            link only sits under line 2. The button's area therefore overlaps
+            the link's cell (column 2, row 2) on purpose, which is only allowed
+            for EXPLICITLY placed items: auto-placement refuses to overlap and
+            would push the button down to a fresh row below the link, so every
+            item here names its start line. Column 2 is `auto` and collapses to
             nothing when there is no PR; the inter-column spacing lives on the
             link and the menu as margins (a grid gap would still open beside an
             empty column). */}
-        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-y-0.5 px-2 py-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] grid-rows-[auto_auto] gap-y-0.5 px-2 py-2">
           <button
             type="button"
             // Focus this session and return to its main thread. The main thread
@@ -332,7 +336,7 @@ export const SessionNode = memo(function SessionNode({
             // which also covers re-clicking the already-focused session while
             // viewing one of its sub-threads.
             onClick={() => selectThread(item.main_thread_id)}
-            className="col-span-2 row-span-2 grid min-w-0 grid-cols-subgrid grid-rows-subgrid text-left text-secondary"
+            className="col-start-1 col-span-2 row-start-1 row-span-2 grid min-w-0 grid-cols-subgrid grid-rows-subgrid text-left text-secondary"
             aria-current={isFocused ? 'true' : undefined}
             data-testid="session-node"
           >
@@ -462,7 +466,7 @@ export const SessionNode = memo(function SessionNode({
               name carries the provider, and the two hues stay distinguishable
               from the resting text tone. */}
           <Menu
-            className="col-start-3 row-span-2 ml-2 self-center"
+            className="col-start-3 row-start-1 row-span-2 ml-2 self-center"
             label={`Session actions for ${label} (${PROVIDER_METADATA[item.session.provider].label} session)`}
             triggerClassName={PROVIDER_TRIGGER_TINT[item.session.provider]}
             onOpenChange={setMenuOpen}
