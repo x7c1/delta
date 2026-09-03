@@ -126,8 +126,8 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// flip an already-active session.
     async fn mark_session_failed(&self, id: &SessionId) -> Result<()>;
 
-    /// One page of sessions, ordered most-recently-active first, resuming
-    /// strictly after `cursor` (or from the top when `None`).
+    /// One page of sessions in the store's recency stream, resuming strictly
+    /// after `cursor` (or from the top when `None`).
     ///
     /// The ordering is `recency` DESC, then `created_at` DESC, then `id` DESC,
     /// where `recency = COALESCE(session.last_activity_at, session.created_at)`
@@ -136,11 +136,34 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// Each row carries its raw `last_activity_at` (`None` when message-less) so
     /// the usecase needs no per-row activity lookup. At most `limit` rows are
     /// returned; a full page (`len == limit`) signals more may follow.
+    ///
+    /// This is pure recency: liveness is process-runtime state, not a column,
+    /// so the store cannot sort on it. The API's open-first ordering is layered
+    /// on top by [`Interactor::list_sessions_page`], which pulls the live
+    /// sessions' rows through [`Self::list_sessions_by_ids`] and filters them
+    /// out of this stream.
+    ///
+    /// [`Interactor::list_sessions_page`]: crate::Interactor::list_sessions_page
     async fn list_sessions_page(
         &self,
         cursor: Option<SessionPageCursor>,
         limit: u32,
     ) -> Result<Vec<SessionPageRow>>;
+
+    /// The rows of specific sessions, in the session list's recency order.
+    ///
+    /// Same shape and ordering key as [`Self::list_sessions_page`] (`recency`
+    /// DESC, `created_at` DESC, `id` DESC, where
+    /// `recency = COALESCE(last_activity_at, created_at)`), but selected by id
+    /// rather than paged: it backs the open-first head of the session list,
+    /// where the set of live sessions is known to the usecase and bounded by the
+    /// number of live panes.
+    ///
+    /// An id with no row is silently skipped (an accepted spawn whose row was
+    /// reaped between the liveness snapshot and this query), so the result may
+    /// be shorter than `ids`. An empty `ids` returns an empty `Vec` without
+    /// touching the database.
+    async fn list_sessions_by_ids(&self, ids: &[SessionId]) -> Result<Vec<SessionPageRow>>;
 
     /// Look up a session by id, if it exists.
     async fn session(&self, id: &SessionId) -> Result<Option<Session>>;
@@ -762,6 +785,10 @@ impl SessionStore for Box<dyn SessionStore> {
         limit: u32,
     ) -> Result<Vec<SessionPageRow>> {
         (**self).list_sessions_page(cursor, limit).await
+    }
+
+    async fn list_sessions_by_ids(&self, ids: &[SessionId]) -> Result<Vec<SessionPageRow>> {
+        (**self).list_sessions_by_ids(ids).await
     }
 
     async fn session(&self, id: &SessionId) -> Result<Option<Session>> {

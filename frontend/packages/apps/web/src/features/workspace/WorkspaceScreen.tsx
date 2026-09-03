@@ -92,9 +92,10 @@ const PANE_TOGGLE_BUTTON_CLASS =
 
 /**
  * Pick the session to focus on cold load from the session list: prefer the
- * most-recently-active open session, else the most-recently-active session,
- * else the new-session sentinel when the list is empty. The list is ordered by
- * most recent activity first, so "most recent" is the first element.
+ * most-recently-active open session, else the first-listed session, else the
+ * new-session sentinel when the list is empty. The list is open-first and
+ * most-recently-active within each group, so "most recent" is the first element
+ * of whichever pool is picked.
  */
 function pickInitialFocus(sessions: SessionListItem[]): FocusedSession {
   if (sessions.length === 0) {
@@ -124,8 +125,18 @@ export function WorkspaceScreen() {
 
   const sessionsQuery = useSessionsQuery(client);
   // The session list is cursor-paginated; flatten the loaded pages back into one
-  // ordered list. Pages arrive most-recently-active first, so concatenation
-  // preserves the global order.
+  // ordered list. The server decides the order — open-first, then closed, each
+  // group most-recently-active first, with the whole live group on page one —
+  // and pages arrive in that order, so plain concatenation preserves it. No
+  // client-side sorting: `session_opened` / `session_closed` invalidate the list
+  // and the server re-groups it.
+  //
+  // Because liveness is snapshotted per request, a session that flips state
+  // partway through the page walk can land in the flattened list twice (it
+  // closed after leading page 1) or not at all (it opened after page 1 went
+  // out). Neither is corrected here: the very events that cause it are the ones
+  // that invalidate the list, so the walk restarts and the flattened list is
+  // consistent again within a refetch.
   const sessions = useMemo(
     () => sessionsQuery.data?.pages.flatMap((page) => page.sessions) ?? [],
     [sessionsQuery.data],

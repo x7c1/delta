@@ -8,7 +8,9 @@ use delta_model::{Session, ThreadId};
 /// conversation Delta knows — whether or not it currently has a live pane — and
 /// route into each one. Open/closed is process-runtime state from the registry,
 /// not a persisted column, so it is computed per call rather than read off
-/// `session`.
+/// `session`. That same runtime state drives the list's open-first ordering:
+/// every live session leads — including a spawn in flight, which still reports
+/// `open: false` — then the closed ones, each group most-recently-active first.
 #[derive(Debug, Clone)]
 pub struct SessionListing {
     /// The persisted session record.
@@ -21,6 +23,7 @@ pub struct SessionListing {
     /// The timestamp of the session's most recent message (ISO-8601 UTC), or
     /// `None` when the session has no messages yet. Read from the denormalized
     /// `session.last_activity_at` column (maintained on every message upsert),
-    /// so the session list orders by it without recomputing recency per row.
+    /// so the session list orders within each open/closed group by it without
+    /// recomputing recency per row.
     pub last_activity_at: Option<String>,
 }

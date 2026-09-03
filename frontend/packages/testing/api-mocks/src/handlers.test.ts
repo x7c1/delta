@@ -13,6 +13,7 @@ import type {
 import { createHandlers, createMockApi } from './handlers';
 import {
   mockSpawnSessionId,
+  FILLER_SESSION_COUNT,
   MOCK_GIT_REPO_ROOT,
   SESSIONS_PAGE_SIZE,
   SESSION_ID,
@@ -26,8 +27,16 @@ import {
  * The `GET /api/sessions` mock is cursor-paginated so the infinite-scroll path
  * (a non-null `next_cursor`, then a terminal `null`) is exercised without a
  * backend. These tests drive the handler directly and walk the cursor chain to
- * verify every seeded session is reachable exactly once, in order, across pages.
+ * verify every seeded session is reachable exactly once, in order, across pages,
+ * under the server's open-first ordering.
  */
+
+/**
+ * Live sessions in the seed data: `sess-mock-1` alone is open, and nothing is
+ * mid-spawn. The list is open-first and `limit` bounds only its *closed*
+ * portion, so the first page holds this many entries plus the limit.
+ */
+const SEEDED_LIVE_SESSIONS = 1;
 
 /** Resolve the `GET /api/sessions` handler for a given query string. */
 async function getSessionsPage(
@@ -55,7 +64,8 @@ describe('GET /api/sessions mock pagination', () => {
 
     const first = await getSessionsPage(handlers);
 
-    expect(first.sessions).toHaveLength(SESSIONS_PAGE_SIZE);
+    // Every live session plus a full closed page.
+    expect(first.sessions).toHaveLength(SEEDED_LIVE_SESSIONS + SESSIONS_PAGE_SIZE);
     expect(first.next_cursor).not.toBeNull();
   });
 
@@ -70,7 +80,10 @@ describe('GET /api/sessions mock pagination', () => {
         cursor === null ? '' : `?cursor=${encodeURIComponent(cursor)}`;
       const page: SessionsResponse = await getSessionsPage(handlers, query);
       expect(page.sessions.length).toBeGreaterThan(0);
-      expect(page.sessions.length).toBeLessThanOrEqual(SESSIONS_PAGE_SIZE);
+      // The first page also carries the live group; later pages are closed-only.
+      const cap =
+        pages === 0 ? SEEDED_LIVE_SESSIONS + SESSIONS_PAGE_SIZE : SESSIONS_PAGE_SIZE;
+      expect(page.sessions.length).toBeLessThanOrEqual(cap);
       for (const item of page.sessions) {
         seen.push(item.session.id);
       }
@@ -82,10 +95,32 @@ describe('GET /api/sessions mock pagination', () => {
     expect(pages).toBeGreaterThan(1);
     // Every session appears exactly once across the walk (no dupes, no gaps).
     expect(new Set(seen).size).toBe(seen.length);
-    // The two detailed sessions are the most recently active, so they lead the
-    // list (sess-mock-2 has the newest message, then sess-mock-1) ahead of the
-    // older filler sessions.
-    expect(seen.slice(0, 2)).toEqual(['sess-mock-2', 'sess-mock-1']);
+    // Open-first: sess-mock-1 is the only live session, so it leads even though
+    // sess-mock-2 (closed) has the newer message; sess-mock-2 then heads the
+    // closed group, ahead of the older filler sessions.
+    expect(seen.slice(0, 2)).toEqual(['sess-mock-1', 'sess-mock-2']);
+  });
+
+  it('leads the first page with a live session older than every closed one', async () => {
+    const api = createMockApi();
+    const handlers = api.handlers as HttpHandler[];
+    // The oldest filler session: no closed session sorts below it on recency,
+    // so recency alone would put it on the very last page.
+    const oldest = `sess-mock-fill-${FILLER_SESSION_COUNT}`;
+    api.applyEvent({ kind: 'session_opened', session_id: oldest });
+    // Close the one seeded open session so `oldest` is the only live one.
+    api.applyEvent({ kind: 'session_closed', session_id: SESSION_ID });
+
+    const page = await getSessionsPage(handlers);
+
+    expect(page.sessions[0]?.session.id).toBe(oldest);
+    expect(page.sessions).toHaveLength(SEEDED_LIVE_SESSIONS + SESSIONS_PAGE_SIZE);
+    // The rest of the page is the closed group by recency, led by the two
+    // detailed sessions.
+    expect(page.sessions.slice(1).map((s) => s.session.id)).toEqual([
+      SESSION_ID_2,
+      SESSION_ID,
+    ]);
   });
 
   it('honors an explicit limit', async () => {
@@ -93,7 +128,8 @@ describe('GET /api/sessions mock pagination', () => {
 
     const page = await getSessionsPage(handlers, '?limit=1');
 
-    expect(page.sessions).toHaveLength(1);
+    // `limit` caps the closed portion; the live group rides on top of it.
+    expect(page.sessions).toHaveLength(SEEDED_LIVE_SESSIONS + 1);
     expect(page.next_cursor).not.toBeNull();
   });
 });

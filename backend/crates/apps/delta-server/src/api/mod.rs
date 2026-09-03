@@ -64,15 +64,18 @@ pub(crate) struct ListSessionsQuery {
     limit: Option<u32>,
 }
 
-/// `GET /api/sessions` — one page of known sessions, most-recently-active first.
+/// `GET /api/sessions` — one page of known sessions, open-first.
 ///
-/// Returns a single page (most-recently-active first), each session tagged with
-/// whether it currently has a live pane (`open`) and its `main` thread id, so
-/// the navigator can show and route into every conversation — open or closed.
-/// The page size is `limit` (default [`DEFAULT_PAGE_LIMIT`], capped at
-/// [`MAX_PAGE_LIMIT`]). When more rows may follow, `next_cursor` carries an
-/// opaque token the caller echoes back as `cursor` to fetch the next page; a
-/// malformed `cursor` is a `400`.
+/// Returns a single page, each session tagged with whether it currently has a
+/// live pane (`open`) and its `main` thread id, so the navigator can show and
+/// route into every conversation — open or closed. Live sessions — open, or a
+/// spawn still in flight — lead the list and closed sessions follow,
+/// most-recently-active first within each group. The first page
+/// carries every live session plus up to `limit` closed ones; later pages
+/// carry closed sessions only, `limit` per page (default
+/// [`DEFAULT_PAGE_LIMIT`], capped at [`MAX_PAGE_LIMIT`]). When more rows may
+/// follow, `next_cursor` carries an opaque token the caller echoes back as
+/// `cursor` to fetch the next page; a malformed `cursor` is a `400`.
 pub(crate) async fn list_sessions(
     State(state): State<AppState>,
     Query(query): Query<ListSessionsQuery>,

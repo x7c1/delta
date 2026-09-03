@@ -203,13 +203,8 @@ where
     /// first session's worktree is being checked out reuses it instead of
     /// starting a rival session (`SessionRuntime::has_live_pane`).
     pub async fn ensure_session(&self) -> Result<SessionLifecycle> {
-        for id in self.sessions.ids() {
-            if self
-                .query(&id, |reply| SessionInput::QueryIsLive { reply }, false)
-                .await
-            {
-                return Ok(SessionLifecycle::Ready);
-            }
+        if !self.live_session_ids().await.is_empty() {
+            return Ok(SessionLifecycle::Ready);
         }
         self.new_session().await?;
         Ok(SessionLifecycle::Starting)
@@ -295,6 +290,32 @@ where
     pub async fn is_session_open(&self, id: &SessionId) -> bool {
         self.query(id, |reply| SessionInput::QueryIsOpen { reply }, false)
             .await
+    }
+
+    /// The ids of every session whose actor reports a live pane, in registry
+    /// order.
+    ///
+    /// "Live" is wider than open: it also covers a spawn still in flight — one
+    /// whose pane is up awaiting its first bind, and one that has only been
+    /// accepted with its launch preparation still running
+    /// (`SessionRuntime::has_live_pane`). A session with no actor is not live by
+    /// definition, so the result is bounded by the number of live panes rather
+    /// than by the size of the store.
+    ///
+    /// Two callers depend on that definition: the cold start (which reuses a
+    /// live session instead of spawning a rival one) and the session list
+    /// (whose open-first ordering leads with exactly this set).
+    pub(crate) async fn live_session_ids(&self) -> Vec<SessionId> {
+        let mut live = Vec::new();
+        for id in self.sessions.ids() {
+            if self
+                .query(&id, |reply| SessionInput::QueryIsLive { reply }, false)
+                .await
+            {
+                live.push(id);
+            }
+        }
+        live
     }
 
     /// The queryable live state of a session: its turn phase plus the

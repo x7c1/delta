@@ -245,13 +245,22 @@ export function createMockApi(): MockApi {
         main_thread_id: entry.mainThreadId,
         last_activity_at: lastActivityAt(entry.threads.map((t) => t.id)),
       }));
-      // Most-recently-active first, mirroring the backend: key on last activity,
+      // Open-first, mirroring the backend: every live session leads, then the
+      // closed ones. "Live" is wider than `open` — a still-`spawning` row counts
+      // (the backend reads it off the in-flight spawn), so a just-started
+      // session leads the list before anything binds to it.
+      const live = (item: (typeof items)[number]) =>
+        item.open || item.session.status === 'spawning';
+      // Within each group, most-recently-active first: key on last activity,
       // falling back to the session's own created_at when it has no messages,
       // with a deterministic created_at-then-id tiebreaker. ISO-8601 UTC strings
       // compare lexicographically, so a string compare is a time compare.
       const recency = (item: (typeof items)[number]) =>
         item.last_activity_at ?? item.session.created_at;
       items.sort((a, b) => {
+        if (live(a) !== live(b)) {
+          return live(a) ? -1 : 1;
+        }
         if (recency(a) !== recency(b)) {
           return recency(a) < recency(b) ? 1 : -1;
         }
@@ -260,6 +269,7 @@ export function createMockApi(): MockApi {
         }
         return a.session.id < b.session.id ? -1 : a.session.id > b.session.id ? 1 : 0;
       });
+      const liveCount = items.filter(live).length;
 
       // Cursor pagination over the fully-ordered list. The cursor is opaque to
       // the client; here it encodes the offset of the next page's first item.
@@ -282,7 +292,11 @@ export function createMockApi(): MockApi {
       const offset =
         Number.isInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
 
-      const page = items.slice(offset, offset + limit);
+      // `limit` bounds the *closed* portion of a page, as on the real server:
+      // the first page additionally carries the whole live group (which sits at
+      // the head of `items`), later pages carry `limit` closed rows each.
+      const pageSize = offset === 0 ? liveCount + limit : limit;
+      const page = items.slice(offset, offset + pageSize);
       const nextOffset = offset + page.length;
       const next_cursor = nextOffset < items.length ? String(nextOffset) : null;
 

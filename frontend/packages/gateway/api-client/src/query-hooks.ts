@@ -56,7 +56,11 @@ const SESSIONS_PAGE_SIZE = 30;
  * no cursor (`pageParam: null`), and each subsequent page echoes back the prior
  * page's `next_cursor`. `getNextPageParam` returns `undefined` at end-of-list
  * (`next_cursor: null`), which is how `hasNextPage` becomes `false`. Consumers
- * flatten `data.pages[].sessions` to recover the full ordered list.
+ * flatten `data.pages[].sessions` to recover the full ordered list — the server
+ * orders it open-first, so page 1 leads with every live session and the pages
+ * concatenate straight into the display order. The `session_opened` /
+ * `session_closed` invalidations above are what move a session between the two
+ * groups.
  */
 export function useSessionsQuery(
   client: ApiClient,

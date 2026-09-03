@@ -46,7 +46,11 @@ const ESTIMATED_SESSION_NODE_HEIGHT = 64;
 const SESSION_OVERSCAN = 8;
 
 export interface NavigatorPaneProps {
-  /** The loaded sessions so far, ordered most-recently-active first. */
+  /**
+   * The loaded sessions so far, in the server's open-first order: every live
+   * session, then the closed ones, each group most-recently-active first.
+   * Rendered as received — the pane never re-sorts.
+   */
   sessions: SessionListItem[];
   /** Whether more session pages remain to be fetched. */
   hasMoreSessions: boolean;
@@ -334,12 +338,14 @@ export function NavigatorPane({
   // ref (see below); `estimateSize` is only the spacer seed before measurement.
   //
   // `getItemKey` keys the measurement cache by session id, not by index. The
-  // list is recency-ordered, so sending a message bumps that session to the top
-  // and reindexes the rest. With the default index key, each row would inherit
-  // the cached height of whichever session previously sat at its index — a tall
-  // threaded card's height landing on a short collapsed one, leaving gaps (and
-  // vice versa, overlaps). Keying by id makes a measured height travel with its
-  // session across reorders, so the spacers stay correct.
+  // list is open-first and recency-ordered within each group, so sending a
+  // message bumps that session to the top of its group, and opening or closing
+  // one carries it across the groups — either way the rows below reindex. With
+  // the default index key, each row would inherit the cached height of whichever
+  // session previously sat at its index — a tall threaded card's height landing
+  // on a short collapsed one, leaving gaps (and vice versa, overlaps). Keying by
+  // id makes a measured height travel with its session across reorders, so the
+  // spacers stay correct.
   const virtualizer = useVirtualizer({
     count: sessions.length,
     getScrollElement: () => scrollBodyRef.current,
