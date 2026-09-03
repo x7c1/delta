@@ -177,7 +177,28 @@ export interface MockApi {
    * queries refetch, so a `GET` that follows an event observes the new state.
    */
   applyEvent: (event: SessionEvent) => void;
+  /**
+   * Subscribe to the events this mock backend produces *itself* — the mirror
+   * image of {@link applyEvent}, which feeds scripted events in.
+   *
+   * The real server answers some requests by broadcasting on the live channel:
+   * closing a still-starting session cancels its launch and reports a
+   * `spawn_failed`. The mock has to do the same, or a client would never see
+   * the outcome of a request it made. Every emitted event has already been
+   * mirrored into the store through {@link applyEvent}, so a listener may pass
+   * it straight to the app's event plumbing.
+   *
+   * Returns an unsubscribe function.
+   */
+  onServerEvent: (listener: (event: SessionEvent) => void) => () => void;
 }
+
+/**
+ * The `reason` the mock reports when a still-starting session is closed,
+ * matching the server's wording (`closed while starting`) so a client's
+ * rendering of it can be exercised in mock mode.
+ */
+export const MOCK_CLOSED_WHILE_STARTING_REASON = 'closed while starting';
 
 /**
  * Build a mock backend: MSW handlers over a small in-memory store (one per
@@ -188,6 +209,9 @@ export interface MockApi {
  */
 export function createMockApi(): MockApi {
   const store: MockStore = seedData();
+
+  /** Subscribers to the events this mock backend produces itself. */
+  const serverEventListeners = new Set<(event: SessionEvent) => void>();
 
   const findSessionByThread = (threadId: number) =>
     store.sessions.find((entry) =>
@@ -330,6 +354,32 @@ export function createMockApi(): MockApi {
       const entry = store.sessions.find((s) => s.session.id === params.id);
       if (!entry) {
         return HttpResponse.json({ error: 'unknown session' }, { status: 404 });
+      }
+      // Closing a session that is STILL STARTING cancels its launch instead of
+      // tearing a pane down, exactly as on the server: the row was created
+      // eagerly when its first send was accepted and holds no conversation, so
+      // it is removed and the cancellation is reported as a `spawn_failed`
+      // carrying the reason and the sends the launch never delivered (see
+      // `MockApi.onServerEvent` for why the mock emits it rather than only
+      // mutating the store).
+      if (entry.session.status === 'spawning') {
+        const unsent = store.sends
+          .filter(
+            (send) =>
+              send.session_id === entry.session.id &&
+              (send.status === 'queued' || send.status === 'dispatched'),
+          )
+          .map((send) => ({ send_id: send.id, text: send.text }));
+        emitServerEvent({
+          kind: 'spawn_failed',
+          session_id: entry.session.id,
+          reason: MOCK_CLOSED_WHILE_STARTING_REASON,
+          // The user asked for this one, which is what tells a client to word
+          // it as a cancel rather than a failure.
+          cancelled: true,
+          unsent,
+        });
+        return new HttpResponse(null, { status: 204 });
       }
       entry.open = false;
       return new HttpResponse(null, { status: 204 });
@@ -1318,7 +1368,28 @@ export function createMockApi(): MockApi {
     }
   };
 
-  return { handlers, applyEvent };
+  /**
+   * Report an event this mock backend produced itself: mirror it into the store
+   * first (through the one `applyEvent` switch, so a request-driven event and a
+   * scripted one move the store identically), then hand it to the subscribers —
+   * in that order, so a listener that triggers a refetch already observes the
+   * state the event implies.
+   */
+  const emitServerEvent = (event: SessionEvent): void => {
+    applyEvent(event);
+    for (const listener of [...serverEventListeners]) {
+      listener(event);
+    }
+  };
+
+  const onServerEvent = (listener: (event: SessionEvent) => void) => {
+    serverEventListeners.add(listener);
+    return () => {
+      serverEventListeners.delete(listener);
+    };
+  };
+
+  return { handlers, applyEvent, onServerEvent };
 }
 
 /**

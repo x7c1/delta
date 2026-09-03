@@ -34,7 +34,7 @@ function reset() {
   // and a failure with no chip to carry it announces itself in the app-wide
   // snackbar, so both stores are shared state these tests move too.
   useComposerStore.setState({ drafts: {} });
-  useNotificationStore.setState({ errors: [] });
+  useNotificationStore.setState({ notifications: [] });
 }
 
 /**
@@ -758,6 +758,7 @@ describe('liveStore spawn tracking', () => {
 
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [],
@@ -769,6 +770,46 @@ describe('liveStore spawn tracking', () => {
     expect(spawn.workdir).toBe('/work/dir');
     // The first send's turn will never end; its tracked twin goes with it.
     expect(useLiveStore.getState().localSends).toEqual({});
+  });
+
+  it('marks a spawn the user cancelled, so its chip is not a failure', () => {
+    // The event's own flag is what carries this: a launch the user cancelled
+    // (they closed a session that was still starting) reaches the same chip as
+    // a broken one, and the `reason` prose is not something to match on.
+    trackOne();
+
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      cancelled: true,
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      reason: 'closed while starting',
+      unsent: [],
+    });
+
+    const spawn = useLiveStore.getState().spawns[0];
+    expect(spawn.status).toBe('failed');
+    expect(spawn.cancelled).toBe(true);
+    expect(spawn.reason).toBe('closed while starting');
+  });
+
+  it('carries the cancelled flag across a failure that outran its POST', () => {
+    // The buffered failure has to hand the flag on too, or a cancel that beat
+    // the POST response back would be shown as a breakage by the very chip
+    // `trackSpawn` puts up.
+    beginNewSessionPost();
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      cancelled: true,
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      reason: 'closed while starting',
+      unsent: [],
+    });
+
+    trackOne();
+
+    expect(useLiveStore.getState().spawns[0].cancelled).toBe(true);
   });
 
   it('keeps the failed spawn’s provider and worktree for its Retry', () => {
@@ -792,6 +833,7 @@ describe('liveStore spawn tracking', () => {
 
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-codex',
       pane_token: 'pane-1',
       unsent: [],
@@ -812,6 +854,7 @@ describe('liveStore spawn tracking', () => {
 
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       reason: 'git error: invalid reference: origin/nope',
@@ -827,6 +870,7 @@ describe('liveStore spawn tracking', () => {
     beginNewSessionPost();
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       reason: 'git error: worktree add failed',
@@ -863,6 +907,7 @@ describe('liveStore spawn tracking', () => {
     trackOne();
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [],
@@ -891,6 +936,7 @@ describe('liveStore spawn tracking', () => {
 
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-someone-elses',
       pane_token: 'pane-x',
       unsent: [],
@@ -906,6 +952,7 @@ describe('liveStore spawn tracking', () => {
     beginNewSessionPost();
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [],
@@ -934,6 +981,7 @@ describe('liveStore spawn tracking', () => {
     beginNewSessionPost();
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-foreign',
       pane_token: 'pane-x',
       unsent: [],
@@ -959,12 +1007,14 @@ describe('liveStore spawn tracking', () => {
     trackOne();
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [],
     });
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [],
@@ -979,6 +1029,7 @@ describe('liveStore spawn tracking', () => {
     trackOne();
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [],
@@ -1008,6 +1059,7 @@ describe('liveStore spawn tracking', () => {
 
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [
@@ -1036,6 +1088,7 @@ describe('liveStore spawn tracking', () => {
 
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [
@@ -1055,6 +1108,7 @@ describe('liveStore spawn tracking', () => {
     trackOne();
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [{ send_id: 7, text: 'start a new session' }],
@@ -1073,6 +1127,7 @@ describe('liveStore spawn tracking', () => {
     beginNewSessionPost();
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [
@@ -1084,7 +1139,7 @@ describe('liveStore spawn tracking', () => {
       useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY],
     ).toBeUndefined();
     // Nothing is announced either: the chip about to appear says it all.
-    expect(useNotificationStore.getState().errors).toEqual([]);
+    expect(useNotificationStore.getState().notifications).toEqual([]);
 
     trackOne();
 
@@ -1105,6 +1160,7 @@ describe('liveStore spawn tracking', () => {
     // reason, the whole list goes to the composer and the failure is announced.
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       reason: 'git error: worktree add failed',
@@ -1120,12 +1176,51 @@ describe('liveStore spawn tracking', () => {
     expect(
       useNotificationStore
         .getState()
-        .errors.map(({ title, detail }) => ({ title, detail })),
+        .notifications.map(({ tone, title, detail }) => ({
+          tone,
+          title,
+          detail,
+        })),
     ).toEqual([
       {
+        tone: 'error',
         title: 'The session failed to start',
         detail:
           'git error: worktree add failed — The 2 unsent messages were returned to the composer.',
+      },
+    ]);
+  });
+
+  it('announces an untracked cancel as information, not as an error', () => {
+    // Same path as the untracked failure above (no chip, so the snackbar is
+    // the only surface), but the user asked for this one: dressing their own
+    // action in error colours would tell them it broke something.
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      cancelled: true,
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      reason: 'closed while starting',
+      unsent: [
+        { send_id: 7, text: 'start a new session' },
+        { send_id: 8, text: 'and one more' },
+      ],
+    });
+
+    expect(
+      useNotificationStore
+        .getState()
+        .notifications.map(({ tone, title, detail }) => ({
+          tone,
+          title,
+          detail,
+        })),
+    ).toEqual([
+      {
+        tone: 'info',
+        title: 'Launch cancelled',
+        detail:
+          'closed while starting — The 2 unsent messages were returned to the composer.',
       },
     ]);
   });
@@ -1137,6 +1232,7 @@ describe('liveStore spawn tracking', () => {
 
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [{ send_id: 7, text: 'start a new session' }],
@@ -1147,7 +1243,7 @@ describe('liveStore spawn tracking', () => {
     ).toBe('already typing this\n\nstart a new session');
     // No reason to report, so the headline stands alone with the account of
     // where the text went.
-    expect(useNotificationStore.getState().errors[0].detail).toBe(
+    expect(useNotificationStore.getState().notifications[0].detail).toBe(
       'The unsent message was returned to the composer.',
     );
   });
@@ -1155,6 +1251,7 @@ describe('liveStore spawn tracking', () => {
   it('restores an untracked failure once, however often it repeats', () => {
     const event = {
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [{ send_id: 7, text: 'start a new session' }],
@@ -1165,7 +1262,7 @@ describe('liveStore spawn tracking', () => {
     expect(
       useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY],
     ).toBe('start a new session');
-    expect(useNotificationStore.getState().errors).toHaveLength(1);
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
   });
 
   it('does not restore an already-restored failure again when a spawn is tracked', () => {
@@ -1173,6 +1270,7 @@ describe('liveStore spawn tracking', () => {
     // did turn up for it, the same text could not go into the draft twice.
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-1',
       pane_token: 'pane-1',
       unsent: [
@@ -1196,6 +1294,7 @@ describe('liveStore spawn tracking', () => {
 
     useLiveStore.getState().applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: 'sess-spawn-2',
       pane_token: 'pane-2',
       unsent: [],

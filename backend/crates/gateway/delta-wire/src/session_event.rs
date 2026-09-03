@@ -150,6 +150,16 @@ pub enum WireSessionEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         reason: Option<String>,
+        /// Whether the user asked for this: `true` only for the explicit close
+        /// of a still-starting session (`POST /api/sessions/{id}/close`, which
+        /// cancels its launch), `false` for the three producers that report a
+        /// launch which broke on its own.
+        ///
+        /// Always present, so a client reads it without a presence check. It
+        /// is the stable key for telling a requested cancel from a breakage —
+        /// `reason` is prose to display, not something to match on — so a
+        /// client that words the two differently branches here.
+        cancelled: bool,
         /// Every send the failed launch accepted but never delivered, oldest
         /// first — the first prompt included. The rows are deleted with the
         /// session, so this frame is the last place their text exists.
@@ -430,11 +440,13 @@ impl From<SessionEvent> for WireSessionEvent {
                 session_id,
                 pane_token,
                 reason,
+                cancelled,
                 unsent,
             } => Self::SpawnFailed {
                 session_id: session_id.0,
                 pane_token,
                 reason,
+                cancelled,
                 unsent: unsent.into_iter().map(WireUnsentSend::from).collect(),
             },
             SessionEvent::AssistantStreaming {
@@ -623,6 +635,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
             session_id: session_id(),
             pane_token: Some("delta-sample".to_owned()),
             reason: Some("git error: worktree add failed".to_owned()),
+            cancelled: false,
             unsent: vec![WireUnsentSend {
                 send_id: 7,
                 text: "the message that never went out".to_owned(),
@@ -755,12 +768,14 @@ mod tests {
                 session_id: "sess-1".into(),
                 pane_token: Some("delta-1".into()),
                 reason: None,
+                cancelled: false,
                 unsent: Vec::new(),
             }),
             serde_json::json!({
                 "kind": "spawn_failed",
                 "session_id": "sess-1",
                 "pane_token": "delta-1",
+                "cancelled": false,
                 "unsent": [],
             }),
         );
@@ -775,6 +790,7 @@ mod tests {
                 session_id: "sess-1".into(),
                 pane_token: Some("delta-1".into()),
                 reason: None,
+                cancelled: false,
                 unsent: vec![
                     WireUnsentSend {
                         send_id: 1,
@@ -790,6 +806,7 @@ mod tests {
                 "kind": "spawn_failed",
                 "session_id": "sess-1",
                 "pane_token": "delta-1",
+                "cancelled": false,
                 "unsent": [
                     { "send_id": 1, "text": "first message" },
                     { "send_id": 2, "text": "and one more" },
@@ -807,12 +824,14 @@ mod tests {
                 session_id: "sess-1".into(),
                 pane_token: None,
                 reason: Some("agent error: codex is not installed".into()),
+                cancelled: false,
                 unsent: Vec::new(),
             }),
             serde_json::json!({
                 "kind": "spawn_failed",
                 "session_id": "sess-1",
                 "reason": "agent error: codex is not installed",
+                "cancelled": false,
                 "unsent": [],
             }),
         );
@@ -828,6 +847,7 @@ mod tests {
                 session_id: "sess-1".into(),
                 pane_token: Some("delta-1".into()),
                 reason: Some("git error: worktree add failed".into()),
+                cancelled: false,
                 unsent: Vec::new(),
             }),
             serde_json::json!({
@@ -835,6 +855,31 @@ mod tests {
                 "session_id": "sess-1",
                 "pane_token": "delta-1",
                 "reason": "git error: worktree add failed",
+                "cancelled": false,
+                "unsent": [],
+            }),
+        );
+    }
+
+    /// A launch the user cancelled ends in the same frame as a broken one, so
+    /// `cancelled` is the only thing that tells them apart — a client that
+    /// words a requested cancel neutrally reads the flag, never the prose.
+    #[test]
+    fn spawn_failed_marks_a_launch_the_user_cancelled() {
+        assert_eq!(
+            json(&WireSessionEvent::SpawnFailed {
+                session_id: "sess-1".into(),
+                pane_token: Some("delta-1".into()),
+                reason: Some("closed while starting".into()),
+                cancelled: true,
+                unsent: Vec::new(),
+            }),
+            serde_json::json!({
+                "kind": "spawn_failed",
+                "session_id": "sess-1",
+                "pane_token": "delta-1",
+                "reason": "closed while starting",
+                "cancelled": true,
                 "unsent": [],
             }),
         );

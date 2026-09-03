@@ -226,22 +226,25 @@ pub enum SessionEvent {
         session_id: SessionId,
         request_id: i64,
     },
-    /// A freshly-spawned session failed to come up: its launch preparation
-    /// failed, or its launch ended (or never got far enough) before it ever
-    /// registered via its first `UserPromptSubmit`, so it never bound to a live
-    /// session.
+    /// A freshly-spawned session never came up: its launch preparation failed,
+    /// its launch ended (or never got far enough) before it ever registered via
+    /// its first `UserPromptSubmit`, or the user closed it while it was still
+    /// starting — so it never bound to a live session.
     ///
     /// A new spawn is fire-and-forget — the send is accepted, the launch is
     /// prepared in the background, and the only thing that registers/binds the
     /// pane is the first `UserPromptSubmit` hook. If that preparation fails, or
     /// `claude` crashes, exits, or hangs on auth before the hook ever fires,
     /// nothing would otherwise time the dangling spawn out and the UI is stuck
-    /// "pending" forever with no error. This event is the failure signal, with
-    /// three producers: the background launch preparation (a failed
+    /// "pending" forever with no error. This event is the "it is not coming up"
+    /// signal, with four producers: the background launch preparation (a failed
     /// `git worktree add`, a remote branch that does not exist, a tmux failure,
     /// an adapter that would not connect or start a thread), the `SessionEnd`
-    /// hook (the launch exited while still unbound — the immediate case), and
-    /// the watchdog reaper (the spawn outlived its bind deadline).
+    /// hook (the launch exited while still unbound — the immediate case), the
+    /// watchdog reaper (the spawn outlived its bind deadline), and the explicit
+    /// close of a still-starting session (`POST /api/sessions/{id}/close`,
+    /// which cancels the launch — the one producer the user asked for, so it
+    /// is the only one that sets `cancelled`).
     ///
     /// It is emitted for **every** provider: an adapter-backed (Codex) launch
     /// is accepted and prepared in the background exactly like a Claude one, so
@@ -265,6 +268,15 @@ pub enum SessionEvent {
         /// the only place that message can still reach the user, so the failed
         /// chip shows it under "failed to start".
         reason: Option<String>,
+        /// Whether the user asked for this: `true` only for the explicit close
+        /// of a still-starting session, `false` for the three producers that
+        /// report a launch which broke on its own.
+        ///
+        /// Every other field looks the same either way, and `reason` is prose
+        /// to display rather than a key to match on, so this is what lets the
+        /// browser present a requested cancel neutrally instead of as a
+        /// failure.
+        cancelled: bool,
         /// Every send this session had accepted but never delivered to an
         /// agent, oldest first — the first prompt included.
         ///

@@ -70,7 +70,7 @@ function reset() {
     activeTurns: {},
     notices: {},
   });
-  useNotificationStore.setState({ errors: [] });
+  useNotificationStore.setState({ notifications: [] });
 }
 
 function serverSend(overrides: Partial<Send> = {}): Send {
@@ -241,7 +241,7 @@ describe('PendingQueue server sends', () => {
     // feature, the mutation only invalidated the open-send list, so the
     // refusal produced no user-visible feedback and the Cancel button read
     // as dead. Now the failure pushes an explanation onto the app-wide
-    // notification store (rendered by `ErrorSnackbar`).
+    // notification store (rendered by `NotificationSnackbar`).
     server.use(
       http.get('*/api/sessions/:id/sends', () =>
         HttpResponse.json({
@@ -266,9 +266,9 @@ describe('PendingQueue server sends', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     await waitFor(() => {
-      expect(useNotificationStore.getState().errors).toHaveLength(1);
+      expect(useNotificationStore.getState().notifications).toHaveLength(1);
     });
-    const [notice] = useNotificationStore.getState().errors;
+    const [notice] = useNotificationStore.getState().notifications;
     expect(notice.title).toBe('Could not cancel the send');
     expect(notice.detail).toMatch(/no longer cancellable/);
     // The chip stays (the refetch still reports the row): the refusal is
@@ -369,7 +369,7 @@ describe('PendingQueue server sends', () => {
     // The row is still pending (dispatched now), not gone.
     expect(screen.getByText('held over')).toBeInTheDocument();
     expect(screen.getByText('awaiting reply')).toBeInTheDocument();
-    expect(useNotificationStore.getState().errors).toHaveLength(0);
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
   });
 
   it('retires the parked-send notice when the row it points at is acted on', async () => {
@@ -462,9 +462,9 @@ describe('PendingQueue server sends', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(useNotificationStore.getState().errors).toHaveLength(1);
+      expect(useNotificationStore.getState().notifications).toHaveLength(1);
     });
-    expect(useNotificationStore.getState().errors[0].title).toBe(
+    expect(useNotificationStore.getState().notifications[0].title).toBe(
       'Could not send the message',
     );
     // The row is still held, and the notice explaining why is still up.
@@ -511,7 +511,7 @@ describe('PendingQueue server sends', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     await waitFor(() => {
-      expect(useNotificationStore.getState().errors).toHaveLength(1);
+      expect(useNotificationStore.getState().notifications).toHaveLength(1);
     });
     expect(
       noticeOf(useLiveStore.getState().notices, SESSION_ID, 'send_parked'),
@@ -595,9 +595,9 @@ describe('PendingQueue server sends', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(useNotificationStore.getState().errors).toHaveLength(1);
+      expect(useNotificationStore.getState().notifications).toHaveLength(1);
     });
-    const [notice] = useNotificationStore.getState().errors;
+    const [notice] = useNotificationStore.getState().notifications;
     expect(notice.title).toBe('Could not send the message');
     expect(notice.detail).toMatch(/no longer awaiting a release/);
     // The chip stays (the refetch still reports the row): the refusal is
@@ -751,6 +751,42 @@ describe('PendingQueue failed spawn', () => {
     expect(screen.getByTestId('pending-fail-reason')).toHaveTextContent(
       'invalid reference: origin/nope',
     );
+  });
+
+  it('words and tones a cancelled launch as a cancel, not a failure', () => {
+    // The user closed a session that was still starting. That lands on this
+    // very chip — nothing bound, Retry re-runs the identical launch — so the
+    // only thing that must change is how it reads: an outcome they asked for
+    // is not a breakage, and the actions stay exactly the same.
+    useLiveStore.setState({
+      spawns: [
+        {
+          ...failedSpawn,
+          cancelled: true,
+          reason: 'closed while starting',
+        },
+      ],
+    });
+    renderStrip({ kind: 'new-session' });
+
+    expect(
+      screen.getByText('Launch cancelled. Retry or dismiss it.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/failed to start/i)).toBeNull();
+    expect(screen.queryByText('failed')).toBeNull();
+    expect(screen.getByText('cancelled')).toBeInTheDocument();
+    // Nothing about it is painted as an error.
+    const row = screen.getByTestId('pending-item');
+    expect(row.className).not.toContain('danger');
+    // The server's own words still explain which close this was.
+    expect(screen.getByTestId('pending-fail-reason')).toHaveTextContent(
+      'closed while starting',
+    );
+    // Both recoveries are still offered.
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Dismiss' }),
+    ).toBeInTheDocument();
   });
 
   it('Dismiss removes the failed chip', () => {

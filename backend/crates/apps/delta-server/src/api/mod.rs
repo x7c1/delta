@@ -134,20 +134,35 @@ pub(crate) async fn open_session(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /api/sessions/{id}/close` — tear down a session's pane, keep its data.
+/// `POST /api/sessions/{id}/close` — tear down a session's pane, keep its data;
+/// or, for a session that is still starting, cancel its launch.
 ///
-/// Kills the live pane and drops it from the registry, broadcasting
-/// `SessionClosed`; the conversation remains in the store and can be reopened.
-/// Closing also sweeps any lingering background subagent whose completion
-/// notification can no longer arrive; the resulting `SubagentFinished` events
-/// are broadcast so live viewers' indicators clear immediately.
+/// For a bound session it kills the live pane and drops it from the registry;
+/// the conversation remains in the store and can be reopened. Closing also
+/// sweeps any lingering background subagent whose completion notification can no
+/// longer arrive; the resulting `SubagentFinished` events are broadcast so live
+/// viewers' indicators clear immediately.
+///
+/// A session that is **still starting** holds no conversation yet, so closing it
+/// cancels the launch instead: whatever the launch stood up is reclaimed and the
+/// eagerly-created row is removed, reported as a `SpawnFailed` marked
+/// `cancelled` — this is the only producer that sets it — whose `reason` names
+/// the close and which carries the sends the launch never delivered.
+/// That event is in the returned batch, broadcast here like the sweep's.
+///
+/// `SessionClosed` is broadcast either way: what a client does on it is refetch
+/// its session list (and that session's open sends), and for a cancelled launch
+/// the row being gone from that refetch is exactly right. It goes out *after*
+/// the batch above, so a `SpawnFailed` in it has already told the client the
+/// session is finished — a client that drops the deleted session's caches there
+/// is not sent back to refetch rows that no longer exist.
 pub(crate) async fn close_session(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let id = SessionId::from(id);
-    let subagent_finished = state.interactor().close_session(&id).await?;
-    state.broadcast(subagent_finished);
+    let events = state.interactor().close_session(&id).await?;
+    state.broadcast(events);
     state.broadcast([delta_usecase::SessionEvent::SessionClosed { session_id: id }]);
     Ok(StatusCode::NO_CONTENT)
 }

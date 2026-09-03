@@ -1,11 +1,10 @@
 use std::time::Instant;
 
 use crate::error::Result;
+use crate::interactor::lifecycle::UnboundLaunchEnd;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::InteractorCore;
-use crate::ports::{
-    GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, UnsentSend, Workspace,
-};
+use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -83,22 +82,13 @@ where
                 "reaping a spawn that never bound before its deadline; \
                  killing its pane and reporting SpawnFailed"
             );
-            self.kill_pane_best_effort(spawn.token.as_str()).await;
-            // The row (and any first send, by cascade) is deleted; drop the
-            // turn entry with it.
-            self.state.forget_turn();
-            let session_id = self.id.clone();
-            // BEFORE the cleanup, which deletes the rows this reads.
-            let unsent = self.undelivered_sends(&session_id).await;
-            self.clean_up_failed_spawn_row(&session_id).await?;
-            events.push(SessionEvent::SpawnFailed {
-                session_id,
-                pane_token: Some(spawn.token.as_str().to_owned()),
-                // The watchdog observes silence, not a cause: nothing said why
-                // the launch never bound.
-                reason: None,
-                unsent,
-            });
+            // The shared cleanup (`cancel_unbound_launch`). `Failed(None)`
+            // because the watchdog observes silence, not a cause: nothing said
+            // why the launch never bound.
+            events.push(
+                self.cancel_unbound_launch(Some(&spawn.token), UnboundLaunchEnd::Failed(None))
+                    .await,
+            );
         }
         if let Some(resuming) = stale_resume {
             tracing::warn!(
@@ -118,6 +108,7 @@ where
                 session_id: self.id.clone(),
                 pane_token: Some(resuming.token.as_str().to_owned()),
                 reason: None,
+                cancelled: false,
                 // A resume keeps its session row and every send row with it —
                 // the `Close` above requeued the held prompt rather than
                 // dropping it — so nothing is about to be deleted and there is
@@ -137,77 +128,8 @@ where
     W: Workspace,
     G: GitWorktree,
 {
-    /// The sends a failed launch accepted but never delivered to an agent,
-    /// oldest first — the text the browser puts back in its composer.
-    ///
-    /// A spawn that never bound reached no agent at all, so *every* open send
-    /// of the session qualifies: the first prompt (`dispatched` for a Claude
-    /// spawn, whose prompt rides the launch command line; `queued` for an
-    /// adapter-backed one, whose prompt waits for the provider thread) and each
-    /// send accepted as `queued` while the launch was still running.
-    /// [`SessionStore::open_sends`] is exactly that set, in id order.
-    ///
-    /// Must be called BEFORE [`Self::clean_up_failed_spawn_row`]: the rows
-    /// cascade away with the session, and this frame is the last place their
-    /// text exists.
-    ///
-    /// A read failure is logged and reported as "nothing outstanding" rather
-    /// than propagated: the browser is waiting on a session that will never
-    /// come up, and losing the failure report over a failed query would be the
-    /// worse outcome.
-    pub(in crate::interactor) async fn undelivered_sends(
-        &self,
-        session_id: &delta_model::SessionId,
-    ) -> Vec<UnsentSend> {
-        match self.store.open_sends(session_id).await {
-            Ok(sends) => sends
-                .into_iter()
-                .map(|send| UnsentSend {
-                    send_id: send.id,
-                    text: send.text,
-                })
-                .collect(),
-            Err(err) => {
-                tracing::error!(
-                    session_id = %session_id,
-                    error = %err,
-                    "failed to read the undelivered sends of a failed launch; \
-                     reporting the failure without them (their text is lost)"
-                );
-                Vec::new()
-            }
-        }
-    }
-
-    /// Clean up the eagerly-created session row of a spawn that never bound.
-    ///
-    /// The row was INSERTed (status `spawning`) when the id was minted, before
-    /// `claude` launched. A spawn that never bound ingested nothing, so the row
-    /// — and its main thread plus every `send` row, removed by cascade — is
-    /// deleted outright rather than kept as a `failed` tombstone. The user's
-    /// text is not lost with them: the composer's Retry/Dismiss chip holds the
-    /// FIRST prompt browser-side, and [`Self::undelivered_sends`] must run
-    /// before this deletion to carry the rest out on the
-    /// [`SessionEvent::SpawnFailed`] the caller emits. The `failed` status is
-    /// kept only for the defensive case of a session that somehow already
-    /// ingested messages (data worth keeping), which a never-bound spawn cannot
-    /// normally reach.
-    ///
-    /// [`SessionEvent::SpawnFailed`]: crate::ports::SessionEvent::SpawnFailed
-    pub(in crate::interactor) async fn clean_up_failed_spawn_row(
-        &self,
-        session_id: &delta_model::SessionId,
-    ) -> Result<()> {
-        if self.store.message_count(session_id).await? == 0 {
-            self.store.delete_session(session_id).await?;
-        } else {
-            self.store.mark_session_failed(session_id).await?;
-        }
-        Ok(())
-    }
-
-    /// Best-effort pane teardown shared by the watchdog sweeps and the
-    /// `SessionEnd` failure path: probe with `has_session` and kill if present,
+    /// Best-effort pane teardown shared by every path that gives a launch up,
+    /// however it ended: probe with `has_session` and kill if present,
     /// never letting a teardown error mask the failure report (the launch is
     /// already removed from the runtime state, so the failure event must still
     /// fire).

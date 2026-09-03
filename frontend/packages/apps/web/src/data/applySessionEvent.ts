@@ -9,8 +9,9 @@ import {
   invalidateThreadMessages,
   removeSessionSends,
 } from '@delta/api-client';
-import { useLiveStore } from '../store/liveStore';
+import { returnedToComposerNote, useLiveStore } from '../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
+import { useNotificationStore } from '../store/notificationStore';
 
 /**
  * Route a live `SessionEvent` to the two state homes:
@@ -28,7 +29,9 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
  * - **Nav store** (Zustand): one case only — a `spawn_failed` for the focused
  *   session, which is about to stop existing, so focus is handed back to the
  *   new-session screen where its Retry / Dismiss card lives (and where the live
- *   store has just restored whatever the failed launch never sent).
+ *   store has just restored whatever the failed launch never sent). When the
+ *   cancelled session was NOT the focused one there is no handoff to make, so
+ *   the snackbar says where that card and that text went instead.
  * - **Live store** (Zustand): ephemeral UI signals that are not REST resources
  *   — turn tracking, the spawn registry, permission notices, unread badges,
  *   external input, and the per-session resuming marker.
@@ -240,7 +243,7 @@ export function applySessionEvent(
       // arrives later via the normal transcript sync (a `transcript_updated` /
       // turn-end refetch), which is what supersedes the preview.
       break;
-    case 'spawn_failed':
+    case 'spawn_failed': {
       // A freshly-spawned session never bound; the server reaped its row (the
       // store flips the tracked spawn to a Retry/Dismiss chip and restores
       // `event.unsent` into the new-session composer draft). That restore
@@ -260,8 +263,40 @@ export function applySessionEvent(
       // opened in the meantime standing.
       if (isFocused) {
         useNavStore.getState().reconcileFocusedSession(NEW_SESSION_FOCUS);
+        break;
+      }
+      // Not focused, and the user asked for this: they closed a starting
+      // session from the navigator while looking at something else. The only
+      // thing that happens on their screen is the card disappearing — the
+      // Retry / Dismiss chip and the text the launch never sent are waiting on
+      // the new-session surface, which they are not on — so say so. Only for a
+      // cancel: a launch that broke on its own is already reported by the
+      // spawn registry (its chip, or the snackbar when no chip exists).
+      //
+      // A spawn this client never tracked has already had its own snackbar
+      // from that registry (`reportUntrackedSpawnFailure`), so it is skipped
+      // here rather than told twice; the entry below is present because
+      // `store.applyEvent` above flipped it to `failed`.
+      const cancelledSpawn = event.cancelled
+        ? useLiveStore
+            .getState()
+            .spawns.find((spawn) => spawn.sessionId === event.session_id)
+        : undefined;
+      if (cancelledSpawn) {
+        useNotificationStore
+          .getState()
+          .showInfo(
+            'Launch cancelled',
+            [
+              'Retry or dismiss it on the new-session screen.',
+              returnedToComposerNote(cancelledSpawn.restoredCount ?? 0),
+            ]
+              .filter((part) => part !== undefined)
+              .join(' '),
+          );
       }
       break;
+    }
     case 'repository_clone_completed':
     case 'repository_clone_failed':
       // A clone job reported. Refetch the repository list and both PR lenses

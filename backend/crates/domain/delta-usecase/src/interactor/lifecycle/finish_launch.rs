@@ -4,10 +4,11 @@
 use std::time::Instant;
 
 use crate::error::{Error, Result};
+use crate::interactor::lifecycle::UnboundLaunchEnd;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::{LaunchTarget, PendingSpawn};
 use crate::pane_token::PaneToken;
-use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -61,6 +62,7 @@ where
     /// and carrying `unsent`, the text of every send the launch accepted but
     /// never delivered, read a step before the rows cascade away.
     ///
+    /// [`SessionEvent::SpawnFailed`]: crate::ports::SessionEvent::SpawnFailed
     /// [`spawn_launch_preparation`]: super::launch_prep::spawn_launch_preparation
     /// [`LaunchConfig::launch_prep_deadline`]: crate::launch_config::LaunchConfig::launch_prep_deadline
     pub(in crate::interactor) async fn finish_launch(
@@ -141,22 +143,20 @@ where
         }
     }
 
-    /// Undo an accepted-but-failed launch: reclaim whatever the launch stood
-    /// up, drop the turn, delete the eager session row, and announce the
-    /// failure on the async event seam.
+    /// Undo an accepted-but-failed launch and announce the failure on the async
+    /// event seam.
     ///
     /// Shared by every failure shape above — a preparation that died before the
     /// agent, a `create_session` that died after its checkpoint, and an adapter
     /// launch that connected but could not be bound — because the cleanup is
     /// identical once the caller has removed whichever launch record the
-    /// session was holding.
+    /// session was holding. That cleanup itself is
+    /// [`Self::cancel_unbound_launch`]; this wrapper adds the two things
+    /// specific to a *reported* failure: the error text as the event's
+    /// `reason`, and delivery on the async seam (the REST caller is long gone).
     ///
-    /// `pane_token` is `Some` only for a pane-backed (Claude) launch: it names
-    /// the tmux session to reclaim and travels on the event so the browser can
-    /// show it. An adapter-backed launch has no pane at all — passing `None`
-    /// keeps tmux entirely out of its rollback (a probe against a name tmux was
-    /// never given would answer "no such session" anyway, but asking at all
-    /// would be a lie about what this session is).
+    /// `pane_token` is `Some` only for a pane-backed (Claude) launch — see the
+    /// helper for what that decides.
     async fn roll_back_failed_launch(&mut self, pane_token: Option<&PaneToken>, err: &Error) {
         tracing::error!(
             token = pane_token.map(PaneToken::as_str),
@@ -165,47 +165,9 @@ where
             "fresh spawn failed to launch; rolling back the eager session row \
              and reporting SpawnFailed"
         );
-        if let Some(token) = pane_token {
-            // A failure before `create_session` leaves no pane at all; one after
-            // it leaves a pane to reclaim. The probe-then-kill helper covers both.
-            self.kill_pane_best_effort(token.as_str()).await;
-        }
-        // An adapter-backed launch that got as far as binding holds a live
-        // provider connection (Codex: a `codex app-server` process). Close it
-        // explicitly rather than relying on the drop that follows, so the
-        // provider is told the thread is over and the process is reclaimed at a
-        // point we can log. A no-op for a pane-backed or never-bound launch.
-        if let Some(agent) = self.state.remove_open_agent() {
-            if let Err(close_err) = agent.adapter.close(&agent.handle).await {
-                tracing::warn!(
-                    session_id = %self.id,
-                    error = %close_err,
-                    "failed to close the adapter of a launch that could not be \
-                     completed (the connection is dropped regardless)"
-                );
-            }
-        }
-        // The session row (and every send row, by cascade) is deleted, so the
-        // turn entry is dropped without orphan handling.
-        self.state.forget_turn();
-        let session_id = self.id.clone();
-        // BEFORE the cleanup, which deletes the rows this reads.
-        let unsent = self.undelivered_sends(&session_id).await;
-        if let Err(cleanup_err) = self.clean_up_failed_spawn_row(&session_id).await {
-            // Report the launch failure regardless: the browser is waiting on a
-            // session that will never come up, and a row that outlived its
-            // cleanup is the lesser problem.
-            tracing::error!(
-                session_id = %session_id,
-                error = %cleanup_err,
-                "failed to clean up the eager session row of a failed launch"
-            );
-        }
-        self.emit_async_event(SessionEvent::SpawnFailed {
-            session_id,
-            pane_token: pane_token.map(|token| token.as_str().to_owned()),
-            reason: Some(err.to_string()),
-            unsent,
-        });
+        let event = self
+            .cancel_unbound_launch(pane_token, UnboundLaunchEnd::Failed(Some(err.to_string())))
+            .await;
+        self.emit_async_event(event);
     }
 }

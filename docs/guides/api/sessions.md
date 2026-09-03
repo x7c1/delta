@@ -158,15 +158,40 @@ session is a no-op.
 
 ### `POST /api/sessions/{id}/close`
 
-Tear down an open session's pane, keeping its data. Kills the live pane and drops
-it from the registry; the conversation remains in the store and can be reopened.
-Broadcasts `session_closed`. Closing a session that is not open is a no-op.
+Close a session. This has two outcomes, decided by whether the session ever
+bound an agent.
+
+**A session that has bound is torn down and kept**: the live pane is killed and
+dropped from the registry (a terminal-less Codex session is closed through its
+adapter instead); the conversation remains in the store and can be reopened.
+Closing a session that is already closed is a no-op.
 
 Closing also sweeps any lingering background subagent whose completion
 notification can no longer arrive, broadcasting a `subagent_finished` for each so
 live viewers' running indicators clear immediately.
 
-- **204 No Content** — the session is closed (or already was).
+**A session that is still starting has its launch cancelled and its row
+removed.** Such a session holds no conversation: its row was written eagerly
+when the send was accepted (it is listed as `spawning`) and no transcript line
+has been ingested against it, so there is nothing to tear down and keep. Delta
+therefore reclaims whatever the launch has stood up so far — the launch
+preparation is abandoned, an unbound pane is killed, a connected provider is
+dropped — and deletes the row. The cancellation is reported on the live channel
+as a [`spawn_failed`](live-channels.md#session-lifecycle) marked `cancelled`
+(the key that tells a requested cancel from a broken launch), whose `reason`
+names the close and whose `unsent` carries every send the launch never
+delivered, so a client can put that text back in front of the user; the row is
+gone from the next
+`GET /api/sessions`. This is what makes a wedged launch recoverable: a `git fetch`
+hanging past every deadline, or a `spawning` row stranded by a server restart
+mid-launch — open/closed is runtime state rebuilt empty on restart, so no
+watchdog is left to reap it — would otherwise leave a session the user could not
+be rid of.
+
+Either way `session_closed` is broadcast.
+
+- **204 No Content** — the session is closed or its launch was cancelled (or it
+  was already closed).
 - **404** — no session with that id.
 - **500** — killing the tmux session failed.
 

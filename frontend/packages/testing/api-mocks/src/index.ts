@@ -3,6 +3,7 @@ export {
   createMockApi,
   handlers,
   mockApi,
+  MOCK_CLOSED_WHILE_STARTING_REASON,
   type MockApi,
 } from './handlers';
 export { isDangerousLaunchOption } from './launchOptionDanger';

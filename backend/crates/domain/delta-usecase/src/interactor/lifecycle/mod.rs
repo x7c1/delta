@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 mod adapter_launch;
 mod adapter_session;
+mod cancel_launch;
 mod close_session;
 mod dispatch_ready_resumes;
 mod finish_launch;
@@ -21,6 +22,7 @@ mod workdir_for;
 mod worktree_launch_dir;
 
 pub(in crate::interactor) use adapter_launch::PreparedAdapterLaunch;
+pub(in crate::interactor) use cancel_launch::UnboundLaunchEnd;
 pub(in crate::interactor) use record_launched_pane::LaunchApproval;
 pub(in crate::interactor) use spawn_fresh::FreshSpawn;
 

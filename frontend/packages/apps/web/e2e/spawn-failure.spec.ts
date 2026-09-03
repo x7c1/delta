@@ -52,6 +52,7 @@ test('a failed spawn returns to the new-session screen with a Retry / Dismiss ro
   // message typed after it while the launch was still coming up.
   await emitEvent(page, {
     kind: 'spawn_failed',
+    cancelled: false,
     session_id: mockSpawnSessionId(1),
     pane_token: 'pane-never-bound',
     reason: 'git error: invalid reference: origin/nope',

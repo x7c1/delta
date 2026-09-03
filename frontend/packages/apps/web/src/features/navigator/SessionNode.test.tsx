@@ -565,10 +565,19 @@ describe('SessionNode kebab menu', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('offers no "Close" while the session is still starting', () => {
-    // A starting session is listed (and clickable) from the moment its first
-    // send is accepted, but nothing is bound to it yet: there is no pane to
-    // tear down, and closing it would leave the launch coming up orphaned.
+  it('offers "Close" while the session is still starting, and it cancels the launch', async () => {
+    // A starting session is not `open` — nothing is bound to it yet — but it
+    // must still be closable: that is what cancels a launch that has wedged,
+    // and without it the amber card has no way out. The request is the same
+    // endpoint a bound session's Close hits; the server decides which outcome
+    // it gets.
+    const closed = vi.fn<(id: string | readonly string[]) => void>();
+    server.use(
+      http.post('*/api/sessions/:id/close', ({ params }) => {
+        closed(params.id);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
     renderNode({ item: spawningItem });
 
     fireEvent.click(
@@ -578,9 +587,11 @@ describe('SessionNode kebab menu', () => {
     expect(
       screen.getByRole('menuitem', { name: 'Copy session ID' }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('menuitem', { name: 'Close' }),
-    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Close' }));
+
+    await waitFor(() =>
+      expect(closed).toHaveBeenCalledWith(spawningItem.session.id),
+    );
   });
 
   it('writes the session id to the clipboard when "Copy session ID" is picked', () => {

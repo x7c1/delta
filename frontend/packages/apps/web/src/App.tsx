@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Button, ErrorBoundary } from '@delta/ui-kit';
 import { ApiProvider } from './data/apiContext';
-import { ErrorSnackbar } from './features/notifications/ErrorSnackbar';
+import { NotificationSnackbar } from './features/notifications/NotificationSnackbar';
 import { WorkspaceScreen } from './features/workspace/WorkspaceScreen';
 import { ThemeProvider } from './hooks/themeContext';
 import { VisualEffectsProvider } from './hooks/visualEffectsContext';
@@ -59,10 +59,11 @@ export function App() {
             <ErrorBoundary label="app" fallback={() => <AppCrash />}>
               <div className="h-full bg-surface-elevated text-fg">
                 <WorkspaceScreen />
-                {/* App-wide error snackbar. Rendered as a fixed overlay
+                {/* App-wide snackbar, for failures and for outcomes the user
+                    asked for alike. Rendered as a fixed overlay
                     outside the workspace layout so a bottom-anchored
                     notification never affects transcript scrolling. */}
-                <ErrorSnackbar />
+                <NotificationSnackbar />
               </div>
             </ErrorBoundary>
           </VisualEffectsProvider>

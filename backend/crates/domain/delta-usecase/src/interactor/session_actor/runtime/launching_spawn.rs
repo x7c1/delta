@@ -160,6 +160,23 @@ impl SessionRuntime {
         None
     }
 
+    /// Take the in-flight launch back out whatever its token — the *explicit*
+    /// cancellation path, where the caller is the user rather than the launch.
+    ///
+    /// [`SessionContext::close_session`] on a session that is still starting has
+    /// no token to key on: it knows only the session, and the single launch that
+    /// session can hold is by definition the one being cancelled. The launch
+    /// task keeps running, which is safe precisely because the entry is gone:
+    /// its checkpoint then answers [`LaunchApproval::Abandon`] (no pane is
+    /// created, a connected adapter is dropped) and its `LaunchFinished` finds
+    /// nothing left to settle.
+    ///
+    /// [`SessionContext::close_session`]: crate::interactor::session_actor::actor::SessionContext::close_session
+    /// [`LaunchApproval::Abandon`]: crate::interactor::lifecycle::LaunchApproval::Abandon
+    pub fn take_launching(&mut self) -> Option<LaunchingSpawn> {
+        self.launching_spawn.take()
+    }
+
     /// The in-flight launch, for the test seams that read launch state back.
     #[cfg(test)]
     pub(crate) fn launching_spawn(&self) -> Option<&LaunchingSpawn> {

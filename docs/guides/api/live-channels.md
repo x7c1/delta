@@ -72,12 +72,16 @@ which frames arrive, and a client must handle each event whenever it lands.
 { "kind": "session_closed", "session_id": "sess-1" }
 
 { "kind": "spawn_failed", "session_id": "sess-1", "pane_token": "delta-1",
-  "reason": "git error: invalid reference: origin/nope",
+  "reason": "git error: invalid reference: origin/nope", "cancelled": false,
   "unsent": [ { "send_id": 1, "text": "kick off a new conversation" },
               { "send_id": 2, "text": "and one more while it starts" } ] }
 
-{ "kind": "spawn_failed", "session_id": "sess-2", "unsent": [],
+{ "kind": "spawn_failed", "session_id": "sess-2", "unsent": [], "cancelled": false,
   "reason": "agent error: failed to spawn app-server: No such file or directory (os error 2)" }
+
+{ "kind": "spawn_failed", "session_id": "sess-3", "pane_token": "delta-3",
+  "reason": "closed while starting", "cancelled": true,
+  "unsent": [ { "send_id": 7, "text": "kick off a new conversation" } ] }
 ```
 
 - `session_registered` — emitted when a freshly-spawned session's launch binds
@@ -101,31 +105,47 @@ which frames arrive, and a client must handle each event whenever it lands.
   settles (`turn_interrupted` for an in-flight turn, `permission_resolved` for
   every pending request) and then reports the close, so a watching browser
   converges from events alone — see
-  [sessions.md](sessions.md) for the recovery story.
+  [sessions.md](sessions.md) for the recovery story. A close that instead
+  *cancelled* a still-starting launch
+  ([sessions.md](sessions.md#post-apisessionsidclose)) emits it too, right after
+  the `spawn_failed` that reports the cancellation — and there the data does not
+  remain, the row is gone. That order is deliberate, so a client that refetches
+  the session list (and that session's open sends) on this event has already
+  been told the session is finished and needs no special case.
 - `spawn_failed` — a freshly-spawned session never came up, for **any**
-  provider. Three producers emit it: the background launch when it fails (the
+  provider. Four producers emit it: the background launch when it fails (the
   worktree build, including one that landed on a path other than the one planned
   at accept time; for Claude the trust seed and the tmux launch; for an
   adapter-backed provider the connect and the `thread/start`; or the whole
   sequence outrunning its deadline — all of which run *after* the send was
   accepted, see [sends.md](sends.md)), the
-  `SessionEnd` hook when a Claude launch exited while still unbound, and the
+  `SessionEnd` hook when a Claude launch exited while still unbound, the
   watchdog reaper when a launched Claude spawn outlived its bind deadline
-  without ever registering. The contentless row is deleted, so the session stops
-  being listed; without the event a launch that failed, crashed or hung on auth
-  would leave the browser sitting on a session that silently vanished.
+  without ever registering, and `POST /api/sessions/{id}/close` on a session
+  that is still starting, which cancels the launch (see
+  [sessions.md](sessions.md)) — the one producer the user asked for. The
+  contentless row is deleted, so the session stops being listed; without the
+  event a launch that failed, crashed or hung on auth would leave the browser
+  sitting on a session that silently vanished.
 
   `session_id` is the Delta-minted id the browser correlates with the session it
   focused on acceptance (and with its pending chip); it is the only key a client
   matches on. `pane_token` names the tmux session that was torn down, and is
   **absent entirely** for an adapter-backed (Codex) launch, which never had a
-  pane. `reason` carries the failure's message when Delta can name it — the
-  launch's error text, which is the only place that text reaches the user now
-  that the send is accepted before the launch runs; it too is **absent
-  entirely** from the other two producers' frames, since a launch that exited or
-  never bound says nothing about why. A client shows it as an extra line under
-  its own "failed to start" wording and renders that wording alone when it is
-  missing.
+  pane. `reason` carries the cause when Delta can name it — the launch's error
+  text (the only place that text reaches the user now that the send is accepted
+  before the launch runs), or, for a cancelled launch, that the session was
+  closed while starting; it is **absent entirely** from the two watchdog-shaped
+  producers' frames, since a launch that exited or never bound says nothing
+  about why. A client shows it as an extra line under its own headline wording
+  and renders that wording alone when it is missing. That text is prose
+  for display, not a code to match on: `cancelled` is what a client keys on to
+  tell the two apart. It is `true` only for the close the user asked for and
+  `false` for the three producers that report a launch which broke on its own,
+  always present, and the only difference between the two frames. A client that
+  wants to word a cancellation neutrally (Delta's browser says "Launch
+  cancelled" and drops the error colouring, keeping the same Retry / Dismiss
+  actions) branches on it.
 
   `unsent` lists every send the session had accepted but never delivered to an
   agent — the first prompt included — oldest first, each as its `send_id` and

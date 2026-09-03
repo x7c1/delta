@@ -36,18 +36,29 @@ export interface SpawnItem extends NewSessionLaunch {
    * {@link restoreUnsentIntoDraft}.
    */
   firstSendId: number;
-  /** spawning: launch in flight; failed: reaped (`spawn_failed` arrived). */
+  /**
+   * spawning: launch in flight; failed: the launch ended without ever binding
+   * (`spawn_failed` arrived) — it broke, the watchdog reaped it, or the user
+   * cancelled it, which {@link SpawnItem.cancelled} tells apart.
+   */
   status: 'spawning' | 'failed';
   /**
-   * Why the launch failed, when the `spawn_failed` named a cause — a git or
-   * tmux message from the background launch preparation. Shown under the
-   * failed chip's "failed to start" line, and the only place that message
-   * appears: the send was accepted long before the failure, so no error
-   * response could carry it. `undefined` while spawning, and for the
-   * watchdog-shaped failures (a launch that exited, a spawn that never bound),
-   * which observe only silence.
+   * Why the launch ended, when the `spawn_failed` named a cause — a git or
+   * tmux message from the background launch preparation, or, for a cancel,
+   * that the session was closed while it was starting. Shown under the chip's
+   * own line, and the only place that message appears: the send was accepted
+   * long before the launch ended, so no error response could carry it.
+   * `undefined` while spawning, and for the watchdog-shaped failures (a launch
+   * that exited, a spawn that never bound), which observe only silence.
    */
   reason?: string;
+  /**
+   * True when the user asked for the launch to stop: they closed a session
+   * that was still starting. A cancel is not a breakage, so the chip words and
+   * tones it as one thing that happened rather than as a failure.
+   * `undefined` while spawning.
+   */
+  cancelled?: boolean;
   /**
    * How many of the launch's undelivered messages went back into the
    * new-session composer draft (see {@link restoreUnsentIntoDraft}) — the ones
@@ -136,8 +147,27 @@ function newSessionPostInFlight(state: Pick<SendsSlice, 'sending'>): boolean {
 }
 
 /**
- * Tell the user, through the app-wide snackbar, that a launch they had no chip
- * for has failed — and what became of the text they had typed into it.
+ * The one sentence that accounts for text a launch's end handed back to the
+ * new-session composer, or `undefined` when it handed back none.
+ *
+ * Shared by both surfaces that have to say it — the snackbar this module
+ * raises for a launch with no chip, and the one `applySessionEvent` raises for
+ * a cancel the user was not watching — because the count and its plural are
+ * the whole content of the sentence, and two wordings of it would drift.
+ */
+export function returnedToComposerNote(restored: number): string | undefined {
+  if (restored <= 0) {
+    return undefined;
+  }
+  return restored === 1
+    ? 'The unsent message was returned to the composer.'
+    : `The ${restored} unsent messages were returned to the composer.`;
+}
+
+/**
+ * Tell the user, through the app-wide snackbar, how a launch they had no chip
+ * for ended — it broke, or they cancelled it — and what became of the text
+ * they had typed into it.
  *
  * The per-session {@link SessionNotice} kinds cannot carry this: every one of
  * them renders inside its session's transcript pane, and this session's row is
@@ -147,25 +177,26 @@ function newSessionPostInFlight(state: Pick<SendsSlice, 'sending'>): boolean {
  */
 function reportUntrackedSpawnFailure(
   reason: string | undefined,
+  cancelled: boolean,
   restored: number,
 ): void {
   const parts: string[] = [];
   if (reason !== undefined) {
     parts.push(reason);
   }
-  if (restored > 0) {
-    parts.push(
-      restored === 1
-        ? 'The unsent message was returned to the composer.'
-        : `The ${restored} unsent messages were returned to the composer.`,
-    );
+  const returned = returnedToComposerNote(restored);
+  if (returned !== undefined) {
+    parts.push(returned);
   }
-  useNotificationStore
-    .getState()
-    .showError(
-      'The session failed to start',
-      parts.length > 0 ? parts.join(' — ') : undefined,
-    );
+  const detail = parts.length > 0 ? parts.join(' — ') : undefined;
+  const notifications = useNotificationStore.getState();
+  // A cancel is something the user asked for, so it states what happened
+  // instead of alarming: only a launch that broke on its own is an error.
+  if (cancelled) {
+    notifications.showInfo('Launch cancelled', detail);
+    return;
+  }
+  notifications.showError('The session failed to start', detail);
 }
 
 export const createSpawnsSlice: StateCreator<
@@ -203,7 +234,13 @@ export const createSpawnsSlice: StateCreator<
     set((state) => ({
       spawns: [
         ...state.spawns,
-        { ...spawn, status: 'failed', reason: buffered.reason, restoredCount },
+        {
+          ...spawn,
+          status: 'failed',
+          reason: buffered.reason,
+          cancelled: buffered.cancelled,
+          restoredCount,
+        },
       ],
       ...removeNotices(
         state.notices,
@@ -220,8 +257,9 @@ export const createSpawnsSlice: StateCreator<
     })),
 });
 
-// The launch preparation failed, or the spawn never bound and the server
-// reaped it (the row is gone either way).
+// The launch ended without ever binding: it broke, the server reaped it, or
+// the user closed the still-starting session and cancelled it (the row is gone
+// either way, and `event.cancelled` says which).
 // Flip the tracked spawn to `failed` so the recoverable chip with
 // Retry / Dismiss surfaces, and drop any tracked local send for it —
 // its turn will never end. The event carries the REAL session id the
@@ -267,12 +305,13 @@ export const reduceSpawnFailed: EventReducer<SpawnsState, 'spawn_failed'> = (
           kind: 'spawn_failure_buffered',
           reason: event.reason,
           unsent: event.unsent,
+          cancelled: event.cancelled,
           restored: false,
         }),
       };
     }
     const restored = restoreUnsentIntoDraft(event.unsent, null);
-    reportUntrackedSpawnFailure(event.reason, restored);
+    reportUntrackedSpawnFailure(event.reason, event.cancelled, restored);
     // The buffered entry stays behind purely as the "already handled" marker
     // the guard above reads.
     return {
@@ -280,6 +319,7 @@ export const reduceSpawnFailed: EventReducer<SpawnsState, 'spawn_failed'> = (
         kind: 'spawn_failure_buffered',
         reason: event.reason,
         unsent: event.unsent,
+        cancelled: event.cancelled,
         restored: true,
       }),
     };
@@ -296,6 +336,7 @@ export const reduceSpawnFailed: EventReducer<SpawnsState, 'spawn_failed'> = (
     ...spawns[idx],
     status: 'failed',
     reason: event.reason,
+    cancelled: event.cancelled,
     restoredCount,
   };
   return {

@@ -57,6 +57,7 @@ async fn failed_launch_preparation_reaps_the_row_and_reports_spawn_failed() {
     let SessionEvent::SpawnFailed {
         session_id: failed_id,
         reason,
+        cancelled,
         ..
     } = event
     else {
@@ -69,6 +70,10 @@ async fn failed_launch_preparation_reaps_the_row_and_reports_spawn_failed() {
     assert!(
         reason.is_some_and(|reason| reason.contains("worktree add failed")),
         "the failure carries git's message, which no response body can carry now"
+    );
+    assert!(
+        !cancelled,
+        "a broken preparation is a failure, not something the user asked for"
     );
 
     // The contentless row is gone, so the session stops being listed…
