@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Badge, Button, Spinner } from '@delta/ui-kit';
+import { Badge, Button, cn, Spinner } from '@delta/ui-kit';
 import {
   ApiError,
   useCancelSendMutation,
@@ -55,8 +55,10 @@ function restoredNote(restoredCount: number | undefined): string | undefined {
  *   "sending" spinner;
  * - a send whose turn is running keeps an in-progress spinner until the
  *   turn-end event lands;
- * - a rejected submit or a reaped spawn renders a distinct error row with
- *   Dismiss (and Retry for a new-session launch) so it is recoverable.
+ * - a rejected submit or a spawn that never bound renders a distinct row with
+ *   Dismiss (and Retry for a new-session launch) so it is recoverable. A
+ *   launch the user cancelled ends up there too, worded and toned as the
+ *   outcome it is rather than as a failure (see `outcomeRow`).
  *
  * Both `queued` and `dispatched` rows carry a Cancel control: a queued send
  * is dropped before it ever touches the pane, and a dispatched send whose
@@ -112,32 +114,64 @@ export function PendingQueue({
       (entry.kind === 'sending' && entry.item.status !== 'failed'),
   );
 
-  const failureRow = (
-    key: string,
-    text: string,
-    message: string,
-    actions: ReactNode,
-    // What the server said went wrong, when it could name it (a failed spawn's
-    // `SpawnItem.reason`, or a refused launch option's `SendingItem.reason`).
-    // Shown verbatim *under* the generic line rather than replacing it: that
-    // line says what to do, this says what happened.
-    reason?: string,
-    // Where the rest of the user's text went, for a failed spawn that put its
-    // later messages back in the new-session composer (see `restoredNote`).
-    note?: string,
-  ) => (
+  /**
+   * A row the user has to answer: a send or a launch that ended without
+   * delivering, with the actions that clear it.
+   *
+   * `cancelled` picks which of the two endings this is. A launch the user
+   * cancelled (they closed a session that was still starting) lands in exactly
+   * this state — nothing bound, the text is back in hand, Retry re-runs the
+   * identical launch — so it reuses the row rather than inventing a second
+   * one; it just drops the danger wash and the `failed` badge, because the one
+   * thing the user's own action did not do is break something.
+   */
+  const outcomeRow = ({
+    key,
+    text,
+    message,
+    actions,
+    reason,
+    note,
+    cancelled = false,
+  }: {
+    key: string;
+    /** The message the row stands for. */
+    text: string;
+    /** The line saying what the user can do about it. */
+    message: string;
+    actions: ReactNode;
+    /**
+     * What the server said happened, when it could name it (a failed spawn's
+     * `SpawnItem.reason`, a refused launch option's `SendingItem.reason`).
+     * Shown verbatim *under* the generic line rather than replacing it: that
+     * line says what to do, this says what happened.
+     */
+    reason?: string;
+    /**
+     * Where the rest of the user's text went, for a spawn that put its later
+     * messages back in the new-session composer (see `restoredNote`).
+     */
+    note?: string;
+    /** True when this ending is the one the user asked for. */
+    cancelled?: boolean;
+  }) => (
     <li
       key={key}
-      className="space-y-1 rounded border border-danger/30 bg-danger/10 px-2 py-1.5"
+      className={cn(
+        'space-y-1 rounded border px-2 py-1.5',
+        cancelled
+          ? 'border-border-default bg-surface-elevated'
+          : 'border-danger/30 bg-danger/10',
+      )}
       data-testid="pending-item"
     >
       <div className="flex items-start gap-2">
-        <Badge className="shrink-0" tone="warning">
-          failed
+        <Badge className="shrink-0" tone={cancelled ? 'neutral' : 'warning'}>
+          {cancelled ? 'cancelled' : 'failed'}
         </Badge>
         <span className="min-w-0 flex-1 truncate text-fg">{text}</span>
       </div>
-      <p className="text-danger">{message}</p>
+      <p className={cancelled ? 'text-fg-muted' : 'text-danger'}>{message}</p>
       {reason && (
         <p className="break-words text-muted" data-testid="pending-fail-reason">
           {reason}
@@ -360,87 +394,97 @@ export function PendingQueue({
             case 'sending':
               if (entry.item.status === 'failed') {
                 const target = entry.item.target;
-                return failureRow(
-                  entry.key,
-                  entry.item.text,
-                  target.kind === 'new-session'
-                    ? 'The session failed to start. Retry or dismiss it.'
-                    : 'The message could not be sent.',
-                  <>
-                    {target.kind === 'new-session' && (
+                return outcomeRow({
+                  key: entry.key,
+                  text: entry.item.text,
+                  message:
+                    target.kind === 'new-session'
+                      ? 'The session failed to start. Retry or dismiss it.'
+                      : 'The message could not be sent.',
+                  actions: (
+                    <>
+                      {target.kind === 'new-session' && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            // Re-attempt the identical launch: the same text plus
+                            // the whole configuration the target retained (chosen
+                            // directory, selected launch options, provider,
+                            // worktree, PR origin). Then drop the failed chip so
+                            // only the fresh attempt shows.
+                            retrySpawn({
+                              text: entry.item.text,
+                              workdir: target.workdir,
+                              launchOptionIds: target.launchOptionIds,
+                              provider: target.provider,
+                              worktree: target.worktree,
+                              pullRequestNumber: target.pullRequestNumber,
+                            });
+                            removeSending(entry.item.id);
+                          }}
+                        >
+                          Retry
+                        </Button>
+                      )}
                       <Button
                         size="sm"
-                        variant="secondary"
-                        onClick={() => {
-                          // Re-attempt the identical launch: the same text plus
-                          // the whole configuration the target retained (chosen
-                          // directory, selected launch options, provider,
-                          // worktree, PR origin). Then drop the failed chip so
-                          // only the fresh attempt shows.
-                          retrySpawn({
-                            text: entry.item.text,
-                            workdir: target.workdir,
-                            launchOptionIds: target.launchOptionIds,
-                            provider: target.provider,
-                            worktree: target.worktree,
-                            pullRequestNumber: target.pullRequestNumber,
-                          });
-                          removeSending(entry.item.id);
-                        }}
+                        variant="ghost"
+                        onClick={() => removeSending(entry.item.id)}
                       >
-                        Retry
+                        Dismiss
                       </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => removeSending(entry.item.id)}
-                    >
-                      Dismiss
-                    </Button>
-                  </>,
-                  entry.item.reason,
-                );
+                    </>
+                  ),
+                  reason: entry.item.reason,
+                });
               }
               return sendRow(
                 entry.key,
                 entry.item.text,
                 <Spinner className="shrink-0" label="sending" />,
               );
-            case 'spawn-failed':
-              return failureRow(
-                entry.key,
-                entry.spawn.text,
-                'The session failed to start. Retry or dismiss it.',
-                <>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      retrySpawn({
-                        text: entry.spawn.text,
-                        workdir: entry.spawn.workdir,
-                        launchOptionIds: entry.spawn.launchOptionIds,
-                        provider: entry.spawn.provider,
-                        worktree: entry.spawn.worktree,
-                        pullRequestNumber: entry.spawn.pullRequestNumber,
-                      });
-                      clearSpawn(entry.spawn.sessionId);
-                    }}
-                  >
-                    Retry
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => clearSpawn(entry.spawn.sessionId)}
-                  >
-                    Dismiss
-                  </Button>
-                </>,
-                entry.spawn.reason,
-                restoredNote(entry.spawn.restoredCount),
-              );
+            case 'spawn-failed': {
+              const cancelled = entry.spawn.cancelled === true;
+              return outcomeRow({
+                key: entry.key,
+                text: entry.spawn.text,
+                message: cancelled
+                  ? 'Launch cancelled. Retry or dismiss it.'
+                  : 'The session failed to start. Retry or dismiss it.',
+                actions: (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        retrySpawn({
+                          text: entry.spawn.text,
+                          workdir: entry.spawn.workdir,
+                          launchOptionIds: entry.spawn.launchOptionIds,
+                          provider: entry.spawn.provider,
+                          worktree: entry.spawn.worktree,
+                          pullRequestNumber: entry.spawn.pullRequestNumber,
+                        });
+                        clearSpawn(entry.spawn.sessionId);
+                      }}
+                    >
+                      Retry
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => clearSpawn(entry.spawn.sessionId)}
+                    >
+                      Dismiss
+                    </Button>
+                  </>
+                ),
+                reason: entry.spawn.reason,
+                note: restoredNote(entry.spawn.restoredCount),
+                cancelled,
+              });
+            }
           }
         })}
       </ul>

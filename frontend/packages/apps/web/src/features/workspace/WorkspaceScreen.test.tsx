@@ -441,6 +441,7 @@ describe('WorkspaceScreen multi-session', () => {
 
     deliverEvent(queryClient, {
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: UNLISTED_SPAWN_ID,
       pane_token: 'delta-9',
       unsent: [],

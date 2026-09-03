@@ -45,6 +45,8 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
             pane_token: Some("delta-1".to_owned()),
             // The watchdog observes silence, so it names no cause.
             reason: None,
+            // Nobody asked for this: the spawn ran out of time.
+            cancelled: false,
             // The reaped spawn was seeded through the runtime seam and accepted
             // no send, so it has no undelivered text to hand back.
             unsent: Vec::new(),

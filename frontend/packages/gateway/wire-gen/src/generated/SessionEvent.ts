@@ -83,6 +83,18 @@ pane_token?: string,
  */
 reason?: string, 
 /**
+ * Whether the user asked for this: `true` only for the explicit close
+ * of a still-starting session (`POST /api/sessions/{id}/close`, which
+ * cancels its launch), `false` for the three producers that report a
+ * launch which broke on its own.
+ *
+ * Always present, so a client reads it without a presence check. It
+ * is the stable key for telling a requested cancel from a breakage —
+ * `reason` is prose to display, not something to match on — so a
+ * client that words the two differently branches here.
+ */
+cancelled: boolean, 
+/**
  * Every send the failed launch accepted but never delivered, oldest
  * first — the first prompt included. The rows are deleted with the
  * session, so this frame is the last place their text exists.

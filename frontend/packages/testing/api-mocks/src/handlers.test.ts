@@ -8,9 +8,14 @@ import type {
   PromptTemplatesResponse,
   SendResponse,
   SendsResponse,
+  SessionEvent,
   SessionsResponse,
 } from '@delta/wire-gen';
-import { createHandlers, createMockApi } from './handlers';
+import {
+  createHandlers,
+  createMockApi,
+  MOCK_CLOSED_WHILE_STARTING_REASON,
+} from './handlers';
 import {
   mockSpawnSessionId,
   FILLER_SESSION_COUNT,
@@ -515,6 +520,7 @@ describe('new-session send mock (eager rows)', () => {
     // the contentless failed session.
     applyEvent({
       kind: 'spawn_failed',
+      cancelled: false,
       session_id: failed,
       pane_token: 'pane-x',
       unsent: [],
@@ -527,6 +533,82 @@ describe('new-session send mock (eager rows)', () => {
       `http://localhost/api/sessions/${failed}/sends`,
     );
     expect(response.status).toBe(404);
+  });
+
+  it('cancels the launch when a still-spawning row is closed, reporting spawn_failed', async () => {
+    // Mirrors the server: a close on a session that never bound is not a
+    // tear-down-but-keep — it cancels the launch, removes the contentless row
+    // and reports the cancellation on the live channel, carrying the sends the
+    // launch never delivered so a client can restore their text. Without the
+    // emitted event a mock-mode client would watch the row vanish with no
+    // explanation, taking a path the real backend never produces.
+    const { handlers, onServerEvent } = createMockApi();
+    const httpHandlers = handlers as HttpHandler[];
+
+    const first = (await (
+      await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+        new_session: true,
+        text: 'kick off',
+      })
+    ).json()) as SendResponse;
+    const queued = (await (
+      await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+        thread_id: first.send.thread_id,
+        text: 'and one more while it starts',
+      })
+    ).json()) as SendResponse;
+    const sessionId = first.send.session_id;
+
+    const reported: SessionEvent[] = [];
+    onServerEvent((event) => reported.push(event));
+
+    const closed = await runPost(
+      httpHandlers,
+      '/close',
+      `http://localhost/api/sessions/${sessionId}/close`,
+    );
+
+    expect(closed.status).toBe(204);
+    expect(reported).toEqual([
+      {
+        kind: 'spawn_failed',
+        // The user asked for it, so the mock marks it as the real server does
+        // and a mock-mode client words it as a cancel.
+        cancelled: true,
+        session_id: sessionId,
+        reason: MOCK_CLOSED_WHILE_STARTING_REASON,
+        unsent: [
+          { send_id: first.send.id, text: 'kick off' },
+          { send_id: queued.send.id, text: 'and one more while it starts' },
+        ],
+      },
+    ]);
+    // The row leaves the list, as it does after any spawn_failed.
+    const page = await getSessionsPage(httpHandlers, '?limit=100');
+    expect(page.sessions.some((s) => s.session.id === sessionId)).toBe(false);
+  });
+
+  it('still only flips `open` when a bound session is closed', async () => {
+    // The other half of the branch: a session that HAS bound keeps its data, so
+    // its close must neither delete the row nor report a cancellation.
+    const { handlers, onServerEvent } = createMockApi();
+    const httpHandlers = handlers as HttpHandler[];
+
+    const reported: SessionEvent[] = [];
+    onServerEvent((event) => reported.push(event));
+
+    const closed = await runPost(
+      httpHandlers,
+      '/close',
+      `http://localhost/api/sessions/${SESSION_ID}/close`,
+    );
+
+    expect(closed.status).toBe(204);
+    expect(reported).toEqual([]);
+    const page = await getSessionsPage(httpHandlers, '?limit=100');
+    const listed = page.sessions.find((s) => s.session.id === SESSION_ID);
+    expect(listed?.open).toBe(false);
+    expect(listed?.session.status).toBe('active');
   });
 });
 

@@ -86,6 +86,14 @@ export async function createMockEventSource(): Promise<FakeEventSource> {
   // resolves the session's open sends, exactly as the real backend's
   // ingestion would have during the turn.
   source.onEvent((event) => mockApi.applyEvent(event));
+  // The mock backend also produces events of its own, the way the real server
+  // broadcasts on the live channel while answering a request: closing a
+  // still-starting session cancels its launch and reports a `spawn_failed`.
+  // Feed those into the same source, so mock mode takes exactly the path the
+  // app takes against the real backend. The store transition already ran
+  // inside the mock's own emit, and the mirror above is idempotent, so
+  // re-applying it here changes nothing.
+  mockApi.onServerEvent((event) => source.emit(event));
   if (typeof window !== 'undefined') {
     window[MOCK_EVENT_SOURCE_KEY] = source;
   }

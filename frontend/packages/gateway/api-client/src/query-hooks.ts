@@ -413,7 +413,10 @@ export function useOpenSessionMutation(
   });
 }
 
-/** Close an open session (`POST /api/sessions/{id}/close`). */
+/**
+ * Close a session, or cancel a still-starting session's launch
+ * (`POST /api/sessions/{id}/close`).
+ */
 export function useCloseSessionMutation(
   client: ApiClient,
 ): UseMutationResult<void, Error, SessionId> {

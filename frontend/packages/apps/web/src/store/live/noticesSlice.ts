@@ -205,6 +205,12 @@ export interface SpawnFailureBufferedNotice {
    */
   unsent: UnsentSend[];
   /**
+   * Whether the user asked for the launch to stop, carried across for the same
+   * reason as {@link SpawnFailureBufferedNotice.reason}: the chip `trackSpawn`
+   * registers must word a cancel differently from a breakage.
+   */
+  cancelled: boolean;
+  /**
    * True when {@link unsent} was already put back into the new-session draft
    * whole, because no registration could ever arrive to split it. Read by
    * {@link SpawnsSlice.trackSpawn} so the restore never happens twice.

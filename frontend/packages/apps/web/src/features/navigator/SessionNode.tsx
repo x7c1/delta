@@ -92,9 +92,10 @@ const PROVIDER_TRIGGER_TINT = {
  * tinted in the session's provider hue, doubling as the card's provider marker.
  * The menu always offers `Copy session ID` (useful even for a closed session —
  * copying its id, e.g. to feed `claude --resume`, does not require the session
- * to be running) and additionally exposes `Close` while the session is open
- * (never on a session that is still starting — there is no bound pane to
- * close). The focused card is lifted with an indigo border, tint, and ring.
+ * to be running) and additionally exposes `Close` while there is something to
+ * close: an open session, or one that is still starting — closing that cancels
+ * its launch, which is the only way out of a launch that has wedged. The
+ * focused card is lifted with an indigo border, tint, and ring.
  *
  * Every session that has branched into sub-threads shows its {@link ThreadTree}
  * expanded by default — focused or not — so the whole visible list reads as a
@@ -343,8 +344,9 @@ export const SessionNode = memo(function SessionNode({
             <span className="col-span-2 flex min-w-0 items-center gap-2">
               {/* `Starting` is a third state alongside Open and Closed: it must
                   not read as `Closed`, which invites a resume the server would
-                  refuse. It is a status the user waits out (a second or so),
-                  not one they can act on. */}
+                  refuse. It is normally a status the user waits out (a second
+                  or so) — and, when a launch wedges there, one the user can
+                  act on: the kebab's `Close` cancels it. */}
               <StatusDot
                 tone={spawning ? 'amber' : item.open ? 'green' : 'slate'}
                 title={spawning ? 'Starting' : item.open ? 'Open' : 'Closed'}
@@ -475,9 +477,8 @@ export const SessionNode = memo(function SessionNode({
             //      affordance, so it takes the top slot the user's eye
             //      lands on first.
             //   2. Copy session ID — a passive, always-available utility.
-            //   3. Close — destructive, so it sits at the bottom and only
-            //      appears while the session is open (Close on an already-
-            //      closed session is a no-op).
+            //   3. Close — destructive, so it sits at the bottom, and
+            //      conditional (see the item itself).
             items={[
               // Open the session's launch-time cwd in an external tool. Uses
               // the SESSION-LEVEL cwd (spawn-time fixed value), not any
@@ -498,12 +499,19 @@ export const SessionNode = memo(function SessionNode({
                   void navigator.clipboard.writeText(item.session.id);
                 },
               },
-              // A starting session is not open either, so it lands in the same
-              // branch; spelling it out keeps the reason visible. Closing an
-              // unbound spawn is not a supported operation — there is no pane
-              // to tear down yet, and the launch would come up orphaned — so
-              // the item stays hidden until the session registers.
-              ...(item.open && !spawning
+              // Offered while the session is open, and while it is still
+              // STARTING — a starting session is not `open` (nothing is bound
+              // to it yet), but closing it is what cancels a launch that has
+              // wedged: the server tears down whatever the launch stood up,
+              // removes the eagerly-created row, and reports a `spawn_failed`
+              // whose handling already flips the spawn chip to Retry / Dismiss
+              // with the reason and restores the unsent text into the
+              // new-session draft — or, when this tab tracks no chip for the
+              // spawn (it reloaded, or another window started it), reports the
+              // same thing through the app-wide snackbar and restores the whole
+              // text. Only an already-closed session hides the item, where
+              // Close would be a no-op.
+              ...(item.open || spawning
                 ? [
                     {
                       label: 'Close',
