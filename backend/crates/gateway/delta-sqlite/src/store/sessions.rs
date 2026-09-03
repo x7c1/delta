@@ -280,8 +280,10 @@ impl SqliteStore {
         // `created_at` when message-less — read straight from the denormalized
         // `last_activity_at` column, NOT recomputed per row. The ordering is
         // `recency` DESC, then `created_at` DESC, then `id` DESC, satisfied by
-        // `ix_session_last_activity (last_activity_at, created_at, id)` so LIMIT
-        // bounds the scan instead of sorting every session. The final
+        // the expression index `ix_session_recency
+        // (COALESCE(last_activity_at, created_at) DESC, created_at DESC,
+        // id DESC)` so LIMIT bounds the scan instead of sorting every session
+        // (`list_sessions_page_uses_the_recency_index` asserts the plan). The final
         // tiebreaker is descending because Delta-minted session ids are
         // time-ordered UUID v7: when two sessions tie on both timestamps (they
         // have second resolution, so a burst of activity ties easily), the
@@ -322,6 +324,52 @@ impl SqliteStore {
                     ":i": id,
                     ":limit": limit,
                 },
+                |row| Ok(page_row_from_row(row)),
+            )
+            .map_err(Error::from)?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(Error::from)??);
+        }
+        Ok(out)
+    }
+
+    pub(super) async fn list_sessions_by_ids(
+        &self,
+        ids: &[SessionId],
+    ) -> std::result::Result<Vec<SessionPageRow>, delta_usecase::Error> {
+        // An empty id list matches nothing by definition; short-circuit rather
+        // than building an `IN ()` (which SQLite rejects) or taking the lock.
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().await;
+
+        // Same row shape and same ordering key as `list_sessions_page`, so the
+        // open-first head of the session list is internally ordered exactly like
+        // the closed stream that follows it. Selection is by id rather than by
+        // cursor: the caller already holds the (live-pane-bounded) id set. An id
+        // with no row simply matches nothing — an accepted spawn reaped between
+        // the liveness snapshot and this query drops out silently.
+        let placeholders = (1..=ids.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {SESSION_COLS}, \
+                 last_activity_at, \
+                 COALESCE(last_activity_at, created_at) AS recency \
+                 FROM session \
+                 WHERE id IN ({placeholders}) \
+                 ORDER BY recency DESC, created_at DESC, id DESC"
+            ))
+            .map_err(Error::from)?;
+
+        let rows = stmt
+            .query_map(
+                rusqlite::params_from_iter(ids.iter().map(|id| id.as_str())),
                 |row| Ok(page_row_from_row(row)),
             )
             .map_err(Error::from)?;

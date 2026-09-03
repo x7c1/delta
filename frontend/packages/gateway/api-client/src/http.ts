@@ -237,10 +237,12 @@ export class ApiClient {
 
   /**
    * `GET /api/sessions` — one page of sessions with their open flag and main
-   * thread, ordered most-recently-active first. Pass the previous page's
-   * `next_cursor` as `cursor` to fetch the following page; omit it for the
-   * first page. `limit` caps the page size. The cursor is opaque: echo it back
-   * verbatim, never construct or parse one.
+   * thread, ordered open-first: every live session, then the closed ones, each
+   * group most-recently-active first. Pass the previous page's `next_cursor` as
+   * `cursor` to fetch the following page; omit it for the first page. `limit`
+   * caps the page's *closed* portion — the first page additionally carries the
+   * whole live group. The cursor is opaque: echo it back verbatim, never
+   * construct or parse one.
    */
   getSessions(
     params?: { cursor?: string; limit?: number },

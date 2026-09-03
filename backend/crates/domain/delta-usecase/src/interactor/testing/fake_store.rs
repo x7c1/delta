@@ -49,6 +49,40 @@ fn derive_root_message_uuid(g: &FakeStoreInner, thread_id: ThreadId) -> Option<M
         })
 }
 
+/// A row's recency key: its last activity, falling back to the session's own
+/// `created_at` when message-less — the `COALESCE(last_activity_at, created_at)`
+/// the SQL queries sort on.
+fn row_recency(row: &SessionPageRow) -> String {
+    row.1.clone().unwrap_or_else(|| row.0.created_at.clone())
+}
+
+/// Every stored session as a `(session, last_activity_at)` row, ordered exactly
+/// as the SQL session-list queries order them: recency DESC, `created_at` DESC,
+/// `id` DESC. Every row is included, a message-less `spawning` one too (see
+/// `SqliteStore::list_sessions_page`).
+fn recency_ordered_rows(g: &FakeStoreInner) -> Vec<SessionPageRow> {
+    let mut rows: Vec<SessionPageRow> = g
+        .sessions
+        .iter()
+        .map(|s| {
+            let last_activity_at = g
+                .messages
+                .iter()
+                .filter(|m| m.session_id == s.id)
+                .filter_map(|m| m.created_at.clone())
+                .max();
+            (s.clone(), last_activity_at)
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        row_recency(b)
+            .cmp(&row_recency(a))
+            .then_with(|| b.0.created_at.cmp(&a.0.created_at))
+            .then_with(|| b.0.id.as_str().cmp(a.0.id.as_str()))
+    });
+    rows
+}
+
 #[derive(Default)]
 pub(crate) struct FakeStoreInner {
     pub(crate) sessions: Vec<Session>,
@@ -240,38 +274,12 @@ impl SessionStore for FakeStore {
         limit: u32,
     ) -> Result<Vec<SessionPageRow>> {
         let g = self.inner.lock().unwrap();
-        // Build (session, last_activity_at) rows, then order exactly as the
-        // SQL page query does: recency DESC, created_at DESC, id DESC, where
-        // recency = last_activity_at or the session's created_at fallback.
-        let mut rows: Vec<SessionPageRow> = g
-            .sessions
-            .iter()
-            .map(|s| {
-                let last_activity_at = g
-                    .messages
-                    .iter()
-                    .filter(|m| m.session_id == s.id)
-                    .filter_map(|m| m.created_at.clone())
-                    .max();
-                (s.clone(), last_activity_at)
-            })
-            // Every row is listed, including a message-less `spawning` one,
-            // mirroring the SQL page query (see `SqliteStore::list_sessions_page`).
-            .collect();
-        let recency = |row: &SessionPageRow| -> String {
-            row.1.clone().unwrap_or_else(|| row.0.created_at.clone())
-        };
-        rows.sort_by(|a, b| {
-            recency(b)
-                .cmp(&recency(a))
-                .then_with(|| b.0.created_at.cmp(&a.0.created_at))
-                .then_with(|| b.0.id.as_str().cmp(a.0.id.as_str()))
-        });
+        let mut rows = recency_ordered_rows(&g);
         // Apply the cursor: keep only rows strictly after it under the same
         // ordering.
         if let Some(c) = cursor {
             rows.retain(|row| {
-                let r = recency(row);
+                let r = row_recency(row);
                 r < c.recency
                     || (r == c.recency
                         && (row.0.created_at < c.created_at
@@ -280,6 +288,18 @@ impl SessionStore for FakeStore {
             });
         }
         rows.truncate(limit as usize);
+        Ok(rows)
+    }
+
+    async fn list_sessions_by_ids(&self, ids: &[SessionId]) -> Result<Vec<SessionPageRow>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let g = self.inner.lock().unwrap();
+        // Same recency order as the page query, filtered to the requested ids;
+        // an id with no row simply matches nothing, mirroring the SQL `IN`.
+        let mut rows = recency_ordered_rows(&g);
+        rows.retain(|row| ids.contains(&row.0.id));
         Ok(rows)
     }
 

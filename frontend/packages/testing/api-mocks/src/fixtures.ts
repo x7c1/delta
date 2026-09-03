@@ -32,13 +32,14 @@ import type {
  *   `resumable: false`, which makes the mock `open`/`sends` handlers answer with
  *   `409 resume_unavailable` — exactly as the real server does — so the
  *   "this session cannot be resumed" UI is developable with no backend. It sorts
- *   just after the two detailed sessions (top of page 2), leaving page 1 and the
+ *   just after the two detailed sessions (the last row of page 1, which holds
+ *   the one live session plus `SESSIONS_PAGE_SIZE` closed ones), leaving the
  *   auto-focus unchanged.
  * - `sess-mock-4` — **closed, Codex provider**. The other three run on Claude;
  *   this one carries `provider: 'codex'` so the navigator's provider badge is
  *   exercisable for both providers with no backend. It has an empty main thread
- *   (no messages) and sorts just below `sess-mock-3` (still on page 2), again
- *   leaving page 1 and the auto-focus unchanged.
+ *   (no messages) and sorts just below `sess-mock-3` (top of page 2), again
+ *   leaving the auto-focus unchanged.
  */
 
 export const SESSION_ID = 'sess-mock-1';

@@ -1,5 +1,5 @@
 //! The `session` table: one row per conversation Delta knows about, plus the
-//! index the session list is ordered by.
+//! index the session list's recency ordering is served by.
 //!
 //! **Status lifecycle.** A Delta-launched session is INSERTed as `'spawning'`
 //! when the id is minted (before `claude` is up), flips to `'active'` when the
@@ -11,12 +11,18 @@
 //! **`last_activity_at` is denormalized on purpose.** It is a copy of the
 //! session's most recent message timestamp (`MAX(message.created_at)`),
 //! maintained on every message upsert, and NULL while the session has no
-//! timestamped message. The session list orders by it directly so the ordering
-//! is index-backed (`ix_session_recency`) and a LIMIT truly bounds the work,
-//! instead of recomputing recency for every session with a correlated subquery
-//! and sorting the whole table. The navigator's recency key is
+//! timestamped message. The session-list queries order by it directly so the
+//! ordering is index-backed (`ix_session_recency`) and a LIMIT truly bounds the
+//! work, instead of recomputing recency for every session with a correlated
+//! subquery and sorting the whole table. The navigator's recency key is
 //! `COALESCE(last_activity_at, created_at)`, so a message-less session still
 //! sorts on its own `created_at`.
+//!
+//! Recency is the only key SQL sorts on. The list the browser sees is
+//! open-first — live sessions ahead of closed ones, each group by recency — but
+//! liveness is process-runtime state with no column here, so that grouping is
+//! layered on in the usecase and deliberately kept out of the `ORDER BY` this
+//! index serves.
 //!
 //! **`ix_session_recency` is an expression index**, on
 //! `COALESCE(last_activity_at, created_at)` — the navigator's recency key —

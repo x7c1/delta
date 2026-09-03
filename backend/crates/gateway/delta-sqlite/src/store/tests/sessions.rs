@@ -482,6 +482,40 @@ async fn list_sessions_page_signals_more_via_full_page_only() {
     assert_eq!(short.len(), 2, "a last page returns fewer than the limit");
 }
 
+/// `list_sessions_by_ids` backs the open-first head of the session list: the
+/// usecase knows which sessions are live and needs their rows in the same
+/// recency order the paged stream uses. Unknown ids drop out silently (a spawn
+/// reaped between the liveness snapshot and this query) and an empty request is
+/// an empty answer.
+#[tokio::test]
+async fn list_sessions_by_ids_returns_requested_rows_in_recency_order() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    session_active_at(&store, "sess-mid", "2026-02-01T00:00:00Z").await;
+    session_active_at(&store, "sess-new", "2026-03-01T00:00:00Z").await;
+    session_active_at(&store, "sess-old", "2026-01-01T00:00:00Z").await;
+
+    // Requested out of order, and including an id with no row.
+    let rows = store
+        .list_sessions_by_ids(&[
+            SessionId::from("sess-old"),
+            SessionId::from("sess-gone"),
+            SessionId::from("sess-new"),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(
+        page_ids(&rows),
+        vec!["sess-new", "sess-old"],
+        "the requested rows come back in recency order, unknown ids skipped"
+    );
+    // Each row carries its inline last activity, exactly as a page row does.
+    assert_eq!(rows[0].1.as_deref(), Some("2026-03-01T00:00:00Z"));
+    assert_eq!(rows[1].1.as_deref(), Some("2026-01-01T00:00:00Z"));
+
+    let empty = store.list_sessions_by_ids(&[]).await.unwrap();
+    assert!(empty.is_empty(), "no ids requested, no rows returned");
+}
+
 #[tokio::test]
 async fn spawning_session_inserts_then_activates_on_register() {
     let store = SqliteStore::open_in_memory().unwrap();

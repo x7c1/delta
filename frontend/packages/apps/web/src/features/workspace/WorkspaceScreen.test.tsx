@@ -511,14 +511,15 @@ describe('WorkspaceScreen multi-session', () => {
   it('shows the first page of sessions when more remain', async () => {
     renderScreen();
 
-    // The list is cursor-paginated (mock page size 2), so the first page holds
-    // exactly the two most-recently-active sessions; the rest stay unloaded.
-    // (The list is windowed, but two rows are well within the rendered window,
-    // so both are mounted.)
+    // The list is cursor-paginated and open-first (mock page size 2): the first
+    // page holds every live session — here sess-mock-1 alone — plus the two
+    // most-recently-active closed ones; the rest stay unloaded. (The list is
+    // windowed, but three rows are well within the rendered window, so all are
+    // mounted.)
     await waitFor(() =>
-      expect(screen.getAllByTestId('session-node').length).toBe(2),
+      expect(screen.getAllByTestId('session-node').length).toBe(3),
     );
-    // The open one (sess-mock-1) is on page 1; its dot carries the "Open" name.
+    // The open one (sess-mock-1) leads page 1; its dot carries the "Open" name.
     expect(screen.getAllByRole('status', { name: 'Open' })).toHaveLength(1);
     // More pages remain. In jsdom the scroll viewport has no measured height, so
     // the virtualizer cannot auto-advance its range; pagination is driven
@@ -562,8 +563,9 @@ describe('WorkspaceScreen multi-session', () => {
   });
 
   it('falls back to the most-recently-active session when none are open', async () => {
-    // The list arrives recency-descending (newest first), so with no open
-    // session the head of the list is the most recent and gets focused.
+    // The list is open-first, so with nothing live the whole response is the
+    // closed group and arrives recency-descending (newest first); its head is
+    // the most recent and gets focused.
     server.use(
       http.get('*/api/sessions', () =>
         HttpResponse.json({

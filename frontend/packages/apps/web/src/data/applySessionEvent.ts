@@ -171,9 +171,9 @@ export function applySessionEvent(
       // The continuous tail ingested new lines. Pure refetch: invalidate every
       // affected thread plus the focused active one, with no store change.
       //
-      // New lines also move the session's last activity — and with it the
-      // session list's most-recently-active ordering — so refresh the list
-      // too. And an ingested user line is what matches a dispatched send
+      // New lines also move the session's last activity — and with it its place
+      // in the session list's recency order inside its open/closed group — so
+      // refresh the list too. An ingested user line is what matches a dispatched send
       // (terminal — it leaves the open list), so the session's open-send list
       // refetches here as well.
       invalidateSessions(queryClient);
@@ -196,8 +196,10 @@ export function applySessionEvent(
     case 'session_opened':
     case 'session_closed':
       // A session was spawned/bound, resumed, or closed. Refresh the session
-      // list so its presence and open flag update, and refresh the focused
-      // session's threads if it is the one affected.
+      // list so its presence and open flag update — and with them its place in
+      // the server's open-first order, since these are exactly the events that
+      // move a session between the live and closed groups. Refresh the focused
+      // session's threads too if it is the one affected.
       invalidateSessions(queryClient);
       if (event.kind === 'session_closed') {
         // Closing cancels/strands nothing silently: refetch so the pending

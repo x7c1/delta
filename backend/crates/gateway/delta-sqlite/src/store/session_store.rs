@@ -69,6 +69,13 @@ impl SessionStore for SqliteStore {
         self.list_sessions_page(cursor, limit).await
     }
 
+    async fn list_sessions_by_ids(
+        &self,
+        ids: &[SessionId],
+    ) -> std::result::Result<Vec<SessionPageRow>, delta_usecase::Error> {
+        self.list_sessions_by_ids(ids).await
+    }
+
     async fn session(
         &self,
         id: &SessionId,

@@ -76,7 +76,8 @@ declare_endpoints! {
 
     // Browser REST surface: queries and commands.
 
-    /// The session list, newest first, paged by an opaque cursor.
+    /// The session list, open-first then newest first, paged by an opaque
+    /// cursor.
     ListSessions: GET "/api/sessions", response = WireSessionsResponse;
 
     /// Starts a new session and reports how to reach it.

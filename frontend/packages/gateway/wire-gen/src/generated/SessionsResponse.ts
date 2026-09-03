@@ -2,8 +2,10 @@
 import type { SessionListItem } from "./SessionListItem";
 
 /**
- * Response for `GET /api/sessions`: one page of sessions, most-recently-active
- * first, plus the cursor to fetch the following page.
+ * Response for `GET /api/sessions`: one page of sessions, open-first (every
+ * live session, then the closed ones, each group most-recently-active first),
+ * plus the cursor to fetch the following page. The first page carries the whole
+ * live group; the cursor walks the closed ones.
  */
 export type SessionsResponse = { sessions: Array<SessionListItem>, 
 /**

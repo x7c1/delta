@@ -23,18 +23,27 @@ settled session resumes it, exactly as after a server restart.
 
 ### `GET /api/sessions`
 
-List known sessions, ordered by most recent activity (newest first), each
-annotated with its live state and trunk thread. The recency key is a session's
+List known sessions, **open-first**, each annotated with its live state and
+trunk thread. Every live session comes before every closed one; within each
+group the order is most recent activity first. The recency key is a session's
 last activity (`last_activity_at`), falling back to its own `created_at` when it
-has no messages yet — so a brand-new session sorts near the top. This is the
-browser's hydration surface: it shows every conversation — open or closed — so
-the navigator can route into any of them.
+has no messages yet — so a brand-new session sorts near the top of its group. A
+closed session never outranks a live one, however recently its transcript was
+touched. This is the browser's hydration surface: it shows every conversation —
+open or closed — so the navigator can route into any of them.
+
+The leading group is wider than `open: true`: a session whose spawn is still in
+flight (`status: "spawning"`, not yet bound to a pane) is live too, so a
+just-started session leads the list from the moment its first send is accepted.
 
 Query parameters:
 
 - `cursor` (optional) — the previous page's `next_cursor`, passed back
   unchanged. Opaque; a token the server cannot decode is a `400`.
-- `limit` (optional) — page size, clamped to `[1, 100]`. Defaults to `30`.
+- `limit` (optional) — how many **closed** sessions a page carries, clamped to
+  `[1, 100]`. Defaults to `30`. It does not bound the whole page: the first page
+  also carries the entire live group, which is small (bounded by the number of
+  live panes). Later pages are closed sessions only.
 
 Response:
 
@@ -58,7 +67,18 @@ Response:
   `--resume`). `last_activity_at` is the ISO-8601 UTC timestamp of the session's
   most recent message (`MAX(message.created_at)`), or `null` when the session has
   no messages yet. `next_cursor` is an opaque token to fetch the following page,
-  or `null` on the last page.
+  or `null` on the last page — it advances through the closed sessions, since
+  the live group rides on the first page alone.
+
+  Liveness is snapshotted per request, so a session whose state flips partway
+  through a page walk can be listed twice or not at all. One that **closes**
+  between two fetches appears a second time in the closed portion of a later
+  page: it led the first page as live and is no longer excluded from the closed
+  stream. One that **opens** between two fetches is missed: it is now excluded
+  from the closed stream, while the live group that would carry it rode on the
+  first page. Clients need to handle neither — `session_opened` and
+  `session_closed`, which are exactly the events that cause them, each
+  invalidate the whole list, so the walk restarts from a fresh page 1 at once.
 
   A session is listed from the moment its first send is accepted, whatever its
   provider: the `POST /api/sends` that spawns it writes the row before the
@@ -69,8 +89,9 @@ Response:
   other (its threads and open sends are queryable, so the browser can focus it
   and show its first prompt right away), but it is not open — nothing is bound
   to it yet, so it reports `open: false` and nothing can be *dispatched* into
-  it. A plain send to it is still accepted, as a `queued` row typed once the
-  launch binds; only a branch send is refused, with `409 session_spawning` (see
+  it. It counts as live for ordering all the same, so it leads the list. A plain
+  send to it is still accepted, as a `queued` row typed once the launch binds;
+  only a branch send is refused, with `409 session_spawning` (see
   [sends.md](sends.md)). A launch that fails, and a Claude spawn that came up
   but never bound (reaped at its bind deadline), both have their row deleted, so
   the session disappears from this list again and the client hears
