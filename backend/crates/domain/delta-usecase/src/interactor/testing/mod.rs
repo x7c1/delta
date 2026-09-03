@@ -25,9 +25,9 @@ pub(crate) use factory::{
     interactor_with_failing_tmux, interactor_with_gh_and_event_sink, interactor_with_git,
     interactor_with_git_and_codex_factory, interactor_with_git_and_codex_factory_and_event_sink,
     interactor_with_git_and_event_sink, interactor_with_git_and_gh,
-    interactor_with_git_and_worktree_base, interactor_with_tmux, TestInteractor,
-    SEED_TRANSCRIPT_PATH, TEST_SETTINGS_JSON, TEST_SETTINGS_PATH, TEST_WORKDIR_BASE,
-    TEST_WORKTREE_BASE,
+    interactor_with_git_and_worktree_base, interactor_with_tmux, interactor_with_transcript_root,
+    TestInteractor, SEED_TRANSCRIPT_PATH, TEST_SETTINGS_JSON, TEST_SETTINGS_PATH,
+    TEST_WORKDIR_BASE, TEST_WORKTREE_BASE,
 };
 pub(crate) use fake_agent::{ConnectGate, FakeAgentFactory, FAKE_AGENT_CAPABILITIES};
 pub(crate) use fake_binary_detector::FakeBinaryDetector;
@@ -38,7 +38,7 @@ pub(crate) use fake_store::FakeStore;
 pub(crate) use fake_tmux::{FakeTmux, PaneInput, TmuxGate};
 pub(crate) use fake_transcript::FakeTranscript;
 pub(crate) use fake_workspace::FakeWorkspace;
-pub(crate) use hooks::{session_start, submit, submit_for, submit_in};
+pub(crate) use hooks::{session_start, session_start_at, submit, submit_for, submit_in};
 pub(crate) use spawning::spawning_session;
 pub(crate) use targets::{branch_off, to};
 pub(crate) use transcript_lines::{

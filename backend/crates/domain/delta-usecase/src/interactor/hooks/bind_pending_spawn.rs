@@ -20,13 +20,23 @@ where
     /// This is the single binding step shared by the two signals that can first
     /// contact a Delta spawn: `SessionStart(source=startup)` and the first
     /// `UserPromptSubmit`. Whichever arrives first does the real work; the other
-    /// is a no-op. Concretely, it moves the recorded [`PendingSpawn`] into the
-    /// bound pane (via [`SessionRuntime::bind_pending_spawn`]); then it
-    /// activates the session row written eagerly at spawn time — `spawning` →
-    /// `active`, filling in the hook-reported transcript path that was unknown
-    /// when the id was minted — and emits [`SessionEvent::SessionRegistered`].
-    /// Any first prompt's `send` row was already written at spawn time, so no
-    /// row writing happens at bind.
+    /// is a no-op. Concretely, it activates the session row written eagerly at
+    /// spawn time — `spawning` → `active`, filling in the hook-reported
+    /// transcript path that was unknown when the id was minted — emits
+    /// [`SessionEvent::SessionRegistered`], and only then moves the recorded
+    /// [`PendingSpawn`] into the bound pane (via
+    /// [`SessionRuntime::bind_pending_spawn`]). Any first prompt's `send` row
+    /// was already written at spawn time, so no row writing happens at bind.
+    ///
+    /// **The runtime transition is deliberately last.** Registration is
+    /// fallible — it validates the hook-reported transcript path and writes the
+    /// row — and a spawn consumed before that failure would be lost: every
+    /// later hook would find nothing pending, fall back to the still-`spawning`
+    /// row with a `NULL` transcript path, and the session would be wedged with
+    /// a bound pane, no transcript to tail, and no retry. Registering first
+    /// instead leaves the [`PendingSpawn`] in place when it fails, so the next
+    /// hook for this id retries the whole bind, and the stale-pending sweep
+    /// still reports the launch as failed if no hook ever succeeds.
     ///
     /// It then posts a [`SessionInput::FlushQueuedSend`] to this actor's own
     /// mailbox. A session accepts sends as `queued` rows for as long as it is
@@ -44,6 +54,9 @@ where
     /// - `Ok(None)` — nothing was pending (already bound by a prior call, or
     ///   the id belongs to an external/unknown session). A no-op: the caller
     ///   decides what to do with an unmatched id.
+    /// - `Err(_)` — registration was refused (e.g. an out-of-root transcript
+    ///   path). Nothing was bound and the spawn stays pending for the next
+    ///   hook.
     ///
     /// [`PendingSpawn`]: crate::interactor::session_actor::runtime::PendingSpawn
     /// [`SessionRuntime::bind_pending_spawn`]: crate::interactor::session_actor::runtime::SessionRuntime::bind_pending_spawn
@@ -53,17 +66,27 @@ where
         transcript_path: &str,
         events: &mut Vec<SessionEvent>,
     ) -> Result<Option<Session>> {
-        // Move the pending spawn into the bound pane. `false` means nothing is
-        // pending — either it was already bound (idempotent re-entry) or this
-        // is an external/unknown id.
-        if !self.state.bind_pending_spawn() {
+        // Look without consuming: nothing pending means the spawn was already
+        // bound (idempotent re-entry) or this is an external/unknown id.
+        if !self.state.has_pending_spawn() {
             return Ok(None);
         }
 
+        // Fallible work first — a refused path (or a failed write) must leave
+        // the spawn pending so the next hook retries. See the doc comment.
         let (session, _main_id) = self
             .core
             .register_session_row(self.id, cwd, transcript_path, events)
             .await?;
+        // Registered: now the runtime transition, which cannot fail. Nothing
+        // can slip between the look and the take — the actor holds its state
+        // by `&mut` across the await above, so no other input is handled in
+        // between — and `Ok(Some(..))` below promises a bind really happened.
+        let bound = self.state.bind_pending_spawn();
+        debug_assert!(
+            bound,
+            "a spawn that was pending before the await is still pending after it"
+        );
         // Deliberately posted, not called: see the doc comment above. Weak,
         // like every self-post, so a retired actor simply drops it.
         if let Some(sender) = self.self_sender.upgrade() {

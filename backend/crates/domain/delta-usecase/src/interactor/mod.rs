@@ -124,10 +124,14 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// The directory a hook-reported `transcript_path` must resolve under to be
     /// registered (and therefore later read and surfaced to the browser).
     ///
-    /// `Some(root)` turns on confinement: `register_session_row` canonicalizes
-    /// the incoming path and refuses anything that is not a `.jsonl` file under
-    /// this root, so a forged (or first, unvalidated) hook cannot point Delta's
-    /// transcript tailer at an arbitrary file. Production always wires it (from
+    /// `Some(root)` turns on confinement: `register_session_row` refuses
+    /// anything that is not a `.jsonl` file resolving under this root, so a
+    /// forged (or first, unvalidated) hook cannot point Delta's transcript
+    /// tailer at an arbitrary file. The path itself need not exist yet — Claude
+    /// Code creates the per-project directory only on its first transcript
+    /// write, after the `SessionStart` hook — so it is this root and the
+    /// deepest *existing* ancestor of the reported path that get canonicalized
+    /// (see `hooks::validate_transcript_path`). Production always wires it (from
     /// `Config::transcript_root`); `None` — the default constructor used by the
     /// domain tests, which register sessions with throwaway temp paths — skips
     /// the check, exactly as the other unwired capabilities default to a
@@ -378,9 +382,11 @@ where
     /// Confine hook-reported transcript paths to `root`.
     ///
     /// Turns on the confinement `register_session_row` enforces: an incoming
-    /// `transcript_path` must canonicalize to a `.jsonl` file under `root` or the
+    /// `transcript_path` must be a `.jsonl` file resolving under `root` or the
     /// registration is refused with [`crate::Error::InvalidTranscriptPath`],
-    /// before the path is persisted or read. The composition root passes
+    /// before the path is persisted or read. `root` itself has to exist; the
+    /// reported path need not, since its per-project directory is created only
+    /// after the hook fires. The composition root passes
     /// `Config::transcript_root`; a configuration that never calls this (the
     /// default constructor, the domain tests) leaves confinement off. Same
     /// constraint as [`Self::with_launch_config`]: must run before any session
