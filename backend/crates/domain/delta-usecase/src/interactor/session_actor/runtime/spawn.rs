@@ -183,6 +183,18 @@ impl SessionRuntime {
         None
     }
 
+    /// Whether a spawn is still waiting for its first hook.
+    ///
+    /// The non-consuming look before [`Self::bind_pending_spawn`]: the hook
+    /// path has fallible work to do first (validating and persisting the
+    /// reported transcript path), and it must run *before* the spawn is
+    /// consumed so that a refused hook leaves the spawn pending for the next
+    /// one to retry. Unlike [`Self::is_launching_or_pending`] this is `false`
+    /// while the launch is still being prepared — there is nothing to bind yet.
+    pub fn has_pending_spawn(&self) -> bool {
+        self.pending_spawn.is_some()
+    }
+
     /// Idempotently bind the pending spawn, returning whether the bind was
     /// performed by *this* call.
     ///
@@ -192,7 +204,9 @@ impl SessionRuntime {
     /// [`PendingSpawn`] into the bound pane and returns `true`; whichever
     /// arrives second finds nothing pending, so it returns `false` and the
     /// already-bound session is left untouched (a no-op, including for
-    /// sessions that never had a pending spawn at all).
+    /// sessions that never had a pending spawn at all). "Arrives first" means
+    /// gets all the way through registration: callers do their fallible work
+    /// behind [`Self::has_pending_spawn`] first.
     pub fn bind_pending_spawn(&mut self) -> bool {
         let Some(spawn) = self.pending_spawn.take() else {
             return false;

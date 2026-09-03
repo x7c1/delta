@@ -14,6 +14,7 @@ mod on_stop;
 mod on_user_prompt_submit;
 mod register_on_first_contact;
 mod register_session_row;
+mod validate_transcript_path;
 
 #[cfg(test)]
 mod tests;
@@ -46,3 +47,4 @@ pub(in crate::interactor) fn is_subagent_tool(tool_name: &str) -> bool {
 pub use on_permission_request::PermissionWait;
 
 pub(in crate::interactor::hooks) use match_uuid_for_prompt::match_uuid_for_prompt;
+pub(in crate::interactor::hooks) use validate_transcript_path::validate_transcript_path;

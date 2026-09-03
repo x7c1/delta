@@ -177,6 +177,15 @@ pub(crate) fn interactor_with_tmux(tmux: FakeTmux) -> TestInteractor {
     )
 }
 
+/// Build a test interactor with hook-reported transcript paths confined to
+/// `root` — the production configuration, which the default fake set leaves
+/// off. Point it at a `tempfile::tempdir()`: `root` itself is the one thing
+/// confinement requires to exist, while the transcript path named under it need
+/// not — that missing-directory shape is the one production hits first.
+pub(crate) fn interactor_with_transcript_root(root: impl Into<String>) -> TestInteractor {
+    interactor().with_transcript_root(root)
+}
+
 /// An interactor whose tmux dispatch always fails.
 pub(crate) fn interactor_with_failing_tmux() -> TestInteractor {
     interactor_with_tmux(FakeTmux {

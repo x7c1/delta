@@ -4,16 +4,29 @@ use delta_model::SessionId;
 
 use crate::ports::{SessionStartHook, UserPromptSubmitHook};
 
+use super::factory::SEED_TRANSCRIPT_PATH;
+
 /// A `SessionStart` hook for an explicit session id and source.
 ///
 /// The `cwd`/`transcript_path` mirror the `submit` builder so a `startup` bind
 /// registers the same session row a `UserPromptSubmit` would.
 pub(crate) fn session_start(session_id: &str, source: &str) -> SessionStartHook {
+    session_start_at(session_id, source, SEED_TRANSCRIPT_PATH)
+}
+
+/// A `SessionStart` hook naming an explicit transcript path, for the tests that
+/// run with transcript-path confinement on and so need to name a path that is
+/// (or deliberately is not) under the configured root.
+pub(crate) fn session_start_at(
+    session_id: &str,
+    source: &str,
+    transcript_path: &str,
+) -> SessionStartHook {
     SessionStartHook {
         session_id: SessionId::from(session_id),
         source: source.into(),
         cwd: "/work".into(),
-        transcript_path: "/tmp/t.jsonl".into(),
+        transcript_path: transcript_path.into(),
     }
 }
 
@@ -21,7 +34,7 @@ pub(crate) fn submit(text: &str) -> UserPromptSubmitHook {
     UserPromptSubmitHook {
         prompt: text.into(),
         session_id: SessionId::from("sess-1"),
-        transcript_path: "/tmp/t.jsonl".into(),
+        transcript_path: SEED_TRANSCRIPT_PATH.into(),
         cwd: "/work".into(),
     }
 }
