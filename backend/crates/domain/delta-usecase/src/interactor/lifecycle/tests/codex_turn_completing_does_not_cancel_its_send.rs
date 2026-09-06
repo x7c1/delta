@@ -44,7 +44,7 @@ async fn codex_turn_completing_does_not_cancel_its_send() {
         SendStatus::Matched,
     );
 
-    // The running turn completes (what the C3e-3 pump maps `TurnCompleted` to).
+    // The running turn completes (what the event pump maps `TurnCompleted` to).
     let next = ix
         .apply_turn_input(&session_id, TurnInput::Stop)
         .await

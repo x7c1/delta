@@ -14,11 +14,8 @@ async fn clone_roots_round_trip_create_list_delete() {
     assert_eq!(alpha.path, "/home/dev/projects");
     assert!(!alpha.created_at.is_empty());
 
-    let beta = store
-        .insert_clone_root("/work/atelier/repos/x7c1")
-        .await
-        .unwrap();
-    assert_eq!(beta.path, "/work/atelier/repos/x7c1");
+    let beta = store.insert_clone_root("/work/clones/x7c1").await.unwrap();
+    assert_eq!(beta.path, "/work/clones/x7c1");
 
     // Listed both, newest first. The seeded `now_iso8601` may tie at second
     // resolution; the secondary sort key (path ASC) keeps the order stable.
@@ -26,7 +23,7 @@ async fn clone_roots_round_trip_create_list_delete() {
     assert_eq!(listed.len(), 2);
     let paths: Vec<&str> = listed.iter().map(|r| r.path.as_str()).collect();
     assert!(paths.contains(&"/home/dev/projects"));
-    assert!(paths.contains(&"/work/atelier/repos/x7c1"));
+    assert!(paths.contains(&"/work/clones/x7c1"));
 
     // Inserting a duplicate path is a typed conflict, not a silent overwrite —
     // the PRIMARY KEY constraint is the conflict gate.
@@ -43,7 +40,7 @@ async fn clone_roots_round_trip_create_list_delete() {
     store.delete_clone_root("/home/dev/projects").await.unwrap();
     let remaining = store.list_clone_roots().await.unwrap();
     assert_eq!(remaining.len(), 1);
-    assert_eq!(remaining[0].path, "/work/atelier/repos/x7c1");
+    assert_eq!(remaining[0].path, "/work/clones/x7c1");
 
     // Deleting an unknown path is a silent no-op (idempotent), not an error.
     store.delete_clone_root("/does/not/exist").await.unwrap();

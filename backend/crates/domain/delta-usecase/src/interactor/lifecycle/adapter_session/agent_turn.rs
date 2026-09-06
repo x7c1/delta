@@ -1,7 +1,7 @@
 //! Running one turn on an adapter-backed session: writing its `send` row and
 //! starting the turn over the provider's adapter.
 //!
-//! ## Turn-start / send-row model (the C3e-2 decision)
+//! ## Turn-start / send-row model
 //!
 //! An adapter-backed turn does **not** use Claude's `Dispatch → AwaitingEcho →
 //! PromptSubmitted` correlation: the adapter's `send` (Codex: `turn/start`)

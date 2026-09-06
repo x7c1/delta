@@ -850,7 +850,7 @@ async fn create_session_endpoint_reports_starting_then_ready() {
 /// `spawn_async_event_drain` and delivered to a WebSocket subscriber, exactly
 /// as a synchronously-broadcast event would be.
 ///
-/// This proves the C3e-1 plumbing: interactor sink → server drain task →
+/// This proves the async-event plumbing: interactor sink → server drain task →
 /// broadcast → subscriber. No Claude path emits on the seam (it is dormant), so
 /// this drives it directly through the interactor's public emit.
 ///
