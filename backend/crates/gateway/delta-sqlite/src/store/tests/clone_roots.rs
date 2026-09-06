@@ -14,10 +14,7 @@ async fn clone_roots_round_trip_create_list_delete() {
     assert_eq!(alpha.path, "/home/dev/projects");
     assert!(!alpha.created_at.is_empty());
 
-    let beta = store
-        .insert_clone_root("/work/clones/x7c1")
-        .await
-        .unwrap();
+    let beta = store.insert_clone_root("/work/clones/x7c1").await.unwrap();
     assert_eq!(beta.path, "/work/clones/x7c1");
 
     // Listed both, newest first. The seeded `now_iso8601` may tie at second
