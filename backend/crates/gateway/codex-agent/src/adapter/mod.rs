@@ -469,11 +469,19 @@ impl CodexAppServerAdapter {
     ///
     /// `UserPromptAccepted` is emitted before the `turn/start` request is even
     /// issued, so it always precedes the turn's pushed notifications on the
-    /// stream. The visible prompt rides `turn/start` as the reconciled `input`
-    /// array (`[{ "type": "text", "text": … }]`, a single `TextUserInput`). The
+    /// stream — including that turn's own `turn/started`, which is why the
+    /// content fold cannot key the prompt off a turn id at acceptance time (see
+    /// [`crate::content`]) and re-stamps its group once the turn names itself.
+    /// The visible prompt rides `turn/start` as the reconciled `input` array
+    /// (`[{ "type": "text", "text": … }]`, a single `TextUserInput`). The
     /// `turn/start` response carries the started `Turn` under `result.turn`, whose
     /// `id` becomes both the tracked turn id (which `turn/interrupt` references)
     /// and the send receipt's provider message id.
+    ///
+    /// Nothing here refuses a send while a turn is running: Codex accepts it and
+    /// steers the input into the turn in flight, answering with a fresh turn id
+    /// that never appears as a `turn/started`. One turn can therefore carry
+    /// several accepted prompts.
     async fn start_turn(
         &self,
         handle: &AgentSessionHandle,
