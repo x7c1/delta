@@ -608,7 +608,7 @@ const RELIED_ON_V2_DEFINITIONS: &[&str] = &[
     "AgentMessageDeltaNotification",
 ];
 
-/// The non-versioned combined-schema definitions Delta's approval fan-out (R2)
+/// The non-versioned combined-schema definitions Delta's approval fan-out
 /// reconciled against: the server → client request registry and its approval
 /// param/response types.
 const RELIED_ON_SERVER_REQUEST_DEFINITIONS: &[&str] = &[

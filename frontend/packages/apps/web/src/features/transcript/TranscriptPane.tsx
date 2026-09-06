@@ -608,7 +608,7 @@ export function TranscriptPane({
       // A timeline jump into this lane is landing: its programmatic
       // scrollIntoView fires a scroll event just like a user scroll, and for a
       // near-tail target it clamps at the bottom. Re-arming stick here would
-      // glue the pane to the tail (M2) and then live content would push the
+      // glue the pane to the tail and then live content would push the
       // jump target off-screen. So while an intent for this lane is live, never
       // arm — keep stick disarmed and let the jump land on its target. The
       // intent is cleared a couple of frames after the scroll settles (see the
