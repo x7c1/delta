@@ -5,17 +5,17 @@
 Contract-monitoring suites that run against the **real, authenticated agent
 CLIs** — never in CI, always on demand (or behind the opt-in trigger below):
 
-- `make e2e-real` — the real-claude canary suite, checking the fake-claude
+- `make e2e-real-claude` — the real-claude canary suite, checking the fake-claude
   lane's recording of claude's implicit contract against reality.
 - `make e2e-real-codex` — the real-codex canaries, checking the Codex
   app-server wire contract against the real `codex app-server`.
-- `make e2e-real-auto` — a gated wrapper that runs `e2e-real` only when the
+- `make e2e-real-gate` — a gated wrapper that runs `e2e-real-claude` only when the
   installed `claude` version changed, for a periodic driver.
 
 The scripted lanes these canaries keep honest are documented in
 [e2e.md](e2e.md).
 
-## Real-claude canaries (`make e2e-real`)
+## Real-claude canaries (`make e2e-real-claude`)
 
 The fake-claude lane ([e2e.md](e2e.md)) is a *recording* of claude's implicit
 contract — the hook events and payload fields, the JSONL transcript shapes,
@@ -24,7 +24,7 @@ permission-decision envelope. The real-claude canary suite checks that
 recording against reality:
 
 ```bash
-make e2e-real
+make e2e-real-claude
 ```
 
 Its role is **contract monitoring, not feature testing**: it exists to detect
@@ -39,7 +39,7 @@ parsing and hook handling. It is two layers, cheapest first:
    doc comment lists exactly what it pins.
 2. **One Playwright smoke spec** (`packages/apps/web/e2e-real/`): browser →
    real `delta-server` → tmux → real claude → transcript → browser, proving
-   the full loop closes against the real binary. `scripts/e2e-real.sh` boots
+   the full loop closes against the real binary. `scripts/e2e-real-claude.sh` boots
    the backend with the same per-run isolation as the fake lane (temp
    database, per-run tmux socket, dedicated ports 7897/5197).
 
@@ -66,7 +66,7 @@ The two-layer sync rule:
    `delta-attribution`'s `claude_format`, the hook wire types and handlers) to
    the new reality, keeping compatibility with old recorded transcripts where
    resume needs it.
-3. Re-run `make e2e-real` to confirm the canary is green against the new
+3. Re-run `make e2e-real-claude` to confirm the canary is green against the new
    contract, and `make check && make e2e && make e2e-fake` to confirm the
    re-enactment still proves the loop.
 
@@ -119,11 +119,11 @@ yet.
 ## Automatic canary trigger (opt-in)
 
 ```bash
-make e2e-real-auto    # gated: runs e2e-real only when it is worth a run
+make e2e-real-gate    # gated: runs e2e-real-claude only when it is worth a run
 ```
 
-`scripts/e2e-real-auto.sh` is a gating wrapper meant to be invoked by a
-periodic driver. Each invocation runs `make e2e-real` only when **both** hold:
+`scripts/e2e-real-gate.sh` is a gating wrapper meant to be invoked by a
+periodic driver. Each invocation runs `make e2e-real-claude` only when **both** hold:
 
 - the installed `claude --version` (respecting `DELTA_CLAUDE_BIN`) differs
   from the version recorded at the last attempt, **and**
@@ -145,9 +145,9 @@ claude and quota, so they share one gate), under
   `epoch`/`date`, the `result` (`success` / `failure (exit N)` /
   `interrupted`), and the `log` path of that run.
 - `logs/` — full output of recent runs (the newest 10 are kept).
-- `lock` — `flock` guard shared with `scripts/e2e-real.sh`, so a periodic
+- `lock` — `flock` guard shared with `scripts/e2e-real-claude.sh`, so a periodic
   tick never overlaps an in-flight suite run, including a manual
-  `make e2e-real` from any checkout (the tick skips and tries again later).
+  `make e2e-real-claude` from any checkout (the tick skips and tries again later).
 
 **The debounce is on the attempt, not on success.** A red canary usually
 means real upstream drift; auto-retrying it hourly would burn quota without
@@ -156,7 +156,7 @@ systemd unit shows as failed), prints a `FAILURE:` line with the saved log
 path, records `result=failure` in `last-attempt`, and fires a `notify-send`
 desktop notification when available (best-effort). When that happens, read
 the run log and follow the drift runbook above; the next automatic run
-happens once claude updates again (or run `make e2e-real` manually after the
+happens once claude updates again (or run `make e2e-real-claude` manually after the
 fix — manual runs are not gated).
 
 **Periodic driver (systemd user timer).** A ready-made unit pair lives in
@@ -164,10 +164,10 @@ fix — manual runs are not gated).
 service file's `DELTA_REPO` must point at your checkout. Install:
 
 ```bash
-cp scripts/systemd/delta-e2e-real.{service,timer} ~/.config/systemd/user/
-"$EDITOR" ~/.config/systemd/user/delta-e2e-real.service   # set DELTA_REPO
+cp scripts/systemd/delta-e2e-real-gate.{service,timer} ~/.config/systemd/user/
+"$EDITOR" ~/.config/systemd/user/delta-e2e-real-gate.service   # set DELTA_REPO
 systemctl --user daemon-reload
-systemctl --user enable --now delta-e2e-real.timer
+systemctl --user enable --now delta-e2e-real-gate.timer
 ```
 
 The timer ticks hourly (`Persistent=true`, so a machine that was off catches
@@ -175,16 +175,16 @@ up on boot); almost every tick is an immediate skip — the gate, not the
 timer, decides when quota is spent. Inspect it with:
 
 ```bash
-systemctl --user list-timers delta-e2e-real.timer   # next/last tick
-journalctl --user -u delta-e2e-real.service -n 50   # gate decisions + failures
+systemctl --user list-timers delta-e2e-real-gate.timer   # next/last tick
+journalctl --user -u delta-e2e-real-gate.service -n 50   # gate decisions + failures
 cat ~/.local/state/delta/e2e-real/last-attempt      # last attempt summary
 ```
 
 Uninstall:
 
 ```bash
-systemctl --user disable --now delta-e2e-real.timer
-rm ~/.config/systemd/user/delta-e2e-real.{service,timer}
+systemctl --user disable --now delta-e2e-real-gate.timer
+rm ~/.config/systemd/user/delta-e2e-real-gate.{service,timer}
 systemctl --user daemon-reload
 ```
 
@@ -192,7 +192,7 @@ systemctl --user daemon-reload
 the run the same PATH as an interactive terminal):
 
 ```cron
-0 * * * * bash -lc 'make -C "$HOME/repos/delta" e2e-real-auto' >> "$HOME/.local/state/delta/e2e-real/cron.log" 2>&1
+0 * * * * bash -lc 'make -C "$HOME/repos/delta" e2e-real-gate' >> "$HOME/.local/state/delta/e2e-real/cron.log" 2>&1
 ```
 
 **Testing the gate without spending quota:** point `DELTA_CLAUDE_BIN` at a

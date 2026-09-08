@@ -17,7 +17,7 @@ part. The larger workflows live in their own files:
 
 - **[e2e.md](e2e.md)** — the headless Playwright suites: mock mode (`make e2e`)
   and fake mode against the real backend (`make e2e-fake`).
-- **[canary.md](canary.md)** — the real-agent canary suites (`make e2e-real`,
+- **[canary.md](canary.md)** — the real-agent canary suites (`make e2e-real-claude`,
   `make e2e-real-codex`), the drift runbook, and the automatic canary trigger.
 - **[local-run.md](local-run.md)** — running the whole thing locally with
   `make dev`.

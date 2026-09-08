@@ -23,13 +23,13 @@ test('a browser prompt round-trips through the real claude and survives reload',
 }) => {
   const prompt = 'Reply with only the word: ok';
 
-  // The session's working directory, provided by scripts/e2e-real.sh: a
+  // The session's working directory, provided by scripts/e2e-real-claude.sh: a
   // fresh directory inside the repository, so the real claude — which raises
   // a first-run trust prompt in directories it has never been trusted in —
   // starts under the repository's already-established trust.
   const workdir = process.env.E2E_REAL_WORKDIR;
   if (!workdir) {
-    throw new Error('E2E_REAL_WORKDIR is not set; run via scripts/e2e-real.sh');
+    throw new Error('E2E_REAL_WORKDIR is not set; run via scripts/e2e-real-claude.sh');
   }
 
   await page.goto('/');

@@ -49,7 +49,7 @@
 //! `make check` gate non-hermetic — its result would depend on which `codex`
 //! version happens to be installed on the developer's host. Keeping EVERY
 //! canary `#[ignore]` keeps the normal gate hermetic and offline, and makes
-//! the real-binary lane a single explicit opt-in, mirroring `make e2e-real`.
+//! the real-binary lane a single explicit opt-in, mirroring `make e2e-real-claude`.
 //!
 //! The drift canary needs only the binary (no auth/network), so it *could*
 //! have been presence-gated; it is `#[ignore]` anyway, for the hermeticity

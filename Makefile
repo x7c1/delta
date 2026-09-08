@@ -107,15 +107,15 @@ e2e:
 e2e-fake:
 	scripts/e2e-fake.sh
 
-## e2e-real: run the real-claude canary suite — contract monitoring against the real `claude` CLI (local only; consumes Claude quota; never in CI)
-.PHONY: e2e-real
-e2e-real:
-	scripts/e2e-real.sh
+## e2e-real-claude: run the real-claude canary suite — contract monitoring against the real `claude` CLI (local only; consumes Claude quota; never in CI)
+.PHONY: e2e-real-claude
+e2e-real-claude:
+	scripts/e2e-real-claude.sh
 
-## e2e-real-auto: run e2e-real only if the claude version changed AND ≥24h since the last attempt — for a periodic driver (see docs/guides/development/canary.md)
-.PHONY: e2e-real-auto
-e2e-real-auto:
-	scripts/e2e-real-auto.sh
+## e2e-real-gate: run e2e-real-claude only if the claude version changed AND ≥24h since the last attempt — for a periodic driver (see docs/guides/development/canary.md)
+.PHONY: e2e-real-gate
+e2e-real-gate:
+	scripts/e2e-real-gate.sh
 
 ## e2e-real-codex: run the real-codex canaries against the real `codex app-server` — one safe turn end-to-end + the thread-metadata wire fields + the worktree sandbox git grant + schema drift detection (local only; only the turn consumes Codex quota; never in CI). DELTA_CODEX_BIN overrides the binary.
 .PHONY: e2e-real-codex

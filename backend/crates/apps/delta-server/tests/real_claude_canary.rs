@@ -11,7 +11,7 @@
 //! docs/guides/development/canary.md ("Real-claude canaries").
 //!
 //! Every test is `#[ignore]`: a run consumes the local user's Claude
-//! subscription quota, so the suite only runs on demand via `make e2e-real`
+//! subscription quota, so the suite only runs on demand via `make e2e-real-claude`
 //! (`cargo test … -- --ignored --test-threads=1`), never under `cargo test`
 //! or in CI. Every canary uses the smallest workable prompt and assertions
 //! are structural only (a line with this role/shape appeared; a hook with
@@ -435,7 +435,7 @@ fn ensure(ok: bool, context: &str, session: &ClaudeSession) -> Result<(), String
 // --- Canaries ------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "drives the real claude CLI (consumes quota); run via make e2e-real"]
+#[ignore = "drives the real claude CLI (consumes quota); run via make e2e-real-claude"]
 async fn prompt_turn_fires_hooks_and_streams_the_transcript() {
     with_one_retry("prompt_turn", || async {
         let capture = Arc::new(Capture {
@@ -579,7 +579,7 @@ async fn prompt_turn_fires_hooks_and_streams_the_transcript() {
 }
 
 #[tokio::test]
-#[ignore = "drives the real claude CLI (consumes quota); run via make e2e-real"]
+#[ignore = "drives the real claude CLI (consumes quota); run via make e2e-real-claude"]
 async fn interrupting_a_turn_writes_the_marker_and_queued_prompts_dequeue() {
     // QUEUED-PROMPT FORMAT (claude 2.1.x): a prompt typed while a turn is in
     // flight is recorded as a uuid-less `{"type":"queue-operation",
@@ -699,7 +699,7 @@ async fn interrupting_a_turn_writes_the_marker_and_queued_prompts_dequeue() {
 }
 
 #[tokio::test]
-#[ignore = "drives the real claude CLI (consumes quota); run via make e2e-real"]
+#[ignore = "drives the real claude CLI (consumes quota); run via make e2e-real-claude"]
 async fn permission_dialog_fires_the_hook_and_the_allow_decision_is_honored() {
     with_one_retry("permission", || async {
         let capture = Arc::new(Capture {

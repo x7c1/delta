@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# e2e-real-auto.sh — gated automatic trigger for the real-claude canary suite.
+# e2e-real-gate.sh — gated automatic trigger for the real-claude canary suite.
 #
 # Meant to be invoked by a periodic driver (the systemd user timer under
 # scripts/systemd/, or a cron line — see docs/guides/development/canary.md,
-# "Automatic canary trigger"). Each tick it runs `make e2e-real` only when
+# "Automatic canary trigger"). Each tick it runs `make e2e-real-claude` only when
 # BOTH hold:
 #
 #   (a) the installed `claude` CLI version differs from the version recorded
@@ -30,14 +30,14 @@
 #   ${XDG_STATE_HOME:-$HOME/.local/state}/delta/e2e-real/logs/         run logs
 #   ${XDG_STATE_HOME:-$HOME/.local/state}/delta/e2e-real/lock          flock guard
 #
-# The lock is shared with scripts/e2e-real.sh, so a periodic tick never
+# The lock is shared with scripts/e2e-real-claude.sh, so a periodic tick never
 # overlaps an in-flight suite run — including a concurrent manual
-# `make e2e-real` from any checkout.
+# `make e2e-real-claude` from any checkout.
 #
-# Usage: scripts/e2e-real-auto.sh
+# Usage: scripts/e2e-real-gate.sh
 #   DELTA_CLAUDE_BIN  overrides the claude binary (default: `claude` on PATH).
 #   E2E_REAL_CMD      overrides the suite command (testing only; default:
-#                     `make e2e-real` in this repository). Run via `bash -c`.
+#                     `make e2e-real-claude` in this repository). Run via `bash -c`.
 
 set -euo pipefail
 
@@ -52,8 +52,8 @@ LOCK_FILE="$STATE_DIR/lock"
 DEBOUNCE_SECONDS=$((24 * 60 * 60))
 KEEP_LOGS=10
 
-log() { printf '\033[1;35m[e2e-real-auto]\033[0m %s\n' "$*"; }
-die() { printf '\033[1;31m[e2e-real-auto]\033[0m %s\n' "$*" >&2; exit 1; }
+log() { printf '\033[1;35m[e2e-real-gate]\033[0m %s\n' "$*"; }
+die() { printf '\033[1;31m[e2e-real-gate]\033[0m %s\n' "$*" >&2; exit 1; }
 
 # --- Preconditions. -----------------------------------------------------------
 
@@ -74,7 +74,7 @@ if [ -z "$current_version" ]; then
   exit 0
 fi
 
-# --- Overlap guard (shared with scripts/e2e-real.sh). --------------------------
+# --- Overlap guard (shared with scripts/e2e-real-claude.sh). --------------------------
 
 mkdir -p "$STATE_DIR" "$LOG_DIR"
 exec 9>"$LOCK_FILE"
@@ -135,7 +135,7 @@ run_suite() {
   if [ -n "${E2E_REAL_CMD:-}" ]; then
     DELTA_E2E_REAL_LOCK_HELD=1 bash -c "$E2E_REAL_CMD"
   else
-    DELTA_E2E_REAL_LOCK_HELD=1 make -C "$REPO_ROOT" e2e-real
+    DELTA_E2E_REAL_LOCK_HELD=1 make -C "$REPO_ROOT" e2e-real-claude
   fi
 }
 
@@ -161,7 +161,7 @@ if [ "$status" -eq 0 ]; then
 fi
 
 record_attempt "failure (exit $status)"
-printf '\033[1;31m[e2e-real-auto]\033[0m FAILURE: real-claude canary suite failed (exit %s) on claude %s — likely upstream contract drift. Log: %s. See docs/guides/development/canary.md (drift runbook).\n' \
+printf '\033[1;31m[e2e-real-gate]\033[0m FAILURE: real-claude canary suite failed (exit %s) on claude %s — likely upstream contract drift. Log: %s. See docs/guides/development/canary.md (drift runbook).\n' \
   "$status" "$current_version" "$log_file" >&2
 if command -v notify-send >/dev/null 2>&1; then
   notify-send -u critical "Delta canary FAILED" \

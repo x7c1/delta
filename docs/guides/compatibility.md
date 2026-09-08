@@ -282,10 +282,10 @@ detection mechanism. In practice the fix happens when the maintainer notices the
 breakage during their own use of delta, not on a schedule and not in
 response to a public canary signal.
 
-### `scripts/e2e-real-auto.sh` as a retained tool
+### `scripts/e2e-real-gate.sh` as a retained tool
 
-`scripts/e2e-real-auto.sh` is a gating wrapper around the real-claude
-canary suite (`make e2e-real`) that runs the canary only when both the
+`scripts/e2e-real-gate.sh` is a gating wrapper around the real-claude
+canary suite (`make e2e-real-claude`) that runs the canary only when both the
 installed `claude --version` differs from the version recorded at the
 last attempt **and** at least 24 hours have passed since the last
 attempt. The wrapper and its per-host state files are kept in the tree
