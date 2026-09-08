@@ -6,9 +6,9 @@ import { defineConfig, devices } from '@playwright/test';
  * Nothing in the loop is scripted — this is the lane that checks the upstream
  * contract the fake-claude suite re-enacts (`playwright.fake.config.ts`)
  * against reality. It consumes the local user's Claude subscription quota, so
- * it runs locally on demand (`make e2e-real`), never in CI.
+ * it runs locally on demand (`make e2e-real-claude`), never in CI.
  *
- * The backend is booted by `scripts/e2e-real.sh` (the `make e2e-real` entry
+ * The backend is booted by `scripts/e2e-real-claude.sh` (the `make e2e-real-claude` entry
  * point), which owns the temp database, the per-run tmux socket, and
  * teardown. This config only starts the Vite dev server, proxied to that
  * backend via DELTA_PORT (see vite.config.ts).

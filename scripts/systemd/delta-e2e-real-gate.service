@@ -1,6 +1,6 @@
 # Delta real-claude canary suite — gated one-shot run.
 #
-# Opt-in: copy this file (and delta-e2e-real.timer) to
+# Opt-in: copy this file (and delta-e2e-real-gate.timer) to
 # ~/.config/systemd/user/ and adjust DELTA_REPO below; nothing in the
 # repository installs it for you. See docs/guides/development.md
 # ("Automatic canary trigger") for the full install/uninstall steps.
@@ -16,4 +16,4 @@ Description=Delta real-claude canary suite (gated: version change + 24h debounce
 Type=oneshot
 # Point this at your Delta checkout.
 Environment=DELTA_REPO=%h/repos/delta
-ExecStart=/usr/bin/env bash -lc 'make -C "$DELTA_REPO" e2e-real-auto'
+ExecStart=/usr/bin/env bash -lc 'make -C "$DELTA_REPO" e2e-real-gate'

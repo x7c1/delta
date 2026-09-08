@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# e2e-real.sh — run the real-claude canary suite against the real `claude` CLI.
+# e2e-real-claude.sh — run the real-claude canary suite against the real `claude` CLI.
 #
 # This lane is contract monitoring, not feature testing: it checks that the
 # implicit upstream contract Delta depends on — hook events and their payload
@@ -33,7 +33,7 @@
 # `make dev` (7878/5173), the mock suite (5199), and the fake suite
 # (7899/5198) are never touched.
 #
-# Usage: scripts/e2e-real.sh
+# Usage: scripts/e2e-real-claude.sh
 #   E2E_REAL_BACKEND_PORT / E2E_REAL_PORT override the ports.
 #   DELTA_CLAUDE_BIN overrides the binary (default: `claude` on PATH).
 #
@@ -60,15 +60,15 @@ TMUX_SOCKET="delta-e2e-real-$$"
 # the fake suite's `playwright.fake.config.ts` / `e2e-fake/support/server.ts`.
 export DELTA_AUTH_TOKEN="${DELTA_AUTH_TOKEN:-delta-e2e-real-auth-token}"
 
-log() { printf '\033[1;35m[e2e-real]\033[0m %s\n' "$*"; }
-die() { printf '\033[1;31m[e2e-real]\033[0m %s\n' "$*" >&2; exit 1; }
+log() { printf '\033[1;35m[e2e-real-claude]\033[0m %s\n' "$*"; }
+die() { printf '\033[1;31m[e2e-real-claude]\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v tmux >/dev/null 2>&1 || die "tmux not found on PATH"
 command -v cargo >/dev/null 2>&1 || die "cargo not found on PATH"
 command -v pnpm >/dev/null 2>&1 || die "pnpm not found on PATH"
 command -v "$CLAUDE_BIN" >/dev/null 2>&1 || die "claude binary not found: $CLAUDE_BIN"
 
-# Per-host overlap guard, shared with scripts/e2e-real-auto.sh: at most one
+# Per-host overlap guard, shared with scripts/e2e-real-gate.sh: at most one
 # real-claude suite per host at a time, across all checkouts/worktrees (they
 # share the host's claude, quota, and ~/.claude state). The auto wrapper
 # already holds the lock when it invokes this script and signals that with
