@@ -28,7 +28,7 @@ where
     /// Delta observes this itself because no adapter-backed provider reports it.
     /// Codex's `thread/start` response *declares* a `thread.gitInfo` — the schema
     /// even documents it as "captured when the thread was created" — but the real
-    /// server returns it as `null` there (verified against `codex-cli 0.144.4`),
+    /// server returns it as `null` there (verified against `codex-cli 0.153.4`),
     /// so waiting for the provider to report a branch means never reporting one.
     /// Asking git about a directory Delta itself chose is not reconstructing a
     /// provider fact; it is Delta reporting what it observed about its own launch

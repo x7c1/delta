@@ -11,7 +11,7 @@
 /// Drift detection regenerates the schema at this version and compares it
 /// against the vendored copy; when re-vendoring against a newer Codex, bump this
 /// and replace the files under `vendor/app-server-schema/` in the same change.
-pub const VENDORED_CODEX_VERSION: &str = "0.144.4";
+pub const VENDORED_CODEX_VERSION: &str = "0.153.4";
 
 /// Path, relative to this crate's manifest directory, of the combined v2 schema
 /// document — the client-request + notification surface Delta pins. v1 is a

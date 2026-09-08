@@ -356,7 +356,7 @@ async fn real_codex_completes_a_safe_turn_end_to_end() {
 /// That third assertion is the interesting one. `Thread.gitInfo` is declared as
 /// `GitInfo | null` and documented as "Optional Git metadata captured when the
 /// thread was created", which reads like a populated field. It is not: as of
-/// `codex-cli 0.144.4` the real server returns `gitInfo: null` on `thread/start`
+/// `codex-cli 0.153.4` the real server returns `gitInfo: null` on `thread/start`
 /// even when `cwd` is a git working tree on a named branch. The declared value
 /// is evidently materialised on some other read path, not this response.
 ///
@@ -483,7 +483,7 @@ fn git_branch_of(dir: &Path) -> Option<String> {
 /// default is.
 ///
 /// Also worth reading in the output: the baseline roots (a start with no grant)
-/// against the granted ones. As of `codex-cli 0.144.4` the leaf override
+/// against the granted ones. As of `codex-cli 0.153.4` the leaf override
 /// **replaces** the user's global `writable_roots` rather than unioning with it
 /// — which is why the adapter unions Delta's path *into* a list a selected
 /// `config` states rather than standing aside from it (see the adapter's module

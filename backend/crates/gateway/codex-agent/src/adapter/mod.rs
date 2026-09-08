@@ -86,7 +86,7 @@
 //! `real_thread_start_honors_the_worktree_git_grant` canary rather than assumed:
 //!
 //! - the **dotted** config key is accepted on this path and applies at the leaf,
-//!   exactly as the CLI's `-c` flag does (`codex-cli 0.144.4`). This one the
+//!   exactly as the CLI's `-c` flag does (`codex-cli 0.153.4`). This one the
 //!   canary *asserts*, so a version that stops honouring the spelling turns it
 //!   red;
 //! - a leaf override **replaces** the user's global `writable_roots` list for
@@ -99,7 +99,7 @@
 //!   the thread ends up with, so the only way the worktree's git directory can
 //!   be in it is for Delta to put it there. (A relative `".git"`, the workaround
 //!   users write for a normal clone, does not name the worktree's real git
-//!   directory — and on this path 0.144.4 resolves a relative root against the
+//!   directory — and on this path 0.153.4 resolves a relative root against the
 //!   Codex home rather than the cwd, so it names nothing useful either way.) If
 //!   replacement of the *global* list ever proves harmful, a
 //!   `config/read`-then-union is the way out.
@@ -697,7 +697,7 @@ fn inject_message_item(text: &str) -> Value {
 /// It is the only session fact worth reading here. The response's `thread` also
 /// declares a `gitInfo` (`GitInfo | null`, documented as "captured when the
 /// thread was created"), but the real server returns it as **null** on this
-/// response — verified against `codex-cli 0.144.4`, and pinned by the
+/// response — verified against `codex-cli 0.153.4`, and pinned by the
 /// `real_thread_start_reports_the_metadata_delta_stamps_on_messages` canary. The
 /// field's presence in the schema is not evidence that this response populates
 /// it, so Delta observes the branch of its own launch directory instead of
