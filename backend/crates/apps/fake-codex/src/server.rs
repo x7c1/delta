@@ -103,7 +103,7 @@ impl Server<'_> {
     ///
     /// Deliberately carries NO `thread.gitInfo`. The schema declares the field,
     /// but the real `codex app-server` returns it as null on both responses
-    /// (verified against `codex-cli 0.144.4`), so re-enacting it populated here
+    /// (verified against `codex-cli 0.153.4`), so re-enacting it populated here
     /// would let Delta green-light a source of truth the real server never
     /// provides. Delta observes its launch directory's branch itself instead.
     fn thread_response(&self, thread_id: &str) -> Value {

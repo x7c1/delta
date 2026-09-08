@@ -10,7 +10,7 @@ against: later work diffs Delta's own types (in `codex-agent`'s `wire`,
 
 | Field | Value |
 | ----- | ----- |
-| Codex CLI | `codex-cli 0.144.4` |
+| Codex CLI | `codex-cli 0.153.4` |
 | Generated with | `codex app-server generate-json-schema --out <dir>` |
 
 The version is also encoded in code as
@@ -38,12 +38,12 @@ The generator emits two protocol versions:
   the structured conversation protocol. It is intentionally **not vendored**
   here beyond this note.
 - **v2** — the real conversation protocol: `thread/*`, `turn/*`, `item/*`, and
-  server/client notifications; 228 individual files plus the combined document.
+  server/client notifications; 265 individual files plus the combined document.
   Delta pins **v2** for the client-request + notification surface.
 
 ### The v2 combined document OMITS the server → client request registry
 
-Empirically confirmed against a live `codex app-server 0.144.4` turn: for a
+Empirically confirmed against a live `codex app-server 0.153.4` turn: for a
 `turn/start` turn the server drives approvals as **server → client requests**
 (request/response with an id), not notifications — e.g.
 `item/commandExecution/requestApproval`, answered `{"decision":"decline"}`.
