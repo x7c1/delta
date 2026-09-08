@@ -284,25 +284,21 @@ response to a public canary signal.
 
 ### `scripts/e2e-real-gate.sh` as a retained tool
 
-`scripts/e2e-real-gate.sh` is a gating wrapper around the real-claude
-canary suite (`make e2e-real-claude`) that runs the canary only when both the
-installed `claude --version` differs from the version recorded at the
-last attempt **and** at least 24 hours have passed since the last
-attempt. The wrapper and its per-host state files are kept in the tree
-as an **internal development tool**: the maintainer can invoke it by
-hand, or attach it to a periodic driver locally, when it is useful. It
-is not part of any public compatibility commitment — `v0.x` does not
-promise to run it on a schedule, and does not publish its results.
+`scripts/e2e-real-gate.sh` is a gating wrapper around both real-agent
+canary suites — the real-claude suite (`make e2e-real-claude`) and the
+real-codex canaries (`make e2e-real-codex`). It gates each provider
+independently, running that suite only when both the installed CLI's
+`--version` differs from the version recorded at that provider's last
+attempt **and** at least 24 hours have passed since that attempt.
+The wrapper and its per-host state files are kept in the tree as an
+**internal development tool**: the maintainer can invoke it by hand, or
+attach it to a periodic driver locally, when it is useful. It is not
+part of any public compatibility commitment — `v0.x` does not promise to
+run it on a schedule, and does not publish its results.
 
-For the gating mechanism, the per-host state files, and an optional
+For the gating mechanism, the per-provider state files, and an optional
 periodic-driver setup, see
 [development/canary.md — Automatic canary trigger](development/canary.md#automatic-canary-trigger-opt-in).
-
-The Codex counterpart is `make e2e-real-codex`, which runs the real-codex
-canaries (one safe turn end to end, the thread-metadata wire fields, and
-schema drift detection) against the real `codex app-server`. It has no
-auto-gating wrapper yet, and is likewise an internal tool, not a public
-compatibility commitment.
 
 ### When this rule expires
 

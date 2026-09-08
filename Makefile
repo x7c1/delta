@@ -112,7 +112,7 @@ e2e-fake:
 e2e-real-claude:
 	scripts/e2e-real-claude.sh
 
-## e2e-real-gate: run e2e-real-claude only if the claude version changed AND ≥24h since the last attempt — for a periodic driver (see docs/guides/development/canary.md)
+## e2e-real-gate: run e2e-real-claude and e2e-real-codex, each only if that CLI's version changed AND ≥24h since its own last attempt — for a periodic driver (see docs/guides/development/canary.md)
 .PHONY: e2e-real-gate
 e2e-real-gate:
 	scripts/e2e-real-gate.sh
