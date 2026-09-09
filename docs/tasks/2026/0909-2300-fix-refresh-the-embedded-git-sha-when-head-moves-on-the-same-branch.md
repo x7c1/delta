@@ -100,7 +100,7 @@ in every ordinary clone and worktree.
       `main` to a newer commit B by fast-forward `git pull` (no branch switch),
       run `cargo build`, restart the server, and the footer reads
       `+dev.<short sha of B>` — not the sha of A.
-- [ ] (Carried over from #380, unrelated to this fix — verified on the same
+- [x] (Carried over from #380, unrelated to this fix — verified on the same
       restarted server) In a Codex session, send a plain message, then a
       branch send mid-turn: the branch-send prompt appears on the new thread,
       the preceding plain prompt is still present on the parent thread, and
