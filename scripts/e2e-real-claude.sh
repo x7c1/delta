@@ -73,7 +73,10 @@ command -v "$CLAUDE_BIN" >/dev/null 2>&1 || die "claude binary not found: $CLAUD
 # share the host's claude, quota, and ~/.claude state). The auto wrapper
 # already holds the lock when it invokes this script and signals that with
 # DELTA_E2E_REAL_LOCK_HELD; re-acquiring here would deadlock its own run.
-# Hosts without flock keep the old unguarded manual behavior.
+# Hosts without flock keep the old unguarded manual behavior (the gate falls
+# back to a lock directory there, which this script deliberately does not take:
+# a manual run is an explicit "I want this now" and must not be blocked by a
+# lock it cannot see the owner of).
 if [ "${DELTA_E2E_REAL_LOCK_HELD:-}" != "1" ] && command -v flock >/dev/null 2>&1; then
   LOCK_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/delta/e2e-real/lock"
   mkdir -p "$(dirname "$LOCK_FILE")"

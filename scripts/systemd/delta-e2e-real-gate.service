@@ -1,16 +1,16 @@
-# Delta real-claude canary suite — gated one-shot run.
+# Delta real-agent canary suites (real-claude, real-codex) — gated one-shot run.
 #
 # Opt-in: copy this file (and delta-e2e-real-gate.timer) to
 # ~/.config/systemd/user/ and adjust DELTA_REPO below; nothing in the
-# repository installs it for you. See docs/guides/development.md
+# repository installs it for you. See docs/guides/development/canary.md
 # ("Automatic canary trigger") for the full install/uninstall steps.
 #
 # `bash -lc` runs the gate through a login shell so the suite sees the same
-# PATH as an interactive terminal (claude, cargo, pnpm, tmux are typically
+# PATH as an interactive terminal (claude, codex, cargo, pnpm, tmux are typically
 # user-local and absent from the systemd user manager's default PATH).
 
 [Unit]
-Description=Delta real-claude canary suite (gated: version change + 24h debounce)
+Description=Delta real-agent canary suites (gated: version change + 24h debounce, per provider)
 
 [Service]
 Type=oneshot

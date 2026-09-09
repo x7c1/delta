@@ -9,8 +9,8 @@ CLIs** — never in CI, always on demand (or behind the opt-in trigger below):
   lane's recording of claude's implicit contract against reality.
 - `make e2e-real-codex` — the real-codex canaries, checking the Codex
   app-server wire contract against the real `codex app-server`.
-- `make e2e-real-gate` — a gated wrapper that runs `e2e-real-claude` only when the
-  installed `claude` version changed, for a periodic driver.
+- `make e2e-real-gate` — a gated wrapper that runs each suite above only when
+  that CLI's installed version changed, for a periodic driver.
 
 The scripted lanes these canaries keep honest are documented in
 [e2e.md](e2e.md).
@@ -113,51 +113,99 @@ detection against the vendored app-server schema. Only the turn canary consumes
 Codex quota. `DELTA_CODEX_BIN` overrides
 the binary. Like the claude suite it is local-only, never wired into CI, and
 worth a run after a codex version bump or when the real Codex loop misbehaves
-while the `fake-codex` re-enactment is green. It has no auto-gating wrapper
-yet.
+while the `fake-codex` re-enactment is green — or let the gate below run it
+for you when `codex` updates, which is what keeps the vendored schema from
+drifting unnoticed.
 
 ## Automatic canary trigger (opt-in)
 
 ```bash
-make e2e-real-gate    # gated: runs e2e-real-claude only when it is worth a run
+make e2e-real-gate    # gated: runs each suite only when it is worth a run
 ```
 
-`scripts/e2e-real-gate.sh` is a gating wrapper meant to be invoked by a
-periodic driver. Each invocation runs `make e2e-real-claude` only when **both** hold:
+`scripts/e2e-real-gate.sh` is a gating wrapper meant to be invoked by hand or
+by a periodic driver. Each invocation walks both providers:
 
-- the installed `claude --version` (respecting `DELTA_CLAUDE_BIN`) differs
-  from the version recorded at the last attempt, **and**
-- at least 24 hours have passed since the last attempt.
+| provider | binary (override) | suite |
+|----------|-------------------|-------|
+| `claude` | `claude` (`DELTA_CLAUDE_BIN`) | `make e2e-real-claude` |
+| `codex`  | `codex` (`DELTA_CODEX_BIN`)   | `make e2e-real-codex`  |
 
-Otherwise it exits 0 with a one-line `skipped (reason)`. Claude auto-updates
-frequently — sometimes several times a day — and each suite run costs a
-handful of real subscription turns, so the gate caps automatic spend at one
-run per day, spends nothing on days without an update, and never misses an
-update (a version change inside the debounce window runs on a later tick).
-On a host without `claude` the wrapper exits 0 quietly: it simply is not a
-canary host, so the same timer can be installed everywhere.
+and runs that provider's suite only when **both** hold:
+
+- the installed `<binary> --version` differs from the version recorded at that
+  provider's last attempt, **and**
+- at least 24 hours have passed since that attempt.
+
+Otherwise that provider is skipped with a one-line `<provider>: skipped
+(reason)`, and the tick ends with a summary naming what each provider did
+(`ran: success` / `ran: failure (exit N)` / `skipped (…)`). Both CLIs
+auto-update frequently — sometimes several times a day — and both suites cost
+real subscription quota (the claude suite a handful of turns, the codex
+canaries one safe turn plus the schema-drift check), so the gate caps
+automatic spend at one run per provider per day, spends nothing on days
+without an update, and never misses an update (a version change inside the
+debounce window runs on a later tick).
+
+The providers are independent. A host without one of the CLIs skips only that
+provider and still gates the other — it simply is not a canary host for the
+missing one, so the same timer can be installed everywhere — and a failing
+suite for one provider still leaves the other provider's gate evaluated and
+run. The tick exits non-zero if any suite failed.
 
 **State and logs** live per host (every checkout/worktree shares the host's
-claude and quota, so they share one gate), under
+CLIs and quota, so they share one gate), under
 `${XDG_STATE_HOME:-$HOME/.local/state}/delta/e2e-real/`:
 
-- `last-attempt` — `key=value` lines: the claude `version`, attempt
+- `<provider>/last-attempt` — `key=value` lines: the CLI `version`, attempt
   `epoch`/`date`, the `result` (`success` / `failure (exit N)` /
   `interrupted`), and the `log` path of that run.
-- `logs/` — full output of recent runs (the newest 10 are kept).
-- `lock` — `flock` guard shared with `scripts/e2e-real-claude.sh`, so a periodic
-  tick never overlaps an in-flight suite run, including a manual
-  `make e2e-real-claude` from any checkout (the tick skips and tries again later).
+- `<provider>/logs/` — full output of that provider's recent runs (the newest
+  10 are kept). A suite's own output goes only there, never to the terminal, so
+  a manual `make e2e-real-gate` is quiet for as long as the suite takes; the
+  tick prints the log path before starting the run, to `tail -f` if you want to
+  watch it.
+- `lock` — overlap guard for the whole tick, shared with
+  `scripts/e2e-real-claude.sh`, so a periodic tick never overlaps an in-flight
+  suite run, including a manual `make e2e-real-claude` from any checkout (the
+  tick skips and tries again later). It is `flock` where available and an
+  atomic `lock.d` directory (holding the owner pid, reclaimed when that pid is
+  gone) otherwise. Only the `flock` guard covers manual runs: on a host
+  without `flock`, `make e2e-real-claude` takes no lock at all (a manual run
+  stays an explicit "run it now"), so a tick that starts while one is in
+  flight will collide with it on the suite's fixed ports — worth knowing if
+  you hand-roll a periodic driver on macOS.
+
+A host set up before the gate knew about Codex has its claude state in the
+root `last-attempt` file; the first tick moves it to `claude/last-attempt`, so
+migrating costs no re-run.
+
+The wrapper runs on **stock macOS as well as Linux**: it needs no `flock` and
+no GNU-only `date`/`head` flags, and the failure notification falls back from
+`notify-send` to `osascript` (and to nothing at all when neither exists).
+Only the periodic *driver* is Linux-flavoured — the shipped examples are a
+systemd user timer and a cron line; on macOS, invoke the gate however you
+prefer (by hand, or from a driver you install yourself).
 
 **The debounce is on the attempt, not on success.** A red canary usually
 means real upstream drift; auto-retrying it hourly would burn quota without
 new information. A failure is loud instead: the wrapper exits non-zero (the
-systemd unit shows as failed), prints a `FAILURE:` line with the saved log
-path, records `result=failure` in `last-attempt`, and fires a `notify-send`
-desktop notification when available (best-effort). When that happens, read
-the run log and follow the drift runbook above; the next automatic run
-happens once claude updates again (or run `make e2e-real-claude` manually after the
-fix — manual runs are not gated).
+systemd unit shows as failed), prints one `FAILURE:` line per failed provider
+with the saved log path, records `result=failure` in that provider's
+`last-attempt`, and fires a best-effort desktop notification. It stays visible
+afterwards: while that CLI's version is unchanged, every later tick repeats the
+verdict in that provider's skip line and in the tick summary (`skipped (version
+unchanged; last attempt: failure (exit 3))`) with the log path, so a red canary
+does not read as green once the `FAILURE:` line has scrolled away. When that
+happens, read the run log and follow the drift runbook above (for codex, a
+red schema-drift check means re-vendoring the app-server schema); the next
+automatic run happens once that CLI updates again (or run the suite manually
+after the fix — manual runs are not gated).
+
+A manual run does not touch the gate's record, so the repeated verdict stays
+until the gate itself runs that provider again;
+`rm ~/.local/state/delta/e2e-real/<provider>/last-attempt` clears it and makes
+the next tick re-run that suite from scratch.
 
 **Periodic driver (systemd user timer).** A ready-made unit pair lives in
 `scripts/systemd/`. It is opt-in: nothing installs it for you, and the
@@ -177,7 +225,7 @@ timer, decides when quota is spent. Inspect it with:
 ```bash
 systemctl --user list-timers delta-e2e-real-gate.timer   # next/last tick
 journalctl --user -u delta-e2e-real-gate.service -n 50   # gate decisions + failures
-cat ~/.local/state/delta/e2e-real/last-attempt      # last attempt summary
+head ~/.local/state/delta/e2e-real/*/last-attempt        # last attempt per provider (headed by path)
 ```
 
 Uninstall:
@@ -192,10 +240,23 @@ systemctl --user daemon-reload
 the run the same PATH as an interactive terminal):
 
 ```cron
-0 * * * * bash -lc 'make -C "$HOME/repos/delta" e2e-real-gate' >> "$HOME/.local/state/delta/e2e-real/cron.log" 2>&1
+0 * * * * bash -lc 'd="$HOME/.local/state/delta/e2e-real"; mkdir -p "$d"; make -C "$HOME/repos/delta" e2e-real-gate >>"$d/cron.log" 2>&1'
 ```
 
-**Testing the gate without spending quota:** point `DELTA_CLAUDE_BIN` at a
-stub that prints a fake version, set `XDG_STATE_HOME` to a temp dir, and set
-`E2E_REAL_CMD` (testing-only override, run via `bash -c`) to a stub command —
-the wrapper then exercises every gate branch without touching the real suite.
+The redirect is *inside* `bash -lc`, after a `mkdir -p`: the gate creates that
+state directory itself, but only once it runs, so a cron-level `>>` into it
+would fail before the gate ever got a chance on a host that has never run it.
+
+**Testing the gate without spending quota.** The test script exercises the
+gate's decision paths with stub CLIs and a stub suite:
+
+```bash
+bash scripts/tests/e2e-real-gate.test.sh
+```
+
+To drive the gate by hand the same way: point `DELTA_CLAUDE_BIN` /
+`DELTA_CODEX_BIN` at stubs that print a fake version, set `XDG_STATE_HOME` to
+a temp dir, and set `E2E_REAL_CMD` (testing-only override, run via `bash -c`,
+with `E2E_REAL_GATE_PROVIDER` naming the provider it was invoked for) to a
+stub command. `E2E_REAL_GATE_PROVIDERS` (space-separated) narrows the tick to
+one provider.
