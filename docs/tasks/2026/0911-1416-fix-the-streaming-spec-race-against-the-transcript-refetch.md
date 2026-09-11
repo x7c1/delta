@@ -102,7 +102,7 @@ suppression gate it exercises is already correct.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] The rewritten spec still fails when the regression it guards is
+- [x] The rewritten spec still fails when the regression it guards is
       reintroduced: temporarily defeat the content-based suppression of the
       provisional bubble (the gate behind `streaming-message` in
       `frontend/packages/apps/web/src/features/transcript/` and
