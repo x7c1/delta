@@ -109,9 +109,9 @@ export function applySessionEvent(
       // + `setActiveThread` settle: with the previous gate the invalidate was
       // skipped, and the next refetch trigger became the next turn event seconds
       // later — by which point the user prompt, streamed reply, and tool_use
-      // lines had all landed together on the same refetch, surfacing as 3
-      // message-items in the streaming-window of `streaming.spec.ts` where the
-      // assertion expects 1. Routing by `event.thread_id` (always carried by
+      // lines had all landed together on that one refetch; until then the
+      // transcript stayed empty, instead of showing the user prompt as soon as
+      // the turn started. Routing by `event.thread_id` (always carried by
       // `turn_started`; carried by turn completion/interruption when the turn
       // was thread-bound) targets exactly the thread the server says grew,
       // independent of client focus state — and invalidate on a not-yet-mounted
