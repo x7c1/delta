@@ -96,7 +96,7 @@ in every ordinary clone and worktree.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] On the development machine: with the server built from commit A, move
+- [x] On the development machine: with the server built from commit A, move
       `main` to a newer commit B by fast-forward `git pull` (no branch switch),
       run `cargo build`, restart the server, and the footer reads
       `+dev.<short sha of B>` — not the sha of A.
