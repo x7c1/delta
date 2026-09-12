@@ -43,7 +43,7 @@ async fn sessions_ingest_concurrently_while_a_third_handles_a_hook() {
     ix.transcript_fake()
         .gate_reads("/tmp/s2.jsonl", gate.clone());
 
-    let poll = ix.poll_transcript();
+    let poll = ix.poll_transcript(TICK_BOUND);
     let hook_then_release = async {
         // A third session registers via its hook while sess-1/sess-2 are
         // blocked mid-ingest: per-session mailboxes make this independent.

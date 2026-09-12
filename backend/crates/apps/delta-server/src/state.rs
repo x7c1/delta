@@ -1,8 +1,7 @@
 //! Shared application state.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::broadcast;
 
@@ -22,6 +21,28 @@ const EVENT_CHANNEL_CAPACITY: usize = 256;
 /// fires, so the hook sync misses it. A sub-second poll picks it up so the reply
 /// renders without waiting for the next hook.
 const TRANSCRIPT_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+/// How long the three registry sweeps on the same tick (resume dispatch, spawn
+/// reap, echo-deadline sweep) wait on any one session actor.
+///
+/// Deliberately far longer than [`TRANSCRIPT_POLL_INTERVAL`], which bounds the
+/// transcript poll, because the two fan-outs lose different things to a missed
+/// deadline. The poll's actors announce themselves on the async event seam, so
+/// skipping one costs only that tick's return value. These three have no such
+/// seam: their reply *is* the delivery of their events, and dropping it strands
+/// a `SendDispatched` (the browser keeps showing a just-typed send as queued) or
+/// a `SpawnFailed` (the optimistic pending chip never clears) until the next
+/// reload.
+///
+/// So the bound must sit above a *legitimately* slow actor, not at the poll
+/// interval. Each of these sweeps types into a pane, and that typing waits on
+/// purpose: `send_line` holds 250ms between the text and its submit `Enter`
+/// (Claude's TUI would otherwise absorb the `Enter` into the paste burst), and
+/// the echo sweep may send a settling `Escape` first — roughly 400ms of built-in
+/// delay plus four `tmux send-keys` round trips before anything has gone wrong.
+/// This is the backstop for an actor that has wedged, so that one cannot stall
+/// the loop forever; it is not a scheduling budget.
+const SWEEP_TICK_BOUND: Duration = Duration::from_secs(2);
 
 /// State shared across all request handlers.
 ///
@@ -241,11 +262,26 @@ impl AppState {
     /// Spawn the continuous transcript tail.
     ///
     /// Every [`TRANSCRIPT_POLL_INTERVAL`], poll every registered session's
-    /// transcript for newly-written lines. For each session that ingested new
-    /// lines, broadcast a [`SessionEvent::TranscriptUpdated`] carrying the
-    /// distinct threads they landed on so browsers refetch them. This catches the
-    /// assistant reply that Claude Code flushes to the JSONL *after* the `Stop`
-    /// hook fires, which the hook sync misses.
+    /// transcript for newly-written lines. This catches the assistant reply that
+    /// Claude Code flushes to the JSONL *after* the `Stop` hook fires, which the
+    /// hook sync misses.
+    ///
+    /// The poll's *announcements* do not come back through this loop: each
+    /// session's actor emits its own transcript-updated event (and the ingest's
+    /// other events) onto the interactor's async event seam the moment its rows
+    /// land, and [`Self::spawn_async_event_drain`] forwards them to the same
+    /// broadcast. That is deliberate — announcing here, after the fan-out had
+    /// collected *every* session's reply, meant one slow actor delayed every
+    /// other session's refetch signal. So the poll's return value is discarded
+    /// here: re-broadcasting it would only make each browser refetch twice.
+    ///
+    /// Every fan-out is bounded, so an actor that stops answering cannot stall
+    /// the loop; the use case logs the session and stage it dropped. The poll
+    /// waits [`TRANSCRIPT_POLL_INTERVAL`] and the three sweeps below wait
+    /// [`SWEEP_TICK_BOUND`] — they type into panes, and a skipped reply loses
+    /// their events outright rather than just a return value (see that
+    /// constant). A tick that still overruns the interval is logged with its
+    /// per-stage durations.
     ///
     /// The same tick also runs three registry sweeps that must execute outside
     /// any hook handler:
@@ -286,7 +322,10 @@ impl AppState {
             let mut ticker = tokio::time::interval(TRANSCRIPT_POLL_INTERVAL);
             loop {
                 ticker.tick().await;
-                let now = std::time::Instant::now();
+                // One clock read drives every stage's injected `now` *and* the
+                // tick's own timing, so the stage durations below partition the
+                // tick exactly.
+                let now = Instant::now();
                 // Resume dispatch: type the held first prompt of every resume that
                 // `SessionStart(source=resume)` marked ready and that has since
                 // settled. This runs outside the (blocking) SessionStart hook
@@ -299,7 +338,10 @@ impl AppState {
                 // sees each queued→dispatched transition. `Instant::now()` is the
                 // live clock; tests drive `dispatch_ready_resumes` directly with
                 // an injected `now`.
-                match interactor.dispatch_ready_resumes(now).await {
+                match interactor
+                    .dispatch_ready_resumes(now, SWEEP_TICK_BOUND)
+                    .await
+                {
                     Ok(dispatched_events) => {
                         for event in dispatched_events {
                             let _ = events.send(event);
@@ -309,11 +351,12 @@ impl AppState {
                         tracing::warn!(error = %err, "resume dispatch failed");
                     }
                 }
+                let resumes_done = Instant::now();
                 // Watchdog: reap fresh spawns that never bound and resumes that
                 // never became ready before their deadlines. `Instant::now()` is
                 // the live clock here; tests drive `reap_stale_spawns` directly
                 // with an injected `now`.
-                match interactor.reap_stale_spawns(now).await {
+                match interactor.reap_stale_spawns(now, SWEEP_TICK_BOUND).await {
                     Ok(failed_events) => {
                         for event in failed_events {
                             let _ = events.send(event);
@@ -323,6 +366,7 @@ impl AppState {
                         tracing::warn!(error = %err, "spawn watchdog reap failed");
                     }
                 }
+                let reap_done = Instant::now();
                 // Echo watchdog: release any send whose keystrokes vanished
                 // without a trace — no echo, no turn boundary, no signal of any
                 // kind — before its deadline, retrying it once and parking it
@@ -332,7 +376,7 @@ impl AppState {
                 // event to react to; the ticks are what make the silence
                 // observable. `Instant::now()` is the live clock here; tests
                 // drive `sweep_echo_deadlines` directly with an injected `now`.
-                match interactor.sweep_echo_deadlines(now).await {
+                match interactor.sweep_echo_deadlines(now, SWEEP_TICK_BOUND).await {
                     Ok(dispatched_events) => {
                         for event in dispatched_events {
                             let _ = events.send(event);
@@ -342,36 +386,30 @@ impl AppState {
                         tracing::warn!(error = %err, "echo deadline sweep failed");
                     }
                 }
-                match interactor.poll_transcript().await {
-                    Ok((groups, resolved_events)) => {
-                        // One non-empty group per session that ingested new lines.
-                        for messages in groups {
-                            let session_id = messages[0].session_id.clone();
-                            let thread_ids: Vec<_> = messages
-                                .iter()
-                                .map(|m| m.thread_id)
-                                .collect::<BTreeSet<_>>()
-                                .into_iter()
-                                .collect();
-                            // A send error only means there are no subscribers;
-                            // that is fine. We use the raw sender (not
-                            // `broadcast`) because `&self` is not available inside
-                            // the task.
-                            let _ = events.send(SessionEvent::TranscriptUpdated {
-                                session_id,
-                                thread_ids,
-                            });
-                        }
-                        // Permission-resolution events from the ingest (a late
-                        // tool_result tailed in here): broadcast so the browser
-                        // clears the "permission requested" notice.
-                        for event in resolved_events {
-                            let _ = events.send(event);
-                        }
-                    }
-                    Err(err) => {
-                        tracing::warn!(error = %err, "transcript tail poll failed");
-                    }
+                let echo_sweep_done = Instant::now();
+                // Transcript poll. Nothing is broadcast from here: every session's
+                // actor already announced its own ingest on the async event seam,
+                // at the moment its rows landed, so the returned batch is dropped
+                // (see this function's doc comment).
+                if let Err(err) = interactor.poll_transcript(TRANSCRIPT_POLL_INTERVAL).await {
+                    tracing::warn!(error = %err, "transcript tail poll failed");
+                }
+                // A tick that outruns its own interval starves every stage behind
+                // it, so name what it spent the time on. Each fan-out is bounded,
+                // so this reports a *slow* tick rather than a stuck one — the
+                // use case logs the individual actors it gave up waiting for.
+                let poll_done = Instant::now();
+                let elapsed = poll_done - now;
+                if elapsed > TRANSCRIPT_POLL_INTERVAL {
+                    tracing::warn!(
+                        elapsed_ms = elapsed.as_millis() as u64,
+                        interval_ms = TRANSCRIPT_POLL_INTERVAL.as_millis() as u64,
+                        resume_dispatch_ms = (resumes_done - now).as_millis() as u64,
+                        reap_ms = (reap_done - resumes_done).as_millis() as u64,
+                        echo_sweep_ms = (echo_sweep_done - reap_done).as_millis() as u64,
+                        transcript_poll_ms = (poll_done - echo_sweep_done).as_millis() as u64,
+                        "transcript tail tick overran its poll interval"
+                    );
                 }
             }
         })

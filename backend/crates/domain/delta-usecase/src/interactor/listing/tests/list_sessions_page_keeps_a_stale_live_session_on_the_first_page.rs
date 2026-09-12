@@ -28,7 +28,7 @@ async fn list_sessions_page_keeps_a_stale_live_session_on_the_first_page() {
         ix.transcript_fake()
             .push_to(transcript, assistant_line_at(id, "seed", at));
     }
-    ix.poll_transcript().await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await.unwrap();
     // Everything but `sess-live` closes; `sess-live` is the least recently
     // active, so recency alone would bury it on the last page.
     for id in ["sess-a", "sess-b", "sess-c"] {

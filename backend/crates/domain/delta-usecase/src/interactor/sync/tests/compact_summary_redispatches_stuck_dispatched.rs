@@ -34,7 +34,7 @@ async fn compact_summary_redispatches_stuck_dispatched() {
         "cs-1",
         "<summary>of the previous conversation</summary>",
     ));
-    let (_groups, _events) = ix.poll_transcript().await.unwrap();
+    let (_groups, _events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     let sent = ix.tmux_fake().sent.lock().unwrap().clone();
     assert_eq!(
@@ -91,7 +91,7 @@ async fn compact_summary_redispatch_is_debounced_against_hook() {
         "cs-1",
         "<summary>of the previous conversation</summary>",
     ));
-    ix.poll_transcript().await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await.unwrap();
     assert_eq!(
         ix.tmux_fake().sent.lock().unwrap().len(),
         baseline + 1,

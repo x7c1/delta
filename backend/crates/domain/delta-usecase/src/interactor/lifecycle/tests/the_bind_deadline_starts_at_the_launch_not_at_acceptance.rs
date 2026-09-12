@@ -53,7 +53,7 @@ async fn the_bind_deadline_starts_at_the_launch_not_at_acceptance() {
     // A build that has been running for ten times the bind deadline is still
     // not the watchdog's business: nothing is reaped and the row survives.
     let events = ix
-        .reap_stale_spawns(accepted_at + PENDING_SPAWN_DEADLINE * 10)
+        .reap_stale_spawns(accepted_at + PENDING_SPAWN_DEADLINE * 10, TICK_BOUND)
         .await
         .unwrap();
     assert!(
@@ -71,7 +71,7 @@ async fn the_bind_deadline_starts_at_the_launch_not_at_acceptance() {
     // The deadline now runs from the launch: a sweep at the moment it came up
     // leaves it alone…
     let launched_at = Instant::now();
-    let events = ix.reap_stale_spawns(launched_at).await.unwrap();
+    let events = ix.reap_stale_spawns(launched_at, TICK_BOUND).await.unwrap();
     assert!(
         events.is_empty(),
         "the freshly-launched spawn gets its full deadline"
@@ -80,7 +80,7 @@ async fn the_bind_deadline_starts_at_the_launch_not_at_acceptance() {
 
     // …and only a sweep a full deadline past the launch reaps it.
     let events = ix
-        .reap_stale_spawns(launched_at + PENDING_SPAWN_DEADLINE)
+        .reap_stale_spawns(launched_at + PENDING_SPAWN_DEADLINE, TICK_BOUND)
         .await
         .unwrap();
     assert_eq!(

@@ -35,7 +35,7 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
         .unwrap()
         .push("delta-1".to_owned());
 
-    let events = ix.reap_stale_spawns(now).await.unwrap();
+    let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
 
     // SpawnFailed is emitted with the minted id and the pane token.
     assert_eq!(

@@ -76,7 +76,7 @@ async fn boot_restored_send_stays_unsent_until_released_then_matches() {
         .await
         .unwrap();
     let events = ix
-        .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE)
+        .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
         .await
         .unwrap();
     assert!(
@@ -188,7 +188,7 @@ async fn release_on_a_closed_session_resumes_it_then_dispatches_at_settle() {
         .await
         .unwrap();
     let events = ix
-        .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE)
+        .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
         .await
         .unwrap();
     assert!(
@@ -269,7 +269,7 @@ async fn release_conflicts_are_send_not_releasable() {
     ix.on_session_start(session_start("sess-1", "resume"))
         .await
         .unwrap();
-    ix.dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE)
+    ix.dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
         .await
         .unwrap();
 

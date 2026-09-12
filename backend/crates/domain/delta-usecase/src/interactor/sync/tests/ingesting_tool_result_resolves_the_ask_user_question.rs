@@ -42,7 +42,7 @@ async fn ingesting_tool_result_resolves_the_ask_user_question() {
     // The user answered in the TUI: the correlated tool_result lands.
     ix.transcript_fake()
         .push(tool_result_line("r-q1", "toolu_q1"));
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     assert!(
         events.iter().any(|e| matches!(

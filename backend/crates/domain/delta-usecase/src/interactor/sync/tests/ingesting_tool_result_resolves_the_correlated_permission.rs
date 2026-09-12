@@ -39,7 +39,7 @@ async fn ingesting_tool_result_resolves_the_correlated_permission() {
     // A tool_result for a *different* tool_use_id resolves nothing.
     ix.transcript_fake()
         .push(tool_result_line("r-other", "toolu_other"));
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
     assert!(
         !events
             .iter()
@@ -51,7 +51,7 @@ async fn ingesting_tool_result_resolves_the_correlated_permission() {
     // `PermissionResolved` for exactly that request.
     ix.transcript_fake()
         .push(tool_result_line("r-1", "toolu_01"));
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
     assert!(
         events.iter().any(|e| matches!(
             e,
@@ -63,7 +63,7 @@ async fn ingesting_tool_result_resolves_the_correlated_permission() {
     // A re-ingested tool_result (no longer pending) resolves nothing again.
     ix.transcript_fake()
         .push(tool_result_line("r-1-dup", "toolu_01"));
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
     assert!(
         !events
             .iter()

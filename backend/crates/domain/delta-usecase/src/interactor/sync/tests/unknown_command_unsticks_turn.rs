@@ -58,7 +58,7 @@ async fn unknown_command_unsticks_turn() {
     // it. No `Stop`/echo hook fires.
     ix.transcript_fake()
         .push(unknown_command_notice_line("notice", "/review-pr"));
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     // (a) The notice surfaces as a system message carrying the warning text.
     let view = ix.thread_view(main).await.unwrap();

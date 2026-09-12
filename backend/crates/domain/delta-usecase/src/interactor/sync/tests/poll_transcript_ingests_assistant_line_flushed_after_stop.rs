@@ -45,7 +45,7 @@ async fn poll_transcript_ingests_assistant_line_flushed_after_stop() {
     // Claude Code now flushes the assistant line. A poll (no hook) catches it.
     // The single session yields one group carrying just the new line.
     ix.transcript_fake().push(assistant_line("a-1", "hi there"));
-    let (polled, _events) = ix.poll_transcript().await.unwrap();
+    let (polled, _events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
     assert_eq!(
         polled.len(),
         1,
@@ -67,6 +67,6 @@ async fn poll_transcript_ingests_assistant_line_flushed_after_stop() {
     );
 
     // A second poll with no new lines returns nothing (cursor advanced).
-    let (again, _events) = ix.poll_transcript().await.unwrap();
+    let (again, _events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
     assert!(again.is_empty(), "no new lines, nothing returned");
 }

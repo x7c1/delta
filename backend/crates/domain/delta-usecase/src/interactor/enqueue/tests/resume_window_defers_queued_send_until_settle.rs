@@ -115,7 +115,7 @@ async fn resume_settle_with_no_held_prompt_flushes_the_queued_send() {
     // The settle tick: no held first prompt, so the flush releases the queued
     // row.
     let events = ix
-        .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE)
+        .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
         .await
         .unwrap();
     assert!(
@@ -171,7 +171,7 @@ async fn resume_settle_with_held_prompt_types_it_first_queued_row_follows_on_tur
         .await
         .unwrap();
     let events = ix
-        .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE)
+        .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
         .await
         .unwrap();
     assert!(
@@ -256,7 +256,7 @@ async fn resume_settle_flushes_the_queued_row_but_never_a_restored_one() {
         .await
         .unwrap();
     let events = ix
-        .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE)
+        .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
         .await
         .unwrap();
 

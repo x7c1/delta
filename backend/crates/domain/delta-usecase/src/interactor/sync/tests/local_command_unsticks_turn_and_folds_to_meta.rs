@@ -52,7 +52,7 @@ async fn local_command_unsticks_turn_and_folds_to_meta() {
         .push(local_command_name_line("cmdname", "pcmd", "/review-pr"));
     ix.transcript_fake()
         .push(local_command_stdout_line("stdout", "pcmd"));
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     // (a) The command-name and stdout lines fold to `meta` — not user bubbles.
     let view = ix.thread_view(main).await.unwrap();
@@ -154,7 +154,7 @@ async fn namespaced_local_command_unsticks_short_form_send_and_folds_to_meta() {
     ));
     ix.transcript_fake()
         .push(local_command_stdout_line("stdout", "pcmd"));
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     // (a) The group folds to meta despite the namespace mismatch.
     let view = ix.thread_view(main).await.unwrap();

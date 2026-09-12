@@ -11,9 +11,10 @@ delta-model = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-# Only the async Mutex used to serialize transcript ingestion; the runtime and
-# the rest of tokio come from the binary crate.
-tokio = { workspace = true, features = ["sync"] }
+# The async Mutex used to serialize transcript ingestion, plus the timer that
+# bounds how long a background tick waits on any one session actor; the runtime
+# and the rest of tokio come from the binary crate.
+tokio = { workspace = true, features = ["sync", "time"] }
 # Mints the session id Delta pins via `claude --session-id` at spawn time.
 uuid = { workspace = true }
 # Parses the stored `AskUserQuestion` tool input (`{"questions":[…]}`) into the

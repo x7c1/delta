@@ -38,7 +38,7 @@ async fn queued_send_dispatches_after_api_error() {
     // `isApiErrorMessage` line, no Stop hook fires. The tail ingests it,
     // returns the turn machine to idle, and releases the queued send.
     ix.transcript_fake().push(api_error_line("uuid-api-error"));
-    ix.poll_transcript().await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     let (count, second) = {
         let sent = ix.tmux_fake().sent.lock().unwrap();

@@ -51,7 +51,7 @@ async fn dispatch_ready_resumes_send_failure_cancels_head_and_clears_turn() {
     assert!(ix.mark_resume_ready_at(&session_id, ready_at).await);
 
     // Dispatch once settled: `send_line` fails inside the tick.
-    ix.dispatch_ready_resumes(ready_at + RESUME_DISPATCH_SETTLE)
+    ix.dispatch_ready_resumes(ready_at + RESUME_DISPATCH_SETTLE, TICK_BOUND)
         .await
         .unwrap();
 

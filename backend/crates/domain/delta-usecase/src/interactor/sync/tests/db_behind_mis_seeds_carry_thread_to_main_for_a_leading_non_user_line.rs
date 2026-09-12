@@ -34,7 +34,7 @@ async fn db_behind_mis_seeds_carry_thread_to_main_for_a_leading_non_user_line() 
         "/elsewhere/t.jsonl",
         assistant_line("a-lead", "leading reply"),
     );
-    ix.poll_transcript().await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     assert_eq!(
         ingested_thread(&ix, "a-lead"),

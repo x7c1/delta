@@ -42,7 +42,7 @@ async fn interrupt_marker_emits_turn_interrupted_and_stays_on_thread() {
     // The turn is interrupted mid-flight: Claude writes the marker line, which
     // the background tail ingests (no `Stop` hook fires).
     ix.transcript_fake().push(interrupt_line("u-int"));
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     // (a) A `TurnInterrupted` is emitted for this session, carrying the
     // interrupted turn's thread (the branch child).

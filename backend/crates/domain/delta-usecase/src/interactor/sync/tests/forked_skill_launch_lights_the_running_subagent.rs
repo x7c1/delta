@@ -54,7 +54,7 @@ async fn forked_skill_launch_lights_a_background_subagent_that_survives_the_turn
         AGENT_ID,
         "example:review-pr",
     ));
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     // The launch is broadcast as a background subagent on the launching thread,
     // labelled with the skill.
@@ -129,13 +129,13 @@ async fn forked_skill_completion_notification_clears_the_indicator() {
         AGENT_ID,
         "example:review-pr",
     ));
-    ix.poll_transcript().await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     // Minutes later the forked agent finishes and the harness injects the
     // notification.
     ix.transcript_fake()
         .push(task_notification_line_task_id_only("u-note", AGENT_ID));
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     assert!(
         events.iter().any(|e| matches!(
@@ -178,14 +178,14 @@ async fn re_ingesting_the_forked_skill_launch_does_not_duplicate_the_indicator()
         AGENT_ID,
         "example:review-pr",
     ));
-    ix.poll_transcript().await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     // Rewind the read cursor so the same line is folded a second time.
     ix.store()
         .set_transcript_lines_read(&session, 0)
         .await
         .unwrap();
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     assert!(
         !events

@@ -44,7 +44,7 @@ async fn api_error_line_emits_turn_interrupted_and_stays_on_thread() {
     // synthetic `isApiErrorMessage` line, which the background tail ingests (no
     // `Stop` hook fires).
     ix.transcript_fake().push(api_error_line("u-api-error"));
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     // (a) A `TurnInterrupted` is emitted for this session, carrying the
     // in-flight turn's thread (the branch child) so the running indicator clears

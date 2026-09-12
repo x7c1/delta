@@ -53,7 +53,7 @@ async fn close_session_runs_a_final_sync_then_stops_polling() {
         "/work/delta-1/t.jsonl",
         assistant_line("a-after", "post-close growth"),
     );
-    let (groups, _events) = ix.poll_transcript().await.unwrap();
+    let (groups, _events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
     assert!(
         groups.is_empty(),
         "a closed session is no longer polled by the tail",

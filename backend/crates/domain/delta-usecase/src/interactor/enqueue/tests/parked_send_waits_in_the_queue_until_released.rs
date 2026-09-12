@@ -55,10 +55,10 @@ async fn parked_send_is_released_by_the_user_and_typed_once() {
         .await
         .unwrap();
     assert_eq!(send.status, SendStatus::Dispatched);
-    ix.sweep_echo_deadlines(past_deadline(Instant::now()))
+    ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
-    ix.sweep_echo_deadlines(past_deadline(Instant::now()))
+    ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
 
@@ -76,7 +76,7 @@ async fn parked_send_is_released_by_the_user_and_typed_once() {
 
     // A further idle sweep leaves it alone: a held row is skipped by every
     // automatic dispatch trigger, exactly like a boot-restored one.
-    ix.sweep_echo_deadlines(past_deadline(Instant::now()))
+    ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
     assert_eq!(
@@ -150,10 +150,10 @@ async fn a_released_send_gets_a_fresh_retry_budget() {
         .enqueue_send(to(main), "swallowed by a dialog", None)
         .await
         .unwrap();
-    ix.sweep_echo_deadlines(past_deadline(Instant::now()))
+    ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
-    ix.sweep_echo_deadlines(past_deadline(Instant::now()))
+    ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
     assert_eq!(
@@ -169,7 +169,7 @@ async fn a_released_send_gets_a_fresh_retry_budget() {
         3,
         "the release types the message once"
     );
-    ix.sweep_echo_deadlines(past_deadline(Instant::now()))
+    ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
     assert_eq!(
@@ -185,7 +185,7 @@ async fn a_released_send_gets_a_fresh_retry_budget() {
 
     // And the fresh budget is just as bounded: the retry's own deadline parks
     // the row a second time, held for another explicit release.
-    ix.sweep_echo_deadlines(past_deadline(Instant::now()))
+    ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
     let reparked = ix.store().send(send.id).await.unwrap().unwrap();
