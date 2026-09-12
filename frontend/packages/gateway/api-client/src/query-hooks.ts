@@ -385,8 +385,8 @@ export function useGitBranchesQuery(
  * true`) spawns the session, so the optimistic pending item reconciles in one
  * round-trip. Likewise `useOpenSessionMutation` exists for an explicit Resume,
  * but the UI resumes a closed session by sending to its main thread (the backend
- * auto-resumes). Only `useCloseSessionMutation` is currently wired (the
- * navigator Close button).
+ * auto-resumes). The wired ones are `useCloseSessionMutation` and
+ * `useDeleteSessionMutation` — the navigator's `Close` and `Remove` items.
  */
 export function useNewSessionMutation(
   client: ApiClient,
@@ -423,6 +423,25 @@ export function useCloseSessionMutation(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (sessionId: SessionId) => client.closeSession(sessionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+    },
+  });
+}
+
+/**
+ * Remove a closed session from the list (`DELETE /api/sessions/{id}`).
+ *
+ * The server broadcasts `session_removed`, which every other tab applies; this
+ * invalidation is what spares the acting tab from waiting on the socket for a
+ * list it can refetch now.
+ */
+export function useDeleteSessionMutation(
+  client: ApiClient,
+): UseMutationResult<void, Error, SessionId> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: SessionId) => client.deleteSession(sessionId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
     },

@@ -213,6 +213,9 @@ where
         SessionInput::CloseSession { reply } => {
             let _ = reply.send(ctx.close_session().await);
         }
+        SessionInput::DeleteSession { reply } => {
+            let _ = reply.send(ctx.delete_session().await);
+        }
         SessionInput::Interrupt { reply } => {
             let _ = reply.send(ctx.interrupt().await);
         }

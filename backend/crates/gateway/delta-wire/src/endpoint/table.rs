@@ -89,6 +89,12 @@ declare_endpoints! {
     /// Closes a session's pane, leaving its history intact.
     CloseSession: POST "/api/sessions/{id}/close";
 
+    /// Removes a closed session from Delta: its row and every row that hangs
+    /// off it. Nothing on disk is touched — not the git worktree, not the
+    /// agent's own transcript or state. Refused while the session is open or
+    /// still starting.
+    DeleteSession: DELETE "/api/sessions/{id}";
+
     /// Interrupts the session's in-flight turn.
     InterruptSession: POST "/api/sessions/{id}/interrupt";
 

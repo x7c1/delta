@@ -144,6 +144,11 @@ pub(in crate::interactor) enum SessionInput {
     /// with the [`SessionEvent::SubagentFinished`]s the process-gone sweep
     /// produced, for the transport to broadcast.
     CloseSession { reply: Reply<Vec<SessionEvent>> },
+    /// Delete the session's rows, once it is neither open nor still starting.
+    /// Refused (leaving every row untouched) otherwise — see
+    /// `SessionContext::delete_session` for the two refusals and for what is
+    /// deliberately *not* deleted.
+    DeleteSession { reply: Reply<()> },
     /// Interrupt the session's in-flight turn without closing it: reach the open
     /// agent and drive [`AgentAdapter::interrupt`], leaving the open agent (and
     /// its event pump) in place so the provider's `turn/completed{interrupted}`

@@ -229,6 +229,18 @@ where
             .await
     }
 
+    /// Remove a closed session from Delta: delete its row and, by cascade,
+    /// every row that hangs off it.
+    ///
+    /// Delta's own rows are all that go. Nothing on disk is touched — see
+    /// `SessionContext::delete_session` for why, and for the two states this is
+    /// refused in (open, still starting). Unknown ids are a clean
+    /// `SessionNotFound`, as for [`Self::close_session`].
+    pub async fn delete_session(&self, id: &SessionId) -> Result<()> {
+        self.request(id, |reply| SessionInput::DeleteSession { reply })
+            .await
+    }
+
     /// Interrupt a session's in-flight turn, keeping the session open.
     ///
     /// For a terminal-less agent (Codex) this drives the adapter's `interrupt`

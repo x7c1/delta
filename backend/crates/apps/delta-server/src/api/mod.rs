@@ -167,6 +167,34 @@ pub(crate) async fn close_session(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `DELETE /api/sessions/{id}` — remove a closed session from Delta's list.
+///
+/// Deletes the `session` row and, by cascade, everything hanging off it. It
+/// deletes **nothing on disk**: the git worktree the session ran in (which may
+/// hold uncommitted work), its branch, and the agent's own transcript and state
+/// files all stay exactly where they are. Closing already keeps the worktree so
+/// a session can be resumed; this is the user tidying Delta's list, not a
+/// command to destroy work.
+///
+/// Only a session that is neither open nor still starting can be removed — the
+/// use case refuses the other two states with `409` (`session_open` /
+/// `session_spawning`) and touches no row when it does, and an unknown id is a
+/// `404`. The browser only offers the action on a closed card, so those
+/// refusals answer a stale card (another tab reopened the session) rather than
+/// anything a user meets in normal use.
+///
+/// `SessionRemoved` is broadcast on success, not `SessionClosed`: every open tab
+/// has to drop the row, which is not what closing means.
+pub(crate) async fn delete_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let id = SessionId::from(id);
+    state.interactor().delete_session(&id).await?;
+    state.broadcast([delta_usecase::SessionEvent::SessionRemoved { session_id: id }]);
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// `POST /api/sessions/{id}/interrupt` — abort a session's in-flight turn.
 ///
 /// For a terminal-less agent (Codex) this drives the adapter's `interrupt`

@@ -42,7 +42,10 @@ the open sends plus the queryable live state (turn phase and thread, the pending
 permission queue's head and depth, pending question, running subagents), and from
 [`GET /api/sessions`](sessions.md#get-apisessions), whose per-session `open` flag
 says what a missed `session_registered` / `session_opened` / `session_closed`
-would have said. What no refetch can rebuild is the little that is never
+would have said — and whose *contents* say what a missed `session_removed` would
+have: the removed session is simply no longer listed, so a client that was
+focused on it resolves that focus against the refetched list, as it must after
+any gap. What no refetch can rebuild is the little that is never
 persisted: a streaming preview, the latest `status_updated` snapshot, and the
 *explanation* a `send_parked` carries — for status the client simply shows
 nothing until the provider's next report, and a missed `send_parked` still
@@ -70,6 +73,8 @@ which frames arrive, and a client must handle each event whenever it lands.
 { "kind": "session_opened", "session_id": "sess-1" }
 
 { "kind": "session_closed", "session_id": "sess-1" }
+
+{ "kind": "session_removed", "session_id": "sess-1" }
 
 { "kind": "spawn_failed", "session_id": "sess-1", "pane_token": "delta-1",
   "reason": "git error: invalid reference: origin/nope", "cancelled": false,
@@ -112,6 +117,14 @@ which frames arrive, and a client must handle each event whenever it lands.
   remain, the row is gone. That order is deliberate, so a client that refetches
   the session list (and that session's open sends) on this event has already
   been told the session is finished and needs no special case.
+- `session_removed` — a closed session was removed
+  ([`DELETE /api/sessions/{id}`](sessions.md#delete-apisessionsid)): its row and
+  every row hanging off it are gone. Its own event rather than a second
+  `session_closed`, because a client must *drop* the session here, not re-render
+  it as closed — refetch the session list, discard whatever it cached under that
+  id, and move focus elsewhere if it was focused. Only Delta's rows go: the
+  session's git worktree and the agent's own transcript and state files are left
+  on disk.
 - `spawn_failed` — a freshly-spawned session never came up, for **any**
   provider. Four producers emit it: the background launch when it fails (the
   worktree build, including one that landed on a path other than the one planned

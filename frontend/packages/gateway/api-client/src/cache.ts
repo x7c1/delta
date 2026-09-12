@@ -1,6 +1,12 @@
-import type { QueryClient } from '@tanstack/react-query';
+import type { InfiniteData, QueryClient } from '@tanstack/react-query';
 import type { SessionId, ThreadId } from '@delta/model';
-import type { Message, MessagesResponse, Send, SendsResponse } from '@delta/wire-gen';
+import type {
+  Message,
+  MessagesResponse,
+  Send,
+  SendsResponse,
+  SessionsResponse,
+} from '@delta/wire-gen';
 import { queryKeys } from './query-keys';
 
 /**
@@ -41,6 +47,34 @@ export function appendMessage(
  */
 export function invalidateSessions(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+}
+
+/**
+ * The id of the first session in the cached list that is not `excluded`, or
+ * `null` when the cache holds no other session (or has not loaded yet).
+ *
+ * Read for the focus handoff when the focused session stops existing
+ * (`session_removed`): the cached list is already in the list's own order — live
+ * sessions first, then the closed ones, each group most-recently-active first —
+ * so its head is "the next session the user would have picked". Reading the
+ * cache makes the choice synchronous and deterministic; it must therefore happen
+ * *before* {@link invalidateSessions}, not after, or it would race a refetch.
+ */
+export function firstOtherSessionId(
+  queryClient: QueryClient,
+  excluded: SessionId,
+): SessionId | null {
+  const cached = queryClient.getQueryData<InfiniteData<SessionsResponse>>(
+    queryKeys.sessions,
+  );
+  for (const page of cached?.pages ?? []) {
+    for (const item of page.sessions) {
+      if (item.session.id !== excluded) {
+        return item.session.id;
+      }
+    }
+  }
+  return null;
 }
 
 /**

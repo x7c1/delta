@@ -599,6 +599,10 @@ async fn delete_session_cascades_to_children() {
         }])
         .await
         .unwrap();
+    let permission = store
+        .record_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#, Some("toolu_01"))
+        .await
+        .unwrap();
     store
         .set_transcript_lines_read(&session.id, 3)
         .await
@@ -615,6 +619,22 @@ async fn delete_session_cascades_to_children() {
         .await
         .unwrap()
         .is_none());
+    // The permission trail goes with the session too — counted in the table
+    // rather than through `decide_permission_request` (which answers `None` for
+    // an already-decided row as well, and so could not tell "gone" from
+    // "settled").
+    assert_eq!(
+        {
+            let conn = store.conn.lock().await;
+            conn.query_row(
+                "SELECT COUNT(*) FROM permission_request WHERE id = ?1",
+                rusqlite::params![permission.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        },
+        0,
+    );
     assert_eq!(store.transcript_lines_read(&session.id).await.unwrap(), 0);
 }
 

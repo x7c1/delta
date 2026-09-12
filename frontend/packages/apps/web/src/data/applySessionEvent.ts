@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import type { SessionId, ThreadId } from '@delta/model';
 import type { SessionEvent } from '@delta/wire-gen';
 import {
+  firstOtherSessionId,
   invalidateRepositoriesAndPullRequests,
   invalidateSessions,
   invalidateSessionSends,
@@ -23,15 +24,18 @@ import { useNotificationStore } from '../store/notificationStore';
  *   (the turn lifecycle, transcript growth, a close) also invalidate the
  *   session's open-send list — the server-side truth behind the pending strip.
  *   Lifecycle events (`session_registered`/`session_opened`/`session_closed`,
- *   and `spawn_failed` — a reaped spawn's row is deleted) invalidate the
- *   session list so a starting, registered, resumed, closed, or vanished
+ *   and the two whose row is deleted — `spawn_failed` for a reaped spawn,
+ *   `session_removed` for a session the user removed) invalidate the session
+ *   list so a starting, registered, resumed, closed, vanished or removed
  *   session's presence and open flag stay in sync.
- * - **Nav store** (Zustand): one case only — a `spawn_failed` for the focused
- *   session, which is about to stop existing, so focus is handed back to the
+ * - **Nav store** (Zustand): the two events whose session stops existing, and
+ *   only when it was the focused one. A `spawn_failed` hands focus back to the
  *   new-session screen where its Retry / Dismiss card lives (and where the live
- *   store has just restored whatever the failed launch never sent). When the
+ *   store has just restored whatever the failed launch never sent); when the
  *   cancelled session was NOT the focused one there is no handoff to make, so
- *   the snackbar says where that card and that text went instead.
+ *   the snackbar says where that card and that text went instead. A
+ *   `session_removed` hands focus to the first other session in the list cache,
+ *   falling back to the new-session screen when there is none.
  * - **Live store** (Zustand): ephemeral UI signals that are not REST resources
  *   — turn tracking, the spawn registry, permission notices, unread badges,
  *   external input, and the per-session resuming marker.
@@ -213,6 +217,33 @@ export function applySessionEvent(
         refreshFocusedThreads();
       }
       break;
+    case 'session_removed': {
+      // A closed session was removed: its row and everything hanging off it are
+      // gone server-side. Modelled on `spawn_failed` below — the other event
+      // whose session stops existing — so it does the same two things: drop the
+      // session's cached open sends (a refetch would only 404) and refetch the
+      // session list, which was listing it and must now lose it.
+      //
+      // Focus goes to the first other session in the cached list, or to the
+      // new-session screen when the removed one was the last. Read here, BEFORE
+      // the invalidation below — see {@link firstOtherSessionId} for why the
+      // head of the cached list is the right target and why reading it after
+      // would race the refetch.
+      const nextFocus = isFocused
+        ? (firstOtherSessionId(queryClient, event.session_id) ??
+          NEW_SESSION_FOCUS)
+        : null;
+      removeSessionSends(queryClient, event.session_id);
+      invalidateSessions(queryClient);
+      // A session the user is NOT looking at being removed changes nothing on
+      // their screen but the card disappearing; moving focus there would yank
+      // them out of what they are reading. Reconciling rather than navigating
+      // leaves any overlay they opened in the meantime standing.
+      if (nextFocus !== null) {
+        useNavStore.getState().reconcileFocusedSession(nextFocus);
+      }
+      break;
+    }
     case 'permission_requested':
     case 'permission_resolved':
     case 'question_asked':

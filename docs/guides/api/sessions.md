@@ -195,6 +195,49 @@ Either way `session_closed` is broadcast.
 - **404** — no session with that id.
 - **500** — killing the tmux session failed.
 
+### `DELETE /api/sessions/{id}`
+
+Remove a **closed** session from Delta. The `session` row is deleted and the
+cascade takes everything hanging off it: threads, messages, sends, permission
+requests, subagent records and the transcript sync cursor. There is no request
+body.
+
+**Nothing on disk is deleted.** The git worktree the session ran in — which may
+hold uncommitted work — its branch, and the agent's own transcript and state
+files (Claude Code's JSONL, Codex's thread) all stay exactly where they are.
+Closing already keeps the worktree so a session can be resumed; this route is
+the user tidying Delta's list, not a command to destroy work. A session removed
+here cannot be resumed, because the row `POST /api/sessions/{id}/open` resumes
+by id is gone.
+
+Removal also stops nothing that is still running, and a session reads as closed
+whenever Delta holds no pane for it — including a `claude` started *outside*
+Delta, which Delta knows only through its hooks and never holds a pane for, so it
+is listed as closed while it runs. Removing one of those does not end it: its
+next hook registers the same id again from scratch, so the card comes back, and
+— the sync cursor having gone with the row — the JSONL on disk is re-ingested
+from its first line. Remove such a session once its agent has exited.
+
+Removal is allowed only for a session that is neither open nor still starting;
+state is checked before anything is deleted, so a refusal leaves every row
+untouched. Both refusals are conflicts with current state, and they carry
+different codes because they ask the caller for different things: close it
+first, versus wait for it to come up. Open/closed is process-runtime state (see
+the overview above), not the row's `status`.
+
+`session_removed` is broadcast on success — its own event, not `session_closed`:
+a client hearing it must drop the session rather than re-render it as closed.
+
+- **204 No Content** — the session and its rows are gone.
+- **404** — no session with that id (including a second removal of the same
+  session).
+- **409** — the session is open (body `code: "session_open"`), whether idle or
+  mid-turn; a turn in flight is not interrupted. Or the session is still
+  starting (body `code: "session_spawning"`) — its launch is still being
+  prepared, its pane is up awaiting its first hook, or its row still says
+  `spawning`.
+- **500** — the delete failed in the store.
+
 ### `POST /api/sessions/{id}/interrupt`
 
 Abort the session's in-flight turn without closing it.

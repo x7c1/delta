@@ -33,7 +33,7 @@ const components: Components = {
  * (see index.css) styles just the elements Claude emits, rather than a full
  * typography framework. GFM enables tables, strikethrough, task lists, and
  * autolinks, which Claude routinely emits; `remarkTrimAutolinkPunctuation`
- * then keeps CJK punctuation out of the URLs GFM's autolinker absorbs it into.
+ * then moves the CJK text the autolinker absorbs back into the prose.
  *
  * Every link opens in a new tab, matching the session card's pull-request
  * link, so that following one never navigates the conversation away and costs

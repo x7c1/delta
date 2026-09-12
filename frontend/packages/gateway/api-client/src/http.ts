@@ -66,14 +66,19 @@ export interface ApiClientOptions {
  * Callers branch on this to keep the session closed and show a specific message
  * rather than a generic failure.
  *
- * `session_spawning` means a **branch** send named a session whose launch has
- * not bound yet, so it has ingested no message to branch from. Only branch
- * sends can see it: a plain send to a starting session is accepted as a
- * `queued` row and dispatched when the launch binds. Unlike the codes around
- * it, nothing branches on this one — the composer cannot compose a branch send
- * against a session with no messages, so a browser that somehow met it would
- * render its generic failure copy. It is declared for completeness of the
- * server's code set.
+ * `session_spawning` means a request named a session whose launch has not bound
+ * yet. Two requests meet it: a **branch** send, which has no message to branch
+ * from (a plain send to a starting session is instead accepted as a `queued` row
+ * and dispatched when the launch binds), and a removal of a session that started
+ * again since the list was fetched. The composer cannot compose a branch send
+ * against a session with no messages, so in the browser only the navigator's
+ * `Remove` reaches this code, which reports it as a session that has started
+ * again and can be removed once it is closed.
+ *
+ * `session_open` means a removal named a session that is currently open. The
+ * navigator offers `Remove` only on a closed card, so this answers a card
+ * another tab reopened. Kept apart from `session_spawning` because the two ask
+ * the user for different things: close it first, versus wait for it to come up.
  *
  * `permission_not_pending` means a permission decision can no longer take
  * effect: the request was already decided, or its hook wait timed out and the
@@ -132,6 +137,7 @@ export interface ApiClientOptions {
 export type ApiErrorCode =
   | 'resume_unavailable'
   | 'session_spawning'
+  | 'session_open'
   | 'permission_not_pending'
   | 'permission_decision_unsupported'
   | 'question_not_pending'
@@ -286,6 +292,22 @@ export class ApiClient {
     return this.requestNoContent(
       `/api/sessions/${encodeURIComponent(sessionId)}/close`,
       { method: 'POST' },
+    );
+  }
+
+  /**
+   * `DELETE /api/sessions/{id}` — remove a closed session from Delta (204).
+   *
+   * Deletes the session's rows and nothing on disk: the git worktree and the
+   * agent's own transcript and state files stay. Refused with a `409` — an
+   * {@link ApiError} carrying `session_open` or `session_spawning` — while the
+   * session is open or still starting; the navigator offers the action only on
+   * a closed card, so that only answers a stale one.
+   */
+  deleteSession(sessionId: SessionId): Promise<void> {
+    return this.requestNoContent(
+      `/api/sessions/${encodeURIComponent(sessionId)}`,
+      { method: 'DELETE' },
     );
   }
 

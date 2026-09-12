@@ -96,8 +96,10 @@ status codes and error bodies — is documented here only.
     local transcript file is gone, so `claude --resume <id>` has nothing to
     replay), `session_spawning` (a *branch* send whose target session was
     accepted but has not bound yet, so it has ingested no message to branch
-    from — a plain send there is accepted as a `queued` row instead),
-    `permission_not_pending`, `question_not_pending`,
+    from — a plain send there is accepted as a `queued` row instead; and a
+    removal aimed at a session that has not finished starting),
+    `session_open` (a removal aimed at a session that is still open — close it
+    first), `permission_not_pending`, `question_not_pending`,
     `send_not_cancellable`, `send_not_releasable`, `clone_root_duplicate`,
     `clone_dest_exists` (the one path a clone could land on is already taken —
     there is no fallback naming), or `launch_option_builtin` (a delete aimed at
