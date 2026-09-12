@@ -30,7 +30,7 @@ async fn list_sessions_page_lists_open_sessions_before_closed_ones() {
         "/tmp/closed.jsonl",
         assistant_line_at("a-closed", "newer", "2026-02-01T00:00:00Z"),
     );
-    ix.poll_transcript().await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await.unwrap();
     ix.close_session(&SessionId::from("sess-closed"))
         .await
         .unwrap();

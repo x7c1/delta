@@ -30,7 +30,9 @@ async fn dispatch_ready_resumes_holds_until_settle_then_dispatches() {
 
     // Before the settle elapses, the dispatch tick holds the keystroke.
     let before_settle = ready_at + RESUME_DISPATCH_SETTLE - Duration::from_millis(1);
-    ix.dispatch_ready_resumes(before_settle).await.unwrap();
+    ix.dispatch_ready_resumes(before_settle, TICK_BOUND)
+        .await
+        .unwrap();
     assert!(
         ix.tmux_fake().sent.lock().unwrap().is_empty(),
         "the held prompt is not dispatched before the settle elapses"
@@ -44,7 +46,9 @@ async fn dispatch_ready_resumes_holds_until_settle_then_dispatches() {
     // Once `now` reaches the settle, the held prompt is typed and the resume
     // leaves the map.
     let at_settle = ready_at + RESUME_DISPATCH_SETTLE;
-    ix.dispatch_ready_resumes(at_settle).await.unwrap();
+    ix.dispatch_ready_resumes(at_settle, TICK_BOUND)
+        .await
+        .unwrap();
     let sent = ix.tmux_fake().sent.lock().unwrap().clone();
     assert!(
         sent.iter()

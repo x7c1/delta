@@ -69,7 +69,7 @@ async fn resume_window_requeue_drops_the_held_first_prompt() {
     ix.on_session_start(session_start("sess-R", "resume"))
         .await
         .unwrap();
-    ix.dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE)
+    ix.dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
         .await
         .unwrap();
     assert!(

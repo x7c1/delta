@@ -35,7 +35,7 @@ async fn open_session_seeds_carry_thread_from_branch_so_leading_line_is_not_main
         "/elsewhere/t.jsonl",
         assistant_line("a-lead", "post-resume reply"),
     );
-    ix.poll_transcript().await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await.unwrap();
     assert_eq!(
         ingested_thread(&ix, "a-lead"),
         Some(child),

@@ -272,6 +272,11 @@ const AUTH_TOKEN: &str = "delta-e2e-auth-token";
 /// callback through, exactly as the rendered hook URLs carry it in production.
 const HOOK_SECRET: &str = "delta-e2e-hook-secret";
 
+/// The bound this test hands a background-tick fan-out. Far longer than the
+/// in-process actors take, so the tick always ends because they replied — never
+/// because the clock ran out on a loaded machine.
+const TICK_BOUND: Duration = Duration::from_secs(30);
+
 async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
     // A hook callback authenticates through the `hs` secret in its URL, not the
     // bearer token, so attach it for the `/hooks/*` paths the driver POSTs.
@@ -487,7 +492,7 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     // `Instant::now()`); the keystroke now lands on the normal `send_line` path.
     state
         .interactor()
-        .dispatch_ready_resumes(Instant::now() + Duration::from_secs(1))
+        .dispatch_ready_resumes(Instant::now() + Duration::from_secs(1), TICK_BOUND)
         .await
         .unwrap();
     assert_eq!(

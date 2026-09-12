@@ -27,7 +27,7 @@ async fn queued_branch_send_dispatches_after_interrupt() {
     // The user interrupts: Claude writes the marker, no Stop fires. The tail
     // ingests it and releases the queued send.
     ix.transcript_fake().push(interrupt_line("uuid-interrupt"));
-    ix.poll_transcript().await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     let (count, second) = {
         let sent = ix.tmux_fake().sent.lock().unwrap();

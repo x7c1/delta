@@ -264,7 +264,9 @@ which frames arrive, and a client must handle each event whenever it lands.
 - `transcript_updated` — the background tail ingested new transcript lines
   between hooks. Claude Code often flushes the final assistant line to the JSONL
   *after* the `Stop` hook fires, so the hook sync misses it; a ~500ms poll picks
-  it up and emits this so the browser refetches the affected `thread_ids`. Unlike
+  it up and emits this so the browser refetches the affected `thread_ids`. Each
+  session emits its own the moment its lines land, so a session slow to read
+  never delays another session's refetch. Unlike
   `turn_completed`/`external_input` it carries no turn semantics — clients must
   only refetch those threads, never mutate the pending-send FIFO or unread
   badges.

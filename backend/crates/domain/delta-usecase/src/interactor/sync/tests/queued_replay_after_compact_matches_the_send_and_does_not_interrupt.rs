@@ -62,7 +62,7 @@ async fn queued_replay_after_compact_matches_the_send_and_does_not_interrupt() {
         queued_replay_line("u-replay", "the user's actual prompt"),
     ));
 
-    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    let (_groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
 
     // (1) The queued replay is persisted as `Role::User` on the send's thread,
     // not swallowed as `Role::Meta`. The regression pin for the hidden

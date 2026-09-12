@@ -45,7 +45,7 @@ async fn session_start_resume_marks_ready_without_dispatching() {
 
     // Proof the hook stamped `ready_at`: once `now` advances past the settle, the
     // dispatch tick types the held prompt (a never-stamped resume would not).
-    ix.dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE)
+    ix.dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
         .await
         .unwrap();
     let sent = ix.tmux_fake().sent.lock().unwrap().clone();

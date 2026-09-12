@@ -66,7 +66,10 @@ async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
     assert_eq!(behind.status, SendStatus::Queued);
 
     // A sweep before the deadline changes nothing: the wait is still young.
-    let dispatched = ix.sweep_echo_deadlines(Instant::now()).await.unwrap();
+    let dispatched = ix
+        .sweep_echo_deadlines(Instant::now(), TICK_BOUND)
+        .await
+        .unwrap();
     assert!(dispatched.is_empty(), "no deadline has passed yet");
     assert_eq!(
         ix.store().send(send.id).await.unwrap().unwrap().status,
@@ -78,7 +81,7 @@ async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
     // dialog still up is dismissed and a half-landed composer draft discarded
     // before the text lands again.
     let dispatched = ix
-        .sweep_echo_deadlines(past_deadline(Instant::now()))
+        .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
     assert!(
@@ -126,7 +129,7 @@ async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
     // The send is parked — held in the queue for an explicit release, its text
     // announced — and the queue behind it moves past it.
     let dispatched = ix
-        .sweep_echo_deadlines(past_deadline(Instant::now()))
+        .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
     assert!(
@@ -214,7 +217,7 @@ async fn a_retyped_send_still_matches_its_echo_and_self_heals() {
     assert_eq!(send.status, SendStatus::Dispatched);
 
     // The first keystrokes are swallowed, so the deadline re-types the send.
-    ix.sweep_echo_deadlines(past_deadline(Instant::now()))
+    ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
     assert_eq!(
@@ -253,7 +256,7 @@ async fn a_retyped_send_still_matches_its_echo_and_self_heals() {
         "the original dispatch and the one retry",
     );
     let dispatched = ix
-        .sweep_echo_deadlines(past_deadline(Instant::now()))
+        .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
     assert!(dispatched.is_empty(), "got {dispatched:?}");
@@ -291,7 +294,7 @@ async fn echo_deadline_after_a_matched_echo_never_retypes() {
     // A sweep tick from far in the future — one that would have fired had the
     // wait still been open — finds nothing to do.
     let dispatched = ix
-        .sweep_echo_deadlines(past_deadline(Instant::now()))
+        .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
     assert!(dispatched.is_empty(), "got {dispatched:?}");
@@ -355,7 +358,7 @@ async fn a_held_resume_prompt_is_not_swept_by_the_echo_deadline() {
     // A sweep long past the deadline leaves the held prompt exactly as it is:
     // no requeue, no park, no Escape into a pane that is still coming up.
     let dispatched = ix
-        .sweep_echo_deadlines(past_deadline(Instant::now()))
+        .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
         .await
         .unwrap();
     assert!(dispatched.is_empty(), "got {dispatched:?}");

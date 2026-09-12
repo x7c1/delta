@@ -22,7 +22,7 @@ async fn reap_stale_spawns_leaves_a_fresh_spawn_alone() {
         .unwrap()
         .push("delta-1".to_owned());
 
-    let events = ix.reap_stale_spawns(now).await.unwrap();
+    let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
 
     assert!(events.is_empty(), "a fresh spawn yields no SpawnFailed");
     assert!(

@@ -2,6 +2,7 @@
 //! tests use to reach into the fakes the interactor owns.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::agent::AgentAdapterFactory;
 use crate::Interactor;
@@ -26,6 +27,17 @@ pub(crate) const TEST_SETTINGS_JSON: &str = r#"{"hooks":{}}"#;
 /// The Delta-owned path the test interactor writes settings to and passes via
 /// `claude --settings`. Outside any spawn workdir, on purpose.
 pub(crate) const TEST_SETTINGS_PATH: &str = "/run/delta/settings.json";
+
+/// The bound the tests pass to the background-tick fan-outs
+/// (`poll_transcript`, `dispatch_ready_resumes`, `reap_stale_spawns`,
+/// `sweep_echo_deadlines`).
+///
+/// Deliberately far longer than any test's actors take: for every test but the
+/// one that *exercises* the bound, the fan-out must end because the actors
+/// replied, never because the clock ran out — a tight default would turn a
+/// loaded CI machine into a flake. The test that exercises the bound passes its
+/// own short value.
+pub(crate) const TICK_BOUND: Duration = Duration::from_secs(30);
 
 /// The concrete interactor type the use-case tests build over the in-memory
 /// fakes.

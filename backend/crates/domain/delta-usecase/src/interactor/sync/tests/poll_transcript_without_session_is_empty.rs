@@ -4,6 +4,6 @@ use crate::interactor::testing::*;
 #[tokio::test]
 async fn poll_transcript_without_session_is_empty() {
     let ix = interactor();
-    let (polled, _events) = ix.poll_transcript().await.unwrap();
+    let (polled, _events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
     assert!(polled.is_empty());
 }

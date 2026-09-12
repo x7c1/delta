@@ -29,7 +29,7 @@ async fn reap_stale_resuming_leaves_a_ready_resume_alone() {
         .await
         .unwrap();
 
-    let events = ix.reap_stale_spawns(now).await.unwrap();
+    let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
 
     assert!(events.is_empty(), "a ready resume is not failed");
     assert!(

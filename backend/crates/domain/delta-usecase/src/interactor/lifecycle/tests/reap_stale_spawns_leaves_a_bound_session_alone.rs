@@ -26,7 +26,10 @@ async fn reap_stale_spawns_leaves_a_bound_session_alone() {
     // Reap with a `now` far past any deadline: the bound session is not pending,
     // so nothing is reaped.
     let events = ix
-        .reap_stale_spawns(Instant::now() + std::time::Duration::from_secs(3600))
+        .reap_stale_spawns(
+            Instant::now() + std::time::Duration::from_secs(3600),
+            TICK_BOUND,
+        )
         .await
         .unwrap();
 

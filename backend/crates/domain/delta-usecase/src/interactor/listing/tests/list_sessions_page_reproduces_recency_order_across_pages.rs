@@ -42,7 +42,7 @@ async fn list_sessions_page_reproduces_recency_order_across_pages() {
         "/tmp/new.jsonl",
         assistant_line_at("a-new", "newer", "2026-02-01T00:00:00Z"),
     );
-    ix.poll_transcript().await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await.unwrap();
     for id in ["sess-old", "sess-new", "sess-quiet"] {
         ix.close_session(&SessionId::from(id)).await.unwrap();
     }

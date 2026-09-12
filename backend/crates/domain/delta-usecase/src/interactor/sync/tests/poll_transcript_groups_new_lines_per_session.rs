@@ -26,7 +26,7 @@ async fn poll_transcript_groups_new_lines_per_session() {
     ix.transcript_fake()
         .push_to("/tmp/s2.jsonl", assistant_line("a-2", "reply two"));
 
-    let (groups, _events) = ix.poll_transcript().await.unwrap();
+    let (groups, _events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
     assert_eq!(groups.len(), 2, "one group per session that grew");
 
     // Each group carries exactly its own session's new line.
@@ -50,5 +50,5 @@ async fn poll_transcript_groups_new_lines_per_session() {
 
     // A second poll with no new lines yields no groups (per-session cursors
     // advanced independently).
-    assert!(ix.poll_transcript().await.unwrap().0.is_empty());
+    assert!(ix.poll_transcript(TICK_BOUND).await.unwrap().0.is_empty());
 }
