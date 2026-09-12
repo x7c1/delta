@@ -162,6 +162,7 @@ export const mockThreads: Thread[] = [
     title: 'main',
     parent_thread_id: null,
     root_message_uuid: null,
+    last_activity_at: '2026-01-01T00:03:00Z',
     created_at: '2026-01-01T00:00:00Z',
   },
   {
@@ -170,6 +171,8 @@ export const mockThreads: Thread[] = [
     title: 'delta etymology',
     parent_thread_id: MAIN_THREAD_ID,
     root_message_uuid: 'uuid-a1',
+    // The newest activity in this session, so the navigator marks this row.
+    last_activity_at: '2026-01-01T00:07:00Z',
     created_at: '2026-01-01T00:05:00Z',
   },
 ];
@@ -181,6 +184,7 @@ export const mockThreads2: Thread[] = [
     title: 'main',
     parent_thread_id: null,
     root_message_uuid: null,
+    last_activity_at: '2026-01-02T00:02:00Z',
     created_at: '2026-01-02T00:00:00Z',
   },
   {
@@ -189,6 +193,7 @@ export const mockThreads2: Thread[] = [
     title: 'scratch ideas',
     parent_thread_id: SESSION_2_MAIN_THREAD_ID,
     root_message_uuid: 'uuid-s2-a1',
+    last_activity_at: '2026-01-02T00:06:00Z',
     created_at: '2026-01-02T00:05:00Z',
   },
 ];
@@ -200,6 +205,7 @@ export const mockThreads3: Thread[] = [
     title: 'main',
     parent_thread_id: null,
     root_message_uuid: null,
+    last_activity_at: null,
     created_at: '2025-12-31T00:00:00Z',
   },
 ];
@@ -211,6 +217,7 @@ export const mockThreads4: Thread[] = [
     title: 'main',
     parent_thread_id: null,
     root_message_uuid: null,
+    last_activity_at: null,
     created_at: '2025-12-30T12:00:00Z',
   },
 ];
@@ -714,6 +721,7 @@ function buildFillerSessions(): MockStore['sessions'] {
           title: 'main',
           parent_thread_id: null,
           root_message_uuid: null,
+          last_activity_at: null,
           created_at: createdAt,
         },
       ],

@@ -23,6 +23,7 @@ function reset() {
     runningThreads: {},
     notices: {},
     unread: {},
+    threadActivity: {},
     streamingMessages: {},
     runningSubagents: {},
     contextUsage: {},
@@ -2692,5 +2693,42 @@ describe('liveStore status persistence', () => {
       codex: [window(SEVEN_DAYS, 44, resetsAt)],
     });
     expect(restored.contextUsage).toEqual({ 'sess-codex': 12 });
+  });
+});
+
+describe('liveStore per-thread latest activity', () => {
+  beforeEach(reset);
+
+  it('records a thread\'s activity and only ever moves it forward', () => {
+    const note = useLiveStore.getState().noteThreadActivity;
+
+    note(1, '2026-01-01T00:01:00Z');
+    expect(useLiveStore.getState().threadActivity).toEqual({
+      1: '2026-01-01T00:01:00Z',
+    });
+
+    // A later stamp wins.
+    note(1, '2026-01-01T00:02:00Z');
+    expect(useLiveStore.getState().threadActivity[1]).toBe(
+      '2026-01-01T00:02:00Z',
+    );
+
+    // An earlier one — two live events for the same thread arriving out of
+    // order — must not pull the mark back to an older moment, and leaves the
+    // map identity-stable so no subscriber re-renders for nothing.
+    const before = useLiveStore.getState().threadActivity;
+    note(1, '2026-01-01T00:00:30Z');
+    expect(useLiveStore.getState().threadActivity).toBe(before);
+  });
+
+  it('keeps each thread separate and defaults to the client clock', () => {
+    const note = useLiveStore.getState().noteThreadActivity;
+    note(1, '2026-01-01T00:01:00Z');
+    note(2);
+
+    const activity = useLiveStore.getState().threadActivity;
+    expect(activity[1]).toBe('2026-01-01T00:01:00Z');
+    // No timestamp given (the live events carry none), so the store stamps now.
+    expect(Number.isNaN(Date.parse(activity[2]))).toBe(false);
   });
 });

@@ -22,6 +22,9 @@ pub struct WireThread {
     pub root_message_uuid: Option<String>,
     /// ISO-8601 timestamp.
     pub created_at: String,
+    /// The thread's most recent message timestamp, ISO-8601; null while the
+    /// thread has no timestamped message.
+    pub last_activity_at: Option<String>,
 }
 
 impl From<Thread> for WireThread {
@@ -33,6 +36,7 @@ impl From<Thread> for WireThread {
             parent_thread_id: thread.parent_thread_id.map(|id| id.0),
             root_message_uuid: thread.root_message_uuid.map(|uuid| uuid.0),
             created_at: thread.created_at,
+            last_activity_at: thread.last_activity_at,
         }
     }
 }
@@ -52,6 +56,7 @@ mod tests {
             parent_thread_id: Some(ThreadId(1)),
             root_message_uuid: Some(MessageUuid::from("uuid-root")),
             created_at: "2026-01-01T00:00:00Z".into(),
+            last_activity_at: Some("2026-01-02T03:04:05Z".into()),
         };
         assert_eq!(
             serde_json::to_value(WireThread::from(thread)).unwrap(),
@@ -62,6 +67,7 @@ mod tests {
                 "parent_thread_id": 1,
                 "root_message_uuid": "uuid-root",
                 "created_at": "2026-01-01T00:00:00Z",
+                "last_activity_at": "2026-01-02T03:04:05Z",
             }),
         );
     }

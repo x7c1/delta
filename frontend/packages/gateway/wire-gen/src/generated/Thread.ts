@@ -17,4 +17,9 @@ root_message_uuid: string | null,
 /**
  * ISO-8601 timestamp.
  */
-created_at: string, };
+created_at: string, 
+/**
+ * The thread's most recent message timestamp, ISO-8601; null while the
+ * thread has no timestamped message.
+ */
+last_activity_at: string | null, };

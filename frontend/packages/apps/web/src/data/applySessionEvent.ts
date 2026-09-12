@@ -38,7 +38,8 @@ import { useNotificationStore } from '../store/notificationStore';
  *   falling back to the new-session screen when there is none.
  * - **Live store** (Zustand): ephemeral UI signals that are not REST resources
  *   — turn tracking, the spawn registry, permission notices, unread badges,
- *   external input, and the per-session resuming marker.
+ *   per-thread latest activity, external input, and the per-session resuming
+ *   marker.
  *
  * Transcript/turn events are scoped to the focused session: `activeThreadId`
  * selects which transcript to refetch and which thread to badge, and
@@ -106,6 +107,15 @@ export function applySessionEvent(
         !(isFocused && activeThreadId === event.thread_id)
       ) {
         store.bumpUnread(event.thread_id);
+      }
+      // A turn starting, ending or being interrupted on a thread means a message
+      // landed there, so it is that thread's latest activity — the navigator's
+      // "most recently active sub-thread" mark moves to it without waiting for
+      // the threads query to refetch. Deliberately NOT gated the way the unread
+      // bump above is: the thread on screen is an ordinary answer to "where did
+      // the last message land", unlike "what happened while you were away".
+      if (event.thread_id !== null) {
+        store.noteThreadActivity(event.thread_id);
       }
       // Refetch the thread the event names — unconditionally, not gated on
       // focus or `activeThreadId`. Under slow scheduling a `turn_started` WS
@@ -175,8 +185,10 @@ export function applySessionEvent(
       }
       break;
     case 'transcript_updated':
-      // The continuous tail ingested new lines. Pure refetch: invalidate every
-      // affected thread plus the focused active one, with no store change.
+      // The continuous tail ingested new lines. Invalidate every affected
+      // thread plus the focused active one; the only store write is each named
+      // thread's latest-activity stamp (no unread bump — the tail is not the
+      // "it finished" signal `turn_completed` is).
       //
       // New lines also move the session's last activity — and with it its place
       // in the session list's recency order inside its open/closed group — so
@@ -187,6 +199,9 @@ export function applySessionEvent(
       invalidateSessionSends(queryClient, event.session_id);
       for (const threadId of event.thread_ids) {
         invalidateThreadMessages(queryClient, threadId);
+        // Lines were ingested on this exact thread, so it is where the newest
+        // message landed — same reasoning as the turn events above.
+        store.noteThreadActivity(threadId);
       }
       if (
         isFocused &&

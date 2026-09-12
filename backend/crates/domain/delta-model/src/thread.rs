@@ -49,4 +49,11 @@ pub struct Thread {
     pub root_message_uuid: Option<MessageUuid>,
     /// ISO-8601 timestamp.
     pub created_at: String,
+    /// The thread's most recent message timestamp (`MAX(message.created_at)`),
+    /// ISO-8601, or `None` while the thread has no timestamped message.
+    ///
+    /// Denormalized onto the thread row and maintained on every message upsert,
+    /// so a listing can rank a session's threads by recency without a `MAX` per
+    /// thread.
+    pub last_activity_at: Option<String>,
 }

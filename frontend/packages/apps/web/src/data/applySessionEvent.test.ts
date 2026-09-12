@@ -71,6 +71,7 @@ describe('applySessionEvent', () => {
       runningSubagents: {},
       notices: {},
       unread: {},
+      threadActivity: {},
       streamingMessages: {},
     });
     useNavStore.setState({ focusedSessionId: FOCUSED });
@@ -475,6 +476,56 @@ describe('applySessionEvent', () => {
 
     // No unread mutation for this event.
     expect(useLiveStore.getState().unread[2]).toBe(1);
+  });
+
+  it('records per-thread latest activity for every thread a message landed on', () => {
+    const queryClient = new QueryClient();
+
+    // Every thread named by the event, including the one being viewed (5) —
+    // unlike `bumpUnread`, which deliberately skips the active thread, this
+    // answers "where did the last message land", and the active thread is an
+    // ordinary answer to that.
+    applySessionEvent(
+      { kind: 'transcript_updated', session_id: FOCUSED, thread_ids: [2, 5] },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+    expect(Object.keys(useLiveStore.getState().threadActivity).sort()).toEqual([
+      '2',
+      '5',
+    ]);
+
+    // The turn events carry a thread too, and record it the same way — again
+    // for the active thread, which raised no unread badge above.
+    applySessionEvent(
+      {
+        kind: 'turn_completed',
+        session_id: FOCUSED,
+        thread_id: 9,
+        stop_reason: null,
+      },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+    expect(useLiveStore.getState().threadActivity[9]).toBeDefined();
+    expect(useLiveStore.getState().unread[9]).toBe(1);
+
+    // A session-wide turn end names no thread, so it moves nothing.
+    const before = useLiveStore.getState().threadActivity;
+    applySessionEvent(
+      {
+        kind: 'turn_completed',
+        session_id: FOCUSED,
+        thread_id: null,
+        stop_reason: null,
+      },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+    expect(useLiveStore.getState().threadActivity).toBe(before);
   });
 
   it('does not double-invalidate the active thread when it is already reported', () => {

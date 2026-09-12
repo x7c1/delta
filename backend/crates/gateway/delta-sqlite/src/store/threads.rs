@@ -17,6 +17,7 @@ fn thread_from_row(row: &Row<'_>) -> Result<Thread> {
         parent_thread_id: row.get::<_, Option<i64>>(3)?.map(ThreadId),
         root_message_uuid: row.get::<_, Option<String>>(4)?.map(MessageUuid::from),
         created_at: row.get(5)?,
+        last_activity_at: row.get(6)?,
     })
 }
 
@@ -34,7 +35,7 @@ const THREAD_COLS: &str = "id, session_id, title, parent_thread_id, \
        (SELECT s.semantic_parent_uuid FROM send s \
          WHERE s.thread_id = thread.id AND s.semantic_parent_uuid IS NOT NULL \
          ORDER BY s.id LIMIT 1) \
-     ) AS root_message_uuid, created_at";
+     ) AS root_message_uuid, created_at, last_activity_at";
 
 impl SqliteStore {
     pub(super) async fn main_thread_id(
@@ -120,6 +121,9 @@ impl SqliteStore {
             // exists yet at creation time.
             root_message_uuid: None,
             created_at: now,
+            // Maintained by `upsert_messages`; a thread with no messages yet
+            // has no activity to report.
+            last_activity_at: None,
         })
     }
 

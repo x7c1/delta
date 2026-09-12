@@ -182,6 +182,69 @@ fn the_v6_step_renames_the_send_hold_marker_and_carries_its_values_over() {
     assert_eq!(unmarked, None, "and an unheld row stays unheld");
 }
 
+#[test]
+fn the_v8_step_adds_the_thread_recency_column_and_backfills_it_from_existing_messages() {
+    // The real registry: a database built to v7 has threads and messages but no
+    // per-thread recency column, and the pending v8 step has to add the column
+    // *and* fill it from the messages already stored — otherwise every thread of
+    // every pre-existing session would read NULL, which the navigator renders as
+    // "main is the newest".
+    let conn = Connection::open_in_memory().unwrap();
+    let steps = registry();
+    migrate(&conn, &steps, 0, 7, None).unwrap();
+
+    // Written straight through SQL rather than through the store: the store's
+    // thread writes speak the *current* column set, and the point here is the
+    // shape that predates it.
+    conn.execute_batch(
+        "INSERT INTO session (id, cwd, status, created_at)
+         VALUES ('sess-1', '/work', 'active', '2026-01-01T00:00:00Z');
+         INSERT INTO thread (id, session_id, title, created_at) VALUES
+           (1, 'sess-1', 'main',   '2026-01-01T00:00:00Z'),
+           (2, 'sess-1', 'branch', '2026-01-01T00:01:00Z'),
+           (3, 'sess-1', 'empty',  '2026-01-01T00:02:00Z');
+         INSERT INTO message (uuid, session_id, thread_id, role, seq, created_at) VALUES
+           ('m-1', 'sess-1', 1, 'user',      0, '2026-01-01T00:00:10Z'),
+           ('m-2', 'sess-1', 1, 'assistant', 1, '2026-01-01T00:00:20Z'),
+           ('m-3', 'sess-1', 2, 'user',      2, '2026-01-01T00:05:00Z'),
+           ('m-4', 'sess-1', 2, 'assistant', 3, NULL);",
+    )
+    .unwrap();
+
+    migrate(&conn, &steps, 7, 8, None).unwrap();
+
+    assert_eq!(user_version(&conn), 8);
+    assert!(
+        column_names(&conn, "thread").contains(&"last_activity_at".to_owned()),
+        "the column is there: {:?}",
+        column_names(&conn, "thread"),
+    );
+
+    let recency = |id: i64| -> Option<String> {
+        conn.query_row(
+            "SELECT last_activity_at FROM thread WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        recency(1).as_deref(),
+        Some("2026-01-01T00:00:20Z"),
+        "each thread is backfilled with the MAX(created_at) of its OWN messages",
+    );
+    assert_eq!(
+        recency(2).as_deref(),
+        Some("2026-01-01T00:05:00Z"),
+        "a timestamp-less message contributes nothing to its thread's backfill",
+    );
+    assert_eq!(
+        recency(3),
+        None,
+        "a thread with no messages at all stays NULL",
+    );
+}
+
 // --- the runner --------------------------------------------------------------
 
 #[test]

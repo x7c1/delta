@@ -5,6 +5,7 @@ import type { SendsSlice } from './sendsSlice';
 import type { SpawnsSlice } from './spawnsSlice';
 import type { RunningThreadsSlice } from './runningThreadsSlice';
 import type { NoticesSlice } from './noticesSlice';
+import type { ThreadActivitySlice } from './threadActivitySlice';
 import type { UnreadSlice } from './unreadSlice';
 import type { StreamingSlice } from './streamingSlice';
 import type { SubagentsSlice } from './subagentsSlice';
@@ -48,6 +49,7 @@ export type LiveState = ConnectionSlice &
   RunningThreadsSlice &
   NoticesSlice &
   UnreadSlice &
+  ThreadActivitySlice &
   StreamingSlice &
   SubagentsSlice &
   StatusSlice &

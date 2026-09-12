@@ -630,6 +630,7 @@ export function createMockApi(): MockApi {
           title: 'main',
           parent_thread_id: null,
           root_message_uuid: null,
+          last_activity_at: null,
           created_at: createdAt,
         };
         store.sessions.push({
@@ -724,6 +725,7 @@ export function createMockApi(): MockApi {
           title: 'new branch',
           parent_thread_id: target.thread_id,
           root_message_uuid: target.semantic_parent_uuid,
+          last_activity_at: null,
           created_at: new Date().toISOString(),
         };
         session.threads.push(child);
