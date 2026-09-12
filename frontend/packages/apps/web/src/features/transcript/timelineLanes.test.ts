@@ -40,6 +40,7 @@ function thread(
     title: title ?? `thread ${id}`,
     parent_thread_id: parent,
     root_message_uuid: rootUuid,
+    last_activity_at: null,
     created_at: createdAt,
   };
 }

@@ -1,5 +1,6 @@
 import {
   buildThreadTree,
+  newestThreadId,
   threadDisplayName,
   threadTooltip,
   type ThreadId,
@@ -51,6 +52,11 @@ export interface ThreadTreeProps {
  * session card header (see {@link NavigatorPane}). Only main's sub-threads are
  * rendered, lifted to depth 0 so they sit directly under the session without a
  * redundant indent level.
+ *
+ * Exactly one row can carry the "most recently active" mark. The ranking runs
+ * over EVERY thread of the session, main included, so when main is where the
+ * last message landed the winner is a thread this tree never draws and no row
+ * is marked — which is the intended reading of an unmarked tree.
  */
 export function ThreadTree({
   threads,
@@ -58,6 +64,16 @@ export function ThreadTree({
   runningSubagents,
   onSelectThread,
 }: ThreadTreeProps) {
+  // Live activity outranks the query's `last_activity_at`: the threads query
+  // supplies the initial values, and these keep the mark current while the
+  // session is open, with no refetch in between.
+  const threadActivity = useLiveStore((state) => state.threadActivity);
+  const newestId = newestThreadId(
+    threads.map((thread) => ({
+      id: thread.id,
+      last_activity_at: threadActivity[thread.id] ?? thread.last_activity_at,
+    })),
+  );
   const roots = buildThreadTree(threads);
   const subThreads = roots.flatMap((root) => root.children);
   return (
@@ -67,6 +83,7 @@ export function ThreadTree({
           key={node.thread.id}
           node={node}
           depth={0}
+          newestId={newestId}
           runningThreads={runningThreads}
           runningSubagents={runningSubagents}
           onSelectThread={onSelectThread}
@@ -79,12 +96,19 @@ export function ThreadTree({
 function ThreadTreeNode({
   node,
   depth,
+  newestId,
   runningThreads,
   runningSubagents,
   onSelectThread,
 }: {
   node: ThreadNode<Thread>;
   depth: number;
+  /**
+   * The session's most recently active thread, computed once for the whole tree
+   * so every row reads one consistent answer. `undefined` when no thread has
+   * any activity.
+   */
+  newestId: ThreadId | undefined;
   runningThreads?: Record<ThreadId, true>;
   runningSubagents?: SubagentActivity[];
   onSelectThread: (threadId: ThreadId) => void;
@@ -93,6 +117,7 @@ function ThreadTreeNode({
   const unread = useLiveStore((state) => state.unread[node.thread.id] ?? 0);
 
   const isActive = activeThreadId === node.thread.id;
+  const isNewest = newestId === node.thread.id;
   // A thread is running when it has an in-flight turn OR a still-running
   // subagent it launched (the latter outlives the turn for a background
   // subagent), so the spinner and the unread suppression below both account for
@@ -112,6 +137,16 @@ function ThreadTreeNode({
         className={cn(
           'flex w-full items-center justify-between gap-2 py-0.5 pr-2 text-left text-secondary leading-5 hover:bg-surface-elevated-hover',
           isActive && 'bg-accent/10 font-medium text-accent',
+          // The most recently active sub-thread: weight ONLY. No colour, so it
+          // stays distinguishable from the active row's accent when the two land
+          // on different rows. A step ABOVE the active row's `font-medium`, and
+          // passed after it so `cn` keeps the heavier of the two, so the mark
+          // still reads when both land on the SAME row: at equal weight, sending
+          // a prompt in the thread you are viewing would leave the tree with no
+          // mark anywhere, which is the reading reserved for "main is newest".
+          // Static, so it neither hides nor is hidden by the running spinner or
+          // the unread badge.
+          isNewest && 'font-semibold',
         )}
         aria-current={isActive ? 'true' : undefined}
       >
@@ -123,6 +158,16 @@ function ThreadTreeNode({
           {threadDisplayName(node.thread)}
         </span>
         <span className="flex shrink-0 items-center gap-1.5">
+          {isNewest && (
+            // The mark itself is purely typographic (the `font-semibold` above),
+            // and weight reaches assistive tech no better than colour does — so
+            // pair it with a visually-hidden label, exactly as the spinner below
+            // and the session row's unread dot do. Text only: it adds nothing
+            // visible, so the "weight only" mark stays weight only.
+            <span className="sr-only" data-testid="thread-newest">
+              most recent activity
+            </span>
+          )}
           {running && (
             // Per-thread running spinner: this exact thread has an in-flight
             // turn. Mirrors the session row's spinner but scoped to the thread,
@@ -149,6 +194,7 @@ function ThreadTreeNode({
               key={child.thread.id}
               node={child}
               depth={depth + 1}
+              newestId={newestId}
               runningThreads={runningThreads}
               runningSubagents={runningSubagents}
               onSelectThread={onSelectThread}

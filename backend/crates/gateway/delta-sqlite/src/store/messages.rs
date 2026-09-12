@@ -44,15 +44,19 @@ impl SqliteStore {
     ) -> std::result::Result<(), delta_usecase::Error> {
         let mut conn = self.conn.lock().await;
         let tx = conn.transaction().map_err(Error::from)?;
-        // Sessions whose messages this batch touched: their denormalized
-        // `last_activity_at` is recomputed once after the inserts (below).
-        // Collected as the distinct session ids in the batch, in first-seen
-        // order, so the recompute runs once per session regardless of how many
-        // of its messages are in the batch.
-        let mut touched: Vec<&SessionId> = Vec::new();
+        // Sessions and threads whose messages this batch touched: their
+        // denormalized `last_activity_at` columns are recomputed once each
+        // after the inserts (below). Collected as the distinct ids in the
+        // batch, in first-seen order, so each recompute runs once regardless of
+        // how many of that row's messages are in the batch.
+        let mut touched_sessions: Vec<&SessionId> = Vec::new();
+        let mut touched_threads: Vec<ThreadId> = Vec::new();
         for m in messages {
-            if !touched.iter().any(|id| **id == m.session_id) {
-                touched.push(&m.session_id);
+            if !touched_sessions.iter().any(|id| **id == m.session_id) {
+                touched_sessions.push(&m.session_id);
+            }
+            if !touched_threads.contains(&m.thread_id) {
+                touched_threads.push(m.thread_id);
             }
         }
         for m in messages {
@@ -114,20 +118,40 @@ impl SqliteStore {
             )
             .map_err(Error::from)?;
         }
-        // Refresh the denormalized recency for every session this batch touched,
-        // recomputing `MAX(message.created_at)` once per session (a single-session
-        // lookup backed by `ix_message_session_created`). Recomputing — rather
-        // than taking the batch max — keeps the column correct even when a
-        // re-ingest rewrites a message's `created_at`, and yields NULL for a
-        // session whose only messages have no timestamp. The whole thing is in
-        // the same transaction as the inserts, so the column can never lag the
-        // rows it summarizes.
-        for session_id in touched {
+        // Refresh the denormalized recency for every session AND every thread
+        // this batch touched, recomputing `MAX(message.created_at)` once per
+        // row (single-key lookups backed by `ix_message_session_created` and
+        // `ix_message_thread`). Both columns are maintained the same way and
+        // for the same reason: recomputing — rather than taking the batch max —
+        // keeps the value correct even when a re-ingest rewrites a message's
+        // `created_at`, and yields NULL when the only messages have no
+        // timestamp. Both run in the same transaction as the inserts, so
+        // neither column can lag the rows it summarizes.
+        //
+        // One asymmetry: `session_id` is part of the message's primary key, so a
+        // row can never move to a session other than the one the batch names,
+        // while `thread_id` is deliberately NOT overwritten on re-ingest (see
+        // the upsert above) — a re-ingested branch line arrives claiming `main`
+        // while its stored row stays on the branch thread. Such a batch
+        // therefore refreshes `main` and leaves the branch thread alone, which
+        // is correct as long as the re-ingest carries that line's original
+        // `created_at` — the only input to the value the branch thread would
+        // recompute to.
+        for session_id in touched_sessions {
             tx.execute(
                 "UPDATE session SET last_activity_at = \
                    (SELECT MAX(created_at) FROM message WHERE session_id = ?1) \
                  WHERE id = ?1",
                 params![session_id.as_str()],
+            )
+            .map_err(Error::from)?;
+        }
+        for thread_id in touched_threads {
+            tx.execute(
+                "UPDATE thread SET last_activity_at = \
+                   (SELECT MAX(created_at) FROM message WHERE thread_id = ?1) \
+                 WHERE id = ?1",
+                params![thread_id.value()],
             )
             .map_err(Error::from)?;
         }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildThreadTree, threadAncestry, type ThreadLike } from './thread-tree';
+import {
+  buildThreadTree,
+  newestThreadId,
+  threadAncestry,
+  type ThreadLike,
+} from './thread-tree';
 
 /**
  * A wire-`Thread`-shaped fixture. The helpers are generic over {@link
@@ -55,5 +60,43 @@ describe('threadAncestry', () => {
 
   it('returns just the thread itself for a root', () => {
     expect(threadAncestry([thread(1, null)], 1).map((t) => t.id)).toEqual([1]);
+  });
+});
+
+describe('newestThreadId', () => {
+  const at = (id: number, last_activity_at: string | null) => ({
+    id,
+    last_activity_at,
+  });
+
+  it('returns the id of the thread with the greatest activity timestamp', () => {
+    expect(
+      newestThreadId([
+        at(1, '2026-01-01T00:00:00Z'),
+        at(2, '2026-01-01T00:09:00Z'),
+        at(3, '2026-01-01T00:05:00Z'),
+      ]),
+    ).toBe(2);
+  });
+
+  it('ignores threads with no activity', () => {
+    expect(
+      newestThreadId([at(1, null), at(2, '2026-01-01T00:01:00Z'), at(3, null)]),
+    ).toBe(2);
+  });
+
+  it('breaks a tie on the larger id so exactly one thread wins', () => {
+    expect(
+      newestThreadId([
+        at(3, '2026-01-01T00:04:00Z'),
+        at(7, '2026-01-01T00:04:00Z'),
+        at(5, '2026-01-01T00:04:00Z'),
+      ]),
+    ).toBe(7);
+  });
+
+  it('returns undefined when no thread has any activity', () => {
+    expect(newestThreadId([at(1, null), at(2, null)])).toBeUndefined();
+    expect(newestThreadId([])).toBeUndefined();
   });
 });

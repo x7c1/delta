@@ -59,12 +59,16 @@ name. Conventions (timestamps, id types, error bodies) are in
   "title": "main",
   "parent_thread_id": null,
   "root_message_uuid": null,
-  "created_at": "2026-01-01T00:00:00Z"
+  "created_at": "2026-01-01T00:00:00Z",
+  "last_activity_at": "2026-01-01T00:04:00Z"
 }
 ```
 
 The trunk thread has the title `main`, no parent, and no root message. Child
 threads carry `parent_thread_id` and the `root_message_uuid` they branch from.
+`last_activity_at` is the thread's newest message timestamp, `null` while the
+thread has no timestamped message; the navigator ranks a session's threads by it
+to mark the most recently active one.
 
 ## `Message`
 

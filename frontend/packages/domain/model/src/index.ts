@@ -9,7 +9,9 @@
 export type { SessionId, ThreadId, MessageUuid } from './ids';
 export {
   buildThreadTree,
+  newestThreadId,
   threadAncestry,
+  type ThreadActivityLike,
   type ThreadLike,
   type ThreadNode,
 } from './thread-tree';

@@ -49,6 +49,49 @@ export function buildThreadTree<T extends ThreadLike>(
 }
 
 /**
+ * The minimal shape {@link newestThreadId} ranks: an id and the thread's last
+ * activity. Kept separate from {@link ThreadLike} because recency has nothing
+ * to do with the tree edges — a caller ranking threads need not have them.
+ */
+export interface ThreadActivityLike {
+  id: ThreadId;
+  last_activity_at: string | null;
+}
+
+/**
+ * The id of the thread whose activity is newest, or `undefined` when no thread
+ * has any. Timestamps are compared as strings: they are ISO-8601 UTC in one
+ * format, so lexicographic order is chronological order.
+ *
+ * A tie breaks on the larger id, so the answer is always exactly one thread —
+ * the navigator marks a single row, and "two threads at the same second" must
+ * not mark both.
+ *
+ * Callers pass EVERY thread of the session, main included. The navigator does
+ * not render main, so naming it here is what makes "no row is marked" mean
+ * "main is where the last message landed".
+ */
+export function newestThreadId(
+  threads: ThreadActivityLike[],
+): ThreadId | undefined {
+  let newest: { id: ThreadId; at: string } | undefined;
+  for (const thread of threads) {
+    const at = thread.last_activity_at;
+    if (at === null) {
+      continue;
+    }
+    if (
+      newest === undefined ||
+      at > newest.at ||
+      (at === newest.at && thread.id > newest.id)
+    ) {
+      newest = { id: thread.id, at };
+    }
+  }
+  return newest?.id;
+}
+
+/**
  * Walk from a thread up to the root, returning the ancestor chain ordered
  * root-first (so the last element is the thread itself). Used to render the
  * transcript breadcrumb. Threads whose parent is missing terminate the walk.

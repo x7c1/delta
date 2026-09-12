@@ -49,6 +49,19 @@ fn derive_root_message_uuid(g: &FakeStoreInner, thread_id: ThreadId) -> Option<M
         })
 }
 
+/// Derive a thread's `last_activity_at` the way the SQL store maintains it:
+/// `MAX(message.created_at)` over the thread's own messages, `None` when none of
+/// them carries a timestamp. The real store denormalizes this onto the thread
+/// row on every upsert; the fake recomputes it on read, which by construction is
+/// the same value.
+fn derive_last_activity_at(g: &FakeStoreInner, thread_id: ThreadId) -> Option<String> {
+    g.messages
+        .iter()
+        .filter(|m| m.thread_id == thread_id)
+        .filter_map(|m| m.created_at.clone())
+        .max()
+}
+
 /// A row's recency key: its last activity, falling back to the session's own
 /// `created_at` when message-less — the `COALESCE(last_activity_at, created_at)`
 /// the SQL queries sort on.
@@ -170,6 +183,7 @@ impl SessionStore for FakeStore {
             parent_thread_id: None,
             root_message_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
+            last_activity_at: None,
         });
         Ok((session, main_id))
     }
@@ -219,6 +233,7 @@ impl SessionStore for FakeStore {
             parent_thread_id: None,
             root_message_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
+            last_activity_at: None,
         });
         Ok((session, main_id))
     }
@@ -523,6 +538,7 @@ impl SessionStore for FakeStore {
         let g = self.inner.lock().unwrap();
         Ok(g.threads.iter().find(|t| t.id == id).cloned().map(|mut t| {
             t.root_message_uuid = derive_root_message_uuid(&g, t.id);
+            t.last_activity_at = derive_last_activity_at(&g, t.id);
             t
         }))
     }
@@ -536,6 +552,7 @@ impl SessionStore for FakeStore {
             .cloned()
             .map(|mut t| {
                 t.root_message_uuid = derive_root_message_uuid(&g, t.id);
+                t.last_activity_at = derive_last_activity_at(&g, t.id);
                 t
             })
             .collect();
@@ -560,6 +577,8 @@ impl SessionStore for FakeStore {
             // the real store; see `derive_root_message_uuid`.
             root_message_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
+            // Likewise derived on read; a thread with no messages has none.
+            last_activity_at: None,
         };
         g.threads.push(thread.clone());
         Ok(thread)

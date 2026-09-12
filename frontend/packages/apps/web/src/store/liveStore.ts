@@ -6,6 +6,7 @@ import { createSpawnsSlice } from './live/spawnsSlice';
 import { createRunningThreadsSlice } from './live/runningThreadsSlice';
 import { createNoticesSlice } from './live/noticesSlice';
 import { createUnreadSlice } from './live/unreadSlice';
+import { createThreadActivitySlice } from './live/threadActivitySlice';
 import { createStreamingSlice } from './live/streamingSlice';
 import { createSubagentsSlice } from './live/subagentsSlice';
 import { createStatusSlice } from './live/statusSlice';
@@ -78,6 +79,7 @@ export const useLiveStore = create<LiveState>()((...args) => ({
   ...createRunningThreadsSlice(...args),
   ...createNoticesSlice(...args),
   ...createUnreadSlice(...args),
+  ...createThreadActivitySlice(...args),
   ...createStreamingSlice(...args),
   ...createSubagentsSlice(...args),
   ...createStatusSlice(...args),

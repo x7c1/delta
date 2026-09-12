@@ -267,6 +267,12 @@ async fn a_session_written_before_a_later_step_stays_a_claude_row() {
 /// duplicate column, a table that already exists).
 fn downgrade_sql(version: u32) -> String {
     let mut sql = String::new();
+    // v8 added the thread's denormalized recency column. Dropping it also
+    // discards the values the step's backfill wrote, which is exactly what an
+    // older binary's file looks like.
+    if version < 8 {
+        sql.push_str("ALTER TABLE thread DROP COLUMN last_activity_at;\n");
+    }
     // v7 added the session's PR-origin snapshot column.
     if version < 7 {
         sql.push_str("ALTER TABLE session DROP COLUMN pull_request_number;\n");
@@ -529,6 +535,96 @@ async fn a_v6_database_gains_pull_request_number_and_keeps_its_sessions() {
             .unwrap()
             .pull_request_number,
         Some(138),
+    );
+}
+
+/// A database written at version 7 — the generation before the thread's
+/// denormalized recency column — is migrated forward on open: `last_activity_at`
+/// arrives on `thread` and is *backfilled* from the messages already stored, so
+/// a session that predates the column ranks its threads correctly from the very
+/// first listing.
+#[tokio::test]
+async fn a_v7_database_gains_the_thread_recency_column_backfilled_from_its_messages() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v7.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    let session_id = SessionId::from("sess-1");
+    let message = |uuid: &str, thread_id, seq, created_at: &str| Message {
+        uuid: MessageUuid::from(uuid),
+        session_id: session_id.clone(),
+        thread_id,
+        role: Role::User,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq,
+        content_text: Some("hi".into()),
+        content: vec![ContentBlock::Text { text: "hi".into() }],
+        created_at: Some(created_at.to_owned()),
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
+        provider_item_id: None,
+    };
+    let branch_id;
+    let main_id;
+    {
+        let store = SqliteStore::open(path_str).unwrap();
+        let (_session, main) = store.register_session(new_session()).await.unwrap();
+        main_id = main;
+        let branch = store
+            .create_thread(&session_id, "branch", Some(main))
+            .await
+            .unwrap();
+        branch_id = branch.id;
+        store
+            .upsert_messages(&[
+                message("m-1", main, 0, "2026-01-01T00:00:00Z"),
+                message("m-2", branch.id, 1, "2026-01-01T00:06:00Z"),
+                message("m-3", main, 2, "2026-01-01T00:02:00Z"),
+            ])
+            .await
+            .unwrap();
+        let conn = store.conn.lock().await;
+        conn.execute_batch(&downgrade_sql(7)).unwrap();
+    }
+    assert_eq!(read_user_version(path_str), 7);
+
+    let store = SqliteStore::open(path_str).unwrap();
+    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
+
+    let threads = store.list_threads(&session_id).await.unwrap();
+    let recency = |id| {
+        threads
+            .iter()
+            .find(|t| t.id == id)
+            .expect("the pre-existing thread survives the migration")
+            .last_activity_at
+            .clone()
+    };
+    assert_eq!(
+        recency(main_id).as_deref(),
+        Some("2026-01-01T00:02:00Z"),
+        "each thread is backfilled from its own messages, not the session's",
+    );
+    assert_eq!(recency(branch_id).as_deref(), Some("2026-01-01T00:06:00Z"));
+
+    // And the column keeps being maintained through the normal write path.
+    store
+        .upsert_messages(&[message("m-4", main_id, 3, "2026-01-01T00:09:00Z")])
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .thread(main_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .last_activity_at
+            .as_deref(),
+        Some("2026-01-01T00:09:00Z"),
     );
 }
 
