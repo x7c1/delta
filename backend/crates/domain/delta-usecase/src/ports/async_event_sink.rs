@@ -1,9 +1,8 @@
 //! The interactor's asynchronous event-emission seam.
 //!
-//! Every [`SessionEvent`] Delta produces today is *returned synchronously* to
-//! whoever drove the work — a hook handler returns its events to the HTTP
-//! handler, `poll_transcript` returns its events to the server tail loop — and
-//! that caller broadcasts them. That path stays exactly as it is.
+//! Many [`SessionEvent`]s are *returned synchronously* to whoever drove the
+//! work — a hook handler returns its events to the HTTP handler, and that
+//! caller broadcasts them. That path stays exactly as it is.
 //!
 //! Some producers, though, emit events *over time, after the call that started
 //! the work has already returned*. A push-based agent adapter (Codex's
