@@ -16,6 +16,9 @@ pub use settings::render_session_settings;
 mod launch_option_danger;
 pub use launch_option_danger::{is_launch_option_dangerous, GatewayLaunchOptionDanger};
 
+mod ensure_tmux_available;
+use ensure_tmux_available::ensure_tmux_available;
+
 // Re-export the underlying store error so callers (the `delta-server` binary)
 // can pattern-match on its variants — notably `SchemaMismatch`, which it
 // surfaces with a clean message at startup — without taking a direct
@@ -225,8 +228,22 @@ impl Config {
 /// `reconcile_builtin_launch_options` for why that one field is the only thing
 /// it has to protect.
 ///
+/// Host requirements: `tmux` must be resolvable before anything else is wired.
+/// See [`ensure_tmux_available()`] for why that is checked here rather than
+/// left to the first launch. The probe reads the process's real `PATH` and
+/// takes no substitute detector, so every caller needs tmux installed — the
+/// tests that wire this root (the server's route tests among them) as much as
+/// a real boot.
+///
 /// [`SessionStore::restore_all_dispatched`]: delta_usecase::SessionStore::restore_all_dispatched
 pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<AppInteractor> {
+    // Real PATH probe. Constructing it touches no filesystem; the first probe
+    // per binary does, then memoises. Built here, ahead of the store, because
+    // the startup tmux check below is the first thing it serves; the same
+    // instance is injected into the interactor for the provider-availability
+    // endpoint, so both read one memo.
+    let binary_detector: Arc<dyn BinaryDetector> = Arc::new(PathBinaryDetector::new());
+    ensure_tmux_available(binary_detector.as_ref()).await?;
     let store = SqliteStore::open(&config.database_path)?;
     let restored = delta_usecase::SessionStore::restore_all_dispatched(&store).await?;
     if restored > 0 {
@@ -258,9 +275,6 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     // records into it — so no per-provider branch appears anywhere.
     let codex_adapter_factory: Arc<dyn AgentAdapterFactory> =
         Arc::new(CodexAdapterFactory::new(codex_launch).with_comms_log(comms_log));
-    // Real PATH probe for the provider-availability endpoint. Constructing it
-    // touches no filesystem; the first probe per binary does, then memoises.
-    let binary_detector: Arc<dyn BinaryDetector> = Arc::new(PathBinaryDetector::new());
     let interactor = Interactor::new(
         Box::new(tmux) as Box<dyn delta_usecase::TmuxDriver>,
         Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
@@ -334,9 +348,17 @@ mod tests {
         }
     }
 
+    /// Wiring succeeds against an in-memory store.
+    ///
+    /// Runs the real host-requirement probe (see [`build`]), so it needs tmux on
+    /// the test host's `PATH`. CI installs it for the backend job.
     #[tokio::test]
     async fn build_wires_an_interactor_with_in_memory_store() {
-        assert!(build(&test_config(), NullCommsLog::arc()).await.is_ok());
+        assert!(
+            build(&test_config(), NullCommsLog::arc()).await.is_ok(),
+            "wiring failed; if this host has no tmux on PATH that is the cause — \
+             `build` refuses to wire without it"
+        );
     }
 
     /// The static accessor resolves each provider's terminal capability without
