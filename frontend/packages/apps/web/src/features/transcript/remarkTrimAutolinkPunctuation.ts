@@ -12,10 +12,12 @@ import { SKIP, visit } from 'unist-util-visit';
  * GFM spec mandates (GitHub renders it the same way), so it is corrected here,
  * after parsing, rather than waited on upstream.
  *
- * Known limit: non-punctuation text glued to a URL (`https://…/375です`) is
- * left alone. It is indistinguishable from an IRI path such as
- * `https://ja.wikipedia.org/wiki/東京`, where the same characters are part of
- * the address.
+ * Known limit: non-punctuation text glued to a URL
+ * (`https://ja.wikipedia.org/wiki/東京です`) is left alone, and so is a
+ * *balanced* full-width pair. Both are indistinguishable from an IRI path such
+ * as `https://ja.wikipedia.org/wiki/デルタ（曖昧さ回避）`, where the same
+ * characters are part of the address. GitHub pull-request and issue URLs are
+ * the exception `trimGitHubIssueUrl` recovers.
  */
 
 /**
@@ -47,14 +49,61 @@ const OPENER_BY_CLOSER = new Map([
 const OPENERS = new Set(OPENER_BY_CLOSER.values());
 
 /**
- * Splits an autolinked URL into the address itself and the CJK punctuation the
+ * A GitHub pull-request or issue address, up to and including its number:
+ * an optional scheme, an optional `www.`, the host, owner and repo, then
+ * `pull/` or `issues/` and the number. Matched case-insensitively, as GFM
+ * autolinks `WWW.GitHub.com/…` just as readily as the lowercase spelling.
+ */
+const GITHUB_ISSUE_PREFIX =
+  /^(?:https?:\/\/)?(?:www\.)?github\.com\/[^/]+\/[^/]+\/(?:pull|issues)\/\d+/i;
+
+/**
+ * The highest code point GitHub can put after an issue number: everything a
+ * pull-request or issue URL carries past it — `/files`, `#issuecomment-1234`,
+ * `?w=1` — is ASCII.
+ */
+const LAST_ASCII_CODE_POINT = 0x7f;
+
+/**
+ * Splits a GitHub pull-request or issue URL at the first non-ASCII character
+ * after the issue number, or returns `undefined` when the URL is not that
+ * shape. Unlike the generic rules this needs no notion of balance: the path
+ * past the number is ASCII by construction, so any non-ASCII character there
+ * came from the prose — `…/pull/375（実機確認済み）` and `…/pull/375です` alike.
+ */
+export function trimGitHubIssueUrl(
+  url: string,
+): { url: string; suffix: string } | undefined {
+  const match = GITHUB_ISSUE_PREFIX.exec(url);
+  if (match === null) {
+    return undefined;
+  }
+  let offset = match[0].length;
+  while (
+    offset < url.length &&
+    url.charCodeAt(offset) <= LAST_ASCII_CODE_POINT
+  ) {
+    offset += 1;
+  }
+  return { url: url.slice(0, offset), suffix: url.slice(offset) };
+}
+
+/**
+ * Splits an autolinked URL into the address itself and the trailing text the
  * autolinker wrongly absorbed. `url + suffix` always reconstructs the input;
  * `suffix` is empty when there is nothing to trim.
+ *
+ * `trimGitHubIssueUrl` is tried first and, where it applies, answers on its
+ * own: only it cuts a balanced pair such as `…/pull/375（補足）`.
  */
 export function trimAutolinkPunctuation(url: string): {
   url: string;
   suffix: string;
 } {
+  const gitHub = trimGitHubIssueUrl(url);
+  if (gitHub !== undefined) {
+    return gitHub;
+  }
   const openCounts = new Map<string, number>();
   const characters = [...url];
   let offset = 0;
@@ -113,9 +162,9 @@ function autolinkLiteralText(node: Link): Text | undefined {
 }
 
 /**
- * Remark plugin that moves absorbed CJK punctuation out of autolink literals
- * and back into the surrounding prose. Runs after `remark-gfm`, whose autolink
- * literals it post-processes.
+ * Remark plugin that moves the text an autolink literal wrongly absorbed back
+ * into the surrounding prose. Runs after `remark-gfm`, whose autolink literals
+ * it post-processes.
  */
 export function remarkTrimAutolinkPunctuation() {
   return (tree: Root) => {

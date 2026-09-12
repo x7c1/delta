@@ -16,6 +16,27 @@ describe('AssistantMarkdown', () => {
     expect(container.textContent).toBe(`completed（PR: ${PR_URL}）。`);
   });
 
+  // The generic rules clear neither tail: they read the parentheses as balanced
+  // and leave them in the href, and `です` is not punctuation at all. So the
+  // GitHub rule is what rescues the href here, on the text GFM really did read
+  // up to the space.
+  it.each([
+    ['a balanced bracket', '（実機確認済み）。'],
+    ['prose glued to the number', 'です'],
+  ])('ends a pull-request URL at %s', (_shape, tail) => {
+    const { container } = render(
+      <AssistantMarkdown text={`詳細は ${PR_URL}${tail}`} />,
+    );
+    const link = screen.getByRole('link');
+    expect(link).toHaveAttribute('href', PR_URL);
+    // Exact, not `toHaveTextContent`'s substring match, which would pass even
+    // with the tail painted inside the link.
+    expect(link.textContent).toBe(PR_URL);
+    // What the link absorbed is back in the prose, right after it.
+    expect(link.nextSibling?.textContent).toBe(tail);
+    expect(container.textContent).toBe(`詳細は ${PR_URL}${tail}`);
+  });
+
   it('keeps CJK punctuation out of a www autolink, scheme intact', () => {
     // GFM linked `www.…` under an `http://` scheme it added itself, and it
     // recognises that `www.` prefix case-insensitively.
