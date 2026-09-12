@@ -31,9 +31,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      # The fake-claude full-loop integration test drives a real tmux server;
-      # it skips silently where tmux is absent, so install tmux explicitly to
-      # guarantee CI always exercises it.
+      # tmux is a hard prerequisite for this job: the composition root
+      # probes for it at startup, so every test that wires the production root
+      # fails without it — except the fake-claude full-loop test, which wires
+      # that same root to drive a real tmux server but probes `PATH` itself
+      # first and merely skips.
       - name: Install tmux
         run: sudo apt-get update && sudo apt-get install -y tmux
 

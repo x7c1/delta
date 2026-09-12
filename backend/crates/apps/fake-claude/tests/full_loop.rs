@@ -9,7 +9,7 @@
 //! messages landed in the thread via the transcript tail.
 //!
 //! Requires a `tmux` on `PATH`; the test skips (with a note) where tmux is
-//! absent so the workspace test suite stays runnable everywhere. CI installs
+//! absent, so its failure mode there is a skip, not a spawn error. CI installs
 //! tmux explicitly so the loop is always exercised there.
 
 use std::time::{Duration, Instant};
