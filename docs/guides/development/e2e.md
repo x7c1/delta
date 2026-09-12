@@ -92,11 +92,18 @@ shared configuration with a bare `restart()` in an `afterEach`. Because a hard
 kill (SIGKILL, Ctrl-C) can skip teardown, the fixture also **sweeps at
 startup**: it kills any leftover `delta-e2e-fake-*` tmux server and removes any
 `delta-e2e-fake.*` temp dir from a crashed run, so leaks are bounded to one
-run. Each server generation logs to its own file under
-`test-results/e2e-fake/` (`server.log`, `server.2.log`, …), all uploaded by CI
-on failure. Nothing the e2e-fake run touches collides with `make dev` or the
-mock suite. It needs tmux, the Playwright chromium browser (see above), and
-built workspace libraries (`make build`).
+run. Diagnostics are preserved under `packages/apps/web/test-results/e2e-fake/`,
+all uploaded by CI on failure: each *boot* of the server gets its own
+`boot-<N>/` directory, holding one log file per server generation
+(`server.log`, `server.2.log`, … across restarts) plus the fake transcripts
+copied out on teardown. A run normally boots once (`boot-1/`), but Playwright
+starts a fresh worker after a failed test and the fixture reboots — landing in
+`boot-2/` rather than overwriting the logs that cover the failure. The artifact
+dir is emptied once per run instead, by the suite's `globalSetup`
+(`packages/apps/web/e2e-fake/support/globalSetup.ts`), so a previous run's logs
+never masquerade as this one's. Nothing the e2e-fake run touches collides with
+`make dev` or the mock suite. It needs tmux, the Playwright chromium browser
+(see above), and built workspace libraries (`make build`).
 
 **Writing a scenario.** Scenarios are JSON files in
 `packages/apps/web/e2e-fake/scenarios/`, executed step by step by the fake:

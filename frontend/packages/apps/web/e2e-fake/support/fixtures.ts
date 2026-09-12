@@ -14,7 +14,8 @@ import { bootServer, type ServerHandle } from './server';
  * handle in the worker process itself; because the suite runs `workers: 1` /
  * `fullyParallel: false` (see `playwright.fake.config.ts`), there is exactly
  * one server for the whole serial suite, and a worker crash automatically
- * re-runs the fixture and reboots it.
+ * re-runs the fixture and reboots it. Emptying the artifact dir happens once
+ * per run instead, in `support/globalSetup.ts`.
  *
  * The `server` fixture is `auto`, so it boots for every spec even the ones
  * that never name it; the restart spec additionally declares `server` in its
