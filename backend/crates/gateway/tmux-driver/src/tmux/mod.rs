@@ -14,6 +14,7 @@ mod driver;
 use tokio::process::Command;
 
 use crate::error::Error;
+use crate::TMUX_BIN;
 
 /// Drives Claude Code sessions living in tmux.
 ///
@@ -63,7 +64,7 @@ impl Tmux {
     /// harmlessly ignored on every other command, so passing it on all of them
     /// guarantees whichever call boots the server uses Delta's config.
     async fn output(&self, args: &[&str]) -> std::result::Result<std::process::Output, Error> {
-        Ok(Command::new("tmux")
+        Ok(Command::new(TMUX_BIN)
             .arg("-L")
             .arg(&self.socket)
             .arg("-f")

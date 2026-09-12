@@ -5,6 +5,21 @@ use thiserror::Error;
 /// Errors raised while wiring the application together.
 #[derive(Debug, Error)]
 pub enum Error {
+    /// A host command Delta cannot run without is absent from `PATH`.
+    ///
+    /// Delta ships as a single binary and drives the host's own tools; `tmux`
+    /// is the one it cannot do without at all, since every session of every
+    /// provider is launched into a tmux pane. Its absence is caught at startup
+    /// rather than deep inside the driver on the first launch. The command name
+    /// is carried as data so the server binary can match on the variant and
+    /// print one plain line.
+    #[error("required command '{bin}' was not found on PATH")]
+    MissingCommand {
+        /// The command that could not be resolved, exactly as it would be
+        /// spawned.
+        bin: String,
+    },
+
     /// The session store could not be opened.
     #[error("failed to open store: {0}")]
     Store(#[from] delta_sqlite::Error),

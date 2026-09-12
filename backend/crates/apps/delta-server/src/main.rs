@@ -31,28 +31,39 @@ async fn main() -> anyhow::Result<()> {
     // (subdomain 3) and the `claude_version` module docs for the contract.
     claude_version::log_claude_version(&config.launch.claude_bin);
 
-    // A refused overlay is the startup error that demands a clear, user-facing
-    // message (the remediation is `make reset`) rather than a generic anyhow
-    // trace. The migration ladder migrates an out-of-date database forward on
-    // its own, so what reaches here is only what it cannot fix: a database
-    // written by a newer binary, one that predates the version stamp entirely,
-    // or one stamped below the ladder's squashed baseline. Print the inner store
-    // error to stderr verbatim (its `Display` already names the remediation) and
-    // exit non-zero; every other failure keeps the default `anyhow` propagation.
+    // Two startup failures demand a clear, user-facing line rather than a
+    // generic anyhow trace, because the user — not Delta — has to act on them.
+    //
+    // A refused overlay is one (the remediation is `make reset`). The migration
+    // ladder migrates an out-of-date database forward on its own, so what
+    // reaches here is only what it cannot fix: a database written by a newer
+    // binary, one that predates the version stamp entirely, or one stamped
+    // below the ladder's squashed baseline. Print the inner store error to
+    // stderr verbatim — its `Display` already names the remediation.
+    //
+    // A missing host command is the other. Its own `Display` names the command,
+    // so that line is printed as-is: installing tmux is the user's business and
+    // Delta has no advice to give about how.
+    //
+    // Both exit non-zero with no backtrace; every other failure keeps the
+    // default `anyhow` propagation.
     let state = match AppState::build(&config).await {
         Ok(state) => state,
-        Err(err) => {
-            if let Some(delta_bootstrap::Error::Store(
+        Err(err) => match err.downcast_ref::<delta_bootstrap::Error>() {
+            Some(delta_bootstrap::Error::Store(
                 store_err @ (delta_bootstrap::StoreError::SchemaMismatch { .. }
                 | delta_bootstrap::StoreError::UnstampedOverlay
                 | delta_bootstrap::StoreError::PreBaselineOverlay { .. }),
-            )) = err.downcast_ref::<delta_bootstrap::Error>()
-            {
+            )) => {
                 eprintln!("delta-server: {store_err}");
                 std::process::exit(1);
             }
-            return Err(err);
-        }
+            Some(missing @ delta_bootstrap::Error::MissingCommand { .. }) => {
+                eprintln!("delta-server: {missing}");
+                std::process::exit(1);
+            }
+            _ => return Err(err),
+        },
     };
 
     // Continuously tail the transcript so assistant replies that Claude Code
