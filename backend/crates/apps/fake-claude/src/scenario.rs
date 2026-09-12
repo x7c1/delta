@@ -44,7 +44,7 @@
 //! | `delay { ms }` | Sleep. Only for delays the scenario itself is about (e.g. holding a turn open); synchronization belongs to the `await_*` steps. |
 //! | `hang` | Block forever (a launch or turn that never progresses). |
 //! | `swallow_prompt` | Consume one prompt from the pane input without firing `UserPromptSubmit` and without writing the transcript — models Claude Code's TUI eating a keystroke, whether into the auto-`/compact` routine or into an interactive dialog it put up on its own. The dispatched send stays `Dispatched` behind a missing echo until something re-types it. Repeat the step to swallow a re-type too. |
-//! | `compact_group` | Write the four-line `/compact` group (caveat + bare command-name + summary + stdout) sharing one `promptId`. The summary line is the `isCompactSummary:true` record that drives `Effect::AutoCompactFinished` on the server. |
+//! | `compact_group` | Write the four-line `/compact` group (caveat + bare command-name + summary + stdout) sharing one `promptId`. The four lines are written ATOMICALLY — one append, one shared `timestamp` — exactly as Claude Code writes a local-command group, so a tail poll can never observe the group half-written. The summary line is the `isCompactSummary:true` record that drives `Effect::AutoCompactFinished` on the server. |
 //!
 //! How the file is found, in priority order:
 //!
@@ -160,8 +160,9 @@ pub enum Step {
     SwallowPrompt,
     /// Write the four-line group Claude Code produces for an auto- or
     /// manually-triggered `/compact` (a caveat / command-name / summary /
-    /// stdout sequence sharing one `promptId`). The summary line is the
-    /// `isCompactSummary:true` record that drives the
+    /// stdout sequence sharing one `promptId`). The group lands atomically —
+    /// one append, one shared timestamp — like the real transcript's. The
+    /// summary line is the `isCompactSummary:true` record that drives the
     /// `Effect::AutoCompactFinished` re-dispatch.
     CompactGroup,
 }
