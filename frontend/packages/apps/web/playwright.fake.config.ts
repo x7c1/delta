@@ -32,6 +32,10 @@ const AUTH_TOKEN = 'delta-e2e-fake-auth-token';
 
 export default defineConfig({
   testDir: './e2e-fake',
+  // Empties the suite's artifact dir (test-results/e2e-fake/) once per run —
+  // a scope the per-worker server fixture cannot express. globalSetup.ts says
+  // why the wipe cannot live in the fixture.
+  globalSetup: './e2e-fake/support/globalSetup.ts',
   forbidOnly: !!process.env.CI,
   retries: 0,
   // One worker, no intra-file parallelism: every spec talks to the one shared

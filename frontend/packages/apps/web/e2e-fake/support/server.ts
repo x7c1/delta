@@ -4,6 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { ARTIFACT_DIR, REPO_ROOT } from './paths';
 
 /**
  * The `delta-server` lifecycle, owned by the Playwright worker process.
@@ -30,15 +31,22 @@ import path from 'node:path';
  * - tmux runs on a unique per-run socket (`delta-e2e-fake-<pid>`), killed on
  *   teardown, so a leftover or parallel run never collides;
  * - the fake's transcripts live under the temp dir too, and are copied into
- *   the CI artifact dir on teardown.
+ *   this boot's directory under the CI artifact dir on teardown.
  *
- * ## Log generations
+ * ## Log generations, one directory per boot
  *
  * One run can now span several server generations (each `restart` spawns a
- * fresh process). Each generation logs to its own file under the artifact
- * dir — `server.log`, `server.2.log`, … — written there directly (not copied
- * on teardown) so a hard crash still leaves every generation's log behind for
- * CI to upload.
+ * fresh process). Each generation logs to its own file — `server.log`,
+ * `server.2.log`, … — written there directly (not copied on teardown) so a
+ * hard crash still leaves every generation's log behind for CI to upload.
+ *
+ * Those files, and the transcripts copied out on teardown, land under a
+ * directory private to this boot: `<artifact dir>/boot-<N>/`. A run can boot
+ * the server more than once — Playwright tears a worker down after a failed
+ * test and runs the fixture again in a fresh one — and the reboot must not
+ * overwrite the evidence of the failure that caused it. So the reboot writes
+ * `boot-2/` next to `boot-1/`, and the artifact dir itself is emptied once per
+ * run, by `globalSetup.ts`, never here.
  *
  * ## Startup sweep
  *
@@ -67,8 +75,6 @@ const TMP_PREFIX = 'delta-e2e-fake.';
 const SOCKET_PREFIX = 'delta-e2e-fake-';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// support/ -> e2e-fake/ -> web/ -> apps/ -> packages/ -> frontend/ -> repo root
-const REPO_ROOT = path.resolve(HERE, '../../../../../..');
 const BACKEND_DIR = path.join(REPO_ROOT, 'backend');
 const SERVER_BIN = path.join(BACKEND_DIR, 'target/debug/delta-server');
 const FAKE_BIN = path.join(BACKEND_DIR, 'target/debug/fake-claude');
@@ -94,12 +100,6 @@ const CODEX_SCENARIO = path.join(SCENARIO_DIR, 'codex-parallel-approvals.json');
 export function scenarioPath(name: string): string {
   return path.join(SCENARIO_DIR, `${name}.json`);
 }
-
-// The per-run state (server.log, transcripts) lives in a temp dir deleted on
-// teardown, which is useless once CI tears the runner down. Mirror the
-// diagnostics to a stable, repo-relative path the CI upload step references
-// (alongside Playwright's own traces/videos/screenshots under test-results/).
-const ARTIFACT_DIR = path.join(REPO_ROOT, 'frontend/packages/apps/web/test-results/e2e-fake');
 
 /** Elevated, overridable log level (a caller-provided `RUST_LOG` wins). */
 const SERVER_RUST_LOG = process.env.RUST_LOG ?? 'delta_usecase=debug,info';
@@ -227,6 +227,21 @@ function sweepStaleRuns(): void {
   }
 }
 
+/**
+ * Create and return this boot's private directory under the artifact dir,
+ * `boot-<N>/` with N one past the boots already recorded there, so a reboot
+ * lands beside the previous boot's diagnostics instead of on top of them.
+ */
+function allocateBootDir(): string {
+  fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
+  const boots = fs
+    .readdirSync(ARTIFACT_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith('boot-'));
+  const dir = path.join(ARTIFACT_DIR, `boot-${boots.length + 1}`);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 /** Poll `/health` until the server answers ok, or throw with the log tail. */
 async function waitHealthy(
   port: number,
@@ -282,13 +297,9 @@ export async function bootServer(): Promise<ServerHandle> {
   const tmuxSocket = `${SOCKET_PREFIX}${process.pid}`;
   fs.mkdirSync(workdir, { recursive: true });
   fs.mkdirSync(transcripts, { recursive: true });
-  // Start each run from a clean artifact dir so a previous run's logs never
-  // masquerade as this one's: generation logs are opened in append mode and
-  // named per generation (server.log, server.2.log, …), so without this a
-  // re-run would append to a stale server.log and leave orphaned server.N.log
-  // / transcripts from a prior multi-generation run for CI to upload.
-  fs.rmSync(ARTIFACT_DIR, { recursive: true, force: true });
-  fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
+  // Everything this boot preserves for CI goes here: its generation logs, and
+  // the transcripts copied out on teardown.
+  const bootDir = allocateBootDir();
 
   if (
     !fs.existsSync(SERVER_BIN) ||
@@ -345,7 +356,7 @@ export async function bootServer(): Promise<ServerHandle> {
   const spawnGeneration = async (): Promise<void> => {
     generation += 1;
     const logPath = path.join(
-      ARTIFACT_DIR,
+      bootDir,
       generation === 1 ? 'server.log' : `server.${generation}.log`,
     );
     const logFd = fs.openSync(logPath, 'a');
@@ -421,10 +432,10 @@ export async function bootServer(): Promise<ServerHandle> {
     async teardown(): Promise<void> {
       await killChild();
       // Copy the fake transcripts out of the soon-to-be-deleted temp dir into
-      // the stable artifact dir CI uploads (best-effort — a run that never
-      // spawned claude leaves none).
+      // this boot's directory under the artifact dir CI uploads (best-effort —
+      // a run that never spawned claude leaves none).
       try {
-        fs.cpSync(transcripts, path.join(ARTIFACT_DIR, 'transcripts'), {
+        fs.cpSync(transcripts, path.join(bootDir, 'transcripts'), {
           recursive: true,
         });
       } catch {
