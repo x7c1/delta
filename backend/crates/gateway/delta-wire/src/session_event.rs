@@ -29,6 +29,10 @@ pub enum WireSessionEvent {
     SessionOpened { session_id: String },
     /// An open session was closed: its pane was torn down but its data remains.
     SessionClosed { session_id: String },
+    /// A closed session was removed: its row and everything hanging off it are
+    /// gone, so a client must drop the session rather than list it as closed.
+    /// Only Delta's rows go — the worktree and the agent's own files survive.
+    SessionRemoved { session_id: String },
     /// A held (`queued`) send was promoted to `dispatched` and typed.
     SendDispatched { session_id: String, send_id: i64 },
     /// A dispatched send was returned to the queue, held for an explicit
@@ -349,6 +353,9 @@ impl From<SessionEvent> for WireSessionEvent {
             SessionEvent::SessionClosed { session_id } => Self::SessionClosed {
                 session_id: session_id.0,
             },
+            SessionEvent::SessionRemoved { session_id } => Self::SessionRemoved {
+                session_id: session_id.0,
+            },
             SessionEvent::SendDispatched {
                 session_id,
                 send_id,
@@ -550,6 +557,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
             WireSessionEvent::SessionRegistered { .. }
             | WireSessionEvent::SessionOpened { .. }
             | WireSessionEvent::SessionClosed { .. }
+            | WireSessionEvent::SessionRemoved { .. }
             | WireSessionEvent::SendDispatched { .. }
             | WireSessionEvent::SendParked { .. }
             | WireSessionEvent::TurnStarted { .. }
@@ -579,6 +587,9 @@ fn sample_events() -> Vec<WireSessionEvent> {
             session_id: session_id(),
         },
         WireSessionEvent::SessionClosed {
+            session_id: session_id(),
+        },
+        WireSessionEvent::SessionRemoved {
             session_id: session_id(),
         },
         WireSessionEvent::SendDispatched {
@@ -729,6 +740,26 @@ mod tests {
                 session_id: "sess-1".into(),
             }),
             serde_json::json!({ "kind": "session_closed", "session_id": "sess-1" }),
+        );
+    }
+
+    /// A removal converts from the domain event and lands on the wire as its
+    /// own `kind`, never as `session_closed`: a client hearing this one has to
+    /// drop the row, which is not what closing means.
+    #[test]
+    fn removed_converts_from_the_domain_event_and_keeps_its_own_kind() {
+        let wire = WireSessionEvent::from(SessionEvent::SessionRemoved {
+            session_id: SessionId::from("sess-1"),
+        });
+        assert_eq!(
+            wire,
+            WireSessionEvent::SessionRemoved {
+                session_id: "sess-1".to_owned(),
+            },
+        );
+        assert_eq!(
+            json(&wire),
+            serde_json::json!({ "kind": "session_removed", "session_id": "sess-1" }),
         );
     }
 
@@ -1097,6 +1128,7 @@ mod tests {
                 "session_registered",
                 "session_opened",
                 "session_closed",
+                "session_removed",
                 "send_dispatched",
                 "send_parked",
                 "turn_started",

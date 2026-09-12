@@ -118,6 +118,38 @@ describe('ApiClient', () => {
     );
   });
 
+  it('removes a session with a DELETE on the session resource itself', async () => {
+    // The removal is a `DELETE` on `/api/sessions/{id}` — the resource, not an
+    // action sub-path like open/close — so the verb and the URL are both part
+    // of the contract.
+    const fetchFn = vi.fn().mockResolvedValue(noContent());
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await expect(client.deleteSession('sess-1')).resolves.toBeUndefined();
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://localhost/api/sessions/sess-1',
+      { method: 'DELETE' },
+    );
+  });
+
+  it('surfaces session_open as an ApiError code when a removal is refused', async () => {
+    // A card the list showed as closed may have been reopened by another tab;
+    // the refusal's `code` is what tells that apart from a still-starting
+    // session (`session_spawning`) or a generic failure.
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ error: 'session is open: sess-1', code: 'session_open' }, 409),
+      );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await expect(client.deleteSession('sess-1')).rejects.toMatchObject({
+      status: 409,
+      code: 'session_open',
+    } satisfies Partial<ApiError>);
+  });
+
   it('fetches a session thread tree by id', async () => {
     const fetchFn = vi
       .fn()

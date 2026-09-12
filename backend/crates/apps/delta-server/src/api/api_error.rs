@@ -10,16 +10,30 @@ use delta_wire::rest::WireErrorBody;
 /// error body so the frontend can distinguish it from a generic failure.
 const RESUME_UNAVAILABLE_CODE: &str = "resume_unavailable";
 
-/// Stable machine-readable code for a **branch** send aimed at a session whose
-/// launch has not bound yet. Such a session is listed (and focusable) from the
-/// moment its first send is accepted, so its composer is reachable while it is
-/// still starting — and a plain send there is accepted as a `queued` row rather
-/// than refused. A branch send is the one shape with nowhere to go: the session
-/// has ingested no message to branch from. The browser cannot compose one
-/// either, for the same reason (branching anchors on a message), so no frontend
-/// path words this code today; it keeps the case distinguishable for an API
-/// client, and for a browser that grows the path later.
+/// Stable machine-readable code for a request aimed at a session whose launch
+/// has not bound yet. Such a session is listed (and focusable) from the moment
+/// its first send is accepted, so it is reachable while it is still starting.
+/// Two requests are refused with it:
+///
+/// - A **branch** send — a plain send there is accepted as a `queued` row
+///   rather than refused, so a branch send is the one send shape with nowhere
+///   to go: the session has ingested no message to branch from. The browser
+///   cannot compose one either, for the same reason (branching anchors on a
+///   message), so no frontend path composes this refusal today; the code keeps
+///   the case distinguishable for an API client, and for a browser that grows
+///   the path later.
+/// - A **removal** (`DELETE /api/sessions/{id}`) — the navigator offers it only
+///   on a closed card, so this answers a stale one. Distinct from
+///   [`SESSION_OPEN_CODE`], the other state a removal is refused in.
 const SESSION_SPAWNING_CODE: &str = "session_spawning";
+
+/// Stable machine-readable code for a removal aimed at a session that is
+/// currently open. Distinct from [`SESSION_SPAWNING_CODE`] — the other state a
+/// removal is refused in — because the two ask the user for different things:
+/// close it first, versus wait for it to come up. The navigator offers `Remove`
+/// only on a closed card, so a client only meets this from a stale one (another
+/// tab reopened the session).
+const SESSION_OPEN_CODE: &str = "session_open";
 
 /// Stable machine-readable code for a permission decision that can no longer
 /// take effect (already decided, or its hook wait timed out and fell back to
@@ -159,6 +173,12 @@ impl IntoResponse for ApiError {
                     Error::SessionSpawning(_) => {
                         (StatusCode::CONFLICT, Some(SESSION_SPAWNING_CODE))
                     }
+                    // A removal aimed at a session that is still open. A 409,
+                    // not a 400: the id is fine and the same call succeeds once
+                    // the session is closed — it is the target's state that
+                    // forbids the delete, the line `LaunchOptionIsBuiltin`
+                    // already draws.
+                    Error::SessionOpen(_) => (StatusCode::CONFLICT, Some(SESSION_OPEN_CODE)),
                     // The permission request exists (or existed) but no browser
                     // decision can reach it anymore: a conflict with current
                     // state, with a stable code so the frontend swaps the
@@ -369,5 +389,16 @@ mod tests {
             rendered(delta_usecase::Error::ResumeUnavailable("sess-2".into())).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(resume_code.as_deref(), Some("resume_unavailable"));
+    }
+
+    /// A removal aimed at an open session is a conflict with current state:
+    /// `409` with its own stable `session_open` code, kept apart from
+    /// `session_spawning` so a client can tell "close it first" from "wait for
+    /// it to come up".
+    #[tokio::test]
+    async fn an_open_session_renders_a_conflict_with_its_own_code() {
+        let (status, code) = rendered(delta_usecase::Error::SessionOpen("sess-1".into())).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(code.as_deref(), Some("session_open"));
     }
 }

@@ -34,6 +34,7 @@ export {
   useNewSessionMutation,
   useOpenSessionMutation,
   useCloseSessionMutation,
+  useDeleteSessionMutation,
   useCreateSendMutation,
   useCancelSendMutation,
   useReleaseSendMutation,
@@ -66,6 +67,7 @@ export {
 export {
   appendMessage,
   appendSessionSend,
+  firstOtherSessionId,
   invalidateRepositoriesAndPullRequests,
   invalidateSessions,
   invalidateSessionThreads,

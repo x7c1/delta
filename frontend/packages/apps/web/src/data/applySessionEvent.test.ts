@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@delta/api-client';
-import type { Send } from '@delta/wire-gen';
+import type { Send, SessionListItem } from '@delta/wire-gen';
 import { applySessionEvent } from './applySessionEvent';
 import { noticeOf, useLiveStore } from '../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
@@ -26,6 +26,38 @@ function serverSend(overrides: Partial<Send> = {}): Send {
     created_at: '2026-01-01T00:00:00Z',
     ...overrides,
   };
+}
+
+/**
+ * Seed the session-list cache with `ids`, in list order, as the infinite query
+ * stores it. The removal handler reads the head of this cache to decide where
+ * focus goes, so the order here is the order the navigator would show.
+ */
+function seedSessionList(queryClient: QueryClient, ids: readonly string[]) {
+  const sessions: SessionListItem[] = ids.map((id) => ({
+    session: {
+      id,
+      cwd: '/work',
+      transcript_path: '',
+      title: null,
+      status: 'active',
+      created_at: '2026-01-01T00:00:00Z',
+      branch_at_launch: null,
+      repo_root: null,
+      repository_display_name: null,
+      provider: 'claude',
+      provider_session_id: null,
+      provider_thread_id: null,
+      pull_request_number: null,
+    },
+    open: false,
+    main_thread_id: 1,
+    last_activity_at: null,
+  }));
+  queryClient.setQueryData(queryKeys.sessions, {
+    pages: [{ sessions, next_cursor: null }],
+    pageParams: [null],
+  });
 }
 
 describe('applySessionEvent', () => {
@@ -729,6 +761,67 @@ describe('applySessionEvent', () => {
     );
 
     expect(useNotificationStore.getState().notifications).toEqual([]);
+  });
+
+  it('drops the removed session and hands focus to the next one on session_removed', () => {
+    // The row is gone server-side, so the cached open sends go with it (a
+    // refetch would only 404) and the session list must refetch to lose the
+    // card. Focus goes to the first OTHER session in the cached list — read
+    // before the invalidation, so the choice cannot race the refetch.
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    seedSessionList(queryClient, [FOCUSED, 'sess-2', 'sess-3']);
+    queryClient.setQueryData(queryKeys.sessionSends(FOCUSED), {
+      sends: [serverSend()],
+    });
+
+    applySessionEvent(
+      { kind: 'session_removed', session_id: FOCUSED },
+      queryClient,
+      null,
+      FOCUSED,
+    );
+
+    expect(
+      queryClient.getQueryData(queryKeys.sessionSends(FOCUSED)),
+    ).toBeUndefined();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions'] });
+    expect(useNavStore.getState().focusedSessionId).toBe('sess-2');
+  });
+
+  it('falls back to the new-session screen when the removed session was the last one', () => {
+    // Nothing else to focus, so the user lands where a session is started
+    // rather than on a screen describing a session that no longer exists.
+    const queryClient = new QueryClient();
+    seedSessionList(queryClient, [FOCUSED]);
+
+    applySessionEvent(
+      { kind: 'session_removed', session_id: FOCUSED },
+      queryClient,
+      null,
+      FOCUSED,
+    );
+
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+  });
+
+  it('leaves focus alone when a different session is removed', () => {
+    // Another tab (or another card in this one) removed a session the user is
+    // not looking at: the only thing that happens on their screen is the card
+    // disappearing. Moving focus would yank them out of what they are reading.
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    seedSessionList(queryClient, [FOCUSED, 'sess-2']);
+
+    applySessionEvent(
+      { kind: 'session_removed', session_id: 'sess-2' },
+      queryClient,
+      null,
+      FOCUSED,
+    );
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions'] });
+    expect(useNavStore.getState().focusedSessionId).toBe(FOCUSED);
   });
 
   it('routes a permission request to the store as a notice', () => {

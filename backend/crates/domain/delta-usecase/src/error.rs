@@ -27,16 +27,39 @@ pub enum Error {
     #[error("session cannot be resumed (transcript missing): {0}")]
     ResumeUnavailable(String),
 
-    /// A **branch** send targeted a session whose launch has not bound yet: the
-    /// row exists (it is listed as `spawning` from the moment its first send was
-    /// accepted) but the session has ingested no messages at all, so there is
-    /// nothing to branch from. A *plain* send in that window is not refused —
-    /// it is accepted as a `queued` row and flushed when the launch binds — so
-    /// this is the branch case alone, which the composer offers no way to
-    /// compose either (branching anchors on a message, and there is none):
-    /// today only an API client reaches it. Surfaced as `409`.
+    /// An operation that needs a settled session targeted one whose launch has
+    /// not bound yet: the row exists (it is listed as `spawning` from the moment
+    /// its first send was accepted) but nothing is bound to it. Two callers
+    /// raise it, and the answer to both is to wait for the launch to come up (or
+    /// to close it, which cancels it). Surfaced as `409`.
+    ///
+    /// - A **branch** send: the session has ingested no messages at all, so
+    ///   there is nothing to branch from. A *plain* send in that window is not
+    ///   refused — it is accepted as a `queued` row and flushed when the launch
+    ///   binds — and the composer offers no way to compose a branch there either
+    ///   (branching anchors on a message, and there is none), so today only an
+    ///   API client reaches this one.
+    /// - A **removal**: a still-starting session is not the user's to discard —
+    ///   its launch is about to write the very rows a delete would take. This is
+    ///   the sibling refusal of [`Self::SessionOpen`], kept apart from it
+    ///   because the two ask the user for different things.
     #[error("session is still starting: {0}")]
     SessionSpawning(String),
+
+    /// A delete aimed at a session that is currently open — a live pane
+    /// (Claude) or a live terminal-less agent session (Codex). Delta's rows are
+    /// only the user's to discard once the session has been closed; a live
+    /// session is still driving a process that writes into them.
+    ///
+    /// Surfaced as `409`, not `400`: the id is a perfectly good one and the
+    /// same call succeeds the moment the session is closed — it is the
+    /// *target's* current state that forbids the operation, the line
+    /// [`Self::LaunchOptionIsBuiltin`] already draws. Kept distinct from
+    /// [`Self::SessionSpawning`] (the *other* forbidden state, a session that
+    /// has not finished starting) because the two ask the user for different
+    /// things: close it first, versus wait for it to come up.
+    #[error("session is open: {0}")]
+    SessionOpen(String),
 
     /// A user-selected working directory is not a usable directory: it does not
     /// exist, is not a directory, or could not be resolved. Surfaced as `400`.

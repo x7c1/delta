@@ -35,6 +35,15 @@ pub enum SessionEvent {
     SessionOpened { session_id: SessionId },
     /// An open session was closed: its pane was torn down but its data remains.
     SessionClosed { session_id: SessionId },
+    /// A closed session was removed from Delta's list: its row and every row
+    /// that hangs off it are gone, so the session no longer exists to be
+    /// listed, focused or resumed.
+    ///
+    /// Deliberately not folded into [`Self::SessionClosed`]: closing *keeps*
+    /// the session, while every client that hears this one has to drop the row
+    /// rather than re-render it as closed. Only Delta's own rows go — the git
+    /// worktree on disk and the agent's own transcript and state survive.
+    SessionRemoved { session_id: SessionId },
     /// A held (`queued`) send was promoted to `dispatched` and its keystrokes
     /// typed: the session went idle and the send took its turn.
     ///

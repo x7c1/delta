@@ -40,6 +40,7 @@ pub fn router(state: AppState) -> Router {
         .bind(endpoint::CreateSession, api::create_session)
         .bind(endpoint::OpenSession, api::open_session)
         .bind(endpoint::CloseSession, api::close_session)
+        .bind(endpoint::DeleteSession, api::delete_session)
         .bind(endpoint::InterruptSession, api::interrupt)
         .bind(endpoint::ListThreads, api::list_threads)
         .bind(endpoint::ListSends, api::list_sends)

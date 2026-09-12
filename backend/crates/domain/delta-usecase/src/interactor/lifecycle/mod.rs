@@ -1,4 +1,4 @@
-//! Session lifecycle use cases: spawn, resume (open), close, and the
+//! Session lifecycle use cases: spawn, resume (open), close, remove, and the
 //! launch-readiness ticks. The `ensure`/`new` entry points live on the
 //! interactor's routing layer (they mint the session id and pick the actor);
 //! everything here runs inside a session's actor.
@@ -10,6 +10,7 @@ mod adapter_launch;
 mod adapter_session;
 mod cancel_launch;
 mod close_session;
+mod delete_session;
 mod dispatch_ready_resumes;
 mod finish_launch;
 mod launch_prep;

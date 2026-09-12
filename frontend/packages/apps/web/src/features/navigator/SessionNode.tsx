@@ -2,7 +2,9 @@ import { memo, useMemo, useState, type CSSProperties, type Ref } from 'react';
 import { displayBranch, pullRequestUrl, type ThreadId } from '@delta/model';
 import type { SessionListItem } from '@delta/wire-gen';
 import {
+  ApiError,
   useCloseSessionMutation,
+  useDeleteSessionMutation,
   useSessionThreadsQuery,
 } from '@delta/api-client';
 import { Badge, Menu, Spinner, StatusDot, cn } from '@delta/ui-kit';
@@ -14,6 +16,7 @@ import {
 } from '../open-cwd/useOpenCwd';
 import { noticeOf, threadIsRunning, useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
+import { useNotificationStore } from '../../store/notificationStore';
 import { ThreadTree } from './ThreadTree';
 
 export interface SessionNodeProps {
@@ -76,6 +79,27 @@ const PROVIDER_TRIGGER_TINT = {
 } as const satisfies Record<keyof typeof PROVIDER_METADATA, string>;
 
 /**
+ * The snackbar line for a `Remove` that the server refused.
+ *
+ * Both refusals mean the same thing to the user — the card was stale and the
+ * session is live again — so each names the state the session is in and the way
+ * out of it, rather than the code that carried it. Anything else (an unexpected
+ * failure, a dropped request) forwards the message it came with, so the user is
+ * never left with a click that produced nothing.
+ */
+function removalRefusalDetail(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case 'session_open':
+        return 'It is open again. Close it first, then remove it.';
+      case 'session_spawning':
+        return 'It is starting again. It can be removed once it is closed.';
+    }
+  }
+  return error instanceof Error ? error.message : 'The request failed.';
+}
+
+/**
  * One top-level navigator node: a session, rendered as a card. The card holds a
  * header row — the focus button (a two-line block: line 1 is the open/closed
  * indicator plus the session's *launch-time* local git branch (the primary
@@ -92,9 +116,11 @@ const PROVIDER_TRIGGER_TINT = {
  * tinted in the session's provider hue, doubling as the card's provider marker.
  * The menu always offers `Copy session ID` (useful even for a closed session —
  * copying its id, e.g. to feed `claude --resume`, does not require the session
- * to be running) and additionally exposes `Close` while there is something to
- * close: an open session, or one that is still starting — closing that cancels
- * its launch, which is the only way out of a launch that has wedged. The
+ * to be running) and additionally exposes exactly one of two destructive items:
+ * `Close` while there is something to close — an open session, or one that is
+ * still starting, where closing cancels its launch, the only way out of a launch
+ * that has wedged — and otherwise `Remove`, which takes a closed session off the
+ * list for good (its rows go; the worktree and the agent's own files stay). The
  * focused card is lifted with an indigo border, tint, and ring.
  *
  * Every session that has branched into sub-threads shows its {@link ThreadTree}
@@ -122,6 +148,9 @@ export const SessionNode = memo(function SessionNode({
   const client = useApiClient();
   const openCwd = useOpenCwd();
   const closeSession = useCloseSessionMutation(client);
+  const deleteSession = useDeleteSessionMutation(client);
+  const showError = useNotificationStore((state) => state.showError);
+  const showInfo = useNotificationStore((state) => state.showInfo);
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   // Whether this session has a pending permission request (a tool blocked on a
@@ -477,8 +506,10 @@ export const SessionNode = memo(function SessionNode({
             //      affordance, so it takes the top slot the user's eye
             //      lands on first.
             //   2. Copy session ID — a passive, always-available utility.
-            //   3. Close — destructive, so it sits at the bottom, and
-            //      conditional (see the item itself).
+            //   3. Close / Remove — destructive, so they sit at the bottom,
+            //      and mutually exclusive on opposite conditions (see the
+            //      items themselves): an open or starting card offers Close,
+            //      a closed one offers Remove.
             items={[
               // Open the session's launch-time cwd in an external tool. Uses
               // the SESSION-LEVEL cwd (spawn-time fixed value), not any
@@ -516,6 +547,48 @@ export const SessionNode = memo(function SessionNode({
                     {
                       label: 'Close',
                       onSelect: () => closeSession.mutate(item.session.id),
+                      tone: 'danger' as const,
+                    },
+                  ]
+                : []),
+              // The exact inverse of the condition above, so a card always
+              // offers exactly one of Close and Remove — never both, never
+              // neither. Removal takes the session off the list for good: its
+              // rows go, while the worktree on disk and the agent's own
+              // transcript stay (see `DELETE /api/sessions/{id}`). No
+              // confirmation dialog: opening the kebab and picking a red item
+              // is already two steps, and Close — the other destructive-looking
+              // action — has none either. A card that was reopened by another
+              // tab since this list was fetched is refused server-side with a
+              // 409 rather than silently removed.
+              //
+              // Both outcomes are said through the app-wide snackbar this
+              // menu's `Open in VS Code` already uses, because selecting an
+              // item closes the menu and an inline message would have nowhere
+              // left to live. The refusal, because the card stays put and the
+              // click would otherwise produce nothing. The success, because the
+              // card vanishing under a red `Remove` reads as "my work is gone"
+              // when the worktree, its branch and the agent's transcript are
+              // all still where they were.
+              ...(!item.open && !spawning
+                ? [
+                    {
+                      label: 'Remove',
+                      onSelect: () =>
+                        deleteSession.mutate(item.session.id, {
+                          onSuccess: () => {
+                            showInfo(
+                              'Session removed',
+                              `Nothing on disk was deleted — ${item.session.cwd} is untouched.`,
+                            );
+                          },
+                          onError: (error: unknown) => {
+                            showError(
+                              'Could not remove the session',
+                              removalRefusalDetail(error),
+                            );
+                          },
+                        }),
                       tone: 'danger' as const,
                     },
                   ]

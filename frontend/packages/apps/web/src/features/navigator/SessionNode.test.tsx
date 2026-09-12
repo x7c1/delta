@@ -19,6 +19,7 @@ import type { SessionListItem } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
+import { useNotificationStore } from '../../store/notificationStore';
 import { SessionNode } from './SessionNode';
 
 const server = setupServer(...createHandlers());
@@ -39,6 +40,10 @@ afterEach(() => {
   // directly (rather than an `onFocus` prop), so clear the nav selection
   // between cases too.
   useNavStore.setState({ focusedSessionId: null, activeThreadId: null });
+  // A `Remove` pushes onto the app-wide snackbar queue either way — refused or
+  // done — and that queue outlives the render; drain it so one case cannot see
+  // another's notification.
+  useNotificationStore.setState({ notifications: [] });
 });
 afterAll(() => server.close());
 
@@ -281,14 +286,14 @@ describe('SessionNode repo line', () => {
         ...item.session,
         repository_display_name: null,
         repo_root: null,
-        cwd: '/Users/x7c1/projects/local-only',
+        cwd: '/home/dev/projects/local-only',
       },
     };
     renderNode({ item: legacy });
 
     const repo = screen.getByTestId('session-repo');
     expect(repo).toHaveTextContent('local-only');
-    expect(repo).toHaveAttribute('title', '/Users/x7c1/projects/local-only');
+    expect(repo).toHaveAttribute('title', '/home/dev/projects/local-only');
     expect(repo.className).toContain('[direction:rtl]');
   });
 
@@ -548,9 +553,11 @@ describe('SessionNode kebab menu', () => {
     ).toBeInTheDocument();
   });
 
-  it('exposes only "Copy session ID" when the session is closed', () => {
+  it('swaps "Close" for "Remove" when the session is closed', () => {
     // The menu trigger must still be enabled for a closed session — copying the
-    // id is useful regardless of whether the session is running.
+    // id is useful regardless of whether the session is running. A closed
+    // session has nothing to close, but it is the one state it can be removed
+    // in, so the destructive slot holds `Remove` instead.
     renderNode({ item: { ...item, open: false } });
 
     fireEvent.click(
@@ -563,6 +570,120 @@ describe('SessionNode kebab menu', () => {
     expect(
       screen.queryByRole('menuitem', { name: 'Close' }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('menuitem', { name: 'Remove' }),
+    ).toBeInTheDocument();
+  });
+
+  it('offers exactly one of "Close" and "Remove" in every session state', () => {
+    // The two items are gated on opposite conditions, so a card can never show
+    // both (offering to remove a live session) nor neither (a card with no way
+    // off the list). Asserted across all three states a card can be in.
+    const states: ReadonlyArray<[string, SessionListItem, 'Close' | 'Remove']> =
+      [
+        ['open', item, 'Close'],
+        ['spawning', spawningItem, 'Close'],
+        ['closed', { ...item, open: false }, 'Remove'],
+      ];
+    for (const [name, node, offered] of states) {
+      const hidden = offered === 'Close' ? 'Remove' : 'Close';
+      const { unmount } = renderNode({ item: node });
+      fireEvent.click(
+        screen.getByRole('button', { name: /Session actions for/ }),
+      );
+      expect(
+        screen.getByRole('menuitem', { name: offered }),
+        `a ${name} session offers ${offered}`,
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('menuitem', { name: hidden }),
+        `a ${name} session does not offer ${hidden}`,
+      ).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it('issues a delete request for the session when "Remove" is picked', async () => {
+    // `Remove` drops Delta's rows for the session, so the click must reach
+    // `DELETE /api/sessions/{id}` with this session's id — and with no
+    // confirmation step in between.
+    const removed = vi.fn<(id: string | readonly string[]) => void>();
+    server.use(
+      http.delete('*/api/sessions/:id', ({ params }) => {
+        removed(params.id);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderNode({ item: { ...item, open: false } });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Session actions for/ }),
+    );
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }));
+
+    await waitFor(() => expect(removed).toHaveBeenCalledWith(item.session.id));
+  });
+
+  it('says that nothing on disk was deleted after a removal', async () => {
+    // The only on-screen result of a successful `Remove` is the card
+    // disappearing, which under a red menu item reads as the work being gone.
+    // The snackbar is what corrects that, so it must name the directory that
+    // survived rather than describe the rows that went.
+    server.use(
+      http.delete(
+        '*/api/sessions/:id',
+        () => new HttpResponse(null, { status: 204 }),
+      ),
+    );
+    renderNode({ item: { ...item, open: false } });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Session actions for/ }),
+    );
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }));
+
+    await waitFor(() =>
+      expect(useNotificationStore.getState().notifications).toEqual([
+        {
+          id: expect.any(Number),
+          tone: 'info',
+          title: 'Session removed',
+          detail: `Nothing on disk was deleted — ${item.session.cwd} is untouched.`,
+        },
+      ]),
+    );
+  });
+
+  it('reports a refused removal in the snackbar', async () => {
+    // A card another tab reopened still shows `Remove`, and the server refuses
+    // it. The menu has closed by then and the card stays put, so without the
+    // snackbar the click would produce nothing at all — and the line must say
+    // what state the session is in, not which code carried the refusal.
+    server.use(
+      http.delete('*/api/sessions/:id', () =>
+        HttpResponse.json(
+          { error: 'session is open: sess-1', code: 'session_open' },
+          { status: 409 },
+        ),
+      ),
+    );
+    renderNode({ item: { ...item, open: false } });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Session actions for/ }),
+    );
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }));
+
+    await waitFor(() =>
+      expect(useNotificationStore.getState().notifications).toEqual([
+        {
+          id: expect.any(Number),
+          tone: 'error',
+          title: 'Could not remove the session',
+          detail: 'It is open again. Close it first, then remove it.',
+        },
+      ]),
+    );
   });
 
   it('offers "Close" while the session is still starting, and it cancels the launch', async () => {

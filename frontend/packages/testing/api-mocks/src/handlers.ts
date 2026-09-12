@@ -385,6 +385,35 @@ export function createMockApi(): MockApi {
       return new HttpResponse(null, { status: 204 });
     }),
 
+    // Remove a closed session. The two refusals mirror the server's, each with
+    // its own stable code, so a stale card meets the same answer in mock mode
+    // as in production. The store mutation rides on the emitted
+    // `session_removed` (see `MockApi.onServerEvent`), the way the cancelled
+    // launch above rides on its `spawn_failed`.
+    http.delete('*/api/sessions/:id', ({ params }) => {
+      const entry = store.sessions.find((s) => s.session.id === params.id);
+      if (!entry) {
+        return HttpResponse.json({ error: 'unknown session' }, { status: 404 });
+      }
+      if (entry.session.status === 'spawning') {
+        return HttpResponse.json(
+          { error: 'session is still starting', code: 'session_spawning' },
+          { status: 409 },
+        );
+      }
+      if (entry.open) {
+        return HttpResponse.json(
+          { error: 'session is open', code: 'session_open' },
+          { status: 409 },
+        );
+      }
+      emitServerEvent({
+        kind: 'session_removed',
+        session_id: entry.session.id,
+      });
+      return new HttpResponse(null, { status: 204 });
+    }),
+
     http.get('*/api/sessions/:id/threads', ({ params }) => {
       const entry = store.sessions.find((s) => s.session.id === params.id);
       if (!entry) {
@@ -1343,6 +1372,24 @@ export function createMockApi(): MockApi {
           (s) => s.session.id === event.session_id,
         );
         if (entry?.spawning) {
+          store.sessions = store.sessions.filter((s) => s !== entry);
+          store.sends = store.sends.filter(
+            (s) => s.session_id !== event.session_id,
+          );
+          for (const thread of entry.threads) {
+            delete store.messagesByThread[thread.id];
+          }
+        }
+        break;
+      }
+      case 'session_removed': {
+        // The user removed a closed session: the row and every row hanging off
+        // it are deleted by the server's cascade. Unconditional, unlike the
+        // spawn reap above — this event only ever names a session that is gone.
+        const entry = store.sessions.find(
+          (s) => s.session.id === event.session_id,
+        );
+        if (entry) {
           store.sessions = store.sessions.filter((s) => s !== entry);
           store.sends = store.sends.filter(
             (s) => s.session_id !== event.session_id,
