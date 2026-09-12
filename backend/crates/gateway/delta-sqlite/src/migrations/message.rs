@@ -27,9 +27,15 @@
 //!
 //! **Indexes.** `ix_message_session_created` backs the per-session
 //! `MAX(created_at)` used to (re)compute a session's denormalized
-//! `last_activity_at` on message upsert; it is a single-session lookup, so the
-//! index bounds it. The others back the per-thread and per-parent reads the
-//! attribution fold and the thread view issue.
+//! `last_activity_at` on message upsert; keyed `(session_id, created_at)`, it
+//! lets that lookup seek straight to the newest row. `ix_message_thread` backs
+//! the twin per-thread `MAX(created_at)` (a thread's `last_activity_at`, on
+//! upsert and in the v8 backfill) but carries only `thread_id`: it bounds the
+//! query to one thread's rows, which are then scanned rather than sought.
+//! Threads are short enough that this is not measurable today; widening the
+//! index to `(thread_id, created_at)` is a schema step, not an edit here. The
+//! remaining indexes back the per-thread and per-parent reads the attribution
+//! fold and the thread view issue.
 //!
 //! **Full-text index** (groundwork: no search UI yet). `message_fts` is an
 //! external-content fts5 table over `message.content_text`, keyed by the message
