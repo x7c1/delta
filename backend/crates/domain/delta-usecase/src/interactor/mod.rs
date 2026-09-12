@@ -227,9 +227,8 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// tick returning its `Vec<SessionEvent>`) is untouched, and a
     /// configuration that never wires the seam (the default constructor, the
     /// domain tests) simply drops any async emit. Production wiring installs the
-    /// sink through [`Interactor::with_event_sink`]. Currently a dormant seam:
-    /// no live path emits on it yet — the push-based producer (the Codex event
-    /// pump) that does lands in a later change.
+    /// sink through [`Interactor::with_event_sink`]; the live emitters are
+    /// listed on [`Self::emit_async_event`].
     pub(in crate::interactor) event_sink: Option<AsyncEventSink>,
     /// Per-lens memo of the latest PR search result, keeping a focus
     /// flip between the two lenses cheap. Bounded by
@@ -653,8 +652,12 @@ where
     /// this pushes a single event onto the [`AsyncEventSink`] the server drains
     /// — for a producer that emits after its driving call has already returned.
     /// A no-op when no sink is wired (the default), so it is always safe to
-    /// call. Currently dormant: the push-based producer that emits through it
-    /// (the Codex event pump) lands in a later change.
+    /// call. Live today: the Codex event pump, a deferred launch's outcome, the
+    /// background tail's per-session ingest announcements, and the queue's
+    /// out-of-request notices (a flush promoting a queued send, the
+    /// echo-deadline sweep parking one). A background clone job is the one
+    /// async producer that skips this helper: it holds its own clone of the
+    /// sink.
     pub fn emit_async_event(&self, event: SessionEvent) {
         if let Some(sink) = &self.event_sink {
             sink.emit(event);
