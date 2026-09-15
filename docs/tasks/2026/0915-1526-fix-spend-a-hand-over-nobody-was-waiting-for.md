@@ -104,6 +104,18 @@ leaving it to mislead.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] In the running app: start a session, and while its POST is in flight click
-      over to another session. When it has started, press **New session** — the
-      new-session screen opens and stays open.
+- [x] In the running app: start a session while the new-session screen is
+      focused — it still carries you into that session — then press **New
+      session** while it is starting and confirm the screen opens and stays
+      open.
+
+**Exception, recorded rather than ticked.** The criterion this section first
+carried asked for the walkthrough with the click-away happening *while the POST
+is in flight*. That window is not reachable by hand: the accept path measured
+15 ms end to end on the development machine, against seconds per deliberate
+user action. Instrumenting the page to widen it was attempted and abandoned —
+the client does not issue the request through `window.fetch`, so patching it
+changed nothing. The branch is covered instead by `useSubmitSend.test.tsx`,
+which gates the request and resolves it deliberately with no workspace mounted,
+so it pins the decision to the focus as it stands when the response arrives —
+a stronger guarantee than a hand attempt at the window would give.
