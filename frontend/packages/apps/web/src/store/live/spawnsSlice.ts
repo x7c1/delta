@@ -60,13 +60,23 @@ export interface SpawnItem extends NewSessionLaunch {
    */
   cancelled?: boolean;
   /**
-   * True once the workspace has handed focus to this spawn. The hand-over is a
-   * one-shot, and this is the record of it having happened — `WorkspaceScreen`
-   * holds the effect and the reasoning for why the focused screen alone cannot
-   * stand in for that record.
+   * True once this spawn's focus hand-over is over — used or spent. The
+   * hand-over is a one-shot and this is its record, set either by the
+   * workspace as it moves focus onto the spawn, or already at
+   * {@link SpawnsSlice.trackSpawn} time by `useSubmitSend`, which spends the
+   * hand-over of a POST that landed with the user elsewhere and holds the
+   * reasoning for deciding it there. `WorkspaceScreen` holds the effect and
+   * the reasoning for why the focused screen alone cannot stand in for that
+   * record.
    *
-   * `undefined` until the hand-over happens, and for a spawn registered
-   * already `failed` — its focus is never handed over at all.
+   * Never read on a `failed` spawn, however this flag stands there: a failure
+   * turns the entry into a Retry / Dismiss card on the new-session screen, and
+   * the hand-over only ever considers `spawning` ones — so a spawn registered
+   * already `failed` (a buffered failure) simply carries whatever the caller
+   * decided a moment before the failure was known.
+   *
+   * `undefined` only in state seeded directly, as tests do, which reads as not
+   * handed over; every `trackSpawn` decides it.
    */
   focusHandedOver?: boolean;
   /**
@@ -89,13 +99,21 @@ export interface SpawnsSlice {
    * Track a new-session spawn (real ids from the POST response). If the
    * spawn's failure already arrived (see {@link SpawnFailureBufferedNotice}),
    * the spawn is registered as `failed` immediately.
+   *
+   * The caller supplies {@link SpawnItem.focusHandedOver}: it is the one place
+   * that knows where the user was when the server answered.
    */
-  trackSpawn: (spawn: Omit<SpawnItem, 'status' | 'focusHandedOver'>) => void;
+  trackSpawn: (
+    spawn: Omit<SpawnItem, 'status' | 'focusHandedOver'> & {
+      focusHandedOver: boolean;
+    },
+  ) => void;
   /**
-   * Record that this spawn's focus hand-over has happened, so it is never
-   * handed over again (see {@link SpawnItem.focusHandedOver}). Called by the
-   * workspace as it moves focus onto the spawn; a no-op for an id that is not
-   * tracked, or whose hand-over is already recorded.
+   * Record that this spawn's focus hand-over is over, so it is never handed
+   * over again (see {@link SpawnItem.focusHandedOver}). Called by the workspace
+   * for the spawn it moves focus onto, and for any sibling that was waiting
+   * alongside it; a no-op for an id that is not tracked, or whose hand-over is
+   * already recorded.
    */
   markSpawnFocusHandedOver: (sessionId: SessionId) => void;
   /**
@@ -379,9 +397,10 @@ export const reduceSpawnFailed: EventReducer<SpawnsState, 'spawn_failed'> = (
 
 /**
  * The spawn came up: its launch bound and the server activated the row. The
- * tracked entry has done its job — the workspace focused the session when the
- * POST accepted it, and the pending chip now renders from the session's own
- * open-send list — so drop it here.
+ * tracked entry has done its job — the workspace focused the session if the
+ * user was still waiting on the new-session screen when the POST was accepted,
+ * and the pending chip now renders from the session's own open-send list — so
+ * drop it here.
  *
  * This is the release point precisely because it is the LAST thing the entry
  * is needed for: while a spawn is tracked the workspace refuses to reconcile

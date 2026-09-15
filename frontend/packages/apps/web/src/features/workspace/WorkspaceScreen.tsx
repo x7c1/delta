@@ -224,9 +224,7 @@ export function WorkspaceScreen() {
   // Deliberately NOT gated on that id being present in the loaded session list:
   // the refetch `useSubmitSend` fires is still in flight, and the
   // reconciliation below is taught to leave a tracked spawn's focus alone until
-  // the row lands. Only while the user is still on the new-session screen,
-  // though — they may have navigated elsewhere during the POST, and a spawn is
-  // not worth stealing a session they chose.
+  // the row lands.
   //
   // ONE-SHOT per spawn, recorded on the entry itself (`focusHandedOver`) and
   // consumed as focus moves. "The new-session screen is focused" is the test
@@ -235,6 +233,13 @@ export function WorkspaceScreen() {
   // would take focus a second time and make the New session button look dead
   // for as long as the launch stayed `spawning` (up to the server's spawn
   // deadline for one stuck on an interactive first-run prompt).
+  //
+  // A spawn whose POST landed while the user was elsewhere never reaches this
+  // effect as a candidate at all: `useSubmitSend` records it already handed
+  // over (it holds the reasoning). This effect therefore only ever hands over
+  // spawns registered from this very screen — and the guard below stays a pure
+  // gate (it mutates nothing), so a hand-over is never spent by a render that
+  // merely caught focus mid-move.
   //
   // The entry is released by `session_registered` (see `spawnsSlice`), not
   // here; a `spawn_failed` turns it into the Retry / Dismiss card instead —
@@ -247,13 +252,14 @@ export function WorkspaceScreen() {
     if (awaitingHandOver.length === 0 || !isNewSessionFocus) {
       return;
     }
-    // Several can be waiting at once only when earlier spawns missed their own
-    // hand-over: their POST landed while the user was elsewhere (a quick Retry
-    // cycle is one way there), so the guard above declined it. The newest is
-    // the one the user is waiting on; an older one keeps its unconsumed
-    // hand-over and takes focus the next time this screen is opened.
+    // Several can be waiting at once only when two POSTs sent from this screen
+    // resolve into the same commit. The newest is the session the user is
+    // taken to; the older ones had their moment here too and are marked with
+    // it, so none of them reclaims focus the next time this screen is opened.
     const target = awaitingHandOver[awaitingHandOver.length - 1];
-    markSpawnFocusHandedOver(target.sessionId);
+    for (const spawn of awaitingHandOver) {
+      markSpawnFocusHandedOver(spawn.sessionId);
+    }
     reconcileFocusedSession(target.sessionId);
   }, [
     spawns,

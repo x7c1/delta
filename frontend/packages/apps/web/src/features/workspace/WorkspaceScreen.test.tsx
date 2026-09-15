@@ -8,6 +8,7 @@ import {
   it,
   vi,
 } from 'vitest';
+import type { ReactNode } from 'react';
 import {
   act,
   fireEvent,
@@ -37,6 +38,7 @@ import { applySessionEvent } from '../../data/applySessionEvent';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { useLiveStore } from '../../store/liveStore';
+import { useNewSessionSend } from '../composer/useNewSessionSend';
 import { WorkspaceScreen } from './WorkspaceScreen';
 
 // The live event source opens a real WebSocket outside mock mode, and the
@@ -81,7 +83,8 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-function renderScreen() {
+/** Render the workspace, optionally with a test harness beside it. */
+function renderScreen(harness?: ReactNode) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -92,6 +95,7 @@ function renderScreen() {
       <QueryClientProvider client={queryClient}>
         <ApiProvider client={client}>
           <WorkspaceScreen />
+          {harness}
         </ApiProvider>
       </QueryClientProvider>,
     ),
@@ -164,6 +168,71 @@ function trackedSpawn(sessionId: string) {
     worktree: null,
     status: 'spawning' as const,
   };
+}
+
+/** The harness button's label (see {@link NewSessionSender}). */
+const SENDER_LABEL = 'start a session from the test';
+
+/**
+ * A button that starts a new session through the real submit path. It is
+ * rendered beside the workspace rather than driven through the composer
+ * because the cases below have to send from screens that carry no new-session
+ * composer at all — the whole point being where focus is when the POST lands.
+ */
+function NewSessionSender() {
+  const send = useNewSessionSend();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        send({
+          text: 'first message',
+          workdir: '/work',
+          launchOptionIds: [],
+          provider: 'claude',
+          worktree: null,
+          pullRequestNumber: null,
+        })
+      }
+    >
+      {SENDER_LABEL}
+    </button>
+  );
+}
+
+/** Render the workspace with the {@link NewSessionSender} harness beside it. */
+function renderScreenWithSender() {
+  return renderScreen(<NewSessionSender />);
+}
+
+/**
+ * Accept the next `POST /api/sends` into `sessionId`, as the server does for a
+ * new session: real ids on the response, and the row not yet in the loaded
+ * list. Stubbed rather than served by the mock store so the session the send
+ * creates cannot leak into later specs' session lists.
+ */
+function acceptNextSendAs(sessionId: string) {
+  server.use(
+    http.post('*/api/sends', () =>
+      HttpResponse.json(
+        {
+          send: {
+            id: 1,
+            session_id: sessionId,
+            thread_id: SESSION_2_MAIN_THREAD_ID,
+            semantic_parent_uuid: null,
+            text: 'first message',
+            locator_quote: null,
+            status: 'dispatched',
+            matched_uuid: null,
+            created_at: '2026-01-01T00:00:00Z',
+            held_at: null,
+          },
+        },
+        { status: 201 },
+      ),
+    ),
+  );
 }
 
 describe('WorkspaceScreen multi-session', () => {
@@ -410,10 +479,11 @@ describe('WorkspaceScreen multi-session', () => {
   });
 
   it('hands a spawn’s focus over once, leaving New session usable', async () => {
-    // The hand-over above is a one-shot. Once it has happened the user can go
-    // back to the new-session screen and start ANOTHER session while the first
-    // is still coming up — pressing "New session" must land there and STAY
-    // there, rather than snapping back to the still-spawning session.
+    // The hand-over above is a one-shot. Once it has happened, pressing "New
+    // session" must land on that screen and STAY there, rather than snapping
+    // back to the still-spawning session. (Starting a second session from
+    // there while the first is still coming up is covered below, through the
+    // real submit path.)
     useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
     useLiveStore.setState({ spawns: [trackedSpawn(UNLISTED_SPAWN_ID)] });
 
@@ -443,19 +513,24 @@ describe('WorkspaceScreen multi-session', () => {
     // has to be unresolved for the case to mean anything.
     expect(useLiveStore.getState().spawns).toHaveLength(1);
     expect(useLiveStore.getState().spawns[0].status).toBe('spawning');
+  });
 
-    // Reaching the screen is only half of "usable": the second launch, sent
-    // from it while the first is still coming up, must be handed focus exactly
-    // as the first was. The record is per spawn, so the entry already handed
-    // over neither suppresses the new hand-over nor stands in for it.
-    act(() => {
-      useLiveStore.setState({
-        spawns: [
-          ...useLiveStore.getState().spawns,
-          trackedSpawn(SECOND_SPAWN_ID),
-        ],
-      });
+  it('spends the hand-over of every spawn awaiting one at the same moment', async () => {
+    // Two new-session sends can travel at once — Send, then Send again while
+    // the first POST is still out — and both can be tracked before the effect
+    // runs, each owed a hand-over from this screen. Focus can only go to one,
+    // the newest; the older one's hand-over is spent alongside it rather than
+    // saved, so pressing "New session" afterwards opens that screen and STAYS
+    // there instead of being yanked into the leftover spawn.
+    useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    useLiveStore.setState({
+      spawns: [
+        { ...trackedSpawn(UNLISTED_SPAWN_ID), focusHandedOver: false },
+        { ...trackedSpawn(SECOND_SPAWN_ID), focusHandedOver: false },
+      ],
     });
+
+    renderScreen();
 
     await waitFor(() =>
       expect(useNavStore.getState().focusedSessionId).toBe(SECOND_SPAWN_ID),
@@ -463,13 +538,107 @@ describe('WorkspaceScreen multi-session', () => {
     expect(useLiveStore.getState().spawns).toEqual([
       expect.objectContaining({
         sessionId: UNLISTED_SPAWN_ID,
+        status: 'spawning',
         focusHandedOver: true,
       }),
       expect.objectContaining({
         sessionId: SECOND_SPAWN_ID,
+        status: 'spawning',
         focusHandedOver: true,
       }),
     ]);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New session' }));
+
+    // Flush the effects the focus change schedules — where the older spawn's
+    // unspent hand-over would have fired.
+    await act(async () => {});
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+  });
+
+  it('carries the user into a session sent from the new-session screen', async () => {
+    // The unchanged path, driven end to end through the real submit: Send from
+    // the new-session screen, and the accepted POST hands focus to the session
+    // it just started.
+    useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    acceptNextSendAs(UNLISTED_SPAWN_ID);
+
+    renderScreenWithSender();
+
+    fireEvent.click(await screen.findByRole('button', { name: SENDER_LABEL }));
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(UNLISTED_SPAWN_ID),
+    );
+  });
+
+  it('starts a second session from the new-session screen while the first spawns', async () => {
+    // Back on the new-session screen with the first launch still coming up, a
+    // second Send is handed focus exactly as the first was: the hand-over is
+    // per spawn, and the one already spent neither suppresses the new one nor
+    // stands in for it.
+    useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    acceptNextSendAs(UNLISTED_SPAWN_ID);
+
+    renderScreenWithSender();
+
+    const sender = await screen.findByRole('button', { name: SENDER_LABEL });
+    fireEvent.click(sender);
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(UNLISTED_SPAWN_ID),
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New session' }));
+    acceptNextSendAs(SECOND_SPAWN_ID);
+    fireEvent.click(sender);
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(SECOND_SPAWN_ID),
+    );
+    // The first is still spawning, so the second hand-over really did happen
+    // alongside a live one rather than after it resolved.
+    expect(useLiveStore.getState().spawns).toEqual([
+      expect.objectContaining({
+        sessionId: UNLISTED_SPAWN_ID,
+        status: 'spawning',
+        focusHandedOver: true,
+      }),
+      expect.objectContaining({
+        sessionId: SECOND_SPAWN_ID,
+        status: 'spawning',
+        focusHandedOver: true,
+      }),
+    ]);
+  });
+
+  it('spends the hand-over of a send accepted while the user was elsewhere', async () => {
+    // The regression: the user pressed Send, then clicked over to another
+    // session while the POST was travelling. The spawn must not steal the
+    // session they chose — and it must not save the hand-over up either. When
+    // they later press "New session", that screen opens and STAYS open,
+    // instead of dropping them into a session they had already moved on from.
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    acceptNextSendAs(UNLISTED_SPAWN_ID);
+
+    renderScreenWithSender();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('session-node').length).toBeGreaterThan(0),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: SENDER_LABEL }));
+
+    await waitFor(() => expect(useLiveStore.getState().spawns).toHaveLength(1));
+    expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New session' }));
+
+    // Flush the effects the focus change schedules — where a hand-over held
+    // back for later would have fired.
+    await act(async () => {});
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    // Still spawning, so the window in which a saved-up hand-over could fire
+    // is genuinely open.
+    expect(useLiveStore.getState().spawns[0].status).toBe('spawning');
   });
 
   it('leaves the new-session screen focused for a failed spawn', async () => {
@@ -491,6 +660,15 @@ describe('WorkspaceScreen multi-session', () => {
     await act(async () => {});
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
     expect(useLiveStore.getState().spawns).toHaveLength(1);
+    // And the card the user has to answer is on that screen, with both of its
+    // actions — the reason a failed spawn is never a hand-over candidate.
+    const card = await screen.findByTestId('pending-item');
+    expect(
+      within(card).getByRole('button', { name: 'Retry' }),
+    ).toBeInTheDocument();
+    expect(
+      within(card).getByRole('button', { name: 'Dismiss' }),
+    ).toBeInTheDocument();
   });
 
   it('releases the tracked spawn when the session registers', async () => {
@@ -549,8 +727,11 @@ describe('WorkspaceScreen multi-session', () => {
   });
 
   it('does not steal focus for a spawn when the user moved on', async () => {
-    // The POST was accepted while the user was already viewing another
-    // session: the spawn is tracked, but focus must stay where they put it.
+    // The effect's gate on its own: a spawn still owed a hand-over while focus
+    // sits elsewhere. `useSubmitSend` spends such a hand-over as the POST
+    // lands, so this state no longer arises in production — but the gate is
+    // what keeps an unspent one from taking the session the user chose, and no
+    // other case pins it.
     useNavStore.setState({ focusedSessionId: SESSION_ID });
     useLiveStore.setState({ spawns: [trackedSpawn(UNLISTED_SPAWN_ID)] });
 

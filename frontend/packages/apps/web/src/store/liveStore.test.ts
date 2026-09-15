@@ -460,6 +460,7 @@ describe('liveStore turn tracking', () => {
     }));
     expect(useLiveStore.getState().sending[0]?.dropOnResolve).toBe(true);
     useLiveStore.getState().trackSpawn({
+      focusHandedOver: false,
       sessionId: 'sess-9',
       threadId: 42,
       text: 'first message',
@@ -717,6 +718,7 @@ describe('liveStore spawn tracking', () => {
     // The submit hook drops the in-flight chip before it registers the spawn.
     useLiveStore.getState().removeSending('local-new-session');
     useLiveStore.getState().trackSpawn({
+      focusHandedOver: false,
       sessionId,
       threadId: 42,
       text: 'start a new session',
@@ -822,6 +824,7 @@ describe('liveStore spawn tracking', () => {
       start_point: { kind: 'remote_branch' as const, name: 'develop' },
     };
     useLiveStore.getState().trackSpawn({
+      focusHandedOver: false,
       sessionId: 'sess-spawn-codex',
       threadId: 42,
       text: 'start on codex',

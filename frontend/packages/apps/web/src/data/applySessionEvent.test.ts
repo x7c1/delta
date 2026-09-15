@@ -573,6 +573,7 @@ describe('applySessionEvent', () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
     // The spawn was accepted with real ids; its first send is in the cache.
     useLiveStore.getState().trackSpawn({
+      focusHandedOver: false,
       sessionId: 'sess-spawned',
       threadId: 42,
       text: 'new session',
@@ -618,6 +619,7 @@ describe('applySessionEvent', () => {
     const queryClient = new QueryClient();
     useNavStore.setState({ focusedSessionId: 'sess-spawned' });
     useLiveStore.getState().trackSpawn({
+      focusHandedOver: false,
       sessionId: 'sess-spawned',
       threadId: 42,
       text: 'new session',
@@ -654,6 +656,7 @@ describe('applySessionEvent', () => {
     useNavStore.setState({ focusedSessionId: 'sess-spawned' });
     useComposerStore.getState().setDraft(NEW_SESSION_DRAFT_KEY, 'meanwhile');
     useLiveStore.getState().trackSpawn({
+      focusHandedOver: false,
       sessionId: 'sess-spawned',
       threadId: 42,
       text: 'new session',
@@ -696,6 +699,7 @@ describe('applySessionEvent', () => {
     // the snackbar is what says where both went.
     const queryClient = new QueryClient();
     useLiveStore.getState().trackSpawn({
+      focusHandedOver: false,
       sessionId: 'sess-spawned',
       threadId: 42,
       text: 'new session',
@@ -752,6 +756,7 @@ describe('applySessionEvent', () => {
     const queryClient = new QueryClient();
     useNavStore.setState({ focusedSessionId: 'sess-spawned' });
     useLiveStore.getState().trackSpawn({
+      focusHandedOver: false,
       sessionId: 'sess-spawned',
       threadId: 42,
       text: 'new session',
@@ -787,6 +792,7 @@ describe('applySessionEvent', () => {
     // seam would double up on every failure.
     const queryClient = new QueryClient();
     useLiveStore.getState().trackSpawn({
+      focusHandedOver: false,
       sessionId: 'sess-spawned',
       threadId: 42,
       text: 'new session',

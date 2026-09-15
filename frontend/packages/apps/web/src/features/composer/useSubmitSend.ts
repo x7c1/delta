@@ -8,6 +8,7 @@ import {
 } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { useLiveStore, type SendingItem } from '../../store/liveStore';
+import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 
 /**
  * The one path every composer submit takes, shared by the composer's Send and
@@ -23,8 +24,9 @@ import { useLiveStore, type SendingItem } from '../../store/liveStore';
  *    REAL ids the server returned — it keeps the chip alive after the send
  *    matches its transcript line, until the turn-end event lands — and, for a
  *    new-session target, track the spawn (the workspace focuses the new session
- *    by that id at once, and a failed launch surfaces Retry / Dismiss) and
- *    refetch the session list the accepted send just added a row to;
+ *    by that id at once if the user is still waiting on the new-session screen,
+ *    and a failed launch surfaces Retry / Dismiss) and refetch the session list
+ *    the accepted send just added a row to;
  * 4. on failure, keep the chip as a recoverable `failed` row — except a
  *    `resume_unavailable` rejection, where the turn can never start (the
  *    transcript is gone): the chip is dropped outright and the session is
@@ -87,7 +89,26 @@ export function useSubmitSend(): (args: {
           // tracks the session itself (focus handoff, failure retry payload),
           // so it always runs on a successful POST whether or not the first
           // send raced its turn-end.
+          //
+          // Where the user is AT THIS MOMENT decides the spawn's focus
+          // hand-over, and the decision is taken here rather than in the
+          // workspace's hand-over effect. The question the policy asks — "was
+          // the user waiting on the new-session screen when the server
+          // answered?" — is asked exactly once, of the focus as it stands when
+          // the POST resolves; the effect instead sees `spawns` and focus as
+          // two independent stores converging over some number of renders, so
+          // anything that moved focus in between would read as "the user left"
+          // and spend a hand-over that was merely late.
+          //
+          // If they are elsewhere, they went and did something else — resumed
+          // another conversation, say — so the hand-over is recorded already
+          // spent: focus stays where they put it now, AND opening the
+          // new-session screen later leaves them there, instead of dropping
+          // them into a session they had already moved on from.
+          const userAwaitingSpawn =
+            useNavStore.getState().focusedSessionId === NEW_SESSION_FOCUS;
           trackSpawn({
+            focusHandedOver: !userAwaitingSpawn,
             sessionId: send.session_id,
             threadId: send.thread_id,
             text: send.text,
