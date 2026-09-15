@@ -45,6 +45,23 @@ describe('ThreadTree', () => {
   const rowClasses = () =>
     screen.getAllByRole('button').map((button) => button.className);
 
+  /** Every rendered row's branch arrow — the element the mark colours. */
+  const arrows = () =>
+    screen
+      .getAllByRole('button')
+      .map((button) => button.querySelector('.truncate span') as HTMLElement);
+
+  /** The branch arrow of the row carrying `title`. */
+  const arrow = (title: string) => {
+    const glyph = row(title).querySelector('.truncate span');
+    expect(glyph).not.toBeNull();
+    return glyph as HTMLElement;
+  };
+
+  /** The arrows drawn in the mark's foreground colour rather than the grey. */
+  const markedArrows = () =>
+    arrows().filter((glyph) => glyph.classList.contains('text-fg'));
+
   it('lists sub-threads only (not main) and selecting one invokes the callback', () => {
     const onSelectThread = vi.fn();
     render(<ThreadTree threads={threads} onSelectThread={onSelectThread} />);
@@ -147,6 +164,41 @@ describe('ThreadTree', () => {
     expect(screen.queryByText('3')).not.toBeInTheDocument();
   });
 
+  it('gives the title the full row width when no trailing signal is shown', () => {
+    // An empty trailing flex item still costs the row's `gap-2`, which cut long
+    // titles short, so the span exists only when it has something to show.
+    useLiveStore.setState({ unread: { 2: 3 } });
+    const { rerender } = render(
+      <ThreadTree threads={threads} onSelectThread={() => {}} />,
+    );
+
+    // Badged: the trailing span is there, holding the badge.
+    expect(row('branch one').lastElementChild).toContainElement(
+      screen.getByText('3'),
+    );
+
+    // Running (which suppresses the badge): still there, holding the spinner.
+    rerender(
+      <ThreadTree
+        threads={threads}
+        runningThreads={{ 2: true }}
+        onSelectThread={() => {}}
+      />,
+    );
+    expect(row('branch one').lastElementChild).toContainElement(
+      screen.getByTestId('thread-running'),
+    );
+
+    // Neither: the title span is the button's only child, so no gap precedes a
+    // span with nothing in it.
+    act(() => {
+      useLiveStore.setState({ unread: {} });
+    });
+    rerender(<ThreadTree threads={threads} onSelectThread={() => {}} />);
+    expect(row('branch one').children).toHaveLength(1);
+    expect(row('branch one').lastElementChild).toHaveClass('truncate');
+  });
+
   describe('the most-recently-active mark', () => {
     // Two sub-threads plus main, so "exactly one row is marked" is a real
     // assertion and the tie/ordering cases have something to choose between.
@@ -168,7 +220,7 @@ describe('ThreadTree', () => {
       },
     ];
 
-    it('marks exactly the sub-thread with the newest activity, with weight only', () => {
+    it('marks exactly the sub-thread with the newest activity, by the arrow colour', () => {
       render(
         <ThreadTree
           threads={withRecency(
@@ -180,27 +232,34 @@ describe('ThreadTree', () => {
         />,
       );
 
-      expect(
-        rowClasses().filter((c) => c.includes('font-semibold')),
-      ).toHaveLength(1);
-      expect(row('branch two').className).toContain('font-semibold');
-      // Weight alone: the accent belongs to the ACTIVE row, so the two signals
-      // stay readable when they land on different rows.
+      expect(markedArrows()).toHaveLength(1);
+      expect(arrow('branch two')).toHaveClass('text-fg');
+      // Every other branch arrow keeps the subtle grey it is drawn in.
+      expect(arrow('branch one')).toHaveClass('text-fg-subtle');
+      // The arrow's colour ALONE: the row's own weight matches its siblings',
+      // and the accent belongs to the ACTIVE row, so the two signals stay
+      // readable when they land on different rows.
+      expect(rowClasses().some((c) => c.includes('font-semibold'))).toBe(false);
       expect(row('branch two').className).not.toContain('text-accent');
       expect(row('branch two').className).not.toContain('bg-accent');
-      // Weight is invisible to assistive tech, so the marked row — and only it
+      // Colour is invisible to assistive tech, so the marked row — and only it
       // — also carries a visually-hidden label.
       expect(screen.getAllByTestId('thread-newest')).toHaveLength(1);
       expect(row('branch two')).toContainElement(
         screen.getByTestId('thread-newest'),
       );
+      // The label TRAILS the title: it joins the row's accessible name, and
+      // between arrow and title it would split the "⤷ <title>" opening that
+      // e2e locators match a thread row by.
+      expect(row('branch two').textContent).toMatch(/^⤷ branch two/);
     });
 
     it('marks no row when the main thread is the newest', () => {
       // Main is not rendered by this tree, so naming it is exactly how "the last
       // message landed on main" is expressed: nothing is marked. A row is active
-      // meanwhile, because the active row carries a weight of its own — the mark
-      // sits a step above it so that "no mark" keeps meaning "main is newest".
+      // meanwhile, because the active row carries styling of its own — none of
+      // which touches the arrow, so "no marked arrow" keeps meaning "main is
+      // newest".
       useNavStore.setState({ activeThreadId: 2 });
       render(
         <ThreadTree
@@ -213,7 +272,7 @@ describe('ThreadTree', () => {
         />,
       );
 
-      expect(rowClasses().some((c) => c.includes('font-semibold'))).toBe(false);
+      expect(markedArrows()).toHaveLength(0);
       expect(row('branch one').className).toContain('font-medium');
       expect(screen.queryByTestId('thread-newest')).not.toBeInTheDocument();
     });
@@ -227,7 +286,7 @@ describe('ThreadTree', () => {
       );
 
       expect(screen.getByText('branch one')).toBeInTheDocument();
-      expect(rowClasses().some((c) => c.includes('font-semibold'))).toBe(false);
+      expect(markedArrows()).toHaveLength(0);
     });
 
     it('coexists with the running spinner and with the active row styling', () => {
@@ -245,17 +304,17 @@ describe('ThreadTree', () => {
           onSelectThread={() => {}}
         />,
       );
-      expect(row('branch two').className).toContain('font-semibold');
+      expect(arrow('branch two')).toHaveClass('text-fg');
       expect(screen.getAllByTestId('thread-running')).toHaveLength(1);
 
-      // The marked row is also the active one: the accent styling still lands,
-      // and the mark survives on it — the active row's own weight does not
-      // swallow the heavier mark.
+      // The marked row is also the active one: the accent styling still lands
+      // on the title, and the mark survives on it — the arrow's colour is set
+      // explicitly, not inherited, so the row's accent does not swallow it.
       act(() => {
         useNavStore.setState({ activeThreadId: 3 });
       });
       rerender(<ThreadTree threads={marked} onSelectThread={() => {}} />);
-      expect(row('branch two').className).toContain('font-semibold');
+      expect(arrow('branch two')).toHaveClass('text-fg');
       expect(row('branch two').className).toContain('text-accent');
       expect(row('branch two').className).toContain('bg-accent/10');
     });
@@ -263,13 +322,17 @@ describe('ThreadTree', () => {
     it('leaves the row order alone whichever row is marked', () => {
       // Sub-threads stay in creation order; recency changes what is marked,
       // never where a row sits.
-      // The visible label, not the row's whole `textContent`: the marked row
-      // also carries a visually-hidden label, which would make the two renders
+      // The displayed name only — the title span's own text nodes, not its
+      // whole `textContent`: the marked row carries an arrow glyph and a
+      // visually-hidden label in child spans, which would make the two renders
       // differ for a reason that has nothing to do with order.
       const order = () =>
-        screen
-          .getAllByRole('button')
-          .map((button) => button.querySelector('.truncate')?.textContent);
+        screen.getAllByRole('button').map((button) =>
+          Array.from(button.querySelector('.truncate')?.childNodes ?? [])
+            .filter((child) => child.nodeType === Node.TEXT_NODE)
+            .map((child) => child.textContent)
+            .join(''),
+        );
 
       const { rerender } = render(
         <ThreadTree
@@ -278,7 +341,7 @@ describe('ThreadTree', () => {
         />,
       );
       const marksFirst = order();
-      expect(row('branch one').className).toContain('font-semibold');
+      expect(arrow('branch one')).toHaveClass('text-fg');
 
       rerender(
         <ThreadTree
@@ -286,7 +349,7 @@ describe('ThreadTree', () => {
           onSelectThread={() => {}}
         />,
       );
-      expect(row('branch two').className).toContain('font-semibold');
+      expect(arrow('branch two')).toHaveClass('text-fg');
       expect(order()).toEqual(marksFirst);
     });
 
@@ -301,7 +364,7 @@ describe('ThreadTree', () => {
       const { rerender } = render(
         <ThreadTree threads={seeded} onSelectThread={() => {}} />,
       );
-      expect(row('branch one').className).toContain('font-semibold');
+      expect(arrow('branch one')).toHaveClass('text-fg');
 
       // A turn ends on `branch two` — the very thread being viewed, which the
       // unread bump deliberately skips and this mark deliberately does not.
@@ -323,11 +386,9 @@ describe('ThreadTree', () => {
 
       // The mark moves onto the active row and is still visible there, so the
       // tree never falls back to the unmarked state that means "main is newest".
-      expect(row('branch two').className).toContain('font-semibold');
-      expect(row('branch one').className).not.toContain('font-semibold');
-      expect(
-        rowClasses().filter((c) => c.includes('font-semibold')),
-      ).toHaveLength(1);
+      expect(arrow('branch two')).toHaveClass('text-fg');
+      expect(arrow('branch one')).not.toHaveClass('text-fg');
+      expect(markedArrows()).toHaveLength(1);
     });
   });
 });
