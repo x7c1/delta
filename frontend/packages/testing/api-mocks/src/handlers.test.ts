@@ -485,7 +485,7 @@ describe('new-session send mock (eager rows)', () => {
     );
   });
 
-  it('activates the row on session_registered and deletes it on spawn_failed', async () => {
+  it('activates the row on session_registered and fails it on spawn_failed', async () => {
     const { handlers, applyEvent } = createMockApi();
     const httpHandlers = handlers as HttpHandler[];
 
@@ -515,33 +515,33 @@ describe('new-session send mock (eager rows)', () => {
     expect(listed?.open).toBe(true);
     expect(listed?.session.status).toBe('active');
 
-    // The reaped spawn disappears entirely: it leaves the session list, and
-    // its sends answer 404 — exactly as the real server does after deleting
-    // the contentless failed session.
+    // The reaped spawn stays listed, now `failed` and carrying the reason —
+    // exactly as the real server leaves it — and its undelivered send is still
+    // readable, which is what the failed session's own screen shows.
     applyEvent({
       kind: 'spawn_failed',
       cancelled: false,
       session_id: failed,
       pane_token: 'pane-x',
-      unsent: [],
+      reason: 'git error: worktree add failed',
     });
     page = await getSessionsPage(httpHandlers, '?limit=100');
-    expect(page.sessions.some((s) => s.session.id === failed)).toBe(false);
-    const response = await runGet(
-      httpHandlers,
-      '/sends',
-      `http://localhost/api/sessions/${failed}/sends`,
+    const reaped = page.sessions.find((s) => s.session.id === failed);
+    expect(reaped?.session.status).toBe('failed');
+    expect(reaped?.open).toBe(false);
+    expect(reaped?.session.failure_reason).toBe(
+      'git error: worktree add failed',
     );
-    expect(response.status).toBe(404);
+    const { sends } = await getOpenSends(httpHandlers, failed);
+    expect(sends.map((send) => send.text)).toEqual(['will fail']);
   });
 
   it('cancels the launch when a still-spawning row is closed, reporting spawn_failed', async () => {
     // Mirrors the server: a close on a session that never bound is not a
-    // tear-down-but-keep — it cancels the launch, removes the contentless row
-    // and reports the cancellation on the live channel, carrying the sends the
-    // launch never delivered so a client can restore their text. Without the
-    // emitted event a mock-mode client would watch the row vanish with no
-    // explanation, taking a path the real backend never produces.
+    // tear-down-but-keep — it cancels the launch, marks the row `failed` with
+    // the reason on it, and reports the cancellation on the live channel.
+    // Without the emitted event a mock-mode client would never learn the
+    // outcome of the request it made.
     const { handlers, onServerEvent } = createMockApi();
     const httpHandlers = handlers as HttpHandler[];
 
@@ -551,12 +551,10 @@ describe('new-session send mock (eager rows)', () => {
         text: 'kick off',
       })
     ).json()) as SendResponse;
-    const queued = (await (
-      await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
-        thread_id: first.send.thread_id,
-        text: 'and one more while it starts',
-      })
-    ).json()) as SendResponse;
+    await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+      thread_id: first.send.thread_id,
+      text: 'and one more while it starts',
+    });
     const sessionId = first.send.session_id;
 
     const reported: SessionEvent[] = [];
@@ -577,15 +575,21 @@ describe('new-session send mock (eager rows)', () => {
         cancelled: true,
         session_id: sessionId,
         reason: MOCK_CLOSED_WHILE_STARTING_REASON,
-        unsent: [
-          { send_id: first.send.id, text: 'kick off' },
-          { send_id: queued.send.id, text: 'and one more while it starts' },
-        ],
       },
     ]);
-    // The row leaves the list, as it does after any spawn_failed.
+    // The row stays in the list, marked `failed` with the reason on it, as it
+    // does after any spawn_failed.
     const page = await getSessionsPage(httpHandlers, '?limit=100');
-    expect(page.sessions.some((s) => s.session.id === sessionId)).toBe(false);
+    const row = page.sessions.find((s) => s.session.id === sessionId);
+    expect(row?.session.status).toBe('failed');
+    expect(row?.session.failure_reason).toBe(MOCK_CLOSED_WHILE_STARTING_REASON);
+    // And the messages it never delivered are still open against it, which is
+    // what the failed session's own screen reads.
+    const { sends } = await getOpenSends(httpHandlers, sessionId);
+    expect(sends.map((send) => send.text)).toEqual([
+      'kick off',
+      'and one more while it starts',
+    ]);
   });
 
   it('still only flips `open` when a bound session is closed', async () => {

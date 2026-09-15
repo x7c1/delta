@@ -10,9 +10,8 @@ import {
   invalidateThreadMessages,
   removeSessionSends,
 } from '@delta/api-client';
-import { returnedToComposerNote, useLiveStore } from '../store/liveStore';
+import { useLiveStore } from '../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
-import { useNotificationStore } from '../store/notificationStore';
 
 /**
  * Route a live `SessionEvent` to the two state homes:
@@ -24,18 +23,15 @@ import { useNotificationStore } from '../store/notificationStore';
  *   (the turn lifecycle, transcript growth, a close) also invalidate the
  *   session's open-send list — the server-side truth behind the pending strip.
  *   Lifecycle events (`session_registered`/`session_opened`/`session_closed`,
- *   and the two whose row is deleted — `spawn_failed` for a reaped spawn,
- *   `session_removed` for a session the user removed) invalidate the session
- *   list so a starting, registered, resumed, closed, vanished or removed
- *   session's presence and open flag stay in sync.
- * - **Nav store** (Zustand): the two events whose session stops existing, and
- *   only when it was the focused one. A `spawn_failed` hands focus back to the
- *   new-session screen where its Retry / Dismiss card lives (and where the live
- *   store has just restored whatever the failed launch never sent); when the
- *   cancelled session was NOT the focused one there is no handoff to make, so
- *   the snackbar says where that card and that text went instead. A
- *   `session_removed` hands focus to the first other session in the list cache,
- *   falling back to the new-session screen when there is none.
+ *   `spawn_failed` for a launch that never bound, and `session_removed` for a
+ *   session the user removed) invalidate the session list so a starting,
+ *   registered, resumed, closed, failed or removed session's presence, status
+ *   and open flag stay in sync.
+ * - **Nav store** (Zustand): the one event whose session stops existing, and
+ *   only when it was the focused one. A `session_removed` hands focus to the
+ *   first other session in the list cache, falling back to the new-session
+ *   screen when there is none. A `spawn_failed` moves no focus at all: its
+ *   session is still there, now with a screen that explains itself.
  * - **Live store** (Zustand): ephemeral UI signals that are not REST resources
  *   — turn tracking, the spawn registry, permission notices, unread badges,
  *   per-thread latest activity, external input, and the per-session resuming
@@ -234,10 +230,9 @@ export function applySessionEvent(
       break;
     case 'session_removed': {
       // A closed session was removed: its row and everything hanging off it are
-      // gone server-side. Modelled on `spawn_failed` below — the other event
-      // whose session stops existing — so it does the same two things: drop the
-      // session's cached open sends (a refetch would only 404) and refetch the
-      // session list, which was listing it and must now lose it.
+      // gone server-side. So it does two things: drop the session's cached open
+      // sends (a refetch would only 404) and refetch the session list, which
+      // was listing it and must now lose it.
       //
       // Focus goes to the first other session in the cached list, or to the
       // new-session screen when the removed one was the last. Read here, BEFORE
@@ -289,61 +284,24 @@ export function applySessionEvent(
       // arrives later via the normal transcript sync (a `transcript_updated` /
       // turn-end refetch), which is what supersedes the preview.
       break;
-    case 'spawn_failed': {
-      // A freshly-spawned session never bound; the server reaped its row (the
-      // store flips the tracked spawn to a Retry/Dismiss chip and restores
-      // `event.unsent` into the new-session composer draft). That restore
-      // happens in `store.applyEvent` above, i.e. strictly before the focus
-      // handoff below, so the composer mounts with the text already in place.
-      // Drop the session's cached open sends — the
-      // row is gone, so a refetch would only 404 — and refetch the session
-      // list, which was listing the starting session and must now lose it.
-      removeSessionSends(queryClient, event.session_id);
-      invalidateSessions(queryClient);
-      // The user is very likely looking at it: the workspace focuses a
-      // starting session the moment its first send is accepted, as long as
-      // they were still waiting on the new-session screen when the POST
-      // answered. Its screen is about to describe a session that no longer
-      // exists, and the failure's Retry / Dismiss card renders on the
-      // new-session surface (see `usePendingSends`) — so send focus back
-      // there, where the user can act on it. Reconciling rather than
-      // navigating leaves any overlay they opened in the meantime standing.
-      if (isFocused) {
-        useNavStore.getState().reconcileFocusedSession(NEW_SESSION_FOCUS);
-        break;
-      }
-      // Not focused, and the user asked for this: they closed a starting
-      // session from the navigator while looking at something else. The only
-      // thing that happens on their screen is the card disappearing — the
-      // Retry / Dismiss chip and the text the launch never sent are waiting on
-      // the new-session surface, which they are not on — so say so. Only for a
-      // cancel: a launch that broke on its own is already reported by the
-      // spawn registry (its chip, or the snackbar when no chip exists).
+    case 'spawn_failed':
+      // A freshly-spawned session never bound. Its row is KEPT, marked
+      // `failed`, so this event announces a state change rather than a
+      // disappearance: refetch the session list (the row's status and its place
+      // in the open/closed grouping both moved) and the session's open sends
+      // (the prompts it never delivered, which its own screen now shows).
       //
-      // A spawn this client never tracked has already had its own snackbar
-      // from that registry (`reportUntrackedSpawnFailure`), so it is skipped
-      // here rather than told twice; the entry below is present because
-      // `store.applyEvent` above flipped it to `failed`.
-      const cancelledSpawn = event.cancelled
-        ? useLiveStore
-            .getState()
-            .spawns.find((spawn) => spawn.sessionId === event.session_id)
-        : undefined;
-      if (cancelledSpawn) {
-        useNotificationStore
-          .getState()
-          .showInfo(
-            'Launch cancelled',
-            [
-              'Retry or dismiss it on the new-session screen.',
-              returnedToComposerNote(cancelledSpawn.restoredCount ?? 0),
-            ]
-              .filter((part) => part !== undefined)
-              .join(' '),
-          );
-      }
+      // Focus is deliberately left alone, whoever was watching: the user who
+      // was on the failed session now sees its failure screen, and a user
+      // elsewhere sees the navigator row turn failed.
+      //
+      // The store did the rest above (`store.applyEvent`): it flipped the
+      // tracked spawn to `failed` (see `SpawnItem.status`) and raised the
+      // snackbar for a spawn this client never tracked
+      // (`reportUntrackedSpawnFailure`).
+      invalidateSessionSends(queryClient, event.session_id);
+      invalidateSessions(queryClient);
       break;
-    }
     case 'repository_clone_completed':
     case 'repository_clone_failed':
       // A clone job reported. Refetch the repository list and both PR lenses

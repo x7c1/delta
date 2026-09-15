@@ -328,7 +328,7 @@ export class ApiClient {
    * auto-dispatches — it waits for an explicit {@link releaseSend} or
    * {@link cancelSend}.
    * The server-side truth behind the pending-send strip. An unknown id is a
-   * `404` (e.g. a reaped spawn), surfaced as {@link ApiError}.
+   * `404` (e.g. a removed session), surfaced as {@link ApiError}.
    */
   getSessionSends(sessionId: SessionId): Promise<SendsResponse> {
     return this.request<SendsResponse>(

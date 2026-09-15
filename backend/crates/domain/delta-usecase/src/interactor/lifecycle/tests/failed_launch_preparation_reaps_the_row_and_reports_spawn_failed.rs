@@ -9,8 +9,8 @@ use crate::{SendTarget, WorktreeSpec};
 /// browser already holds a real session id and is showing the session starting.
 /// The failure therefore arrives on the async event seam as a `spawn_failed`
 /// carrying git's message as its `reason` — the only place that text can still
-/// reach the user — and the eager row (with its first send, by cascade) is
-/// deleted, leaving nothing launched behind it.
+/// reach the user — and the eager row is marked `failed` (with its first send
+/// still open against it), leaving nothing launched behind it.
 #[tokio::test]
 async fn failed_launch_preparation_reaps_the_row_and_reports_spawn_failed() {
     let canonical = FakeWorkspace::canonical("/projects/app");
@@ -76,10 +76,16 @@ async fn failed_launch_preparation_reaps_the_row_and_reports_spawn_failed() {
         "a broken preparation is a failure, not something the user asked for"
     );
 
-    // The contentless row is gone, so the session stops being listed…
+    // The row stays, marked `failed`, so the session stays listed…
     assert!(
-        ix.store().session(&session_id).await.unwrap().is_none(),
-        "the eager row of a failed launch is deleted"
+        ix.store()
+            .session(&session_id)
+            .await
+            .unwrap()
+            .expect("the row of a failed launch is kept")
+            .status
+            == delta_model::SessionStatus::Failed,
+        "the eager row of a failed launch is marked failed, not deleted"
     );
     // …and nothing was launched: the build failed before the agent started.
     assert!(

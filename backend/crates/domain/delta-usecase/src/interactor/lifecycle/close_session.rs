@@ -6,14 +6,17 @@ use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::LaunchTarget;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
-/// The `reason` a launch cancelled by an explicit close reports, shown by the
-/// browser under its own wording on the spawn's Retry / Dismiss chip.
+/// The `reason` a launch cancelled by an explicit close reports — carried on
+/// the event and persisted on the row, which is where the failed session's own
+/// screen reads it.
 ///
 /// A launch the user cancelled is not a breakage, but it ends in exactly the
-/// state a failed one does (nothing bound, no row, the composer holding the
-/// text back), so it reuses that report — see
+/// state a failed one does (nothing bound, the row marked `failed` with its
+/// undelivered sends still on it), so it reuses that report — see
 /// [`SessionContext::close_session`]. The event's `cancelled` flag is what
-/// tells the two apart; this text just says plainly what happened.
+/// tells the two apart; this text just says plainly what happened, so a reader
+/// who meets only the persisted reason still sees a close rather than a
+/// breakage.
 const CLOSED_WHILE_STARTING: &str = "closed while starting";
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>

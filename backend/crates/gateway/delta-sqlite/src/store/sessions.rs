@@ -31,6 +31,7 @@ struct SessionParts {
     provider_session_id: Option<String>,
     provider_thread_id: Option<String>,
     pull_request_number: Option<i64>,
+    failure_reason: Option<String>,
 }
 
 fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
@@ -49,6 +50,7 @@ fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
         provider_session_id: row.get(11)?,
         provider_thread_id: row.get(12)?,
         pull_request_number: row.get(13)?,
+        failure_reason: row.get(14)?,
     })
 }
 
@@ -68,6 +70,7 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
         provider_session_id: parts.provider_session_id,
         provider_thread_id: parts.provider_thread_id,
         pull_request_number: parts.pull_request_number,
+        failure_reason: parts.failure_reason,
     })
 }
 
@@ -78,9 +81,9 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
 fn page_row_from_row(row: &Row<'_>) -> Result<SessionPageRow> {
     let session = session_from_parts(map_session(row)?)?;
     // `last_activity_at` follows the `SESSION_COLS` block, so its positional
-    // index is the column count of `SESSION_COLS` (14) — the first column after
+    // index is the column count of `SESSION_COLS` (15) — the first column after
     // the session fields.
-    let last_activity_at: Option<String> = row.get(14)?;
+    let last_activity_at: Option<String> = row.get(15)?;
     Ok((session, last_activity_at))
 }
 
@@ -102,7 +105,8 @@ fn query_session_by_id(conn: &Connection, id: &SessionId) -> Result<Option<Sessi
 
 const SESSION_COLS: &str = "id, cwd, transcript_path, title, status, created_at, \
      branch_at_launch, repo_root, requested_workdir, repository_display_name, \
-     provider, provider_session_id, provider_thread_id, pull_request_number";
+     provider, provider_session_id, provider_thread_id, pull_request_number, \
+     failure_reason";
 
 impl SqliteStore {
     pub(super) async fn register_session(
@@ -205,6 +209,7 @@ impl SqliteStore {
                 provider_session_id: None,
                 provider_thread_id: None,
                 pull_request_number,
+                failure_reason: None,
             },
             main_id,
         ))
@@ -250,13 +255,18 @@ impl SqliteStore {
     pub(super) async fn mark_session_failed(
         &self,
         id: &SessionId,
+        reason: Option<&str>,
     ) -> std::result::Result<(), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         // Only a still-spawning session can fail to launch; an already-active
-        // session must never be flipped to `failed` by a stale reap.
+        // session must never be flipped to `failed` by a stale reap. The reason
+        // is written in the same statement — including the NULL a
+        // watchdog-shaped ending reports — so the column always describes the
+        // ending that set the status, never one from some earlier attempt.
         conn.execute(
-            "UPDATE session SET status = 'failed' WHERE id = ?1 AND status = 'spawning'",
-            params![id.as_str()],
+            "UPDATE session SET status = 'failed', failure_reason = ?2 \
+             WHERE id = ?1 AND status = 'spawning'",
+            params![id.as_str(), reason],
         )
         .map_err(Error::from)?;
         Ok(())
@@ -273,8 +283,9 @@ impl SqliteStore {
         // has ingested nothing: the browser shows a session from the moment
         // its first send is accepted, as a starting session, rather than
         // parking the user on the new-session screen until the launch's first
-        // hook arrives. A spawn that never binds is reaped, so its row leaves
-        // the list again (the client hears `spawn_failed`).
+        // hook arrives. A spawn that never binds is marked `failed` and stays
+        // listed — the user opens it to read why it did not start, retries it,
+        // or removes it.
         //
         // `recency` is the row's last activity, falling back to its own
         // `created_at` when message-less — read straight from the denormalized

@@ -38,12 +38,18 @@ async fn close_session_cancels_a_spawning_row_left_by_a_restart() {
             pane_token: None,
             reason: Some("closed while starting".to_owned()),
             cancelled: true,
-            unsent: Vec::new(),
         }],
     );
     assert!(
-        ix.store().session(&session_id).await.unwrap().is_none(),
-        "the stranded `spawning` row is deleted, so the amber card leaves the list"
+        ix.store()
+            .session(&session_id)
+            .await
+            .unwrap()
+            .expect("the stranded row is kept")
+            .status
+            == delta_model::SessionStatus::Failed,
+        "the stranded `spawning` row is marked failed, so the amber card stops \
+         reading as a launch still coming up"
     );
     assert!(
         ix.tmux_fake().killed.lock().unwrap().is_empty(),

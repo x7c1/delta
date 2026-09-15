@@ -6,7 +6,7 @@ use crate::Error;
 /// `open_sends_for` is the read side of the browser's pending-send strip: it
 /// returns the session's non-terminal sends (`queued` or `dispatched`) oldest
 /// first, and reports an unknown session as a clean `SessionNotFound` so a
-/// reaped spawn is distinguishable from "nothing pending".
+/// removed session is distinguishable from "nothing pending".
 #[tokio::test]
 async fn open_sends_for_lists_open_sends_and_rejects_unknown_session() {
     let ix = interactor();

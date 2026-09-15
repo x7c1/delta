@@ -4,7 +4,6 @@ import type {
   FileChangeDetail,
   PendingPermission,
   PendingQuestion,
-  UnsentSend,
 } from '@delta/wire-gen';
 import type { EventReducer } from './eventReducer';
 import type { SendsSlice } from './sendsSlice';
@@ -176,46 +175,29 @@ export interface ResumeUnavailableNotice {
  * A `spawn_failed` for a session this client has no tracked spawn for. The
  * event is broadcast on the live channel while the `POST /api/sends` response
  * travels back separately, so a failure can legitimately outrun the
- * registration; dropping it would leave the chip spinning forever. Never
- * rendered: buffered here and consumed by {@link SpawnsSlice.trackSpawn}, which
- * then registers the spawn as `failed` directly.
+ * registration; dropping it would leave the spawn tracked as `spawning`
+ * forever, with the workspace handing focus to a launch that is already over.
+ * Never rendered: buffered here and consumed by
+ * {@link SpawnsSlice.trackSpawn}, which then registers the spawn already
+ * `failed`.
  *
  * An id whose registration is NOT on its way (no new-session POST in flight —
  * this client reloaded and lost its in-memory registry, or the spawn is another
  * client's) can never be consumed, so `reduceSpawnFailed` deals with it on the
- * spot and leaves the entry behind flagged {@link restored}, as the marker that
- * stops a repeat of the same event restoring the same text again. Either shape
- * is removed if the session registers after all.
+ * spot and leaves the entry behind as the marker that stops a repeat of the
+ * same event raising a second snackbar. Either shape is removed if the session
+ * registers after all.
  */
 export interface SpawnFailureBufferedNotice {
   kind: 'spawn_failure_buffered';
   /**
-   * Why the launch failed, when the event named a cause — carried across so the
-   * failed chip `trackSpawn` registers can show it, exactly as one flipped by a
-   * `spawn_failed` that arrived in order does. `undefined` for the
-   * watchdog-shaped failures, which name none.
-   */
-  reason?: string;
-  /**
-   * The messages the failed launch never delivered, carried across for the same
-   * reason as {@link SpawnFailureBufferedNotice.reason}: their rows are deleted
-   * server-side, so this buffer is the only copy left. `trackSpawn` restores
-   * them into the new-session draft once it knows which of them is the spawn's
-   * own first prompt (the Retry chip already holds that one).
-   */
-  unsent: UnsentSend[];
-  /**
-   * Whether the user asked for the launch to stop, carried across for the same
-   * reason as {@link SpawnFailureBufferedNotice.reason}: the chip `trackSpawn`
-   * registers must word a cancel differently from a breakage.
+   * Whether the user asked for the launch to stop. The one thing the event
+   * carries that the entry `trackSpawn` registers cannot get from anywhere
+   * else, and it must word a cancel differently from a breakage. The `reason`
+   * needs no carrying: it is persisted on the session row (see
+   * {@link SpawnItem.status}).
    */
   cancelled: boolean;
-  /**
-   * True when {@link unsent} was already put back into the new-session draft
-   * whole, because no registration could ever arrive to split it. Read by
-   * {@link SpawnsSlice.trackSpawn} so the restore never happens twice.
-   */
-  restored: boolean;
 }
 
 /** One per-session notice; at most one of each kind exists per session. */

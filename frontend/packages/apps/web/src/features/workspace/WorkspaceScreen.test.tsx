@@ -642,9 +642,11 @@ describe('WorkspaceScreen multi-session', () => {
   });
 
   it('leaves the new-session screen focused for a failed spawn', async () => {
-    // A failed spawn is a Retry / Dismiss card, and that card renders ON the
-    // new-session screen: opening that screen must not be undone by the very
-    // spawn the card is about.
+    // A failed spawn's entry is kept for the launch configuration its session's
+    // Retry reads, never as a hand-over candidate: opening the new-session
+    // screen must not be undone by a launch that is already over. The card it
+    // used to raise here is gone — the failure lives on its own session's
+    // screen now — so this screen stays empty and ready for a fresh launch.
     useNavStore.setState({ focusedSessionId: SESSION_ID });
     useLiveStore.setState({
       spawns: [
@@ -660,15 +662,8 @@ describe('WorkspaceScreen multi-session', () => {
     await act(async () => {});
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
     expect(useLiveStore.getState().spawns).toHaveLength(1);
-    // And the card the user has to answer is on that screen, with both of its
-    // actions — the reason a failed spawn is never a hand-over candidate.
-    const card = await screen.findByTestId('pending-item');
-    expect(
-      within(card).getByRole('button', { name: 'Retry' }),
-    ).toBeInTheDocument();
-    expect(
-      within(card).getByRole('button', { name: 'Dismiss' }),
-    ).toBeInTheDocument();
+    expect(screen.queryByTestId('pending-item')).toBeNull();
+    expect(screen.getByTestId('new-session-empty')).toBeInTheDocument();
   });
 
   it('releases the tracked spawn when the session registers', async () => {
@@ -693,11 +688,12 @@ describe('WorkspaceScreen multi-session', () => {
     expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID_2);
   });
 
-  it('returns to the new-session screen when the focused spawn fails', async () => {
-    // The launch never bound and the server reaped it. The focused session is
-    // about to stop existing, and the Retry / Dismiss card renders on the
-    // new-session surface — so focus goes back there, with the failed spawn
-    // still tracked for that card.
+  it('keeps focus on the focused session when its spawn fails', async () => {
+    // The launch never bound. The focused session does NOT stop existing — its
+    // row is kept and marked failed — and its screen is where the failure, the
+    // prompt that never went out, and Retry / Remove now are. So focus stays
+    // exactly where the user is, and the entry stays as what that screen's
+    // Retry reads its launch configuration from.
     useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
     useLiveStore.setState({ spawns: [trackedSpawn(UNLISTED_SPAWN_ID)] });
 
@@ -712,18 +708,17 @@ describe('WorkspaceScreen multi-session', () => {
       cancelled: false,
       session_id: UNLISTED_SPAWN_ID,
       pane_token: 'delta-9',
-      unsent: [],
     });
 
     await waitFor(() =>
-      expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS),
+      expect(useLiveStore.getState().spawns).toEqual([
+        expect.objectContaining({
+          sessionId: UNLISTED_SPAWN_ID,
+          status: 'failed',
+        }),
+      ]),
     );
-    expect(useLiveStore.getState().spawns).toEqual([
-      expect.objectContaining({
-        sessionId: UNLISTED_SPAWN_ID,
-        status: 'failed',
-      }),
-    ]);
+    expect(useNavStore.getState().focusedSessionId).toBe(UNLISTED_SPAWN_ID);
   });
 
   it('does not steal focus for a spawn when the user moved on', async () => {

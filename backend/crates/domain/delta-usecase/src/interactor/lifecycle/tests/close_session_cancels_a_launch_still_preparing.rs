@@ -58,7 +58,6 @@ async fn close_session_cancels_a_launch_still_preparing() {
         pane_token,
         reason,
         cancelled,
-        unsent,
     }] = events.as_slice()
     else {
         panic!("expected exactly one SpawnFailed, got {events:?}");
@@ -78,13 +77,24 @@ async fn close_session_cancels_a_launch_still_preparing() {
         "the user asked for this, so the browser words it as a cancel"
     );
     assert_eq!(
-        unsent.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(),
-        vec!["start something"],
-        "the undelivered first prompt is handed back to the composer"
+        ix.store()
+            .open_sends(&session_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.text)
+            .collect::<Vec<_>>(),
+        vec!["start something".to_owned()],
+        "the undelivered first prompt stays on the kept row"
     );
-    assert!(
-        ix.store().session(&session_id).await.unwrap().is_none(),
-        "the eager row of a cancelled launch is deleted"
+    assert_eq!(
+        ix.store()
+            .session(&session_id)
+            .await
+            .unwrap()
+            .expect("the row of a cancelled launch is kept")
+            .status,
+        delta_model::SessionStatus::Failed,
     );
     assert!(
         ix.launching_session_ids().await.is_empty(),
@@ -108,8 +118,14 @@ async fn close_session_cancels_a_launch_still_preparing() {
         ix.pending_session_ids().await.is_empty(),
         "a cancelled launch never becomes a pending spawn"
     );
-    assert!(
-        ix.store().session(&session_id).await.unwrap().is_none(),
-        "the finished preparation does not resurrect the deleted row"
+    assert_eq!(
+        ix.store()
+            .session(&session_id)
+            .await
+            .unwrap()
+            .expect("the row is still there")
+            .status,
+        delta_model::SessionStatus::Failed,
+        "the finished preparation does not un-fail the row it was abandoned for"
     );
 }

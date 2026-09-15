@@ -258,10 +258,16 @@ pub enum SessionEvent {
     /// It is emitted for **every** provider: an adapter-backed (Codex) launch
     /// is accepted and prepared in the background exactly like a Claude one, so
     /// its failures reach the browser here rather than as a `5xx` body.
+    ///
+    /// The session row is **kept**, marked `failed` with this `reason`, so this
+    /// event announces a state change rather than a disappearance: the browser
+    /// refreshes the session list and the session's own open sends, and the
+    /// failed session's screen reads both from the server. Nothing the user
+    /// wrote has to ride out on the event, because nothing holding it is being
+    /// deleted.
     SpawnFailed {
-        /// The Delta-minted session id, so the browser can correlate the
-        /// failure to the optimistic pending chip. This is the only key the
-        /// browser matches on.
+        /// The Delta-minted session id: which session just became `failed`, and
+        /// the key the browser matches its tracked spawn on.
         session_id: SessionId,
         /// The tmux session that was torn down, for a pane-backed (Claude)
         /// launch. `None` for an adapter-backed one, which never had a pane —
@@ -273,9 +279,13 @@ pub enum SessionEvent {
         /// never bound says nothing about why.
         ///
         /// A preparation failure used to be the REST response's error body.
-        /// Now that the send is accepted before the launch runs, this field is
-        /// the only place that message can still reach the user, so the failed
-        /// chip shows it under "failed to start".
+        /// Now that the send is accepted before the launch runs, the failure
+        /// reaches the user through the row instead: the same text is persisted
+        /// on the session (`session.failure_reason`) by the cleanup that marks
+        /// it `failed`, and the failed session's own screen reads it from
+        /// there, so it survives a reload. It rides on the event too, for the
+        /// snackbar a browser raises when the failure names a session it never
+        /// tracked.
         reason: Option<String>,
         /// Whether the user asked for this: `true` only for the explicit close
         /// of a still-starting session, `false` for the three producers that
@@ -286,22 +296,6 @@ pub enum SessionEvent {
         /// browser present a requested cancel neutrally instead of as a
         /// failure.
         cancelled: bool,
-        /// Every send this session had accepted but never delivered to an
-        /// agent, oldest first — the first prompt included.
-        ///
-        /// The rollback deletes the session row and the `send` rows go with it
-        /// (`send.session_id … ON DELETE CASCADE`), so this is the last moment
-        /// their text exists anywhere. A user who kept typing while a slow
-        /// launch was still checking out would otherwise lose every message
-        /// after the first (the failed chip's Retry holds only the first
-        /// prompt), so the text rides out here and the browser puts it back in
-        /// the composer for the user to send again deliberately — nothing is
-        /// re-sent automatically.
-        ///
-        /// Read *before* the cleanup deletes the rows, in id order. Empty only
-        /// when the session had nothing outstanding (a cold-start spawn with no
-        /// first prompt, or one whose sends were all cancelled).
-        unsent: Vec<UnsentSend>,
     },
     /// A chunk of the in-flight turn's assistant message, delivered live while
     /// the turn is still generating.
@@ -558,15 +552,4 @@ pub struct RateLimitWindow {
     pub used_percentage: Option<f64>,
     /// Unix epoch seconds at which the window resets.
     pub resets_at: Option<i64>,
-}
-
-/// One send that a failed launch never delivered, carried out on
-/// [`SessionEvent::SpawnFailed`] because the row itself is about to be deleted.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnsentSend {
-    /// The deleted `send` row's id — how a client tells the spawn's own first
-    /// prompt apart from the messages typed after it.
-    pub send_id: i64,
-    /// The message the user composed, exactly as it was accepted.
-    pub text: String,
 }

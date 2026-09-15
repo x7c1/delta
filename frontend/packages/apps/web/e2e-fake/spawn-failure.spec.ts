@@ -1,80 +1,155 @@
-import { test, expect } from './support/fixtures';
+import type { SessionsResponse } from '@delta/wire-gen';
+import { test, expect, type Page } from './support/fixtures';
 import { startNewSession } from './support/app';
 
 /**
- * A launch that never becomes ready surfaces as a recoverable failure.
+ * A launch that never binds becomes an ordinary session the user can open,
+ * read, retry and remove.
  *
  * Scenario `never-ready`: the fake skips its `SessionStart` hook and hangs, so
- * the spawn never binds. The session is nevertheless the user's from the moment
- * the POST is accepted — they are moved onto it and watch it start — which is
- * what makes this failure a hand-off in reverse: the backend's launch watchdog
- * (its deadline shrunk via DELTA_LAUNCH_DEADLINE_MS by the suite's server
- * script) reaps the spawn, kills its pane, and emits `spawn_failed`, deleting
- * the row on screen. The user must land back on the new-session screen with an
- * error row offering Retry and Dismiss, rather than be left looking at a
- * session that no longer exists.
+ * the spawn never binds and the backend's launch watchdog (its deadline shrunk
+ * via DELTA_LAUNCH_DEADLINE_MS by the suite's server script) reaps it, kills its
+ * pane and emits `spawn_failed`.
  *
- * And nothing they typed may be lost with the row. A session accepts sends as
- * `queued` rows for as long as it is starting, and those rows cascade away with
- * the session — so the failure event carries their text, and the browser puts
- * everything the Retry chip does not already hold back into the new-session
- * composer. Restored, never re-sent: the message waits there for the user.
+ * What the server does with the row is the whole point: it KEEPS it, marked
+ * `failed`, with the prompt that was never delivered still open against it. So
+ * the failure has a place of its own — a screen that says why it did not start
+ * and offers Retry and Remove — instead of a row that vanishes and forces every
+ * surface around it to compensate for the absence.
  */
-test('a spawn that never binds is focused first, then hands back a Retry / Dismiss row', async ({
+
+type ListedSession = SessionsResponse['sessions'][number];
+
+/** Every session the server knows, newest-active first. */
+async function listSessions(page: Page): Promise<ListedSession[]> {
+  const response = await page.request.get('/api/sessions');
+  expect(response.ok()).toBe(true);
+  return ((await response.json()) as SessionsResponse).sessions;
+}
+
+/**
+ * The one session in `status`, waited for — each spec's handle on its own row.
+ * Read over REST rather than off the screen because the ids and the working
+ * directory are what these specs compare, and neither is rendered.
+ */
+async function sessionWithStatus(
+  page: Page,
+  status: string,
+): Promise<ListedSession['session']> {
+  let match: ListedSession | undefined;
+  await expect
+    .poll(
+      async () => {
+        const sessions = await listSessions(page);
+        match = sessions.find((item) => item.session.status === status);
+        return match !== undefined;
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(true);
+  return match!.session;
+}
+
+/** Whether the server still lists `sessionId` at all. */
+async function stillListed(page: Page, sessionId: string): Promise<boolean> {
+  return (await listSessions(page)).some(
+    (item) => item.session.id === sessionId,
+  );
+}
+
+/** The navigator card of the session showing `status`. */
+function cardWithStatus(page: Page, status: string) {
+  return page
+    .locator('li')
+    .filter({ has: page.getByRole('status', { name: status, exact: true }) });
+}
+
+test('a launch that fails while you are elsewhere turns its row failed, and opening it explains why', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  // The doomed launch first, so that the session started after it is the one
+  // holding focus when the deadline passes.
+  await startNewSession(page, 'never-ready hang at launch');
+  const doomed = await sessionWithStatus(page, 'spawning');
+
+  // A second session, which the workspace focuses as any new session — this is
+  // what the user is reading while the first one gives up. The case used to
+  // produce nothing at all here: the row simply disappeared and no notice was
+  // raised anywhere.
+  await startNewSession(page, 'first-send hello there');
+  await expect(page.getByText('first-send hello there').first()).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // The deadline passes. The row turns failed in the navigator, and focus does
+  // not move: the user stays on what they were reading.
+  await expect(
+    page.getByRole('status', { name: 'Failed', exact: true }),
+  ).toHaveCount(1, { timeout: 15_000 });
+  await expect(page.getByTestId('failed-session-pane')).toHaveCount(0);
+  await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
+  await expect(page.getByText('first-send hello there').first()).toBeVisible();
+
+  // Opening it shows the failure in its own right: the watchdog observed only
+  // silence, so the pane says as much rather than leaving the question hanging,
+  // and the prompt that never went out is there with it.
+  await cardWithStatus(page, 'Failed').getByTestId('session-node').click();
+  await expect(page.getByTestId('failed-session-pane')).toBeVisible();
+  await expect(page.getByTestId('failed-session-reason')).toContainText(
+    /did not hear why/i,
+  );
+  await expect(page.getByTestId('failed-session-prompt')).toHaveText(
+    'never-ready hang at launch',
+  );
+  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+
+  // Remove takes it off the list for good.
+  await page.getByRole('button', { name: 'Remove' }).click();
+  await expect(
+    page.getByRole('status', { name: 'Failed', exact: true }),
+  ).toHaveCount(0);
+  await expect.poll(() => stillListed(page, doomed.id)).toBe(false);
+});
+
+test('the failure lands on the screen you are already on, and Retry starts the same launch again', async ({
   page,
 }) => {
   await page.goto('/');
   await startNewSession(page, 'never-ready hang at launch');
+  const doomed = await sessionWithStatus(page, 'spawning');
 
-  // The accepted session takes focus right away, still starting.
-  await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
-  await expect(
-    page.getByRole('status', { name: 'Starting', exact: true }),
-  ).toHaveCount(1);
-  const pending = page.getByTestId('pending-item');
-  await expect(pending).toHaveCount(1);
-
-  // A second message, composed while the launch was still coming up: accepted
-  // as a `queued` row that never reaches an agent.
-  const textbox = page.getByRole('textbox');
-  await textbox.fill('typed while it was starting');
-  await page.getByRole('button', { name: 'Send' }).click();
-  await expect(pending).toHaveCount(2);
-
-  // The watchdog reaps the spawn after the (shortened) deadline. Its row is
-  // deleted, so focus returns to the new-session screen — where the chip is
-  // now an explicit failure row. The timeout spans the deadline plus the
-  // watchdog tick with margin.
-  await expect(page.getByTestId('new-session-empty')).toBeVisible({
+  // The user is on the failing session's screen — the workspace put them there
+  // when its send was accepted. The failure is shown in place; nothing
+  // teleports them to the new-session screen.
+  await expect(page.getByTestId('failed-session-pane')).toBeVisible({
     timeout: 15_000,
   });
-  await expect(pending).toContainText(/failed to start/i, { timeout: 15_000 });
-  // The watchdog observes only silence, so the card carries no reason line —
-  // unlike a launch preparation that failed with a git or tmux error.
-  await expect(page.getByTestId('pending-fail-reason')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
+  await expect(page.getByTestId('failed-session-prompt')).toHaveText(
+    'never-ready hang at launch',
+  );
+
+  // Retry re-attempts the identical launch: the same first prompt in the same
+  // working directory (the launch options ride in the same request the composer
+  // builds — asserted in `FailedSessionPane.test.tsx`, where the request body is
+  // observable), and this row does not linger beside the session that replaced
+  // it.
+  await page.getByRole('button', { name: 'Retry' }).click();
+  const retried = await sessionWithStatus(page, 'spawning');
+  expect(retried.id).not.toBe(doomed.id);
+  expect(retried.cwd).toBe(doomed.cwd);
+  await expect.poll(() => stillListed(page, doomed.id)).toBe(false);
+
+  // Clean up: the retry hangs the same way, so remove it once it gives up
+  // rather than leaving a failed row behind for the specs that follow.
   await expect(
-    page.getByRole('status', { name: 'Starting', exact: true }),
+    page.getByRole('status', { name: 'Failed', exact: true }),
+  ).toHaveCount(1, { timeout: 15_000 });
+  await cardWithStatus(page, 'Failed').getByTestId('session-node').click();
+  await page.getByRole('button', { name: 'Remove' }).click();
+  await expect(
+    page.getByRole('status', { name: 'Failed', exact: true }),
   ).toHaveCount(0);
-
-  // The second message's rows are gone with the session, so its text came back
-  // on the failure event and is waiting in the new-session composer. The first
-  // prompt is NOT duplicated there — the Retry button above is what re-sends
-  // that one — and neither message was re-sent behind the user's back.
-  await expect(page.getByRole('textbox')).toHaveValue(
-    'typed while it was starting',
-  );
-  // The composer is a different surface from the chip, so the chip is what says
-  // the message went there — and that Retry will not take it along.
-  await expect(page.getByTestId('pending-fail-note')).toHaveText(
-    '1 later message was returned to the composer. Retry re-sends only this one.',
-  );
-
-  // Dismiss clears the failure row; nothing else of the failed spawn remains,
-  // and the restored draft is untouched by it.
-  await page.getByRole('button', { name: 'Dismiss' }).click();
-  await expect(pending).toHaveCount(0);
-  await expect(page.getByRole('textbox')).toHaveValue(
-    'typed while it was starting',
-  );
 });

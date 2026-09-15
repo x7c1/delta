@@ -47,7 +47,7 @@ pub use ports::{
     RecentWorkdir, RemoteBranches, RepositoryCloneRow, SessionEndHook, SessionEvent,
     SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore, SpawningSession,
     StatusSnapshot, StopHook, TmuxDriver, Transcript, TranscriptMessage, TranscriptRead,
-    UnsentSend, UserPromptSubmitHook, Workspace, WorktreeStartPoint,
+    UserPromptSubmitHook, Workspace, WorktreeStartPoint,
 };
 pub use pull_request::{PullRequest, PullRequestLens, PullRequestList};
 pub use repository::{display_name, identity_key, worktree_dir_slug, Clone, Repository};

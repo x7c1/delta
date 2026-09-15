@@ -74,4 +74,15 @@ provider_thread_id: string | null,
  * `#<number>` on the session card, linking to
  * `https://github.com/<repository_display_name>/pull/<number>`.
  */
-pull_request_number: number | null, };
+pull_request_number: number | null, 
+/**
+ * Why a `failed` session's launch ended, when Delta could name a cause —
+ * the launch preparation's own error text, or, for a launch the user
+ * cancelled by closing a still-starting session, the sentence naming that
+ * close. `null` for every other status, for the endings that observe only
+ * silence (a launch that exited, a spawn that never bound before its
+ * deadline), and for rows that predate this field. The failed session's
+ * screen renders it as the explanation, falling back to saying Delta never
+ * heard why.
+ */
+failure_reason: string | null, };

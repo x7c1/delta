@@ -117,14 +117,19 @@ pub trait SessionStore: std::marker::Send + Sync {
     ) -> Result<()>;
 
     /// Delete a session row and everything it owns (threads, messages, sends,
-    /// permission requests, the sync cursor — removed by cascade). Used to reap
-    /// a `spawning` session whose launch failed before any data was ingested.
+    /// permission requests, the sync cursor — removed by cascade). This is the
+    /// user removing a session from Delta's list; a launch that failed is
+    /// marked, not deleted (see [`Self::mark_session_failed`]).
     async fn delete_session(&self, id: &SessionId) -> Result<()>;
 
-    /// Mark a still-`spawning` session `failed` (its launch never bound before
-    /// the deadline). A no-op for any other status, so a stale reap can never
-    /// flip an already-active session.
-    async fn mark_session_failed(&self, id: &SessionId) -> Result<()>;
+    /// Mark a still-`spawning` session `failed` — its launch ended without ever
+    /// binding — and record `reason`, the text that says why, when Delta could
+    /// name one. A no-op for any other status, so a stale reap can never flip an
+    /// already-active session.
+    ///
+    /// The row and everything hanging off it are KEPT — see
+    /// [`SessionStatus::Failed`](delta_model::SessionStatus::Failed).
+    async fn mark_session_failed(&self, id: &SessionId, reason: Option<&str>) -> Result<()>;
 
     /// One page of sessions in the store's recency stream, resuming strictly
     /// after `cursor` (or from the top when `None`).
@@ -775,8 +780,8 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self).delete_session(id).await
     }
 
-    async fn mark_session_failed(&self, id: &SessionId) -> Result<()> {
-        (**self).mark_session_failed(id).await
+    async fn mark_session_failed(&self, id: &SessionId, reason: Option<&str>) -> Result<()> {
+        (**self).mark_session_failed(id, reason).await
     }
 
     async fn list_sessions_page(

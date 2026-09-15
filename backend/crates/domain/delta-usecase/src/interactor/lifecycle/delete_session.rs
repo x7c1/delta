@@ -36,7 +36,7 @@ where
     ///   preparation still running, or its pane up and awaiting its first hook),
     ///   or a row that still says `spawning`. Refused with
     ///   [`Error::SessionSpawning`]: wait for it to come up, or close it, which
-    ///   cancels the launch and removes the eager row anyway.
+    ///   cancels the launch and leaves the row `failed`, which can be removed.
     /// - **Open** — a live pane (Claude) or a live terminal-less agent session
     ///   (Codex). Refused with [`Error::SessionOpen`]: close it first. Open-ness
     ///   is process-runtime state, not a column (a restart rebuilds it empty),
@@ -69,12 +69,12 @@ where
         self.store.delete_session(self.id).await?;
         // The row (and every send row, by cascade) is gone, so the actor's turn
         // state has nothing left to refer to: drop it without orphan handling,
-        // exactly as the launch rollback does for the row it deletes. A closed
-        // session is usually already idle, but one Delta never held a pane for
-        // (an external agent registered by its hooks) can carry a turn and a
-        // background subagent that no completion can ever finish — and a kept
-        // running entry would pin this doomed actor alive for the process's
-        // lifetime.
+        // exactly as a launch that ended drops the turn nothing will ever
+        // drain. A closed session is usually already idle, but one Delta never
+        // held a pane for (an external agent registered by its hooks) can carry
+        // a turn and a background subagent that no completion can ever finish —
+        // and a kept running entry would pin this doomed actor alive for the
+        // process's lifetime.
         self.state.forget_turn();
         Ok(())
     }

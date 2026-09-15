@@ -25,7 +25,8 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
  *    matches its transcript line, until the turn-end event lands — and, for a
  *    new-session target, track the spawn (the workspace focuses the new session
  *    by that id at once if the user is still waiting on the new-session screen,
- *    and a failed launch surfaces Retry / Dismiss) and refetch the session list
+ *    and a failed launch marks the tracked entry so its session's Retry finds
+ *    the launch configuration) and refetch the session list
  *    the accepted send just added a row to;
  * 4. on failure, keep the chip as a recoverable `failed` row — except a
  *    `resume_unavailable` rejection, where the turn can never start (the

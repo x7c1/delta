@@ -109,11 +109,6 @@ where
                 pane_token: Some(resuming.token.as_str().to_owned()),
                 reason: None,
                 cancelled: false,
-                // A resume keeps its session row and every send row with it —
-                // the `Close` above requeued the held prompt rather than
-                // dropping it — so nothing is about to be deleted and there is
-                // no text to hand back.
-                unsent: Vec::new(),
             });
         }
         Ok(events)

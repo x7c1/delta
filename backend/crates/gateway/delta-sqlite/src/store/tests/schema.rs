@@ -267,6 +267,10 @@ async fn a_session_written_before_a_later_step_stays_a_claude_row() {
 /// duplicate column, a table that already exists).
 fn downgrade_sql(version: u32) -> String {
     let mut sql = String::new();
+    // v9 added the session's failure reason.
+    if version < 9 {
+        sql.push_str("ALTER TABLE session DROP COLUMN failure_reason;\n");
+    }
     // v8 added the thread's denormalized recency column. Dropping it also
     // discards the values the step's backfill wrote, which is exactly what an
     // older binary's file looks like.
@@ -625,6 +629,63 @@ async fn a_v7_database_gains_the_thread_recency_column_backfilled_from_its_messa
             .last_activity_at
             .as_deref(),
         Some("2026-01-01T00:09:00Z"),
+    );
+}
+
+/// A database written at version 8 — the generation before the session's
+/// failure reason — is migrated forward on open: `failure_reason` arrives, the
+/// file is re-stamped, and the session that was already there reads back with
+/// the column NULL. There is no backfill, so "this row predates the column" and
+/// "Delta never heard why this launch ended" are deliberately the same value,
+/// which the failed session's screen renders as the same sentence.
+#[tokio::test]
+async fn a_v8_database_gains_failure_reason_and_keeps_its_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v8.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    {
+        let store = SqliteStore::open(path_str).unwrap();
+        store.register_session(new_session()).await.unwrap();
+        let conn = store.conn.lock().await;
+        conn.execute_batch(&downgrade_sql(8)).unwrap();
+    }
+    assert_eq!(read_user_version(path_str), 8);
+
+    let store = SqliteStore::open(path_str).unwrap();
+    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
+
+    let session = store
+        .session(&SessionId::from("sess-1"))
+        .await
+        .unwrap()
+        .expect("the pre-existing session survives the migration");
+    assert_eq!(session.cwd, "/work", "and keeps everything it had");
+    assert_eq!(
+        session.failure_reason, None,
+        "a row that predates the column reads NULL, never a fabricated cause"
+    );
+
+    // The new column is usable through the normal write path: a launch that
+    // never bound records its cause with the status and reads it straight back.
+    let failed_id = SessionId::from("sess-2");
+    store
+        .insert_spawning_session(spawning_session(&failed_id, "/work"))
+        .await
+        .unwrap();
+    store
+        .mark_session_failed(&failed_id, Some("git error: worktree add failed"))
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .session(&failed_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .failure_reason
+            .as_deref(),
+        Some("git error: worktree add failed"),
     );
 }
 

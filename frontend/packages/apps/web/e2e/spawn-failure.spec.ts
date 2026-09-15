@@ -3,21 +3,19 @@ import { mockSpawnSessionId } from '@delta/api-mocks';
 import { emitEvent, useManualEventControl } from './support/app';
 
 /**
- * A new session whose launch never comes up surfaces a recoverable failure.
+ * A new session whose launch never comes up keeps its row and shows the failure
+ * on its own screen.
  *
  * The session row is created eagerly, so `POST /api/sends` returns its real id
  * and the workspace switches to the starting session right away. The backend's
  * watchdog then reaps the spawn that never bound and emits `spawn_failed`
- * carrying that same id — deleting the row the user is looking at. The failure
- * therefore has to do three things: take the user back to the new-session
- * screen, stop the chip looking stuck — it becomes a distinct error row
- * offering Retry and Dismiss — and hand back the messages the launch never
- * delivered. Those `send` rows are deleted with the session, so the event
- * carries their text and the browser restores everything the Retry chip does
- * not already hold into the new-session composer. Dismiss clears the row and
- * leaves the restored draft alone.
+ * carrying that same id — marking the row `failed` rather than deleting it. So
+ * the screen the user is already on simply changes what it shows: why the
+ * launch did not start, the prompt that was never delivered, and the two things
+ * to do about it. Nothing teleports the user anywhere, and nothing has to be
+ * rescued into the composer, because nothing was deleted.
  */
-test('a failed spawn returns to the new-session screen with a Retry / Dismiss row', async ({
+test('a failed spawn shows its failure in place, with Retry and Remove', async ({
   page,
 }) => {
   await useManualEventControl(page);
@@ -45,50 +43,32 @@ test('a failed spawn returns to the new-session screen with a Retry / Dismiss ro
   // session id the POST response carried (the mock mints deterministic spawn
   // ids, so the first spawn's id is known here). The launch preparation runs
   // after the send is accepted, so the git error that killed it has no response
-  // body to travel in: the event's `reason` is the only account of it the user
-  // gets, and it has to reach the card.
-  // `unsent` carries what the session had accepted and never delivered: its
-  // first prompt (send id 1, which the Retry chip already holds) and the
-  // message typed after it while the launch was still coming up.
+  // body to travel in — it reaches the user on the row instead, which is where
+  // the failed session's screen reads it from.
   await emitEvent(page, {
     kind: 'spawn_failed',
     cancelled: false,
     session_id: mockSpawnSessionId(1),
     pane_token: 'pane-never-bound',
     reason: 'git error: invalid reference: origin/nope',
-    unsent: [
-      { send_id: 1, text: 'start something that never boots' },
-      { send_id: 2, text: 'typed while it was starting' },
-    ],
   });
 
-  // The focused session no longer exists, so focus goes back to the
-  // new-session screen — which is where the failure's card lives.
-  await expect(page.getByTestId('new-session-empty')).toBeVisible();
-  await expect(pending).toContainText(/failed to start/i);
-  await expect(page.getByTestId('pending-fail-reason')).toContainText(
+  // The user stays exactly where they were; that screen now explains itself.
+  await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
+  const pane = page.getByTestId('failed-session-pane');
+  await expect(pane).toBeVisible();
+  await expect(page.getByTestId('failed-session-reason')).toContainText(
     'invalid reference: origin/nope',
   );
+  // The prompt that never went out is still a real row on the server, read
+  // back here rather than carried across in the browser's memory.
+  await expect(page.getByTestId('failed-session-prompt')).toHaveText(
+    'start something that never boots',
+  );
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
-  const dismiss = page.getByRole('button', { name: 'Dismiss' });
-  await expect(dismiss).toBeVisible();
 
-  // The second message is back in the composer, ready to send again — and the
-  // first prompt is NOT duplicated there, because Retry is what re-sends that
-  // one. Nothing was re-sent on the user's behalf.
-  await expect(page.getByRole('textbox')).toHaveValue(
-    'typed while it was starting',
-  );
-  // The card accounts for it, since the composer it went to is a different
-  // surface and Retry does not take it along.
-  await expect(page.getByTestId('pending-fail-note')).toHaveText(
-    '1 later message was returned to the composer. Retry re-sends only this one.',
-  );
-
-  // Dismiss clears the failed chip, leaving the restored draft untouched.
-  await dismiss.click();
-  await expect(pending).toHaveCount(0);
-  await expect(page.getByRole('textbox')).toHaveValue(
-    'typed while it was starting',
-  );
+  // Remove takes the failed session off the list, and focus lands on whatever
+  // is left rather than on a screen describing a session that is gone.
+  await page.getByRole('button', { name: 'Remove' }).click();
+  await expect(pane).toHaveCount(0);
 });

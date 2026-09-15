@@ -79,8 +79,8 @@ where
     /// arrives as a [`SessionEvent::SpawnFailed`] carrying the preparation's
     /// failure message as its `reason` — a git or tmux error, a worktree that
     /// landed off the path this phase planned, or the whole sequence outrunning
-    /// its deadline — and the eager row is deleted; see
-    /// [`Self::finish_launch`].
+    /// its deadline — and the eager row is marked `failed` with that reason;
+    /// see [`Self::finish_launch`].
     ///
     /// # Ordering
     ///
@@ -318,7 +318,7 @@ where
         // Eagerly create the session row and its `main` thread, then the first
         // prompt's send row bound to those real ids. Hooks cannot arrive before
         // the launch (and would queue behind this message anyway), so nothing
-        // races this write; if the launch fails the row is deleted again in the
+        // races this write; if the launch fails the row is marked `failed` in the
         // rollback (see [`Self::finish_launch`]). NOTE: the worktree the launch
         // task builds is deliberately NOT removed on a later close — see
         // `close_session` for the no-cleanup-on-close MVP decision; `session.cwd`

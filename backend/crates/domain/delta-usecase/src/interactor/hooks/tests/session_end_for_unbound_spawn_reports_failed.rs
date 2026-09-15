@@ -30,9 +30,6 @@ async fn session_end_for_unbound_spawn_reports_failed() {
             reason: None,
             // Nobody asked for this: the launch ended on its own.
             cancelled: false,
-            // This spawn was seeded through the runtime seam, so it accepted no
-            // send at all; a spawn with sends hands their text back here.
-            unsent: Vec::new(),
         }],
     );
     // The pane was killed and the spawn is gone, so it can never mis-bind later.
@@ -41,10 +38,16 @@ async fn session_end_for_unbound_spawn_reports_failed() {
         vec!["delta-1".to_owned()],
     );
     assert!(ix.pending_session_ids().await.is_empty());
-    // The eagerly-created `spawning` row ingested nothing, so the failure
-    // cleanup deleted it — same policy as the watchdog reap.
+    // The eagerly-created `spawning` row is marked rather than deleted — same
+    // policy as the watchdog reap.
     assert!(
-        ix.store().session(&id).await.unwrap().is_none(),
-        "the never-bound spawn's session row is deleted on SessionEnd"
+        ix.store()
+            .session(&id)
+            .await
+            .unwrap()
+            .expect("the never-bound spawn's row is kept")
+            .status
+            == delta_model::SessionStatus::Failed,
+        "the never-bound spawn's session row is marked failed on SessionEnd"
     );
 }

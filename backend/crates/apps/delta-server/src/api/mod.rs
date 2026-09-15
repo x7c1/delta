@@ -145,17 +145,16 @@ pub(crate) async fn open_session(
 ///
 /// A session that is **still starting** holds no conversation yet, so closing it
 /// cancels the launch instead: whatever the launch stood up is reclaimed and the
-/// eagerly-created row is removed, reported as a `SpawnFailed` marked
+/// eagerly-created row is marked `failed`, reported as a `SpawnFailed` marked
 /// `cancelled` — this is the only producer that sets it — whose `reason` names
-/// the close and which carries the sends the launch never delivered.
+/// the close and is persisted on the row.
 /// That event is in the returned batch, broadcast here like the sweep's.
 ///
 /// `SessionClosed` is broadcast either way: what a client does on it is refetch
 /// its session list (and that session's open sends), and for a cancelled launch
-/// the row being gone from that refetch is exactly right. It goes out *after*
-/// the batch above, so a `SpawnFailed` in it has already told the client the
-/// session is finished — a client that drops the deleted session's caches there
-/// is not sent back to refetch rows that no longer exist.
+/// the row coming back `failed` from that refetch is exactly right. It goes out
+/// *after* the batch above, so a `SpawnFailed` in it has already told the client
+/// the launch is over — the session's own screen is then what explains it.
 pub(crate) async fn close_session(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -230,8 +229,8 @@ pub(crate) async fn list_threads(
 /// `dispatched` state and never auto-dispatches — the browser renders it
 /// with explicit Send ([`release_send`]) and Cancel actions instead of the
 /// waiting label. This is the source of truth for the browser's send strip.
-/// An unknown session id is a `404`, so a reaped spawn is distinguishable
-/// from "nothing pending".
+/// An unknown session id is a `404`, so a removed session is
+/// distinguishable from "nothing pending".
 pub(crate) async fn list_sends(
     State(state): State<AppState>,
     Path(id): Path<String>,

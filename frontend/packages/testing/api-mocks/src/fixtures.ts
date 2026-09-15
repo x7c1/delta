@@ -95,6 +95,7 @@ export const mockSession: Session = {
   // Started from the PR tab: the navigator card links this number to
   // `https://github.com/dev/delta/pull/138`.
   pull_request_number: 138,
+  failure_reason: null,
 };
 
 export const mockSession2: Session = {
@@ -112,6 +113,7 @@ export const mockSession2: Session = {
   provider_thread_id: null,
   // Started from a directory pick: no PR slot on the card.
   pull_request_number: null,
+  failure_reason: null,
 };
 
 export const mockSession3: Session = {
@@ -130,6 +132,7 @@ export const mockSession3: Session = {
   provider_session_id: null,
   provider_thread_id: null,
   pull_request_number: null,
+  failure_reason: null,
 };
 
 export const mockSession4: Session = {
@@ -153,6 +156,7 @@ export const mockSession4: Session = {
   provider_session_id: null,
   provider_thread_id: null,
   pull_request_number: null,
+  failure_reason: null,
 };
 
 export const mockThreads: Thread[] = [
@@ -594,7 +598,7 @@ export interface MockStore {
      * yet. Mirrors the real server's `spawning` status: the row is listed and
      * addressable by id from the moment its first send is accepted, but it is
      * not open (no pane is bound to it) until a `session_registered` event
-     * activates it — or a `spawn_failed` deletes it. A plain send aimed at it
+     * activates it — or a `spawn_failed` marks it `failed`. A plain send aimed at it
      * while it is starting is accepted as a `queued` row, and a branch send is
      * refused with `409 session_spawning`, as on the server.
      */
@@ -711,6 +715,7 @@ function buildFillerSessions(): MockStore['sessions'] {
         provider_session_id: null,
         provider_thread_id: null,
         pull_request_number: null,
+        failure_reason: null,
       },
       open: false,
       mainThreadId: threadId,

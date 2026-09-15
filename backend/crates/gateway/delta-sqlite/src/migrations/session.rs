@@ -3,10 +3,15 @@
 //!
 //! **Status lifecycle.** A Delta-launched session is INSERTed as `'spawning'`
 //! when the id is minted (before `claude` is up), flips to `'active'` when the
-//! first hook binds the spawn, and becomes `'failed'` if the spawn never binds
-//! before its deadline (a failed session with zero ingested messages is deleted
-//! at reap time instead). `transcript_path` is NULL while `'spawning'`: the path
-//! is owned by Claude Code and only learned from the first hook.
+//! first hook binds the spawn, and becomes `'failed'` if the launch ends without
+//! ever binding — it broke, the watchdog reaped it past its deadline, or the
+//! user closed it while it was still starting. The row is KEPT in that state,
+//! with everything the launch recorded (its `cwd`, repository, branch, PR
+//! number, `failure_reason`, and its `send` rows), so the failure is something
+//! the user can open and act on rather than a row that silently disappears.
+//! `transcript_path` is NULL while `'spawning'`, and stays NULL on a `'failed'`
+//! row: the path is owned by Claude Code and only learned from the first hook,
+//! which a never-bound launch never produced.
 //!
 //! **`last_activity_at` is denormalized on purpose.** It is a copy of the
 //! session's most recent message timestamp (`MAX(message.created_at)`),
@@ -84,11 +89,18 @@
 //!   Only the number is stored — the PR's web URL is rebuilt from
 //!   `repository_display_name`, which for a PR-picked session names the very
 //!   same GitHub repository (Delta's PR listing is `github.com`-only).
+//! - `failure_reason` is why a `'failed'` session's launch ended, when Delta
+//!   could name a cause: the launch preparation's own error text, or — for a
+//!   launch the user cancelled by closing a still-starting session — the
+//!   sentence naming that close. NULL for every other status, for the
+//!   watchdog-shaped endings that observe only silence (a launch that exited, a
+//!   spawn that never bound), and for rows written before the column existed.
+//!   It is written once, by the cleanup that marks the row `'failed'`.
 
 use super::Step;
 
-/// The `session` table's history: the v3 baseline table, its recency index, and
-/// the v7 pull-request snapshot column.
+/// The `session` table's history: the v3 baseline table, its recency index, the
+/// v7 pull-request snapshot column, and the v9 failure reason.
 pub(super) const STEPS: &[Step] = &[
     Step::additive(
         3,
@@ -125,4 +137,9 @@ CREATE INDEX IF NOT EXISTS ix_session_recency
         7,
         "ALTER TABLE session ADD COLUMN pull_request_number INTEGER;",
     ),
+    // v9: why a failed launch ended. Nullable with no default, so every
+    // existing row reads NULL — "no cause recorded", which is also what a
+    // watchdog-shaped failure writes, and what the failed session's screen
+    // renders as "Delta did not hear why".
+    Step::additive(9, "ALTER TABLE session ADD COLUMN failure_reason TEXT;"),
 ];

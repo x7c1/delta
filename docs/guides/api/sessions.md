@@ -93,9 +93,9 @@ Response:
   send to it is still accepted, as a `queued` row typed once the launch binds;
   only a branch send is refused, with `409 session_spawning` (see
   [sends.md](sends.md)). A launch that fails, and a Claude spawn that came up
-  but never bound (reaped at its bind deadline), both have their row deleted, so
-  the session disappears from this list again and the client hears
-  `spawn_failed`.
+  but never bound (reaped at its bind deadline), both have their row marked
+  `failed` — kept, and still listed, now among the closed sessions rather than
+  in the live group — and the client hears `spawn_failed`.
 
 - **400** — a malformed `cursor`.
 
@@ -170,23 +170,23 @@ Closing also sweeps any lingering background subagent whose completion
 notification can no longer arrive, broadcasting a `subagent_finished` for each so
 live viewers' running indicators clear immediately.
 
-**A session that is still starting has its launch cancelled and its row
-removed.** Such a session holds no conversation: its row was written eagerly
+**A session that is still starting has its launch cancelled and its row marked
+`failed`.** Such a session holds no conversation: its row was written eagerly
 when the send was accepted (it is listed as `spawning`) and no transcript line
-has been ingested against it, so there is nothing to tear down and keep. Delta
-therefore reclaims whatever the launch has stood up so far — the launch
+has been ingested against it, so there is nothing to tear down and keep alive.
+Delta therefore reclaims whatever the launch has stood up so far — the launch
 preparation is abandoned, an unbound pane is killed, a connected provider is
-dropped — and deletes the row. The cancellation is reported on the live channel
+dropped — and marks the row. The cancellation is reported on the live channel
 as a [`spawn_failed`](live-channels.md#session-lifecycle) marked `cancelled`
 (the key that tells a requested cancel from a broken launch), whose `reason`
-names the close and whose `unsent` carries every send the launch never
-delivered, so a client can put that text back in front of the user; the row is
-gone from the next
-`GET /api/sessions`. This is what makes a wedged launch recoverable: a `git fetch`
-hanging past every deadline, or a `spawning` row stranded by a server restart
-mid-launch — open/closed is runtime state rebuilt empty on restart, so no
-watchdog is left to reap it — would otherwise leave a session the user could not
-be rid of.
+names the close; the same text is stored on the row, and every send the launch
+never delivered stays open against it. The session keeps its place in
+`GET /api/sessions`, now reading `failed`, and `DELETE /api/sessions/{id}` is
+what takes it off the list. This is what makes a wedged launch recoverable: a
+`git fetch` hanging past every deadline, or a `spawning` row stranded by a
+server restart mid-launch — open/closed is runtime state rebuilt empty on
+restart, so no watchdog is left to reap it — would otherwise leave a session
+the user could not be rid of.
 
 Either way `session_closed` is broadcast.
 

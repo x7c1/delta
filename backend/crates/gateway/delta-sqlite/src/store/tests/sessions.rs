@@ -648,15 +648,28 @@ async fn mark_session_failed_flips_only_a_spawning_session() {
         .insert_spawning_session(spawning_session(&id, "/work"))
         .await
         .unwrap();
-    store.mark_session_failed(&id).await.unwrap();
+    store
+        .mark_session_failed(&id, Some("git error: worktree add failed"))
+        .await
+        .unwrap();
     let failed = store.session(&id).await.unwrap().unwrap();
     assert_eq!(failed.status, SessionStatus::Failed);
+    assert_eq!(
+        failed.failure_reason.as_deref(),
+        Some("git error: worktree add failed"),
+        "the reason is written with the status, so the row explains itself"
+    );
 
-    // An active session is untouched by a stale failure mark.
+    // An active session is untouched by a stale failure mark — status and
+    // reason alike.
     let (active, _) = store.register_session(new_session()).await.unwrap();
-    store.mark_session_failed(&active.id).await.unwrap();
+    store
+        .mark_session_failed(&active.id, Some("too late"))
+        .await
+        .unwrap();
     let still = store.session(&active.id).await.unwrap().unwrap();
     assert_eq!(still.status, SessionStatus::Active);
+    assert_eq!(still.failure_reason, None);
 }
 
 #[tokio::test]

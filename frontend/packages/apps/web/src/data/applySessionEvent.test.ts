@@ -5,10 +5,6 @@ import type { Send, SessionListItem } from '@delta/wire-gen';
 import { applySessionEvent } from './applySessionEvent';
 import { noticeOf, useLiveStore } from '../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
-import {
-  NEW_SESSION_DRAFT_KEY,
-  useComposerStore,
-} from '../store/composerStore';
 import { useNotificationStore } from '../store/notificationStore';
 
 const FOCUSED = 'sess-1';
@@ -75,10 +71,8 @@ describe('applySessionEvent', () => {
       streamingMessages: {},
     });
     useNavStore.setState({ focusedSessionId: FOCUSED });
-    // A failed spawn restores its undelivered text into the new-session draft,
-    // and a cancel away from the focused session announces itself in the
-    // app-wide snackbar, so both stores are shared state these tests move too.
-    useComposerStore.setState({ drafts: {} });
+    // A spawn failure this client never tracked announces itself in the
+    // app-wide snackbar, which is shared state these tests move too.
     useNotificationStore.setState({ notifications: [] });
   });
 
@@ -568,7 +562,7 @@ describe('applySessionEvent', () => {
     }
   });
 
-  it('fails the tracked spawn and drops its cached sends on spawn_failed', () => {
+  it('fails the tracked spawn and refetches its sends on spawn_failed', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
     // The spawn was accepted with real ids; its first send is in the cache.
@@ -593,7 +587,6 @@ describe('applySessionEvent', () => {
         cancelled: false,
         session_id: 'sess-spawned',
         pane_token: 'pane-1',
-        unsent: [],
       },
       queryClient,
       null,
@@ -601,21 +594,25 @@ describe('applySessionEvent', () => {
     );
 
     expect(useLiveStore.getState().spawns[0].status).toBe('failed');
-    // The server deleted the row; the cached open sends go with it (a refetch
-    // would only 404).
-    expect(
-      queryClient.getQueryData(queryKeys.sessionSends('sess-spawned')),
-    ).toBeUndefined();
-    // The session WAS listed — from the moment its send was accepted — so the
-    // list must refetch to lose the reaped row.
+    // The row is kept, so its open sends are still real: refetch them rather
+    // than dropping them — they are the messages the failed session's own
+    // screen shows.
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.sessionSends('sess-spawned'),
+    });
+    // The session's status and its place in the list both moved, so the list
+    // must refetch.
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions'] });
     // The failure named a session other than the focused one, so focus stays.
     expect(useNavStore.getState().focusedSessionId).toBe(FOCUSED);
   });
 
-  it('moves focus back to the new-session screen when the focused spawn fails', () => {
+  it('leaves focus on the failed session when it is the focused one', () => {
     // The workspace focuses a spawn as soon as its send is accepted, so a
-    // failure usually lands on the session the user is looking at.
+    // failure usually lands on the session the user is looking at. That screen
+    // is no longer about to describe a session that stopped existing: the row
+    // is kept, and the screen now shows the failure, what was never sent, and
+    // Retry / Remove. So nothing teleports the user away from it.
     const queryClient = new QueryClient();
     useNavStore.setState({ focusedSessionId: 'sess-spawned' });
     useLiveStore.getState().trackSpawn({
@@ -636,160 +633,21 @@ describe('applySessionEvent', () => {
         cancelled: false,
         session_id: 'sess-spawned',
         pane_token: 'pane-1',
-        unsent: [],
       },
       queryClient,
       null,
       'sess-spawned',
     );
 
-    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    expect(useNavStore.getState().focusedSessionId).toBe('sess-spawned');
     expect(useLiveStore.getState().spawns[0].status).toBe('failed');
   });
 
-  it('restores the failed launch’s unsent text before handing focus back', () => {
-    // The `send` rows are deleted server-side, so the event is the last copy of
-    // what the user typed after the first prompt. It has to be in the draft
-    // before focus returns to the new-session screen, or the composer would
-    // mount empty and only fill in on a later render.
-    const queryClient = new QueryClient();
-    useNavStore.setState({ focusedSessionId: 'sess-spawned' });
-    useComposerStore.getState().setDraft(NEW_SESSION_DRAFT_KEY, 'meanwhile');
-    useLiveStore.getState().trackSpawn({
-      focusHandedOver: false,
-      sessionId: 'sess-spawned',
-      threadId: 42,
-      text: 'new session',
-      firstSendId: 1,
-      workdir: null,
-      launchOptionIds: [],
-      provider: 'claude',
-      worktree: null,
-    });
-
-    applySessionEvent(
-      {
-        kind: 'spawn_failed',
-        cancelled: false,
-        session_id: 'sess-spawned',
-        pane_token: 'pane-1',
-        unsent: [
-          { send_id: 1, text: 'new session' },
-          { send_id: 2, text: 'typed while it started' },
-        ],
-      },
-      queryClient,
-      null,
-      'sess-spawned',
-    );
-
-    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
-    // Appended below what was already there, and without the first prompt (the
-    // Retry chip holds that one).
-    expect(useComposerStore.getState().drafts[NEW_SESSION_DRAFT_KEY]).toBe(
-      'meanwhile\n\ntyped while it started',
-    );
-  });
-
-  it('announces a cancel of a session the user was not looking at', () => {
-    // Closing a starting session from the navigator while looking at something
-    // else does nothing visible except the card disappearing: the Retry chip
-    // and the restored text are waiting on the new-session surface, which the
-    // user is not on. Nothing hands them there (that is the focused case), so
-    // the snackbar is what says where both went.
-    const queryClient = new QueryClient();
-    useLiveStore.getState().trackSpawn({
-      focusHandedOver: false,
-      sessionId: 'sess-spawned',
-      threadId: 42,
-      text: 'new session',
-      firstSendId: 1,
-      workdir: null,
-      launchOptionIds: [],
-      provider: 'claude',
-      worktree: null,
-    });
-
-    applySessionEvent(
-      {
-        kind: 'spawn_failed',
-        cancelled: true,
-        session_id: 'sess-spawned',
-        pane_token: 'pane-1',
-        reason: 'closed while starting',
-        unsent: [
-          { send_id: 1, text: 'new session' },
-          { send_id: 2, text: 'typed while it started' },
-        ],
-      },
-      queryClient,
-      null,
-      FOCUSED,
-    );
-
-    expect(useNavStore.getState().focusedSessionId).toBe(FOCUSED);
-    expect(
-      useNotificationStore
-        .getState()
-        .notifications.map(({ tone, title, detail }) => ({
-          tone,
-          title,
-          detail,
-        })),
-    ).toEqual([
-      {
-        tone: 'info',
-        title: 'Launch cancelled',
-        // The message queued behind the first prompt is now in a draft the
-        // user did not put it in, which is the half nothing else can tell
-        // them; the first prompt itself is on the chip.
-        detail:
-          'Retry or dismiss it on the new-session screen. The unsent message was returned to the composer.',
-      },
-    ]);
-  });
-
-  it('stays silent when the cancelled session was the focused one', () => {
-    // Focus is handed to the new-session screen, where the chip is in plain
-    // sight — a snackbar saying where it went would be telling the user about
-    // the screen they are now looking at.
-    const queryClient = new QueryClient();
-    useNavStore.setState({ focusedSessionId: 'sess-spawned' });
-    useLiveStore.getState().trackSpawn({
-      focusHandedOver: false,
-      sessionId: 'sess-spawned',
-      threadId: 42,
-      text: 'new session',
-      firstSendId: 1,
-      workdir: null,
-      launchOptionIds: [],
-      provider: 'claude',
-      worktree: null,
-    });
-
-    applySessionEvent(
-      {
-        kind: 'spawn_failed',
-        cancelled: true,
-        session_id: 'sess-spawned',
-        pane_token: 'pane-1',
-        reason: 'closed while starting',
-        unsent: [],
-      },
-      queryClient,
-      null,
-      'sess-spawned',
-    );
-
-    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
-    expect(useNotificationStore.getState().notifications).toEqual([]);
-  });
-
-  it('leaves an unwatched launch that broke to the spawn registry', () => {
-    // Only a cancel gets the snackbar here: a launch that broke on its own is
-    // already reported by the registry — its chip when this client tracks the
-    // spawn, its own snackbar when it does not — so a second notice from this
-    // seam would double up on every failure.
+  it('raises no notice of its own for a launch this client was tracking', () => {
+    // The failed session is listed, marked failed, and its own screen says what
+    // happened — so this seam adds nothing. Only a failure naming a session
+    // this client never tracked gets a snackbar, and the spawn registry raises
+    // that one.
     const queryClient = new QueryClient();
     useLiveStore.getState().trackSpawn({
       focusHandedOver: false,
@@ -810,7 +668,6 @@ describe('applySessionEvent', () => {
         session_id: 'sess-spawned',
         pane_token: 'pane-1',
         reason: 'git error: worktree add failed',
-        unsent: [],
       },
       queryClient,
       null,

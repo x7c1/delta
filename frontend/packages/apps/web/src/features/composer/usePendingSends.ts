@@ -7,13 +7,12 @@ import {
   useLiveStore,
   type LocalSend,
   type SendingItem,
-  type SpawnItem,
 } from '../../store/liveStore';
 
 /**
  * The surface a pending strip renders for: an existing thread, or the
  * new-session composer screen (which shows the in-flight first sends of
- * tracked spawns, plus failed-spawn cards). `null` renders nothing.
+ * tracked spawns). `null` renders nothing.
  */
 export type PendingSurface =
   | { kind: 'thread'; sessionId: SessionId; threadId: ThreadId }
@@ -29,15 +28,13 @@ export type PendingEntry =
    */
   | { kind: 'local'; key: string; send: LocalSend }
   /** A submit whose POST is still in flight, or was rejected (`failed`). */
-  | { kind: 'sending'; key: string; item: SendingItem }
-  /** A new-session launch the server reaped; recoverable via Retry/Dismiss. */
-  | { kind: 'spawn-failed'; key: string; spawn: SpawnItem };
+  | { kind: 'sending'; key: string; item: SendingItem };
 
 /**
  * Merge the pending strip's sources for one surface, in submit order:
  * server-accepted sends (open list ∪ tracked local sends, id-ordered,
  * de-duplicated by send id — the server row wins while it exists), then
- * in-flight/failed submits, then failed-spawn cards.
+ * in-flight/failed submits.
  *
  * Shared by `PendingQueue` (the rows) and `TranscriptPane` (the count that
  * drives stick-to-bottom and the empty-state gate), so the two can never
@@ -156,7 +153,11 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
     // The new-session screen: the in-flight first send of each tracked spawn
     // (its real ids are known, but the screen has no thread to query under —
     // the tracked local send carries everything the chip needs), then submits
-    // still awaiting their POST, then failed-spawn cards.
+    // still awaiting their POST. A launch that FAILED is deliberately absent:
+    // its session row is kept and marked failed, so its prompt, its reason and
+    // its Retry / Remove actions are on that session's own screen — putting a
+    // card here too would say the same thing twice, on a screen that has
+    // nothing to do with the session that failed.
     const entries: PendingEntry[] = [];
     const spawningIds = new Set(
       spawns
@@ -178,15 +179,6 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
     for (const item of sending) {
       if (item.target.kind === 'new-session') {
         entries.push({ kind: 'sending', key: item.id, item });
-      }
-    }
-    for (const spawn of spawns) {
-      if (spawn.status === 'failed') {
-        entries.push({
-          kind: 'spawn-failed',
-          key: `spawn-${spawn.sessionId}`,
-          spawn,
-        });
       }
     }
     return entries;

@@ -68,9 +68,6 @@ async fn session_end_for_resuming_session_reports_failed() {
             reason: None,
             // Nobody asked for this: the launch ended on its own.
             cancelled: false,
-            // A failed resume keeps its rows: nothing is deleted, so there is
-            // no text to hand back to the composer.
-            unsent: Vec::new(),
         }],
     );
     assert_eq!(

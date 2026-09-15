@@ -43,11 +43,16 @@ async fn close_session_on_a_bound_session_whose_row_is_still_spawning_cleans_it_
             pane_token: Some("delta-7".to_owned()),
             reason: Some("closed while starting".to_owned()),
             cancelled: true,
-            unsent: Vec::new(),
         }],
     );
     assert!(
-        ix.store().session(&session_id).await.unwrap().is_none(),
-        "the contentless `spawning` row is deleted"
+        ix.store()
+            .session(&session_id)
+            .await
+            .unwrap()
+            .expect("the `spawning` row is kept")
+            .status
+            == delta_model::SessionStatus::Failed,
+        "the contentless `spawning` row is marked failed rather than deleted"
     );
 }

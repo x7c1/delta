@@ -170,8 +170,9 @@ export interface MockApi {
    * - `session_registered` activates a `spawning` row (already listed; it now
    *   reads `active` and becomes open);
    * - `session_opened` / `session_closed` flip the live flag;
-   * - `spawn_failed` deletes the spawned row and everything it owns, exactly as
-   *   the server reaps a spawn that never bound.
+   * - `spawn_failed` marks the spawned row `failed` and records its reason,
+   *   exactly as the server does for a spawn that never bound (the row and its
+   *   undelivered sends are kept);
    *
    * Drive this with the same events fed to the fake event source, *before*
    * queries refetch, so a `GET` that follows an event observes the new state.
@@ -261,8 +262,8 @@ export function createMockApi(): MockApi {
       // real server: a session appears the moment its first send is accepted,
       // reading `status: 'spawning'` (and `open: false` — no pane is bound to
       // it yet) until `session_registered` activates it. A spawn that never
-      // binds is reaped, and `spawn_failed` deletes its row here too — see
-      // `applyEvent` for both transitions.
+      // binds stays listed too, reading `failed` once `spawn_failed` marks it
+      // here — see `applyEvent` for both transitions.
       const items = store.sessions.map((entry) => ({
         session: entry.session,
         open: entry.open,
@@ -358,18 +359,14 @@ export function createMockApi(): MockApi {
       // Closing a session that is STILL STARTING cancels its launch instead of
       // tearing a pane down, exactly as on the server: the row was created
       // eagerly when its first send was accepted and holds no conversation, so
-      // it is removed and the cancellation is reported as a `spawn_failed`
-      // carrying the reason and the sends the launch never delivered (see
+      // it is marked `failed` — kept, with its undelivered sends — and the
+      // cancellation is reported as a `spawn_failed` carrying the reason (see
       // `MockApi.onServerEvent` for why the mock emits it rather than only
       // mutating the store).
       if (entry.session.status === 'spawning') {
-        const unsent = store.sends
-          .filter(
-            (send) =>
-              send.session_id === entry.session.id &&
-              (send.status === 'queued' || send.status === 'dispatched'),
-          )
-          .map((send) => ({ send_id: send.id, text: send.text }));
+        entry.session.status = 'failed';
+        entry.session.failure_reason = MOCK_CLOSED_WHILE_STARTING_REASON;
+        entry.spawning = false;
         emitServerEvent({
           kind: 'spawn_failed',
           session_id: entry.session.id,
@@ -377,7 +374,6 @@ export function createMockApi(): MockApi {
           // The user asked for this one, which is what tells a client to word
           // it as a cancel rather than a failure.
           cancelled: true,
-          unsent,
         });
         return new HttpResponse(null, { status: 204 });
       }
@@ -425,7 +421,8 @@ export function createMockApi(): MockApi {
 
     // A session's open (non-terminal) sends — status queued or dispatched —
     // oldest first, mirroring `GET /api/sessions/{id}/sends`. An unknown id is
-    // a 404, so a reaped spawn is distinguishable from "nothing pending".
+    // a 404, so a removed session is distinguishable from "nothing pending".
+    // A failed launch keeps its row, so it answers here like any other session.
     http.get('*/api/sessions/:id/sends', ({ params }) => {
       const entry = store.sessions.find((s) => s.session.id === params.id);
       if (!entry) {
@@ -643,6 +640,7 @@ export function createMockApi(): MockApi {
             title: null,
             status: 'spawning',
             created_at: createdAt,
+            failure_reason: null,
             // `branch_at_launch`/`repo_root`/`repository_display_name` are
             // captured server-side at the spawn moment. The mock has no real
             // git, so seed all three `null` — mirroring "spawning, no hook
@@ -1368,19 +1366,16 @@ export function createMockApi(): MockApi {
         break;
       }
       case 'spawn_failed': {
-        // The server reaps a spawn that never bound: the contentless session
-        // row and everything it owns are deleted.
+        // The launch never bound. The server KEEPS the row, marking it `failed`
+        // with the reason on it and leaving its undelivered sends open against
+        // it — which is what the failed session's own screen reads back.
         const entry = store.sessions.find(
           (s) => s.session.id === event.session_id,
         );
         if (entry?.spawning) {
-          store.sessions = store.sessions.filter((s) => s !== entry);
-          store.sends = store.sends.filter(
-            (s) => s.session_id !== event.session_id,
-          );
-          for (const thread of entry.threads) {
-            delete store.messagesByThread[thread.id];
-          }
+          entry.spawning = false;
+          entry.session.status = 'failed';
+          entry.session.failure_reason = event.reason ?? null;
         }
         break;
       }

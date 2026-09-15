@@ -67,11 +67,17 @@ async fn tmux_failure_after_the_pending_spawn_is_recorded_reaps_the_row() {
         "the failure carries tmux's message"
     );
 
-    // Nothing is left behind: not the eager row, and not the spawn recorded a
-    // moment before the failure.
+    // The eager row is marked `failed` rather than deleted, and the spawn
+    // recorded a moment before the failure is gone from the registry.
     assert!(
-        ix.store().session(&session_id).await.unwrap().is_none(),
-        "the eager row of a failed launch is deleted"
+        ix.store()
+            .session(&session_id)
+            .await
+            .unwrap()
+            .expect("the row of a failed launch is kept")
+            .status
+            == delta_model::SessionStatus::Failed,
+        "the eager row of a failed launch is marked failed, not deleted"
     );
     let (launching, pending) = ix
         .with_runtime(&session_id, |state| {

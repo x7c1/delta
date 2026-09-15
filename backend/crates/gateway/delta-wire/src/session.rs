@@ -125,6 +125,15 @@ pub struct WireSession {
     /// `#<number>` on the session card, linking to
     /// `https://github.com/<repository_display_name>/pull/<number>`.
     pub pull_request_number: Option<i64>,
+    /// Why a `failed` session's launch ended, when Delta could name a cause —
+    /// the launch preparation's own error text, or, for a launch the user
+    /// cancelled by closing a still-starting session, the sentence naming that
+    /// close. `null` for every other status, for the endings that observe only
+    /// silence (a launch that exited, a spawn that never bound before its
+    /// deadline), and for rows that predate this field. The failed session's
+    /// screen renders it as the explanation, falling back to saying Delta never
+    /// heard why.
+    pub failure_reason: Option<String>,
 }
 
 impl From<Session> for WireSession {
@@ -143,6 +152,7 @@ impl From<Session> for WireSession {
             provider_session_id: session.provider_session_id,
             provider_thread_id: session.provider_thread_id,
             pull_request_number: session.pull_request_number,
+            failure_reason: session.failure_reason,
         }
     }
 }
@@ -170,6 +180,7 @@ mod tests {
             provider_session_id: None,
             provider_thread_id: None,
             pull_request_number: Some(138),
+            failure_reason: None,
         };
         assert_eq!(
             serde_json::to_value(WireSession::from(session)).unwrap(),
@@ -187,6 +198,7 @@ mod tests {
                 "provider_session_id": null,
                 "provider_thread_id": null,
                 "pull_request_number": 138,
+                "failure_reason": null,
             }),
         );
     }
@@ -208,6 +220,7 @@ mod tests {
             provider_session_id: Some("thr_abc".into()),
             provider_thread_id: Some("thr_abc".into()),
             pull_request_number: None,
+            failure_reason: None,
         };
         let value = serde_json::to_value(WireSession::from(session)).unwrap();
         assert_eq!(value["provider"], serde_json::json!("codex"));

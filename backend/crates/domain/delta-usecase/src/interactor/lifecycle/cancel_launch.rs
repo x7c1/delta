@@ -1,12 +1,8 @@
 //! The one cleanup every never-bound launch ends in, whatever ended it.
 
-use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::interactor::InteractorCore;
 use crate::pane_token::PaneToken;
-use crate::ports::{
-    GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, UnsentSend, Workspace,
-};
+use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 /// What ended a never-bound launch, as the browser needs to hear it: a launch
 /// that broke, or one the user asked to stop.
@@ -31,9 +27,9 @@ where
     W: Workspace,
     G: GitWorktree,
 {
-    /// Undo an accepted-but-never-bound launch: reclaim whatever it stood up,
-    /// drop the turn, delete the eager session row, and build the
-    /// [`SessionEvent::SpawnFailed`] that reports it.
+    /// End an accepted-but-never-bound launch: reclaim whatever it stood up,
+    /// drop the turn, mark the session row `failed` with the reason, and build
+    /// the [`SessionEvent::SpawnFailed`] that reports it.
     ///
     /// Four callers reach the same end state, so they share one body:
     ///
@@ -61,9 +57,9 @@ where
     /// - `end`: which of the two things happened, and the text the browser
     ///   shows for it ([`UnboundLaunchEnd`]).
     ///
-    /// A failed row cleanup is logged rather than propagated: the browser is
-    /// waiting on a session that will never come up, and a row that outlived
-    /// its cleanup is the lesser problem — losing the failure report over a
+    /// A failed row update is logged rather than propagated: the browser is
+    /// waiting on a session that will never come up, and a row left reading
+    /// `spawning` is the lesser problem — losing the failure report over a
     /// failed query would be the worse one.
     ///
     /// The event is *returned*, not emitted, so each caller delivers it the way
@@ -93,114 +89,38 @@ where
                 );
             }
         }
-        // The session row (and every send row, by cascade) is about to be
-        // deleted, so the turn entry is dropped without orphan handling.
+        // Nothing will ever drain this turn — the launch it belonged to is over
+        // — and the session is not being deleted, so the entry is dropped
+        // rather than left to pin a doomed actor's runtime state alive.
         self.state.forget_turn();
         let session_id = self.id.clone();
-        // BEFORE the cleanup, which deletes the rows this reads.
-        let unsent = self.undelivered_sends(&session_id).await;
-        if let Err(cleanup_err) = self.clean_up_failed_spawn_row(&session_id).await {
-            tracing::error!(
-                session_id = %session_id,
-                error = %cleanup_err,
-                "failed to clean up the eager session row of a launch that never bound"
-            );
-        }
         let (reason, cancelled) = match end {
             UnboundLaunchEnd::Failed(reason) => (reason, false),
             UnboundLaunchEnd::Cancelled(reason) => (Some(reason), true),
         };
+        // The eager row (INSERTed `spawning` when the id was minted, before
+        // `claude` launched) is marked, never deleted — see
+        // [`delta_model::SessionStatus::Failed`] for why the row is what the
+        // failure lives on. `mark_session_failed` only touches a row still
+        // reading `spawning`, so a stale reap cannot flip a session that came
+        // up after all.
+        if let Err(mark_err) = self
+            .store
+            .mark_session_failed(&session_id, reason.as_deref())
+            .await
+        {
+            tracing::error!(
+                session_id = %session_id,
+                error = %mark_err,
+                "failed to mark the session row of a launch that never bound as failed \
+                 (it is left reading `spawning`)"
+            );
+        }
         SessionEvent::SpawnFailed {
             session_id,
             pane_token: pane_token.map(|token| token.as_str().to_owned()),
             reason,
             cancelled,
-            unsent,
         }
-    }
-}
-
-/// The two store-facing halves of the cleanup above, in the order
-/// [`SessionContext::cancel_unbound_launch`] runs them. That method is their
-/// only caller, so they live beside it and reach no further than this module's
-/// own `lifecycle` parent.
-///
-/// They sit on [`InteractorCore`] rather than on the actor's `SessionContext`
-/// because neither touches runtime state: both are store calls keyed by an
-/// explicitly passed session id, reached from the context above through its
-/// `Deref`.
-impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
-where
-    T: TmuxDriver,
-    X: Transcript,
-    S: SessionStore,
-    W: Workspace,
-    G: GitWorktree,
-{
-    /// The sends a failed launch accepted but never delivered to an agent,
-    /// oldest first — the text the browser puts back in its composer.
-    ///
-    /// A spawn that never bound reached no agent at all, so *every* open send
-    /// of the session qualifies: the first prompt (`dispatched` for a Claude
-    /// spawn, whose prompt rides the launch command line; `queued` for an
-    /// adapter-backed one, whose prompt waits for the provider thread) and each
-    /// send accepted as `queued` while the launch was still running.
-    /// [`SessionStore::open_sends`] is exactly that set, in id order.
-    ///
-    /// Must be called BEFORE [`Self::clean_up_failed_spawn_row`]: the rows
-    /// cascade away with the session, and this frame is the last place their
-    /// text exists.
-    ///
-    /// A read failure is logged and reported as "nothing outstanding" rather
-    /// than propagated: the browser is waiting on a session that will never
-    /// come up, and losing the failure report over a failed query would be the
-    /// worse outcome.
-    pub(in crate::interactor::lifecycle) async fn undelivered_sends(
-        &self,
-        session_id: &delta_model::SessionId,
-    ) -> Vec<UnsentSend> {
-        match self.store.open_sends(session_id).await {
-            Ok(sends) => sends
-                .into_iter()
-                .map(|send| UnsentSend {
-                    send_id: send.id,
-                    text: send.text,
-                })
-                .collect(),
-            Err(err) => {
-                tracing::error!(
-                    session_id = %session_id,
-                    error = %err,
-                    "failed to read the undelivered sends of a failed launch; \
-                     reporting the failure without them (their text is lost)"
-                );
-                Vec::new()
-            }
-        }
-    }
-
-    /// Clean up the eagerly-created session row of a spawn that never bound.
-    ///
-    /// The row was INSERTed (status `spawning`) when the id was minted, before
-    /// `claude` launched. A spawn that never bound ingested nothing, so the row
-    /// — and its main thread plus every `send` row, removed by cascade — is
-    /// deleted outright rather than kept as a `failed` tombstone. The user's
-    /// text is not lost with them: the composer's Retry/Dismiss chip holds the
-    /// FIRST prompt browser-side, and [`Self::undelivered_sends`] must run
-    /// before this deletion to carry the rest out on the
-    /// [`SessionEvent::SpawnFailed`] the caller emits. The `failed` status is
-    /// kept only for the defensive case of a session that somehow already
-    /// ingested messages (data worth keeping), which a never-bound spawn cannot
-    /// normally reach.
-    pub(in crate::interactor::lifecycle) async fn clean_up_failed_spawn_row(
-        &self,
-        session_id: &delta_model::SessionId,
-    ) -> Result<()> {
-        if self.store.message_count(session_id).await? == 0 {
-            self.store.delete_session(session_id).await?;
-        } else {
-            self.store.mark_session_failed(session_id).await?;
-        }
-        Ok(())
     }
 }
