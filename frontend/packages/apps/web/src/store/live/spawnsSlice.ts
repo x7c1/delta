@@ -60,6 +60,16 @@ export interface SpawnItem extends NewSessionLaunch {
    */
   cancelled?: boolean;
   /**
+   * True once the workspace has handed focus to this spawn. The hand-over is a
+   * one-shot, and this is the record of it having happened — `WorkspaceScreen`
+   * holds the effect and the reasoning for why the focused screen alone cannot
+   * stand in for that record.
+   *
+   * `undefined` until the hand-over happens, and for a spawn registered
+   * already `failed` — its focus is never handed over at all.
+   */
+  focusHandedOver?: boolean;
+  /**
    * How many of the launch's undelivered messages went back into the
    * new-session composer draft (see {@link restoreUnsentIntoDraft}) — the ones
    * queued *behind* this spawn's own first prompt, which stays on the chip for
@@ -80,7 +90,14 @@ export interface SpawnsSlice {
    * spawn's failure already arrived (see {@link SpawnFailureBufferedNotice}),
    * the spawn is registered as `failed` immediately.
    */
-  trackSpawn: (spawn: Omit<SpawnItem, 'status'>) => void;
+  trackSpawn: (spawn: Omit<SpawnItem, 'status' | 'focusHandedOver'>) => void;
+  /**
+   * Record that this spawn's focus hand-over has happened, so it is never
+   * handed over again (see {@link SpawnItem.focusHandedOver}). Called by the
+   * workspace as it moves focus onto the spawn; a no-op for an id that is not
+   * tracked, or whose hand-over is already recorded.
+   */
+  markSpawnFocusHandedOver: (sessionId: SessionId) => void;
   /**
    * Drop a tracked spawn. A spawn that comes up is released by its
    * `session_registered` event (see {@link reduceSessionRegistered}), so this
@@ -250,6 +267,21 @@ export const createSpawnsSlice: StateCreator<
       ...dropLocalSendsForSession(state, spawn.sessionId),
     }));
   },
+
+  markSpawnFocusHandedOver: (sessionId) =>
+    set((state) => {
+      const idx = state.spawns.findIndex(
+        (spawn) => spawn.sessionId === sessionId && !spawn.focusHandedOver,
+      );
+      if (idx === -1) {
+        // Already recorded, or nothing tracked under that id. Hand back the
+        // identity-stable state so subscribers are not notified.
+        return state;
+      }
+      const spawns = state.spawns.slice();
+      spawns[idx] = { ...spawns[idx], focusHandedOver: true };
+      return { spawns };
+    }),
 
   clearSpawn: (sessionId) =>
     set((state) => ({

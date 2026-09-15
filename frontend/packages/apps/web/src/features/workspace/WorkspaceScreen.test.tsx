@@ -145,6 +145,12 @@ function threadRow(title: string): HTMLElement {
  */
 const UNLISTED_SPAWN_ID = 'sess-just-spawned';
 
+/**
+ * A second such id: the launch started from the new-session screen while the
+ * first is still coming up — the thing the one-shot hand-over exists to allow.
+ */
+const SECOND_SPAWN_ID = 'sess-just-spawned-2';
+
 /** A tracked new-session spawn, as `useSubmitSend` records it from the POST. */
 function trackedSpawn(sessionId: string) {
   return {
@@ -401,6 +407,90 @@ describe('WorkspaceScreen multi-session', () => {
     // And the centre pane says the session is on its way. "Select a session"
     // here would read as if the user's Send had gone nowhere.
     expect(screen.getByText('Starting the session…')).toBeInTheDocument();
+  });
+
+  it('hands a spawn’s focus over once, leaving New session usable', async () => {
+    // The hand-over above is a one-shot. Once it has happened the user can go
+    // back to the new-session screen and start ANOTHER session while the first
+    // is still coming up — pressing "New session" must land there and STAY
+    // there, rather than snapping back to the still-spawning session.
+    useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    useLiveStore.setState({ spawns: [trackedSpawn(UNLISTED_SPAWN_ID)] });
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(UNLISTED_SPAWN_ID),
+    );
+    // The hand-over is recorded on the spawn itself — that record, not which
+    // screen is focused, is what says it has already happened.
+    expect(useLiveStore.getState().spawns).toEqual([
+      expect.objectContaining({
+        sessionId: UNLISTED_SPAWN_ID,
+        status: 'spawning',
+        focusHandedOver: true,
+      }),
+    ]);
+
+    const newButton = await screen.findByRole('button', { name: 'New session' });
+    fireEvent.click(newButton);
+
+    // Flush the effects the focus change schedules: with a standing condition
+    // this is exactly where focus bounced back to the spawn.
+    await act(async () => {});
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    // Still spawning — the lock-out lasted precisely this window, so the spawn
+    // has to be unresolved for the case to mean anything.
+    expect(useLiveStore.getState().spawns).toHaveLength(1);
+    expect(useLiveStore.getState().spawns[0].status).toBe('spawning');
+
+    // Reaching the screen is only half of "usable": the second launch, sent
+    // from it while the first is still coming up, must be handed focus exactly
+    // as the first was. The record is per spawn, so the entry already handed
+    // over neither suppresses the new hand-over nor stands in for it.
+    act(() => {
+      useLiveStore.setState({
+        spawns: [
+          ...useLiveStore.getState().spawns,
+          trackedSpawn(SECOND_SPAWN_ID),
+        ],
+      });
+    });
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(SECOND_SPAWN_ID),
+    );
+    expect(useLiveStore.getState().spawns).toEqual([
+      expect.objectContaining({
+        sessionId: UNLISTED_SPAWN_ID,
+        focusHandedOver: true,
+      }),
+      expect.objectContaining({
+        sessionId: SECOND_SPAWN_ID,
+        focusHandedOver: true,
+      }),
+    ]);
+  });
+
+  it('leaves the new-session screen focused for a failed spawn', async () => {
+    // A failed spawn is a Retry / Dismiss card, and that card renders ON the
+    // new-session screen: opening that screen must not be undone by the very
+    // spawn the card is about.
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    useLiveStore.setState({
+      spawns: [
+        { ...trackedSpawn(UNLISTED_SPAWN_ID), status: 'failed' as const },
+      ],
+    });
+
+    renderScreen();
+
+    const newButton = await screen.findByRole('button', { name: 'New session' });
+    fireEvent.click(newButton);
+
+    await act(async () => {});
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    expect(useLiveStore.getState().spawns).toHaveLength(1);
   });
 
   it('releases the tracked spawn when the session registers', async () => {

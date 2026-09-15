@@ -189,6 +189,9 @@ export function WorkspaceScreen() {
   const terminalWidth = useNavStore((state) => state.terminalWidth);
   const clearUnread = useLiveStore((state) => state.clearUnread);
   const spawns = useLiveStore((state) => state.spawns);
+  const markSpawnFocusHandedOver = useLiveStore(
+    (state) => state.markSpawnFocusHandedOver,
+  );
 
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
 
@@ -225,17 +228,39 @@ export function WorkspaceScreen() {
   // though — they may have navigated elsewhere during the POST, and a spawn is
   // not worth stealing a session they chose.
   //
+  // ONE-SHOT per spawn, recorded on the entry itself (`focusHandedOver`) and
+  // consumed as focus moves. "The new-session screen is focused" is the test
+  // for "the user has not navigated away since the send", and that is true
+  // again every time they come BACK to that screen — so a standing condition
+  // would take focus a second time and make the New session button look dead
+  // for as long as the launch stayed `spawning` (up to the server's spawn
+  // deadline for one stuck on an interactive first-run prompt).
+  //
   // The entry is released by `session_registered` (see `spawnsSlice`), not
-  // here; a `spawn_failed` turns it into the Retry / Dismiss card instead.
+  // here; a `spawn_failed` turns it into the Retry / Dismiss card instead —
+  // and that card lives on the new-session screen, so a `failed` spawn is not
+  // a hand-over candidate at all.
   useEffect(() => {
-    const spawning = spawns.filter((spawn) => spawn.status === 'spawning');
-    if (spawning.length === 0 || !isNewSessionFocus) {
+    const awaitingHandOver = spawns.filter(
+      (spawn) => spawn.status === 'spawning' && !spawn.focusHandedOver,
+    );
+    if (awaitingHandOver.length === 0 || !isNewSessionFocus) {
       return;
     }
-    // Several spawns can only pile up via quick Retry cycles; the newest is
-    // the one the user is waiting on.
-    reconcileFocusedSession(spawning[spawning.length - 1].sessionId);
-  }, [spawns, isNewSessionFocus, reconcileFocusedSession]);
+    // Several can be waiting at once only when earlier spawns missed their own
+    // hand-over: their POST landed while the user was elsewhere (a quick Retry
+    // cycle is one way there), so the guard above declined it. The newest is
+    // the one the user is waiting on; an older one keeps its unconsumed
+    // hand-over and takes focus the next time this screen is opened.
+    const target = awaitingHandOver[awaitingHandOver.length - 1];
+    markSpawnFocusHandedOver(target.sessionId);
+    reconcileFocusedSession(target.sessionId);
+  }, [
+    spawns,
+    isNewSessionFocus,
+    markSpawnFocusHandedOver,
+    reconcileFocusedSession,
+  ]);
 
   // Resolve focus once the session list loads.
   useEffect(() => {
