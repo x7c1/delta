@@ -301,12 +301,13 @@ export function applySessionEvent(
       removeSessionSends(queryClient, event.session_id);
       invalidateSessions(queryClient);
       // The user is very likely looking at it: the workspace focuses a
-      // starting session the moment its first send is accepted. Its screen is
-      // about to describe a session that no longer exists, and the failure's
-      // Retry / Dismiss card renders on the new-session surface (see
-      // `usePendingSends`) — so send focus back there, where the user can act
-      // on it. Reconciling rather than navigating leaves any overlay they
-      // opened in the meantime standing.
+      // starting session the moment its first send is accepted, as long as
+      // they were still waiting on the new-session screen when the POST
+      // answered. Its screen is about to describe a session that no longer
+      // exists, and the failure's Retry / Dismiss card renders on the
+      // new-session surface (see `usePendingSends`) — so send focus back
+      // there, where the user can act on it. Reconciling rather than
+      // navigating leaves any overlay they opened in the meantime standing.
       if (isFocused) {
         useNavStore.getState().reconcileFocusedSession(NEW_SESSION_FOCUS);
         break;
