@@ -21,7 +21,7 @@ pub struct Args {
 }
 
 impl Args {
-    /// Parse the process arguments (without argv[0]).
+    /// Parse the process arguments (without `argv[0]`).
     ///
     /// Unknown `--flags` are skipped; a non-flag argument is the positional
     /// prompt (the last one wins, like a CLI that takes a single positional).

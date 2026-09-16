@@ -58,11 +58,11 @@ where
     /// provider cannot work out for itself (see
     /// [`LaunchRequest::worktree_repo_root`]).
     ///
-    /// It performs no rollback: a fresh spawn deletes its eager row on failure,
-    /// while a resume leaves the already-persisted row untouched — so the caller
-    /// owns that decision. On any error here the adapter is dropped before this
-    /// returns, which tears the provider connection (and its process) down with
-    /// it.
+    /// It performs no rollback: a fresh spawn marks its eager row `failed` on
+    /// failure, while a resume leaves the already-persisted row untouched — so
+    /// the caller owns that decision. On any error here the adapter is dropped
+    /// before this returns, which tears the provider connection (and its
+    /// process) down with it.
     ///
     /// [`SessionContext::install_agent_binding`]: super::install_agent_binding
     pub(in crate::interactor) async fn connect_adapter_agent(

@@ -10,9 +10,9 @@ use crate::SendTarget;
 /// Everything else about an adapter-backed spawn moved behind the accept:
 /// the worktree build, `connect` and `thread/start` all run on the launch task
 /// and report as `spawn_failed`
-/// (`a_failed_codex_launch_reaps_the_row_and_reports_spawn_failed`). Rendering
-/// the selected options is different in kind: it is a pure function of the
-/// request, so the accept phase can ask the adapter about it without
+/// (`a_failed_codex_launch_marks_the_row_failed_and_reports_spawn_failed`).
+/// Rendering the selected options is different in kind: it is a pure function
+/// of the request, so the accept phase can ask the adapter about it without
 /// connecting, and the user gets the adapter's message on the send they just
 /// made instead of a chip about a session that was created and torn down again.
 ///

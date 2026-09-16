@@ -59,7 +59,7 @@ where
     /// arrives as a [`SessionEvent::SpawnFailed`] carrying the failure's message
     /// as its `reason` — a git error, a provider that will not connect or will
     /// not start a thread, or the whole sequence outrunning its deadline — and
-    /// the eager row is deleted; see [`Self::finish_launch`].
+    /// the eager row is marked `failed`; see [`Self::finish_launch`].
     ///
     /// A launch option the provider's adapter **refuses** is deliberately not
     /// one of those. Whether the selections render onto the provider's launch
