@@ -188,12 +188,28 @@ impl AppState {
         &self.interactor
     }
 
-    /// The tmux pane driving a specific open session, for the PTY bridge.
+    /// The tmux pane the PTY bridge may attach to for a session, recording the
+    /// attach as it resolves it.
     ///
-    /// Returns `None` when that session is not open, so the bridge can refuse the
-    /// attach rather than bind to a non-existent pane.
-    pub async fn pane_for_session(&self, id: &delta_usecase::SessionId) -> Option<String> {
-        self.interactor.pane_for_session(id).await
+    /// Delegates to the use case, which defines what resolves (`None` when there
+    /// is nothing to attach to) and what `bound` means. Every `Some` must be
+    /// paired with [`Self::detach_pane`]; the bridge holds a drop guard for
+    /// that.
+    pub async fn attach_pane(
+        &self,
+        id: &delta_usecase::SessionId,
+    ) -> Option<delta_usecase::AttachablePane> {
+        self.interactor.attach_pane(id).await
+    }
+
+    /// Give back an attach recorded by [`Self::attach_pane`], when its bridge
+    /// ends.
+    ///
+    /// `Instant::now()` is the live clock here, as it is for the background
+    /// ticks below: the use case takes the instant rather than reading one so
+    /// its tests can drive the deadline a detach restarts.
+    pub async fn detach_pane(&self, id: &delta_usecase::SessionId) {
+        self.interactor.detach_pane(id, Instant::now()).await;
     }
 
     /// Wipe the residual input of a session's open pane, for the PTY bridge.

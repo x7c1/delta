@@ -8,8 +8,8 @@ import { startNewSession } from './support/app';
  *
  * Scenario `never-ready`: the fake skips its `SessionStart` hook and hangs, so
  * the spawn never binds and the backend's launch watchdog (its deadline shrunk
- * via DELTA_LAUNCH_DEADLINE_MS by the suite's server script) reaps it, kills its
- * pane and emits `spawn_failed`.
+ * via DELTA_LAUNCH_DEADLINE_MS by the suite's server script) captures its pane,
+ * kills it and emits `spawn_failed`.
  *
  * What the server does with the row is the whole point: it KEEPS it, marked
  * `failed`, with the prompt that was never delivered still open against it. So
@@ -92,14 +92,17 @@ test('a launch that fails while you are elsewhere turns its row failed, and open
   await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
   await expect(page.getByText('first-send hello there').first()).toBeVisible();
 
-  // Opening it shows the failure in its own right: the watchdog observed only
-  // silence, so the pane says as much rather than leaving the question hanging,
-  // and the prompt that never went out is there with it.
+  // Opening it shows the failure in its own right. The watchdog heard nothing
+  // from the launch, but that is not the same as knowing nothing: it names the
+  // deadline the launch missed, and quotes what the pane was showing when it
+  // gave up — read just before the pane was killed, which is the only moment
+  // that evidence exists. The prompt that never went out is there with it.
   await cardWithStatus(page, 'Failed').getByTestId('session-node').click();
   await expect(page.getByTestId('failed-session-pane')).toBeVisible();
-  await expect(page.getByTestId('failed-session-reason')).toContainText(
-    /did not hear why/i,
-  );
+  const reason = page.getByTestId('failed-session-reason');
+  await expect(reason).toContainText(/did not start within \d+ seconds?/i);
+  await expect(reason).toContainText('fake-claude session');
+  await expect(reason).not.toContainText(/did not hear why/i);
   await expect(page.getByTestId('failed-session-prompt')).toHaveText(
     'never-ready hang at launch',
   );

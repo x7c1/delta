@@ -21,6 +21,10 @@ import {
   reduceSessionRemoved,
   reduceSpawnFailed,
 } from './spawnsSlice';
+import {
+  reduceSpawnPaneReady,
+  reduceStartingPaneEnded,
+} from './startingPanesSlice';
 import { reduceStatusUpdated } from './statusSlice';
 import { reduceAssistantStreaming } from './streamingSlice';
 import {
@@ -96,14 +100,19 @@ const EVENT_REDUCERS: {
   permission_requested: reducePermissionRequested,
   question_asked: reduceQuestionAsked,
   permission_resolved: reducePermissionResolved,
-  spawn_failed: reduceSpawnFailed,
+  spawn_pane_ready: reduceSpawnPaneReady,
+  spawn_failed: chain(reduceSpawnFailed, reduceStartingPaneEnded),
   assistant_streaming: reduceAssistantStreaming,
   subagent_started: reduceSubagentStarted,
   subagent_finished: reduceSubagentFinished,
   external_input: reduceExternalInput,
   send_dispatched: reduceSendDispatched,
   send_parked: reduceSendParked,
-  session_registered: chain(reduceSessionRegistered, reduceSpawnRegistered),
+  session_registered: chain(
+    reduceSessionRegistered,
+    reduceSpawnRegistered,
+    reduceStartingPaneEnded,
+  ),
   session_removed: reduceSessionRemoved,
   session_opened: reduceSessionOpened,
   session_closed: reduceSessionClosed,

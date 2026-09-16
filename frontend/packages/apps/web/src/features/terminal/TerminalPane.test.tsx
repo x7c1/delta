@@ -123,7 +123,7 @@ let capturedSetPreference: (next: ThemePreference) => void = () => {};
 function ThemeHarness({ sessionId }: { sessionId: SessionId }) {
   const { setPreference } = useThemeContext();
   capturedSetPreference = setPreference;
-  return <TerminalPane sessionId={sessionId} attachable={true} hasTerminal />;
+  return <TerminalPane sessionId={sessionId} paneState="open" hasTerminal />;
 }
 
 describe('TerminalPane xterm theme bridge', () => {
@@ -187,6 +187,85 @@ describe('TerminalPane xterm theme bridge', () => {
   });
 });
 
+describe('TerminalPane attaching to a session that is still starting', () => {
+  beforeEach(() => {
+    fakeTerminals.length = 0;
+    connectPtyMock.mockClear();
+    installMatchMediaStub(false);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('attaches to a spawn whose pane is up but has not bound', () => {
+    // The state this pane exists for: the launch is running in its pane and no
+    // hook has arrived, which is where a workspace-trust dialog sits. The
+    // bridge must open, because answering it is only possible from here.
+    render(
+      <ThemeProvider>
+        <TerminalPane
+          sessionId={'s1' as SessionId}
+          paneState="starting"
+          hasTerminal={true}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(fakeTerminals).toHaveLength(1);
+    expect(connectPtyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('says a starting session is starting, and never that it is closed', () => {
+    // The wording matters as much as the attach: a launch still being prepared
+    // has no pane to attach to, and telling the user to resume a session that
+    // was never closed asks for something they cannot do.
+    const { getByText, queryByText } = render(
+      <ThemeProvider>
+        <TerminalPane
+          sessionId={'s1' as SessionId}
+          paneState="preparing"
+          hasTerminal={true}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(connectPtyMock).not.toHaveBeenCalled();
+    expect(getByText(/still starting up/i)).toBeTruthy();
+    expect(queryByText(/This session is closed/i)).toBeNull();
+  });
+
+  it('does not attach to a session whose launch failed', () => {
+    const { getByText } = render(
+      <ThemeProvider>
+        <TerminalPane
+          sessionId={'s1' as SessionId}
+          paneState="failed"
+          hasTerminal={true}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(connectPtyMock).not.toHaveBeenCalled();
+    expect(getByText(/never started/i)).toBeTruthy();
+  });
+
+  it('still tells a closed session to resume', () => {
+    const { getByText } = render(
+      <ThemeProvider>
+        <TerminalPane
+          sessionId={'s1' as SessionId}
+          paneState="closed"
+          hasTerminal={true}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(connectPtyMock).not.toHaveBeenCalled();
+    expect(getByText(/This session is closed/i)).toBeTruthy();
+  });
+});
+
 describe('TerminalPane capability gate on the PTY bridge', () => {
   beforeEach(() => {
     fakeTerminals.length = 0;
@@ -199,14 +278,14 @@ describe('TerminalPane capability gate on the PTY bridge', () => {
   });
 
   it('opens the PTY bridge for an open session whose provider has a terminal', () => {
-    // Claude's case: an open, attachable session with a terminal capability.
+    // Claude's case: a bound session whose provider has a terminal.
     // The pane builds its xterm instance and connects the `/pty` bridge — the
     // behaviour must stay byte-identical to before the Codex gate landed.
     render(
       <ThemeProvider>
         <TerminalPane
           sessionId={'s1' as SessionId}
-          attachable={true}
+          paneState="open"
           hasTerminal={true}
         />
       </ThemeProvider>,
@@ -217,15 +296,15 @@ describe('TerminalPane capability gate on the PTY bridge', () => {
   });
 
   it('never opens the PTY bridge for a terminal-less provider', () => {
-    // Codex's case: an open, attachable session, but its provider reports no
+    // Codex's case: an open session, but its provider reports no
     // terminal. The capability gate must be authoritative for the connect — no
     // xterm is built and, crucially, no `/pty` websocket is opened (which would
-    // trip the backend's "session is not open" warning).
+    // trip the backend's "no attachable pane" warning).
     render(
       <ThemeProvider>
         <TerminalPane
           sessionId={'s1' as SessionId}
-          attachable={true}
+          paneState="open"
           hasTerminal={false}
         />
       </ThemeProvider>,

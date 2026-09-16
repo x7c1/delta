@@ -41,7 +41,7 @@ pub use hooks::PermissionWait;
 pub use open_cwd::{ExternalHandler, ExternalHandlerId, VSCODE_HANDLER_ID};
 pub use permission_decision::PermissionDecision;
 pub use session_actor::runtime::{
-    PendingPermission, PendingQuestion, RunningSubagent, SessionLiveState,
+    AttachablePane, PendingPermission, PendingQuestion, RunningSubagent, SessionLiveState,
 };
 
 #[cfg(test)]

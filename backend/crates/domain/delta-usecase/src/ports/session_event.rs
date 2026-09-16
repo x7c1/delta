@@ -235,6 +235,33 @@ pub enum SessionEvent {
         session_id: SessionId,
         request_id: i64,
     },
+    /// A freshly-spawned session's pane is up: its launch preparation finished,
+    /// the tmux session exists and the agent is running in it — but nothing has
+    /// bound it yet (no first `UserPromptSubmit`/`SessionStart` has arrived).
+    ///
+    /// This is the middle of the three states a starting session passes through,
+    /// and the only one the browser could not otherwise see. Between the accept
+    /// and the bind the row reads `spawning` either way, yet what the user can
+    /// do differs completely: while the launch is still being prepared there is
+    /// nothing to attach to, and once the pane exists the embedded terminal is
+    /// the only way to reach it — which is exactly what a launch that stops on
+    /// an interactive prompt (Claude Code's workspace-trust dialog) needs, since
+    /// no hook fires until somebody answers it.
+    ///
+    /// Pane-backed (Claude) launches only: an adapter-backed (Codex) launch has
+    /// no pane to attach to, and its bind is the launch's own last step, so it
+    /// has no such window at all.
+    ///
+    /// Fire-and-forget, like every event here. A client that misses it (a
+    /// reload mid-launch) simply does not offer the terminal until the session
+    /// binds, which is what it did before this event existed.
+    SpawnPaneReady {
+        /// The Delta-minted session id whose pane came up.
+        session_id: SessionId,
+        /// The tmux session backing it, named as [`Self::SpawnFailed`] names it
+        /// so a client sees the same token whichever way the launch ends up.
+        pane_token: String,
+    },
     /// A freshly-spawned session never came up: its launch preparation failed,
     /// its launch ended (or never got far enough) before it ever registered via
     /// its first `UserPromptSubmit`, or the user closed it while it was still
@@ -274,9 +301,11 @@ pub enum SessionEvent {
         /// so there is no name to report and none was ever given to tmux.
         pane_token: Option<String>,
         /// Why the launch failed, when Delta can name the cause: the launch
-        /// preparation's own error text. `None` for the two watchdog-shaped
-        /// producers, which observe only silence — a launch that exited or
-        /// never bound says nothing about why.
+        /// preparation's own error text, or — for a spawn the watchdog reaped —
+        /// the deadline it missed plus whatever its pane was still showing.
+        /// `None` only where even that is unavailable: a launch that exited
+        /// (the `SessionEnd` hook) and a resume that never became ready say
+        /// nothing about why, and have no pane left to ask.
         ///
         /// A preparation failure used to be the REST response's error body.
         /// Now that the send is accepted before the launch runs, the failure

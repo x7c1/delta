@@ -48,7 +48,7 @@ async fn send_to_closed_session_with_missing_transcript_writes_no_send_row() {
         "no keystrokes were dispatched"
     );
     assert!(
-        ix.pane_for_session(&id).await.is_none(),
+        ix.bound_pane(&id).await.is_none(),
         "the session stays closed"
     );
 }

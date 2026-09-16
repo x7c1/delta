@@ -103,6 +103,9 @@ where
             // bind deadline allows for, and the first hook can only fire from
             // here on.
             created_at: Instant::now(),
+            // The pane is about to be created, not created: nothing may attach
+            // to it until the launch reports back (`finish_launch`).
+            pane_created: false,
         });
         LaunchApproval::Proceed
     }

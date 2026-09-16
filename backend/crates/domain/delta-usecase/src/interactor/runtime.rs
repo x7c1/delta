@@ -57,7 +57,7 @@ where
     /// driver; when it is not open there is no live pane to clear, so this is
     /// a no-op returning `Ok(())`.
     ///
-    /// Intended for use right before a fresh PTY attach: a prior client's detach
+    /// Intended for use right before a fresh PTY attach to a bound pane: a prior client's detach
     /// leaves a focus-out (`ESC[O`) that Claude renders as a stray blank line, so
     /// clearing on the next attach keeps the input box clean across reconnects.
     pub(in crate::interactor) async fn clear_session_input(&mut self) -> Result<()> {

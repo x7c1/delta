@@ -33,7 +33,7 @@ async fn session_start_binds_a_transcript_in_a_missing_directory() {
         session_id: session_id.clone(),
     }));
     assert_eq!(
-        ix.pane_for_session(&session_id).await,
+        ix.bound_pane(&session_id).await,
         Some("delta-1:0.0".to_owned())
     );
     assert!(ix.pending_session_ids().await.is_empty());

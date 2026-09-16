@@ -70,6 +70,8 @@ which frames arrive, and a client must handle each event whenever it lands.
 
 { "kind": "session_removed", "session_id": "sess-1" }
 
+{ "kind": "spawn_pane_ready", "session_id": "sess-1", "pane_token": "delta-1" }
+
 { "kind": "spawn_failed", "session_id": "sess-1", "pane_token": "delta-1",
   "reason": "git error: invalid reference: origin/nope", "cancelled": false }
 
@@ -116,6 +118,22 @@ which frames arrive, and a client must handle each event whenever it lands.
   id, and move focus elsewhere if it was focused. Only Delta's rows go: the
   session's git worktree and the agent's own transcript and state files are left
   on disk.
+- `spawn_pane_ready` — a freshly-spawned Claude session's pane is up, and
+  nothing has bound it yet. The launch preparation is done, the tmux session
+  exists and the agent is running in it, so the `/pty` bridge will attach to it
+  from here, showing the embedded terminal for a session that is still starting
+  (see [`GET /pty`](#get-ptysession_idid-websocket) for what that window is for).
+
+  Nothing else marks this window. The session row reads `spawning` from the
+  moment its first send was accepted until it binds, so a client with only the
+  row cannot tell a launch still building a worktree — nothing to attach to yet —
+  from one waiting in a pane. Pane-backed (Claude) launches only: a Codex launch
+  has no pane, and binds as the last step of its own launch.
+
+  Fire-and-forget, like every frame here, and nothing breaks without it: a client
+  that misses it (a reload mid-launch) simply does not offer the terminal until
+  the session binds, and `session_registered` or `spawn_failed` ends the window
+  either way.
 - `spawn_failed` — a freshly-spawned session never came up, for **any**
   provider. Four producers emit it: the background launch when it fails (the
   worktree build, including one that landed on a path other than the one planned
@@ -140,10 +158,15 @@ which frames arrive, and a client must handle each event whenever it lands.
   pane. `reason` carries the cause when Delta can name it — the launch's error
   text (the only place that text reaches the user now that the send is accepted
   before the launch runs), or, for a cancelled launch, that the session was
-  closed while starting; it is **absent entirely** from the two watchdog-shaped
-  producers' frames, since a launch that exited or never bound says nothing
-  about why. A client shows it as an extra line under its own headline wording
-  and renders that wording alone when it is missing. That text is prose
+  closed while starting. A spawn the watchdog reaped names the deadline it
+  missed and, when the pane could still be read, the last lines it was showing —
+  captured just before the pane is killed, because that is where the cause is
+  visible when nothing was ever reported. That quoted tail makes the value
+  **multi-line** — prose, a blank line, then a verbatim block — so a client
+  that renders it must preserve the newlines. It is **absent entirely** only
+  where not even that is available: a launch that exited (`SessionEnd`), and a
+  resume that never became ready. A client shows it under its own headline
+  wording and renders that wording alone when it is missing. That text is prose
   for display, not a code to match on: `cancelled` is what a client keys on to
   tell the two apart. It is `true` only for the close the user asked for and
   `false` for the three producers that report a launch which broke on its own,
@@ -531,12 +554,31 @@ ways:
     Malformed or unknown control messages are logged and ignored; they never
     break the bridge.
 
-Used by the embedded xterm.js terminal, primarily so the user can answer
-permission prompts in the TUI.
+Used by the embedded xterm.js terminal, primarily so the user can answer what the
+TUI asks. Two states resolve a pane, so both can be attached to:
 
-If the named session is not open (no live pane — it was never opened, or it is
-closed), there is nothing to attach to: the server accepts the upgrade and then
-closes the socket cleanly without attaching. The client should open the session
+- an **open** session, bound to its pane — a permission prompt mid-turn is
+  answered here;
+- a **starting** session whose pane is up but which nothing has bound yet,
+  announced by [`spawn_pane_ready`](#session-lifecycle). This is the window a
+  launch waiting on an interactive prompt sits in (Claude Code's workspace-trust
+  dialog, in a directory it has not been trusted in): no hook fires until
+  somebody answers it, so the attach is the only way out. While a bridge is
+  attached, the launch watchdog leaves that pane alone rather than reaping it at
+  its deadline — it is not a pane nobody can reach. That only *defers* the
+  deadline: once the last bridge on the pane has gone, the next sweep gives the
+  launch up as it would have, so a client must not treat an attach as
+  cancelling the watchdog.
+
+  Delta types nothing into such a pane on the user's behalf: the input wipe that
+  precedes an attach to a bound pane (which clears the stray line a previous
+  client's detach leaves behind) is skipped here, since those keystrokes would
+  answer whatever dialog is on screen.
+
+Anything else — a launch whose pane does not exist yet, one that failed, a closed
+session, a session on a provider with no terminal — has nothing to attach to: the
+server accepts the upgrade and then closes the socket cleanly without attaching.
+For a closed session the client should open it
 (`POST /api/sessions/{id}/open`) before connecting.
 
 ## `GET /comms?session_id=<id>` (WebSocket)

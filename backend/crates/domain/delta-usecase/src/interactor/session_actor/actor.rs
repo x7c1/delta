@@ -321,9 +321,20 @@ where
         SessionInput::EchoDeadlineTick { now, reply } => {
             let _ = reply.send(ctx.sweep_echo_deadline(now).await);
         }
-        SessionInput::QueryPane { reply } => {
-            let _ = reply.send(ctx.state.handle().map(|h| h.pane.clone()));
+        SessionInput::AttachPane { reply } => {
+            let pane = ctx.state.attachable_pane();
+            if pane.is_some() {
+                // Only a bridge that was actually given a pane is counted, so
+                // the detach that follows balances exactly one attach.
+                ctx.state.note_pty_attached();
+            }
+            let _ = reply.send(pane);
         }
+        #[cfg(test)]
+        SessionInput::QueryPane { reply } => {
+            let _ = reply.send(ctx.state.attachable_pane());
+        }
+        SessionInput::DetachPane { now } => ctx.state.note_pty_detached(now),
         SessionInput::QueryIsOpen { reply } => {
             let _ = reply.send(ctx.state.is_open());
         }

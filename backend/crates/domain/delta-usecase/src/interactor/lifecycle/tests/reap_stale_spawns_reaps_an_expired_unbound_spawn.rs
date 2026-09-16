@@ -6,14 +6,21 @@ use crate::interactor::session_actor::runtime::PENDING_SPAWN_DEADLINE;
 use crate::interactor::testing::*;
 use crate::ports::SessionEvent;
 
-/// An unbound spawn whose deadline has passed is reaped: its pane is killed, it
-/// is removed from the registry, its eagerly-created session row is marked
-/// `failed` — kept, with everything the launch recorded — and a `SpawnFailed`
-/// carrying its id and token is returned.
+/// An unbound spawn whose deadline has passed is reaped: its pane is read and
+/// killed, it is removed from the registry, its eagerly-created session row is
+/// marked `failed` — kept, with everything the launch recorded — and a
+/// `SpawnFailed` carrying its id, token and reason is returned.
 ///
 /// Keeping the row is the point. A spawn that never bound ingested nothing, but
 /// the row still holds the working directory, the repository, and the prompt the
 /// user wrote, which is what someone opens the failed session to look at.
+///
+/// So is the reason. The watchdog observes silence, but silence is not "no
+/// information": the launch did not bind before its deadline, and the pane is
+/// still showing whatever stopped it — here, the workspace-trust dialog that
+/// found this. Both go on the row, because the alternative is the screen saying
+/// Delta never learned why, which is the screen a stalled launch reaches most
+/// often.
 #[tokio::test]
 async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
     let ix = interactor();
@@ -53,20 +60,46 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
         .lock()
         .unwrap()
         .push("delta-1".to_owned());
+    // What the pane is stuck on — the dialog nobody could answer.
+    ix.tmux_fake().show_in_pane(
+        "delta-1:0.0",
+        "\n Quick safety check: Is this a project you created or one you trust?\n\n          > 1. Yes, I trust this project\n   2. No, exit\n\n",
+    );
 
     let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
 
-    // SpawnFailed is emitted with the minted id and the pane token.
+    // SpawnFailed is emitted with the minted id, the pane token, and a reason
+    // built from the deadline and the pane.
+    let [SessionEvent::SpawnFailed {
+        session_id: failed_id,
+        pane_token,
+        reason,
+        cancelled,
+    }] = events.as_slice()
+    else {
+        panic!("expected one SpawnFailed, got {events:?}");
+    };
+    assert_eq!(failed_id, &session_id);
+    assert_eq!(pane_token.as_deref(), Some("delta-1"));
+    // Nobody asked for this: the spawn ran out of time.
+    assert!(!cancelled);
+    let reason = reason.as_deref().expect(
+        "the watchdog names the deadline it enforced, rather than reporting nothing at all",
+    );
+    assert!(
+        reason.contains("did not start within 30 seconds"),
+        "the reason names the deadline the launch missed: {reason}"
+    );
+    assert!(
+        reason.contains("Is this a project you created or one you trust?"),
+        "the reason carries what the pane was showing: {reason}"
+    );
+    // Read while the pane was still alive: a capture after the kill would have
+    // nothing to return.
     assert_eq!(
-        events,
-        vec![SessionEvent::SpawnFailed {
-            session_id: session_id.clone(),
-            pane_token: Some("delta-1".to_owned()),
-            // The watchdog observes silence, so it names no cause.
-            reason: None,
-            // Nobody asked for this: the spawn ran out of time.
-            cancelled: false,
-        }],
+        ix.tmux_fake().captured.lock().unwrap().clone(),
+        vec!["delta-1:0.0".to_owned()],
+        "the pane was captured exactly once, before it was killed"
     );
     // The pane was killed by token.
     assert_eq!(
@@ -92,8 +125,10 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
         "the repository survives the reap"
     );
     assert_eq!(
-        session.failure_reason, None,
-        "the watchdog observes only silence, so it records no cause"
+        session.failure_reason.as_deref(),
+        Some(reason),
+        "the same reason is persisted on the row, so the failed session's screen \
+         shows it after a reload"
     );
 
     // And the prompt the user wrote is still open against the row — nothing

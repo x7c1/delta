@@ -21,7 +21,7 @@ async fn reap_stale_spawns_leaves_a_bound_session_alone() {
     ))
     .await
     .unwrap();
-    assert!(ix.pane_for_session(&id).await.is_some(), "bound and open");
+    assert!(ix.bound_pane(&id).await.is_some(), "bound and open");
 
     // Reap with a `now` far past any deadline: the bound session is not pending,
     // so nothing is reaped.
@@ -39,7 +39,7 @@ async fn reap_stale_spawns_leaves_a_bound_session_alone() {
         "a bound session's pane is not killed by the reaper"
     );
     assert!(
-        ix.pane_for_session(&id).await.is_some(),
+        ix.bound_pane(&id).await.is_some(),
         "the session is still open after the sweep"
     );
 }

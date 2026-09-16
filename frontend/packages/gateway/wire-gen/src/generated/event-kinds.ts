@@ -18,6 +18,7 @@ export const EVENT_KINDS = [
   'permission_requested',
   'question_asked',
   'permission_resolved',
+  'spawn_pane_ready',
   'spawn_failed',
   'assistant_streaming',
   'subagent_started',

@@ -88,9 +88,7 @@ async fn composer_first_send_rolls_back_a_failed_launch() {
         "no pending spawn remained, so the hook is external input"
     );
     assert!(
-        ix.pane_for_session(&SessionId::from("sess-late"))
-            .await
-            .is_none(),
+        ix.bound_pane(&SessionId::from("sess-late")).await.is_none(),
         "the rolled-back launch must not bind a later session"
     );
 }

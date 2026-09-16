@@ -62,7 +62,7 @@ async fn session_start_then_user_prompt_bind_once() {
                 .len(),
             1
         );
-        assert!(ix.pane_for_session(&session_id).await.is_some());
+        assert!(ix.bound_pane(&session_id).await.is_some());
         let head = ix
             .store()
             .head_dispatched_send(&session_id)
@@ -120,7 +120,7 @@ async fn session_start_then_user_prompt_bind_once() {
                 .len(),
             1
         );
-        assert!(ix.pane_for_session(&session_id).await.is_some());
+        assert!(ix.bound_pane(&session_id).await.is_some());
     }
 }
 

@@ -8,7 +8,7 @@ use crate::interactor::lifecycle::UnboundLaunchEnd;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::{LaunchTarget, PendingSpawn};
 use crate::pane_token::PaneToken;
-use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -35,10 +35,12 @@ where
     ///   a live pane on the floor. An adapter launch has nothing equivalent to
     ///   salvage (its checkpoint *is* the bind), so it is rolled back.
     /// - **Pending**: the pane was created and nothing has bound it yet. `Ok` is
-    ///   the normal path and does nothing at all: the spawn is already recorded,
-    ///   its bind deadline already stamped, and the first hook takes it from
-    ///   here. `Err` (a `create_session` that failed after the checkpoint) drops
-    ///   that entry and rolls back.
+    ///   the normal path and settles nothing: the spawn is already recorded, its
+    ///   bind deadline already stamped, and the first hook takes it from here.
+    ///   What it does do is *announce* the pane ([`Self::announce_pane_ready`]),
+    ///   which is the browser's cue that the embedded terminal can now be
+    ///   attached to a session that is still starting. `Err` (a `create_session`
+    ///   that failed after the checkpoint) drops that entry and rolls back.
     /// - **Neither**: the session is already bound — the launch's first hook
     ///   claimed the pending spawn (a routine outcome now that the spawn is
     ///   recorded before the pane exists), or an adapter launch's checkpoint
@@ -91,7 +93,13 @@ where
                             token: launching.token,
                             pane: pane.pane,
                             created_at: Instant::now(),
+                            // Reported success means the pane is up, however
+                            // irregularly this launch got here.
+                            pane_created: true,
                         });
+                        // Salvaged or not, the pane is up and unbound, which is
+                        // the state the browser attaches in.
+                        self.announce_pane_ready(token);
                     }
                     LaunchTarget::Adapter(_) => {
                         // An adapter launch's checkpoint *is* its bind, so a
@@ -112,11 +120,15 @@ where
         }
         if self.state.has_pending_for_token(token) {
             match outcome {
-                Ok(()) => tracing::info!(
-                    token = %token.as_str(),
-                    session_id = %self.id,
-                    "fresh spawn launched; awaiting first UserPromptSubmit to bind"
-                ),
+                Ok(()) => {
+                    tracing::info!(
+                        token = %token.as_str(),
+                        session_id = %self.id,
+                        "fresh spawn launched; awaiting first UserPromptSubmit to bind"
+                    );
+                    self.state.mark_pending_pane_created(token);
+                    self.announce_pane_ready(token);
+                }
                 Err(err) => {
                     // The pane never came up, so the spawn recorded a moment
                     // ago has nothing left to bind to. Only a pane launch ever
@@ -141,6 +153,22 @@ where
                 "a launch reported failure with no spawn left to roll back; ignoring it"
             ),
         }
+    }
+
+    /// Tell the browser this spawn's pane is up, so it can attach to it while
+    /// the session is still starting.
+    ///
+    /// The only announcement of the window between "the pane exists" and "the
+    /// first hook bound it"; [`SessionEvent::SpawnPaneReady`] says why that
+    /// window needs one.
+    ///
+    /// On the async seam, like the failure report that shares this window: the
+    /// REST caller is long gone by the time the background launch reports in.
+    fn announce_pane_ready(&self, token: &PaneToken) {
+        self.emit_async_event(SessionEvent::SpawnPaneReady {
+            session_id: self.id.clone(),
+            pane_token: token.as_str().to_owned(),
+        });
     }
 
     /// Undo an accepted-but-failed launch and announce the failure on the async

@@ -74,7 +74,7 @@ async fn new_session_with_codex_provider_creates_a_terminal_less_session() {
         "a live Codex session is open"
     );
     assert_eq!(
-        ix.pane_for_session(&session_id).await,
+        ix.bound_pane(&session_id).await,
         None,
         "a terminal-less session exposes no pane"
     );

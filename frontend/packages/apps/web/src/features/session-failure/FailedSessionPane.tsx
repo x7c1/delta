@@ -27,8 +27,9 @@ export interface FailedSessionPaneProps {
  * Both of the things it shows — `session.failure_reason` and the session's
  * still-open sends — come from the server rather than from this browser's
  * memory, so a failure survives a reload and is readable in a tab that never
- * started the launch. An ending that named no cause (the watchdog-shaped ones)
- * is said to be unexplained rather than left blank.
+ * started the launch. An ending that named no cause (a launch that simply
+ * exited, a resume that never became ready) is said to be unexplained rather
+ * than left blank.
  *
  * **Retry** re-sends the first prompt as the identical launch and removes this
  * row, so a successful retry leaves one session rather than a live one beside a
@@ -109,8 +110,25 @@ export function FailedSessionPane({ item }: FailedSessionPaneProps) {
             </h2>
           </div>
 
+          {/* `whitespace-pre-wrap`, because the reason is multi-line whenever
+              the watchdog quoted what the pane was showing: a headline, a
+              blank line, then a verbatim block of a TUI's last lines (the
+              contract is in `docs/guides/api/live-channels.md`, under
+              `spawn_failed`). Folded onto one line, the captured screen the
+              user came here to read is box-drawing rubble.
+
+              `font-mono` for the same capture: it is a terminal screen, a box
+              drawn out of box-drawing characters whose every glyph is one cell
+              wide, so in the proportional UI face each row's closing `│` lands
+              somewhere else and the box falls apart. The reason is not always
+              a capture — a plain sentence in mono is merely a little unusual,
+              and the capture is the case worth getting right. `text-code`
+              rides along because that is the size this app pairs `font-mono`
+              with everywhere (the rationale is with the token in
+              `src/index.css`: mono reads optically larger than the sans at the
+              same nominal size). */}
           <p
-            className="break-words text-secondary text-fg-muted"
+            className="whitespace-pre-wrap break-words font-mono text-code text-fg-muted"
             data-testid="failed-session-reason"
           >
             {item.session.failure_reason ??

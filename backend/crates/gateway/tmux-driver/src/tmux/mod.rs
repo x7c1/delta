@@ -76,9 +76,17 @@ impl Tmux {
 
     /// Run `tmux <args>`, erroring on a non-zero exit.
     async fn run(&self, args: &[&str]) -> std::result::Result<(), Error> {
+        self.captured(args).await.map(|_| ())
+    }
+
+    /// Run `tmux <args>` and return its stdout, erroring on a non-zero exit.
+    ///
+    /// The reading twin of [`Self::run`] — same command, same failure handling
+    /// — for the one call whose output is the point (`capture-pane`).
+    async fn captured(&self, args: &[&str]) -> std::result::Result<String, Error> {
         let output = self.output(args).await?;
         if output.status.success() {
-            Ok(())
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
             Err(Error::Command {
                 status: output.status.to_string(),

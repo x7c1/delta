@@ -10,7 +10,7 @@ async fn session_start_startup_binds_pending_spawn() {
     // Cold-start spawn (no first prompt).
     ix.new_session().await.unwrap();
     let session_id = ix.pending_session_ids().await.remove(0);
-    assert!(ix.pane_for_session(&session_id).await.is_none());
+    assert!(ix.bound_pane(&session_id).await.is_none());
 
     let events = ix
         .on_session_start(session_start(session_id.as_str(), "startup"))
@@ -23,7 +23,7 @@ async fn session_start_startup_binds_pending_spawn() {
         session_id: session_id.clone(),
     }));
     assert_eq!(
-        ix.pane_for_session(&session_id).await,
+        ix.bound_pane(&session_id).await,
         Some("delta-1:0.0".to_owned())
     );
     assert!(ix.store().session(&session_id).await.unwrap().is_some());

@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use delta_usecase::TmuxDriver;
 
 use super::commands::{
-    clear_input_commands, input_commands, key_command, new_session_args, submit_command,
-    KEY_SETTLE, SUBMIT_ENTER_DELAY,
+    capture_pane_args, clear_input_commands, input_commands, key_command, new_session_args,
+    submit_command, KEY_SETTLE, SUBMIT_ENTER_DELAY,
 };
 use super::Tmux;
 
@@ -119,6 +119,14 @@ impl TmuxDriver for Tmux {
 
     async fn kill_session(&self, name: &str) -> std::result::Result<(), delta_usecase::Error> {
         self.run(&["kill-session", "-t", name])
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
+    async fn capture_pane(&self, pane: &str) -> std::result::Result<String, delta_usecase::Error> {
+        let args = capture_pane_args(pane);
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.captured(&borrowed)
             .await
             .map_err(delta_usecase::Error::from)
     }

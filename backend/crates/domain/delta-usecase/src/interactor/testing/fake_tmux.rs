@@ -118,6 +118,12 @@ pub(crate) struct FakeTmux {
     pub(crate) created: Mutex<Vec<CreatedSession>>,
     /// The session names `kill_session` was called with, in order.
     pub(crate) killed: Mutex<Vec<String>>,
+    /// What each pane "shows", keyed by tmux target, for `capture_pane`. A pane
+    /// with no entry captures nothing — the same answer a dead pane gives.
+    pub(crate) pane_content: Mutex<std::collections::HashMap<String, String>>,
+    /// The panes `capture_pane` was called with, in order, so a test can assert
+    /// the capture happened while the pane was still alive.
+    pub(crate) captured: Mutex<Vec<String>>,
     /// When set, every `create_session` waits on this gate before recording (or
     /// failing) anything — the seam a test holds open to act while a launch is
     /// between "prepared" and "pane up". `None` (the default) means no wait at
@@ -131,6 +137,14 @@ impl FakeTmux {
     pub(crate) fn with_gate(mut self, gate: &TmuxGate) -> Self {
         self.gate = Some(gate.clone());
         self
+    }
+
+    /// Make `pane` "show" `content`, so a `capture_pane` of it reads that back.
+    pub(crate) fn show_in_pane(&self, pane: &str, content: &str) {
+        self.pane_content
+            .lock()
+            .unwrap()
+            .insert(pane.to_owned(), content.to_owned());
     }
 }
 
@@ -194,6 +208,26 @@ impl TmuxDriver for FakeTmux {
     async fn kill_session(&self, name: &str) -> Result<()> {
         self.killed.lock().unwrap().push(name.to_owned());
         self.live.lock().unwrap().retain(|n| n != name);
+        // A killed session's panes stop showing anything, so anything read out
+        // of one afterwards comes back empty. That is what makes "captured
+        // before the kill" a property a test can hold the reaper to: read the
+        // pane after the cleanup and the reason loses its quoted tail.
+        let prefix = format!("{name}:");
+        self.pane_content
+            .lock()
+            .unwrap()
+            .retain(|pane, _| pane != name && !pane.starts_with(&prefix));
         Ok(())
+    }
+
+    async fn capture_pane(&self, pane: &str) -> Result<String> {
+        self.captured.lock().unwrap().push(pane.to_owned());
+        Ok(self
+            .pane_content
+            .lock()
+            .unwrap()
+            .get(pane)
+            .cloned()
+            .unwrap_or_default())
     }
 }

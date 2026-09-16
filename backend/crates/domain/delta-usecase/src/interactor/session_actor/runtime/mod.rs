@@ -22,6 +22,7 @@ mod agent;
 mod auto_compact;
 mod live_state;
 mod open;
+mod pane_attach;
 mod permission;
 mod question;
 mod spawn;
@@ -37,6 +38,7 @@ pub use planned_worktree::PlannedWorktree;
 
 pub use live_state::SessionLiveState;
 pub use open::{OpenAgentSession, OpenHandle};
+pub use pane_attach::AttachablePane;
 pub use permission::PendingPermission;
 pub use question::PendingQuestion;
 pub use spawn::{PendingSpawn, ResumingSession, PENDING_SPAWN_DEADLINE, RESUME_READY_DEADLINE};
@@ -278,6 +280,14 @@ pub struct SessionRuntime {
     /// [`TurnInput::EchoDeadline`]: crate::turn::TurnInput::EchoDeadline
     /// [`MAX_REQUEUES_PER_SEND`]: turn::MAX_REQUEUES_PER_SEND
     requeues_per_send: HashMap<i64, u32>,
+    /// How many PTY bridges are attached to this session's pane right now.
+    /// Read through [`Self::has_pty_attachment`] by
+    /// [`Self::take_stale_pending`], which spares a pane somebody is watching.
+    ///
+    /// NOT part of [`Self::is_empty`]: a count left behind by a bridge whose
+    /// socket died must never pin the actor alive, and the detach is saturating
+    /// so a retired actor's stale decrement is harmless.
+    pty_attachments: usize,
 }
 
 impl SessionRuntime {

@@ -79,7 +79,7 @@ pub struct PendingSpawn {
     pub token: PaneToken,
     /// The pane keystrokes are sent to (`<token>:0.0`).
     pub pane: String,
-    /// When this spawn was recorded, for the watchdog deadline.
+    /// When this spawn's bind deadline started running.
     ///
     /// A spawn is fire-and-forget: only the first `UserPromptSubmit` hook binds
     /// it, so a launch that crashes/hangs before that hook never times out on
@@ -87,7 +87,21 @@ pub struct PendingSpawn {
     /// [`PENDING_SPAWN_DEADLINE`] to detect and clean up such a stuck spawn.
     /// `Instant` is monotonic, so it measures elapsed wall time without being
     /// perturbed by system-clock changes.
+    ///
+    /// Normally the moment the spawn was recorded, but not for a pane a browser
+    /// has been attached to: the last bridge leaving restarts the deadline from
+    /// there (see [`SessionRuntime::restart_pending_deadline`]).
     pub created_at: Instant,
+    /// Whether the tmux session behind [`Self::pane`] actually exists yet.
+    ///
+    /// The entry is recorded a beat *before* `create_session` runs — the hooks
+    /// the launched agent fires bind this record, so it has to be in place
+    /// first — which leaves a short window where the pane is named but not
+    /// there. Nothing may attach in that window, so the launch flips this when
+    /// it reports success, at the same point the browser is told the pane is up
+    /// (`SessionEvent::SpawnPaneReady`). Binding does not depend on it: a hook
+    /// arriving from inside `create_session` binds the spawn as it always did.
+    pub pane_created: bool,
 }
 
 /// A resumed-but-not-yet-ready session: its pane is bound, but its first prompt
@@ -183,6 +197,51 @@ impl SessionRuntime {
         None
     }
 
+    /// The pane of a spawn whose launch is up but which nothing has bound yet.
+    ///
+    /// The unbound half of [`SessionRuntime::attachable_pane`], whose module
+    /// explains why the PTY bridge is allowed to reach such a pane.
+    ///
+    /// `None` until the pane is really there ([`PendingSpawn::pane_created`]),
+    /// so the window in which the entry exists only so the first hook has
+    /// something to bind offers nothing to attach to.
+    pub fn pending_spawn_pane(&self) -> Option<String> {
+        self.pending_spawn
+            .as_ref()
+            .filter(|spawn| spawn.pane_created)
+            .map(|spawn| spawn.pane.clone())
+    }
+
+    /// Give the pending spawn its whole bind deadline again, measured from
+    /// `now`; a no-op when nothing is pending.
+    ///
+    /// Called when the last PTY bridge detaches (see
+    /// [`SessionRuntime::note_pty_detached`], which holds the reasoning): the
+    /// attachment only holds the reaper off, it does not stop
+    /// [`PendingSpawn::created_at`] running, so a pane that was watched through
+    /// its original deadline would be reaped the instant its watcher left.
+    /// Restarting the clock gives a spawn somebody has just stepped away from
+    /// the same grace as one nobody ever attached to.
+    pub(super) fn restart_pending_deadline(&mut self, now: Instant) {
+        if let Some(spawn) = self.pending_spawn.as_mut() {
+            spawn.created_at = now;
+        }
+    }
+
+    /// Record that the pending spawn's pane now exists, reported by the launch
+    /// task once `create_session` returned. Keyed by token so a late report
+    /// cannot mark an unrelated spawn, and a no-op when nothing is pending (the
+    /// first hook already bound it).
+    pub fn mark_pending_pane_created(&mut self, token: &PaneToken) {
+        if let Some(spawn) = self
+            .pending_spawn
+            .as_mut()
+            .filter(|spawn| &spawn.token == token)
+        {
+            spawn.pane_created = true;
+        }
+    }
+
     /// Whether a spawn is still waiting for its first hook.
     ///
     /// The non-consuming look before [`Self::bind_pending_spawn`]: the hook
@@ -266,6 +325,18 @@ impl SessionRuntime {
     /// [`LaunchConfig`]: crate::launch_config::LaunchConfig
     /// [`LaunchingSpawn`]: super::LaunchingSpawn
     pub fn take_stale_pending(&mut self, now: Instant, deadline: Duration) -> Option<PendingSpawn> {
+        // Never take a pane somebody is attached to. The deadline exists for a
+        // launch nobody can reach — one that crashed, or stopped on a prompt no
+        // hook will ever answer — and a browser holding a PTY bridge on this
+        // pane is the answer to exactly that: killing it would tear the pane
+        // out from under the person typing into it. The spawn stays pending, so
+        // a later tick reaps it once the last bridge is gone — a whole deadline
+        // later, since that detach restarts the clock (see
+        // [`SessionRuntime::has_pty_attachment`] and
+        // [`SessionRuntime::note_pty_detached`]).
+        if self.has_pty_attachment() {
+            return None;
+        }
         if self
             .pending_spawn
             .as_ref()

@@ -21,10 +21,7 @@ async fn ensure_session_is_idempotent_while_a_session_is_bound() {
     ))
     .await
     .unwrap();
-    assert!(
-        ix.pane_for_session(&id).await.is_some(),
-        "the spawn is now bound"
-    );
+    assert!(ix.bound_pane(&id).await.is_some(), "the spawn is now bound");
 
     // A further ensure_session finds the bound session live: reuse, no re-spawn.
     let status = ix.ensure_session().await.unwrap();

@@ -19,7 +19,7 @@ async fn list_sessions_page_marks_a_bound_session_open_and_a_closed_one_not() {
     ))
     .await
     .unwrap();
-    assert!(ix.pane_for_session(&id).await.is_some(), "bound = open");
+    assert!(ix.bound_pane(&id).await.is_some(), "bound = open");
 
     let open_state = |page: &crate::session_page::SessionPage| {
         page.listings

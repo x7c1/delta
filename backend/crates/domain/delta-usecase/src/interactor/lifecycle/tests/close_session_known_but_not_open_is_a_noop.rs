@@ -18,7 +18,7 @@ async fn close_session_known_but_not_open_is_a_noop() {
     .await
     .unwrap();
     let id = SessionId::from("sess-closed");
-    assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
+    assert!(ix.bound_pane(&id).await.is_none(), "starts closed");
 
     ix.close_session(&id)
         .await
