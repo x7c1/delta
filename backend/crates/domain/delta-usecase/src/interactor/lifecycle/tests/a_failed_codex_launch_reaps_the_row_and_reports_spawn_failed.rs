@@ -13,8 +13,8 @@ use crate::SendTarget;
 /// path (`failed_launch_preparation_reaps_the_row_and_reports_spawn_failed`) —
 /// the failure arrives on the async event seam as a `spawn_failed` carrying the
 /// adapter's message as its `reason`, which is the only place that text can
-/// still reach the user, and the eager row (with its first send, by cascade) is
-/// deleted.
+/// still reach the user, and the eager row is marked `failed` with that same
+/// text persisted on it (its first send stays open against the row).
 ///
 /// The `pane_token` is absent: a terminal-less session never had a pane, so
 /// there is no name to report — the browser keys the failure on `session_id`
@@ -71,10 +71,18 @@ async fn a_failed_codex_launch_reaps_the_row_and_reports_spawn_failed() {
         "the failure carries the adapter's message, which no response body can carry now"
     );
 
-    // The contentless row is gone, so the session stops being listed…
-    assert!(
-        ix.store().inner.lock().unwrap().sessions.is_empty(),
-        "the eager Codex row of a failed launch is deleted"
+    // The row stays, marked `failed`, with the adapter's message on it…
+    assert_eq!(
+        ix.store()
+            .inner
+            .lock()
+            .unwrap()
+            .sessions
+            .iter()
+            .map(|s| (s.status, s.failure_reason.is_some()))
+            .collect::<Vec<_>>(),
+        vec![(delta_model::SessionStatus::Failed, true)],
+        "the eager Codex row of a failed launch is marked failed, not deleted"
     );
     // …and nothing was left running or launched: tmux is never touched by an
     // adapter-backed spawn, and the failed connect built no adapter, so no

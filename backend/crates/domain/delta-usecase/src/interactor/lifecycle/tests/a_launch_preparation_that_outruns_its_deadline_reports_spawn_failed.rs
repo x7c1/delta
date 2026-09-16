@@ -83,8 +83,14 @@ async fn a_launch_preparation_that_outruns_its_deadline_reports_spawn_failed() {
 
     // Rolled back exactly as a failed build is.
     assert!(
-        ix.store().session(&session_id).await.unwrap().is_none(),
-        "the eager row of an abandoned launch is deleted"
+        ix.store()
+            .session(&session_id)
+            .await
+            .unwrap()
+            .expect("the row of an abandoned launch is kept")
+            .status
+            == delta_model::SessionStatus::Failed,
+        "the eager row of an abandoned launch is marked failed, not deleted"
     );
     assert!(
         ix.tmux_fake().created.lock().unwrap().is_empty(),

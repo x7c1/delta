@@ -39,9 +39,10 @@ import { createEventsSlice } from './live/eventReducers';
  *   is still running; this local twin keeps the chip visible until the
  *   `turn_completed`/`turn_interrupted` event actually lands.
  * - {@link SpawnsSlice.spawns} — a new-session spawn tracked from the POST
- *   response until it registers or fails. The server deletes a failed spawn's
- *   contentless row at reap, so the failure chip (and its Retry payload)
- *   cannot be server-rendered.
+ *   response until it registers or fails. The server keeps a failed spawn's
+ *   row, so the failure itself is server-rendered; what stays here is the
+ *   launch configuration (launch-option ids, worktree request) that no row
+ *   records and that Retry needs.
  *
  * Per-session notices (the permission prompt, the external-input marker, the
  * resume-impossible flag, the buffered early spawn failure) live in one
@@ -57,7 +58,6 @@ export type {
   NewSessionLaunch,
 } from './live/sendsSlice';
 export type { SpawnItem } from './live/spawnsSlice';
-export { returnedToComposerNote } from './live/spawnsSlice';
 export type { StreamingMessage } from './live/streamingSlice';
 export type { SubagentActivity } from './live/subagentsSlice';
 export { threadIsRunning } from './live/runningThreadsSlice';

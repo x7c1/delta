@@ -47,7 +47,6 @@ async fn close_session_cancels_a_codex_launch_still_connecting() {
         pane_token,
         reason,
         cancelled,
-        unsent,
     }] = events.as_slice()
     else {
         panic!("expected exactly one SpawnFailed, got {events:?}");
@@ -66,13 +65,24 @@ async fn close_session_cancels_a_codex_launch_still_connecting() {
         "the user asked for this, so the browser words it as a cancel"
     );
     assert_eq!(
-        unsent.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(),
-        vec!["start something"],
-        "the queued first prompt is handed back to the composer"
+        ix.store()
+            .open_sends(&session_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.text)
+            .collect::<Vec<_>>(),
+        vec!["start something".to_owned()],
+        "the queued first prompt stays on the kept row"
     );
-    assert!(
-        ix.store().session(&session_id).await.unwrap().is_none(),
-        "the eager Codex row of a cancelled launch is deleted"
+    assert_eq!(
+        ix.store()
+            .session(&session_id)
+            .await
+            .unwrap()
+            .expect("the eager Codex row of a cancelled launch is kept")
+            .status,
+        delta_model::SessionStatus::Failed,
     );
     assert!(
         ix.tmux_fake().created.lock().unwrap().is_empty()
@@ -98,7 +108,13 @@ async fn close_session_cancels_a_codex_launch_still_connecting() {
         "the cancelled launch's first prompt was never started as a turn"
     );
     assert!(
-        ix.store().session(&session_id).await.unwrap().is_none(),
-        "the finished launch does not resurrect the deleted row"
+        ix.store()
+            .session(&session_id)
+            .await
+            .unwrap()
+            .expect("the row is still there")
+            .status
+            == delta_model::SessionStatus::Failed,
+        "the finished launch does not un-fail the row it was cancelled for"
     );
 }

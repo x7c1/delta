@@ -160,12 +160,12 @@ Response:
   not connect or start a thread — therefore cannot be a response at all. It
   arrives on the live channel as a
   [`spawn_failed`](live-channels.md#session-lifecycle) event carrying the error
-  text as its `reason`, and the eagerly-created row (with every send of the
-  session, by cascade) is deleted, so the session stops being listed. Because
-  those rows go, that event also carries `unsent`: the id and text of every send
-  the launch never delivered, first prompt included, so a client can put the
-  messages back in front of the user. Nothing is re-sent server-side. The
-  preparation is also given up on if it has not finished within 10 minutes — a
+  text as its `reason`, and the eagerly-created row is marked `failed` with that
+  same text stored on it, so the session stays listed as something the user can
+  open, read, retry and remove. Its `send` rows stay open against it, so every
+  message the launch never delivered — the first prompt included — is still
+  readable from `GET /api/sessions/{id}/sends`. Nothing is re-sent server-side.
+  The preparation is also given up on if it has not finished within 10 minutes — a
   `git fetch` hanging on an unreachable remote or a credential prompt has no
   timeout of its own — and that gives the same `spawn_failed`, so a stuck
   session never sits `spawning` indefinitely. That deadline is overridable with
@@ -306,8 +306,9 @@ disconnected: events fired during the gap are never replayed.
   process's `dispatched` row) and the
   [echo deadline's park](#when-no-echo-ever-arrives).
 
-- **404** — no session with that id, so a reaped spawn is distinguishable from
-  "nothing pending".
+- **404** — no session with that id, so a removed session is distinguishable
+  from "nothing pending". A launch that failed is not one: its row is kept, and
+  this endpoint is where its screen reads the text it never delivered.
 
 ### `POST /api/sends/{id}/cancel`
 

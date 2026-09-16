@@ -2,20 +2,15 @@ use crate::interactor::testing::*;
 use crate::ports::{SessionEvent, WorktreeStartPoint};
 use crate::{SendTarget, WorktreeSpec};
 
-/// A failed launch hands back every message it never delivered.
+/// A failed launch keeps every message it never delivered — on its own row.
 ///
-/// The rollback deletes the eager session row, and the `send` rows go with it
-/// (`send.session_id … ON DELETE CASCADE`), so the failure event is the last
-/// moment their text exists anywhere. The failed chip's Retry holds only the
-/// FIRST prompt, so without this every message the user typed while the launch
-/// was still checking out would be silently lost — which is exactly the window
-/// the queued acceptance opened up.
-///
-/// So `spawn_failed` carries `unsent`: every row that never reached an agent,
-/// in id order, the first prompt included. The client decides what it already
-/// holds; the server re-sends nothing.
+/// The ending marks the session `failed` instead of deleting it, so the `send`
+/// rows it accepted (the first prompt, plus everything the user typed while the
+/// checkout was still running) stay open against it and the failed session's
+/// own screen reads them back from the server. Nothing has to ride out on the
+/// failure event to survive, and nothing is re-sent.
 #[tokio::test]
-async fn a_failed_launch_reports_its_unsent_queued_text() {
+async fn a_failed_launch_keeps_its_undelivered_text_on_the_row() {
     // A worktree build that is held open (so a send can be accepted mid-launch)
     // and then fails when released (so the rollback runs).
     let gate = WorktreeGate::closed();
@@ -68,7 +63,6 @@ async fn a_failed_launch_reports_its_unsent_queued_text() {
     let SessionEvent::SpawnFailed {
         session_id: failed_id,
         reason,
-        unsent,
         ..
     } = event
     else {
@@ -79,29 +73,35 @@ async fn a_failed_launch_reports_its_unsent_queued_text() {
         reason.is_some_and(|reason| reason.contains("worktree")),
         "the failed launch still names its cause"
     );
-    assert_eq!(
-        unsent
-            .iter()
-            .map(|send| (send.send_id, send.text.as_str()))
-            .collect::<Vec<_>>(),
-        vec![
-            (first.id, "first message"),
-            (queued.id, "and one more while it starts"),
-        ],
-        "every send that never reached an agent rides out, in id order"
+    // The row is kept, marked `failed`, with the cause recorded on it.
+    let session = ix
+        .store()
+        .session(&session_id)
+        .await
+        .unwrap()
+        .expect("the failed launch keeps its session row");
+    assert_eq!(session.status, delta_model::SessionStatus::Failed);
+    assert!(
+        session
+            .failure_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("worktree")),
+        "the cause is persisted on the row, so it survives a reload"
     );
 
-    // …and the rows really are gone, which is why the event had to carry them.
-    assert!(
-        ix.store().session(&session_id).await.unwrap().is_none(),
-        "the failed launch left no session row behind"
-    );
-    assert!(
-        ix.store().send(first.id).await.unwrap().is_none(),
-        "the first prompt's row cascaded away with the session"
-    );
-    assert!(
-        ix.store().send(queued.id).await.unwrap().is_none(),
-        "the queued row cascaded away with the session"
+    // Every send that never reached an agent is still open against it, in id
+    // order — the failed session's screen reads exactly this list.
+    assert_eq!(
+        ix.store()
+            .open_sends(&session_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|send| (send.id, send.text))
+            .collect::<Vec<_>>(),
+        vec![
+            (first.id, "first message".to_owned()),
+            (queued.id, "and one more while it starts".to_owned()),
+        ],
     );
 }

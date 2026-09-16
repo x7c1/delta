@@ -54,13 +54,13 @@ where
     /// outrunning [`LaunchConfig::launch_prep_deadline`] — undoes the
     /// acceptance exactly as the synchronous launch failure used to: reclaim
     /// whatever the launch did stand up (a pane, or a connected adapter), drop
-    /// the turn, delete the eager session row (its main thread and every send
-    /// go by cascade). The REST caller is long gone, so the failure is reported
-    /// on the async event seam instead, as a [`SessionEvent::SpawnFailed`]
-    /// carrying the error text — that `reason` is the only place any of those
-    /// messages can still be shown, since it is no longer a `4xx`/`5xx` body —
-    /// and carrying `unsent`, the text of every send the launch accepted but
-    /// never delivered, read a step before the rows cascade away.
+    /// the turn, mark the eager session row `failed` (its main thread and
+    /// every send row stay with it). The REST caller is long gone, so the
+    /// failure is reported on the async event seam instead, as a
+    /// [`SessionEvent::SpawnFailed`] carrying the error text — that `reason`
+    /// is the only place any of those messages can still be shown, since it
+    /// is no longer a `4xx`/`5xx` body, and the same text is persisted on the
+    /// row.
     ///
     /// [`SessionEvent::SpawnFailed`]: crate::ports::SessionEvent::SpawnFailed
     /// [`spawn_launch_preparation`]: super::launch_prep::spawn_launch_preparation

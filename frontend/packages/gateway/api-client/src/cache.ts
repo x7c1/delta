@@ -163,9 +163,8 @@ export function appendSessionSend(
 }
 
 /**
- * Drop a session's cached open-send list entirely. Used when the session row
- * itself is gone (a reaped spawn): a refetch would only 404, and the failure
- * chip is rendered from client state instead.
+ * Drop a session's cached open-send list entirely. Used when the session
+ * row itself is gone (`session_removed`): a refetch would only 404.
  */
 export function removeSessionSends(
   queryClient: QueryClient,

@@ -9,7 +9,7 @@ import type { AgentProvider, WorktreeSpec } from '@delta/wire-gen';
  *
  * This is the unit that has to survive a failed launch. The launch preparation
  * runs *after* the send is accepted, so any part of it can fail with the
- * session row already created — and the failed chip's Retry re-sends the
+ * session row already created — and the failed session's Retry re-sends the
  * identical configuration. Retaining only part of it is what made Retry quietly
  * start a *different* session (a Claude session in the plain workdir, after a
  * Codex + worktree launch failed), so the whole configuration travels together:

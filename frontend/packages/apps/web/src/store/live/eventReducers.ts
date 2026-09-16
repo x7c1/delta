@@ -18,6 +18,7 @@ import {
 import { reduceTurnStarted } from './runningThreadsSlice';
 import {
   reduceSessionRegistered as reduceSpawnRegistered,
+  reduceSessionRemoved,
   reduceSpawnFailed,
 } from './spawnsSlice';
 import { reduceStatusUpdated } from './statusSlice';
@@ -103,6 +104,7 @@ const EVENT_REDUCERS: {
   send_dispatched: reduceSendDispatched,
   send_parked: reduceSendParked,
   session_registered: chain(reduceSessionRegistered, reduceSpawnRegistered),
+  session_removed: reduceSessionRemoved,
   session_opened: reduceSessionOpened,
   session_closed: reduceSessionClosed,
   status_updated: reduceStatusUpdated,

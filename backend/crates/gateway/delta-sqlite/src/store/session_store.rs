@@ -57,8 +57,9 @@ impl SessionStore for SqliteStore {
     async fn mark_session_failed(
         &self,
         id: &SessionId,
+        reason: Option<&str>,
     ) -> std::result::Result<(), delta_usecase::Error> {
-        self.mark_session_failed(id).await
+        self.mark_session_failed(id, reason).await
     }
 
     async fn list_sessions_page(

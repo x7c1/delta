@@ -172,6 +172,7 @@ impl SessionStore for FakeStore {
             provider_session_id: None,
             provider_thread_id: None,
             pull_request_number: None,
+            failure_reason: None,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -222,6 +223,7 @@ impl SessionStore for FakeStore {
             provider_session_id: None,
             provider_thread_id: None,
             pull_request_number,
+            failure_reason: None,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -271,7 +273,7 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
-    async fn mark_session_failed(&self, id: &SessionId) -> Result<()> {
+    async fn mark_session_failed(&self, id: &SessionId, reason: Option<&str>) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         if let Some(session) = g
             .sessions
@@ -279,6 +281,7 @@ impl SessionStore for FakeStore {
             .find(|s| &s.id == id && s.status == SessionStatus::Spawning)
         {
             session.status = SessionStatus::Failed;
+            session.failure_reason = reason.map(str::to_owned);
         }
         Ok(())
     }

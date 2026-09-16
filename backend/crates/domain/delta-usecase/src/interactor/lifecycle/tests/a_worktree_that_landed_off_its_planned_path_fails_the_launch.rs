@@ -86,10 +86,16 @@ async fn a_worktree_that_landed_off_its_planned_path_fails_the_launch() {
         "the reason names where the worktree actually is: {reason}"
     );
 
-    // The row is rolled back, so the session stops being listed…
+    // The launch is rolled back, but its row stays — marked `failed`…
     assert!(
-        ix.store().session(&session_id).await.unwrap().is_none(),
-        "the eager row of a failed launch is deleted"
+        ix.store()
+            .session(&session_id)
+            .await
+            .unwrap()
+            .expect("the row of a failed launch is kept")
+            .status
+            == delta_model::SessionStatus::Failed,
+        "the eager row of a failed launch is marked failed, not deleted"
     );
     // …and nothing was launched into the directory that was never created.
     assert!(

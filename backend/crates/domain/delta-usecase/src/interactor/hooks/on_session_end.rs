@@ -86,10 +86,6 @@ where
                 pane_token: Some(resuming.token.as_str().to_owned()),
                 reason: None,
                 cancelled: false,
-                // A failed resume keeps its session row and its send rows: the
-                // `Close` above requeued the held prompt rather than deleting
-                // it, so there is nothing to hand back to the composer.
-                unsent: Vec::new(),
             }];
             // The process is gone here too, so a BACKGROUND subagent still
             // running from a turn BEFORE this resume window can never have its

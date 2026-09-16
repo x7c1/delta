@@ -25,13 +25,23 @@ name. Conventions (timestamps, id types, error bodies) are in
   "provider": "claude",
   "provider_session_id": null,
   "provider_thread_id": null,
-  "pull_request_number": 138
+  "pull_request_number": 138,
+  "failure_reason": null
 }
 ```
 
-- `status` is one of `spawning`, `active`, `ended`, `failed`.
+- `status` is one of `spawning`, `active`, `ended`, `failed`. A `failed` session
+  is one whose launch ended without ever binding — it broke, it outlived its
+  bind deadline, or the user closed it while it was still starting. Its row is
+  kept, so the failure is something the user can open, read, retry and remove.
+- `failure_reason` is why a `failed` session's launch ended, when Delta could
+  name a cause: the launch preparation's own error text, or, for a cancelled
+  launch, the sentence naming the close. `null` for every other status, for the
+  endings that observe only silence (a launch that exited, a spawn that never
+  bound before its deadline), and for rows written before the field existed.
 - `transcript_path` is empty while the session is still `spawning`, before the
-  first hook reports it.
+  first hook reports it — and stays empty on a `failed` row, whose launch never
+  produced one.
 - `branch_at_launch`, `repo_root` and `repository_display_name` are spawn-time
   snapshots of the launch directory's git state, all `null` when it was not
   inside a git repository. They are never updated on resume or a later

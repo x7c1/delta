@@ -141,8 +141,9 @@ export function useSessionSendsQuery(
         : queryKeys.sessionSends(sessionId),
     queryFn: () => client.getSessionSends(sessionId as SessionId),
     enabled: sessionId !== null,
-    // A 404 (the session row is gone, e.g. a reaped spawn) will never heal by
-    // retrying; surface it immediately so the view falls back to client state.
+    // A 404 (the session row is gone, e.g. a removed session) will never heal
+    // by retrying; surface it immediately so the view falls back to client
+    // state.
     retry: false,
   });
 }

@@ -87,7 +87,6 @@ describe('parseSessionEvent', () => {
         cancelled: false,
         session_id: 'sess-1',
         pane_token: 'delta-1',
-        unsent: [{ send_id: 3, text: 'never went out' }],
       }),
     );
 
@@ -96,7 +95,6 @@ describe('parseSessionEvent', () => {
       cancelled: false,
       session_id: 'sess-1',
       pane_token: 'delta-1',
-      unsent: [{ send_id: 3, text: 'never went out' }],
     });
   });
 

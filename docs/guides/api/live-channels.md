@@ -50,17 +50,11 @@ persisted: a streaming preview, the latest `status_updated` snapshot, and the
 *explanation* a `send_parked` carries — for status the client simply shows
 nothing until the provider's next report, and a missed `send_parked` still
 leaves its message in the open-send list, held for an explicit release, just
-without the note saying why it is waiting. A missed `spawn_failed` leaves the
-same kind of hole: the failed spawn's row is deleted — whether its launch
-preparation failed or it came up and never bound — so the session stops being
-listed in `GET /api/sessions`, observable on a refetch but with nothing to say
-it was a failure. The `reason` a failed preparation reported goes with it, and
-so does `unsent` — the text of every send that session had accepted but never
-delivered: both ride the event alone, so no refetch can recover them. Delta's
-own browser, which focused that session the moment its send was accepted, holds
-no launch deadline of its own, so it keeps waiting on a session that is gone
-instead of raising the Retry / Dismiss card; picking another session (or
-reloading) is the way out.
+without the note saying why it is waiting. A missed `spawn_failed` leaves
+barely a hole at all: the failed spawn's row is kept and marked `failed`, with
+the `reason` persisted on it, so a refetch of `GET /api/sessions` shows the
+session as failed and its screen still explains why. What a client misses is
+only the moment it happened, not the fact.
 
 The groups below are a reading aid only: they say nothing about the order in
 which frames arrive, and a client must handle each event whenever it lands.
@@ -77,16 +71,13 @@ which frames arrive, and a client must handle each event whenever it lands.
 { "kind": "session_removed", "session_id": "sess-1" }
 
 { "kind": "spawn_failed", "session_id": "sess-1", "pane_token": "delta-1",
-  "reason": "git error: invalid reference: origin/nope", "cancelled": false,
-  "unsent": [ { "send_id": 1, "text": "kick off a new conversation" },
-              { "send_id": 2, "text": "and one more while it starts" } ] }
+  "reason": "git error: invalid reference: origin/nope", "cancelled": false }
 
-{ "kind": "spawn_failed", "session_id": "sess-2", "unsent": [], "cancelled": false,
+{ "kind": "spawn_failed", "session_id": "sess-2", "cancelled": false,
   "reason": "agent error: failed to spawn app-server: No such file or directory (os error 2)" }
 
 { "kind": "spawn_failed", "session_id": "sess-3", "pane_token": "delta-3",
-  "reason": "closed while starting", "cancelled": true,
-  "unsent": [ { "send_id": 7, "text": "kick off a new conversation" } ] }
+  "reason": "closed while starting", "cancelled": true }
 ```
 
 - `session_registered` — emitted when a freshly-spawned session's launch binds
@@ -113,10 +104,10 @@ which frames arrive, and a client must handle each event whenever it lands.
   [sessions.md](sessions.md) for the recovery story. A close that instead
   *cancelled* a still-starting launch
   ([sessions.md](sessions.md#post-apisessionsidclose)) emits it too, right after
-  the `spawn_failed` that reports the cancellation — and there the data does not
-  remain, the row is gone. That order is deliberate, so a client that refetches
-  the session list (and that session's open sends) on this event has already
-  been told the session is finished and needs no special case.
+  the `spawn_failed` that reports the cancellation. That order is deliberate, so
+  a client that refetches the session list (and that session's open sends) on
+  this event has already been told the session is finished and needs no special
+  case.
 - `session_removed` — a closed session was removed
   ([`DELETE /api/sessions/{id}`](sessions.md#delete-apisessionsid)): its row and
   every row hanging off it are gone. Its own event rather than a second
@@ -137,9 +128,10 @@ which frames arrive, and a client must handle each event whenever it lands.
   without ever registering, and `POST /api/sessions/{id}/close` on a session
   that is still starting, which cancels the launch (see
   [sessions.md](sessions.md)) — the one producer the user asked for. The
-  contentless row is deleted, so the session stops being listed; without the
+  row is marked `failed` and stays listed, so the session the user was watching
+  start becomes something they can open, read, retry and remove; without the
   event a launch that failed, crashed or hung on auth would leave the browser
-  sitting on a session that silently vanished.
+  waiting on a session that was never coming up.
 
   `session_id` is the Delta-minted id the browser correlates with the session it
   focused on acceptance (and with its pending chip); it is the only key a client
@@ -156,25 +148,16 @@ which frames arrive, and a client must handle each event whenever it lands.
   tell the two apart. It is `true` only for the close the user asked for and
   `false` for the three producers that report a launch which broke on its own,
   always present, and the only difference between the two frames. A client that
-  wants to word a cancellation neutrally (Delta's browser says "Launch
-  cancelled" and drops the error colouring, keeping the same Retry / Dismiss
+  wants to word a cancellation neutrally (Delta's browser says "This launch was
+  cancelled" and drops the error colouring, keeping the same Retry / Remove
   actions) branches on it.
 
-  `unsent` lists every send the session had accepted but never delivered to an
-  agent — the first prompt included — oldest first, each as its `send_id` and
-  the `text` the user composed. It is always present (`[]` when the spawn had
-  nothing outstanding), so a client reads it without a presence check. It exists
-  because the deleted row takes its `send` rows with it: a session accepts sends
-  as `queued` rows for as long as it is starting (see [sends.md](sends.md)), and
-  this frame is the last place their text exists. **Nothing is re-sent.** A
-  client puts the messages it does not already hold back in front of the user —
-  Delta's browser appends them to the new-session composer draft, excluding the
-  entry whose `send_id` is the spawn's own first prompt (its Retry chip already
-  holds that one) — and the user decides whether to send them again. A client
-  that holds nothing for the id restores the whole list, first prompt included:
-  Delta's browser tracks its spawns in memory only, so a reload (or a second
-  tab) meets this frame with no chip to hold anything back, and then raises the
-  failure itself, since there is no chip to carry the `reason` either.
+  Nothing the user wrote rides on this frame. The session's `send` rows are
+  still there — a session accepts sends as `queued` rows for as long as it is
+  starting (see [sends.md](sends.md)), and marking the row `failed` leaves them
+  open against it — so a client reads them back from
+  `GET /api/sessions/{id}/sends` and shows them on the failed session's own
+  screen. **Nothing is re-sent.**
 
 ### Sends and turns
 

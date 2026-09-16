@@ -81,7 +81,8 @@ where
     ///
     /// On failure the launching entry is **put back** before the error is
     /// returned, so the `LaunchFinished(Err)` that follows finds it and runs the
-    /// one shared rollback (row deleted, adapter closed, `SpawnFailed` emitted)
+    /// one shared rollback (row marked `failed`, adapter closed, `SpawnFailed`
+    /// emitted)
     /// rather than warning about a report with nothing left to settle.
     pub(in crate::interactor) async fn bind_adapter_launch(
         &mut self,

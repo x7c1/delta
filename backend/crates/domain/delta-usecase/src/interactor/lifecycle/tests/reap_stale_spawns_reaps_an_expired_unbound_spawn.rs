@@ -7,20 +7,39 @@ use crate::interactor::testing::*;
 use crate::ports::SessionEvent;
 
 /// An unbound spawn whose deadline has passed is reaped: its pane is killed, it
-/// is removed from the registry, its eagerly-created `spawning` session row
-/// (which ingested nothing) is deleted, and a `SpawnFailed` carrying its id and
-/// token is returned.
+/// is removed from the registry, its eagerly-created session row is marked
+/// `failed` — kept, with everything the launch recorded — and a `SpawnFailed`
+/// carrying its id and token is returned.
+///
+/// Keeping the row is the point. A spawn that never bound ingested nothing, but
+/// the row still holds the working directory, the repository, and the prompt the
+/// user wrote, which is what someone opens the failed session to look at.
 #[tokio::test]
 async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
     let ix = interactor();
     let now = Instant::now();
     let session_id = SessionId::from("sess-stuck");
 
-    // Seed the eager `spawning` row a real spawn would have written, then a
-    // spawn stamped one second past its deadline, with a live tmux session so
-    // the reaper actually issues (and we can observe) the kill.
+    // Seed the eager `spawning` row a real spawn would have written — with the
+    // launch context a real one records — plus the first prompt it accepted,
+    // then a spawn stamped one second past its deadline, with a live tmux
+    // session so the reaper actually issues (and we can observe) the kill.
+    let (_, main) = ix
+        .store()
+        .insert_spawning_session(crate::SpawningSession {
+            repository_display_name: Some("x7c1/delta"),
+            ..spawning_session(&session_id, "/work")
+        })
+        .await
+        .unwrap();
     ix.store()
-        .insert_spawning_session(spawning_session(&session_id, "/work"))
+        .enqueue_queued_send(
+            &session_id,
+            main,
+            None,
+            "the prompt that never went out",
+            None,
+        )
         .await
         .unwrap();
     ix.push_pending_spawn_at(
@@ -47,9 +66,6 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
             reason: None,
             // Nobody asked for this: the spawn ran out of time.
             cancelled: false,
-            // The reaped spawn was seeded through the runtime seam and accepted
-            // no send, so it has no undelivered text to hand back.
-            unsent: Vec::new(),
         }],
     );
     // The pane was killed by token.
@@ -60,10 +76,36 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
     // The spawn is gone from the registry: a later UserPromptSubmit for that id
     // can no longer bind it.
     assert!(ix.pending_session_ids().await.is_empty());
-    // The eager session row ingested nothing, so the reap deleted it (and its
-    // children, by cascade) rather than leaving a dead `spawning` row behind.
-    assert!(
-        ix.store().session(&session_id).await.unwrap().is_none(),
-        "the never-bound spawn's session row is deleted at reap time"
+    // The eager session row is kept and marked `failed`, with everything the
+    // launch recorded still on it.
+    let session = ix
+        .store()
+        .session(&session_id)
+        .await
+        .unwrap()
+        .expect("the never-bound spawn's session row is kept at reap time");
+    assert_eq!(session.status, delta_model::SessionStatus::Failed);
+    assert_eq!(session.cwd, "/work", "the workdir survives the reap");
+    assert_eq!(
+        session.repository_display_name.as_deref(),
+        Some("x7c1/delta"),
+        "the repository survives the reap"
+    );
+    assert_eq!(
+        session.failure_reason, None,
+        "the watchdog observes only silence, so it records no cause"
+    );
+
+    // And the prompt the user wrote is still open against the row — nothing
+    // cascaded away, because nothing was deleted.
+    assert_eq!(
+        ix.store()
+            .open_sends(&session_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|send| send.text)
+            .collect::<Vec<_>>(),
+        vec!["the prompt that never went out".to_owned()],
     );
 }

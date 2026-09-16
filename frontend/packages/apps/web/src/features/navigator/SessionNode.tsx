@@ -195,6 +195,10 @@ export const SessionNode = memo(function SessionNode({
   // from the moment its first send was accepted, so this is a real state a card
   // can be in.
   const spawning = item.session.status === 'spawning';
+  // Whether this session's launch ended without ever binding. Its row is kept,
+  // so this too is a real state a card can be in — and it must not read as
+  // `Closed`, which would invite a resume of a session that never started.
+  const failed = item.session.status === 'failed';
   // The kebab menu's dropdown opens below the trigger, but each windowed row is
   // an absolutely-positioned `transform` stacking context, so the dropdown is
   // painted under the next row's card. While the menu is open, lift this row
@@ -371,14 +375,33 @@ export const SessionNode = memo(function SessionNode({
             data-testid="session-node"
           >
             <span className="col-span-2 flex min-w-0 items-center gap-2">
-              {/* `Starting` is a third state alongside Open and Closed: it must
-                  not read as `Closed`, which invites a resume the server would
-                  refuse. It is normally a status the user waits out (a second
-                  or so) — and, when a launch wedges there, one the user can
-                  act on: the kebab's `Close` cancels it. */}
+              {/* `Starting` and `Failed` are two further states alongside Open
+                  and Closed, and neither may read as `Closed` — that invites a
+                  resume the server would refuse. `Starting` is normally a
+                  status the user waits out (a second or so), and when a launch
+                  wedges there, one they can act on: the kebab's `Close` cancels
+                  it. `Failed` is where such a launch ends up; its card stays in
+                  the list, and opening it explains why it never started and
+                  offers Retry and Remove. */}
               <StatusDot
-                tone={spawning ? 'amber' : item.open ? 'green' : 'slate'}
-                title={spawning ? 'Starting' : item.open ? 'Open' : 'Closed'}
+                tone={
+                  spawning
+                    ? 'amber'
+                    : failed
+                      ? 'red'
+                      : item.open
+                        ? 'green'
+                        : 'slate'
+                }
+                title={
+                  spawning
+                    ? 'Starting'
+                    : failed
+                      ? 'Failed'
+                      : item.open
+                        ? 'Open'
+                        : 'Closed'
+                }
               />
               {/* Line 1: the *launch-time* local git branch, captured once on
                   spawn and never updated on resume or a later `git checkout`.
@@ -534,14 +557,11 @@ export const SessionNode = memo(function SessionNode({
               // STARTING — a starting session is not `open` (nothing is bound
               // to it yet), but closing it is what cancels a launch that has
               // wedged: the server tears down whatever the launch stood up,
-              // removes the eagerly-created row, and reports a `spawn_failed`
-              // whose handling already flips the spawn chip to Retry / Dismiss
-              // with the reason and restores the unsent text into the
-              // new-session draft — or, when this tab tracks no chip for the
-              // spawn (it reloaded, or another window started it), reports the
-              // same thing through the app-wide snackbar and restores the whole
-              // text. Only an already-closed session hides the item, where
-              // Close would be a no-op.
+              // marks the row `failed` with a reason naming the close, and
+              // reports a `spawn_failed`. The card stays, now failed, and its
+              // screen offers Retry and Remove. Only an already-closed session
+              // hides the item, where Close would be a no-op. A failed session
+              // is offered Remove below instead.
               ...(item.open || spawning
                 ? [
                     {

@@ -119,4 +119,16 @@ pub struct Session {
     /// repository the PR lives in, so the PR's web URL is rebuilt from the two
     /// where it is rendered rather than persisted alongside.
     pub pull_request_number: Option<i64>,
+    /// Why this session's launch ended without ever binding, when Delta could
+    /// name a cause — the launch preparation's own error text, or, for a launch
+    /// the user cancelled by closing a still-starting session, the sentence
+    /// naming that close.
+    ///
+    /// Written once, by the cleanup that marks the row
+    /// [`SessionStatus::Failed`], and read by the failed session's own screen,
+    /// which is where the failure now lives. `None` for every other status, for
+    /// the watchdog-shaped endings that observe only silence (a launch that
+    /// exited, a spawn that never bound before its deadline), and for rows that
+    /// predate the column.
+    pub failure_reason: Option<String>,
 }

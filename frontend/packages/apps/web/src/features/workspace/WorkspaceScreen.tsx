@@ -24,6 +24,7 @@ import { useGarbageCollectSessionScopedStorage } from '../../store/sessionScoped
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { CommsLogPane } from '../comms/CommsLogPane';
 import { NavigatorPane } from '../navigator/NavigatorPane';
+import { FailedSessionPane } from '../session-failure/FailedSessionPane';
 import { SettingsView } from '../settings/SettingsView';
 import { TranscriptPane } from '../transcript/TranscriptPane';
 import { TerminalPane } from '../terminal/TerminalPane';
@@ -111,7 +112,8 @@ function pickInitialFocus(sessions: SessionListItem[]): FocusedSession {
  * transcript | right pane. On load it lists every session and focuses one; the
  * composer drives the conversation (new session on cold start, resume on a
  * closed session), so the terminal is no longer required to begin. A focused
- * closed session renders read-only.
+ * closed session renders read-only, and a focused session whose launch never
+ * bound renders its failure instead of a transcript.
  *
  * The right pane is whichever window the focused session's provider actually
  * has, chosen from its capability profile: the embedded terminal for a provider
@@ -208,6 +210,11 @@ export function WorkspaceScreen() {
   // the user now sees: the conversation is empty, the first prompt sits in the
   // pending strip, and the composer waits until the launch comes up.
   const focusedSpawning = focusedItem?.session.status === 'spawning';
+  // A focused session whose launch ended without ever binding. Its row is kept,
+  // so it is an ordinary thing to focus — and it has no conversation, so it
+  // renders its own screen (the failure, what was never sent, and what to do
+  // about it) in the transcript's place.
+  const focusedFailed = focusedItem?.session.status === 'failed';
   const threadsQuery = useSessionThreadsQuery(client, focusedRealSessionId);
   const threads = useMemo(
     () => threadsQuery.data?.threads ?? [],
@@ -242,9 +249,10 @@ export function WorkspaceScreen() {
   // merely caught focus mid-move.
   //
   // The entry is released by `session_registered` (see `spawnsSlice`), not
-  // here; a `spawn_failed` turns it into the Retry / Dismiss card instead —
-  // and that card lives on the new-session screen, so a `failed` spawn is not
-  // a hand-over candidate at all.
+  // here; a `spawn_failed` leaves it behind as the launch configuration its
+  // session's Retry reads, so a `failed` spawn is not a hand-over candidate at
+  // all — the user stays where they are and the failed session is there to
+  // open.
   useEffect(() => {
     const awaitingHandOver = spawns.filter(
       (spawn) => spawn.status === 'spawning' && !spawn.focusHandedOver,
@@ -285,8 +293,9 @@ export function WorkspaceScreen() {
       // refetch is in flight), so "absent from the list" here means "too early",
       // not "gone" — reconciling would bounce focus to some other session for
       // the split second before the row arrives. The tracked entry is dropped
-      // by `session_registered`, and by then the row is listed; a spawn that
-      // fails instead moves focus itself (see `applySessionEvent`).
+      // by `session_registered`, and by then the row is listed. A spawn that
+      // fails keeps its row and its entry, so this guard holds until the user
+      // retries or removes it.
       return;
     }
     const stillExists =
@@ -586,6 +595,8 @@ export function WorkspaceScreen() {
             workdirMandatory={sessions.length === 0}
             paneToggleButton={paneToggleButton}
           />
+        ) : focusedFailed && focusedItem ? (
+          <FailedSessionPane item={focusedItem} />
         ) : activeThread ? (
           <TranscriptPane
             threads={threads}

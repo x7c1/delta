@@ -11,10 +11,18 @@ pub enum SessionStatus {
     Spawning,
     Active,
     Ended,
-    /// The spawn never bound before its deadline. A failed session that
-    /// ingested no messages is deleted at reap time instead of being kept in
-    /// this state, so `Failed` only survives for a session that already holds
-    /// data worth keeping.
+    /// The launch ended without ever binding: it broke, the watchdog reaped it
+    /// past its deadline, or the user closed the session while it was still
+    /// starting.
+    ///
+    /// The row is kept in this state whether or not the session ingested
+    /// anything. A never-bound launch ingested no messages, but it recorded
+    /// everything else — the working directory, the repository and branch, the
+    /// originating pull request, the prompt the user wrote, and (when Delta
+    /// could name one) the failure reason — which is the whole of what someone
+    /// needs to understand why their session did not start. So a failed launch
+    /// is an ordinary thing the user can open, read, retry and remove, rather
+    /// than a row that vanishes and leaves its failure nowhere to live.
     Failed,
 }
 

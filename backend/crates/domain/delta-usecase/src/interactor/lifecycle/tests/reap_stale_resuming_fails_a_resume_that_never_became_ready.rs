@@ -66,8 +66,6 @@ async fn reap_stale_resuming_fails_a_resume_that_never_became_ready() {
             reason: None,
             // Nobody asked for this: the resume ran out of time.
             cancelled: false,
-            // A failed resume keeps its rows, so there is nothing to hand back.
-            unsent: Vec::new(),
         }],
     );
     // The pane was killed.

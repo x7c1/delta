@@ -55,14 +55,22 @@ async fn composer_first_send_rolls_back_a_failed_launch() {
         ix.pending_session_ids().await.is_empty(),
         "the failed launch left no pending entry behind"
     );
-    // The eager session row (and its send, by cascade) was rolled back too.
-    // Checked against the fake store's raw rows so the still-`spawning` eager
-    // row would be caught too (the session-list page deliberately hides
-    // message-less spawning sessions, so it could not distinguish a lingering
-    // one from a deleted one).
-    assert!(
-        ix.store().inner.lock().unwrap().sessions.is_empty(),
-        "the failed launch left no session row behind"
+    // The eager session row stays, marked `failed` — the launch's own record,
+    // which the user can open, retry and remove. Checked against the fake
+    // store's raw rows: the session-list page deliberately hides message-less
+    // `spawning` sessions, so a row left reading `spawning` would otherwise be
+    // indistinguishable from a marked one.
+    assert_eq!(
+        ix.store()
+            .inner
+            .lock()
+            .unwrap()
+            .sessions
+            .iter()
+            .map(|s| s.status)
+            .collect::<Vec<_>>(),
+        vec![delta_model::SessionStatus::Failed],
+        "the failed launch's row is kept and marked failed"
     );
     let (events, _) = ix
         .on_user_prompt_submit(submit_in(
