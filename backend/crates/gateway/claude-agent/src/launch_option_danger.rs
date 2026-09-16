@@ -58,9 +58,8 @@ mod tests {
             PERMISSION_MODE_FLAG,
             Some(BYPASS_PERMISSIONS_MODE)
         ));
-        // The rest of the mode enum as `claude --help` states it, so the
-        // "only for bypass" claim is checked against the real neighbours
-        // rather than made-up ones.
+        // Other mode spellings the CLI accepts, so the "only for bypass"
+        // claim is checked against real neighbours rather than made-up ones.
         for benign in ["default", "acceptEdits", "plan"] {
             assert!(
                 !is_dangerous_launch_option(PERMISSION_MODE_FLAG, Some(benign)),
