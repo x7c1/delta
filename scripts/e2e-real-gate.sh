@@ -262,29 +262,41 @@ gate_provider() {
 
   now="$(date +%s)"
 
+  # A red attempt is not retried right away (the debounce is on the attempt),
+  # so every tick that skips this provider repeats the verdict: otherwise the
+  # only trace of it is the FAILURE line from the tick that produced it, and
+  # every tick after that reads as green. Both skip branches below go through
+  # this one helper, so their wording cannot drift apart again. It logs the
+  # verdict when the last attempt was red and sets $last_attempt_suffix to the
+  # tail the skip summary carries (empty when the last attempt passed).
+  report_unresolved_verdict() {
+    last_attempt_suffix=""
+    if [ -z "$last_result" ] || [ "$last_result" = "success" ]; then
+      return 0
+    fi
+    last_attempt_suffix="; last attempt: $last_result"
+    unresolved="$provider: that attempt did not pass ($last_result) and has not been retried since"
+    if [ -n "$last_log" ]; then
+      unresolved="$unresolved; log: $last_log"
+    fi
+    log "$unresolved"
+  }
+
   if [ "$current_version" = "$last_version" ]; then
     log "$provider: skipped (version unchanged since the last attempt: $current_version)"
-    # A red attempt is not retried until the CLI updates again (the debounce is
-    # on the attempt). Repeat that verdict on every later tick: otherwise the
-    # only trace of it is the FAILURE line from the tick that produced it, and
-    # every tick after that reads as green.
-    if [ -n "$last_result" ] && [ "$last_result" != "success" ]; then
-      unresolved="$provider: that attempt did not pass ($last_result) and is not retried until $provider updates again"
-      if [ -n "$last_log" ]; then
-        unresolved="$unresolved; log: $last_log"
-      fi
-      log "$unresolved"
-      add_summary "$provider" "skipped (version unchanged; last attempt: $last_result)"
-    else
-      add_summary "$provider" "skipped (version unchanged)"
-    fi
+    report_unresolved_verdict
+    add_summary "$provider" "skipped (version unchanged$last_attempt_suffix)"
     return 0
   fi
 
   age=$((now - last_epoch))
   if [ "$last_epoch" -gt 0 ] && [ "$age" -lt "$DEBOUNCE_SECONDS" ]; then
     log "$provider: skipped (last attempt $(format_duration "$age") ago, debounce is $(format_duration "$DEBOUNCE_SECONDS"); '$last_version' -> '$current_version' runs on a later tick, in about $(format_duration $((DEBOUNCE_SECONDS - age))))"
-    add_summary "$provider" "skipped (deferred by the debounce)"
+    # An update inside the debounce window is the common case after a red
+    # attempt (both CLIs auto-update several times a day), so this branch must
+    # repeat the verdict too — it is where a red would otherwise vanish.
+    report_unresolved_verdict
+    add_summary "$provider" "skipped (deferred by the debounce$last_attempt_suffix)"
     return 0
   fi
 

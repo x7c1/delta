@@ -73,9 +73,10 @@ regress:
 Quality gate — `make build`, `make test`, and `make lint` each cover both
 parts and stay fast, for the inner loop. `make check` is the pre-PR gate: it
 runs the whole thing for both parts at once (build, test, lint, the frontend
-typecheck, the generated-bindings freshness check) **plus both Playwright
-suites**, so passing it means CI will pass. It needs tmux, because `make
-e2e-fake` drives the real backend through one.
+typecheck, the generated-bindings freshness check, the canary gate's own
+stubbed tests) **plus both Playwright suites**, so passing it means CI will
+pass. It needs tmux, because `make e2e-fake` drives the real backend through
+one.
 
 Run the server (from `backend/`):
 

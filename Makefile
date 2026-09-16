@@ -78,7 +78,7 @@ lint:
 	cd backend && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy + generated-bindings freshness + frontend build/typecheck/test/lint + both Playwright suites (needs tmux)
+## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy + generated-bindings freshness + frontend build/typecheck/test/lint + both Playwright suites (needs tmux) — plus the canary gate's own stubbed tests, which CI does not run
 # The point of this target is that passing it means CI will pass, so it has to
 # stay a superset of what the workflow runs — including BOTH Playwright suites.
 # `e2e` is the mock-backed one and `e2e-fake` drives the real backend through
@@ -90,6 +90,7 @@ lint:
 check:
 	cd backend && cargo fmt --all -- --check && cargo build && cargo test && cargo clippy --all-targets -- -D warnings
 	$(MAKE) gen-check
+	$(MAKE) e2e-real-gate-test
 	cd frontend && pnpm -r build && pnpm -r typecheck && pnpm -r test && pnpm -r lint
 	$(MAKE) e2e
 	$(MAKE) e2e-fake
@@ -116,6 +117,11 @@ e2e-real-claude:
 .PHONY: e2e-real-gate
 e2e-real-gate:
 	scripts/e2e-real-gate.sh
+
+## e2e-real-gate-test: exercise the canary gate's decision paths with stub CLIs and a stub suite (no quota, no network; part of `make check`)
+.PHONY: e2e-real-gate-test
+e2e-real-gate-test:
+	bash scripts/tests/e2e-real-gate.test.sh
 
 ## e2e-real-codex: run the real-codex canaries against the real `codex app-server` — one safe turn end-to-end + the thread-metadata wire fields + the worktree sandbox git grant + schema drift detection (local only; only the turn consumes Codex quota; never in CI). DELTA_CODEX_BIN overrides the binary.
 .PHONY: e2e-real-codex
