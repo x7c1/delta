@@ -246,7 +246,8 @@ fn decode_with_timeout(
 /// to `produced`.
 ///
 /// Pulled out as a free function so the state transitions are testable in
-/// isolation and the read loop in [`decode_stream`] stays a thin wrapper.
+/// isolation and both read loops — the production `decode_with_timeout` and
+/// the test-only `decode_stream` — stay thin wrappers.
 /// A single byte can produce multiple events when a deferred decision
 /// resolves: e.g. `ESC` followed by `\r` on a non-empty buffer emits both an
 /// `Interrupt` (the ESC stood alone) and a `Prompt` (the `\r` submits the

@@ -12,7 +12,7 @@ use crate::{SendTarget, WorktreeSpec};
 /// reach the user — and the eager row is marked `failed` (with its first send
 /// still open against it), leaving nothing launched behind it.
 #[tokio::test]
-async fn failed_launch_preparation_reaps_the_row_and_reports_spawn_failed() {
+async fn failed_launch_preparation_marks_the_row_failed_and_reports_spawn_failed() {
     let canonical = FakeWorkspace::canonical("/projects/app");
     let repo_root = "/projects/app/.git/..";
     let git = FakeGitWorktree {

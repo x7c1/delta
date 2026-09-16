@@ -903,8 +903,10 @@ async fn create_session_endpoint_reports_starting_then_ready() {
 /// as a synchronously-broadcast event would be.
 ///
 /// This proves the async-event plumbing: interactor sink → server drain task →
-/// broadcast → subscriber. No Claude path emits on the seam (it is dormant), so
-/// this drives it directly through the interactor's public emit.
+/// broadcast → subscriber. Real producers emit on the seam (the transcript
+/// tail's ingest announcements, the Codex pump, deferred launch outcomes), but
+/// this drives it directly through the interactor's public emit so a failure
+/// here names the plumbing rather than whichever producer was used to reach it.
 ///
 /// [`emit_async_event`]: delta_usecase::Interactor::emit_async_event
 #[tokio::test]

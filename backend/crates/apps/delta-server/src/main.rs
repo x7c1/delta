@@ -71,8 +71,9 @@ async fn main() -> anyhow::Result<()> {
     state.spawn_transcript_tail();
 
     // Drain the interactor's async event seam into the broadcast, so a producer
-    // that emits after its driving call returned still reaches browsers. Wired
-    // but dormant in this slice — no live path emits on the seam yet.
+    // that emits after its driving call returned still reaches browsers. This is
+    // the only consumer of that seam, so without it those events go nowhere; for
+    // who emits on it, see `Interactor::emit_async_event`.
     state.spawn_async_event_drain();
 
     let app = router(state);

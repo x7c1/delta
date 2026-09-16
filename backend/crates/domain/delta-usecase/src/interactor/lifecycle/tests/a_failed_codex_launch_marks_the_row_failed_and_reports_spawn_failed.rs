@@ -10,9 +10,10 @@ use crate::SendTarget;
 /// A connect failure (the provider binary is missing, the handshake is
 /// rejected) used to be a synchronous `5xx` on `POST /api/sends`. Now the send
 /// is accepted before the launch is attempted, so — exactly as on the Claude
-/// path (`failed_launch_preparation_reaps_the_row_and_reports_spawn_failed`) —
-/// the failure arrives on the async event seam as a `spawn_failed` carrying the
-/// adapter's message as its `reason`, which is the only place that text can
+/// path
+/// (`failed_launch_preparation_marks_the_row_failed_and_reports_spawn_failed`)
+/// — the failure arrives on the async event seam as a `spawn_failed` carrying
+/// the adapter's message as its `reason`, which is the only place that text can
 /// still reach the user, and the eager row is marked `failed` with that same
 /// text persisted on it (its first send stays open against the row).
 ///
@@ -20,7 +21,7 @@ use crate::SendTarget;
 /// there is no name to report — the browser keys the failure on `session_id`
 /// alone.
 #[tokio::test]
-async fn a_failed_codex_launch_reaps_the_row_and_reports_spawn_failed() {
+async fn a_failed_codex_launch_marks_the_row_failed_and_reports_spawn_failed() {
     let factory = FakeAgentFactory::failing();
     let (ix, mut sink) = interactor_with_git_and_codex_factory_and_event_sink(
         FakeGitWorktree::default(),

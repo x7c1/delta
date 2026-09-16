@@ -2,17 +2,17 @@ use crate::interactor::testing::*;
 use crate::ports::{AsyncEventSink, SessionEvent};
 use crate::SendTarget;
 
-/// A `create_session` that fails still rolls the acceptance back, even though
-/// the spawn was recorded before it ran.
+/// A `create_session` that fails marks the eager row `failed` and still removes
+/// the pending spawn, even though that spawn was recorded before it ran.
 ///
 /// The pending spawn is now recorded *before* the pane is created — that is what
 /// lets the launch's first hook bind — so a tmux failure is the one case where
-/// the rollback has to remove a record the launch itself installed. Missing it
-/// would leave a pending spawn pointing at a pane that never came up: the
-/// session would sit `spawning` until the bind watchdog reaped it, and any
-/// later hook could be mis-bound to the abandoned token in the meantime.
+/// settling the failure has to remove a record the launch itself installed.
+/// Missing it would leave a pending spawn pointing at a pane that never came
+/// up: the session would sit `spawning` until the bind watchdog reaped it, and
+/// any later hook could be mis-bound to the abandoned token in the meantime.
 #[tokio::test]
-async fn tmux_failure_after_the_pending_spawn_is_recorded_reaps_the_row() {
+async fn tmux_failure_after_the_pending_spawn_is_recorded_marks_the_row_failed() {
     let (sink, mut events) = AsyncEventSink::channel();
     let gate = TmuxGate::closed();
     let ix = interactor_with_tmux(FakeTmux {
