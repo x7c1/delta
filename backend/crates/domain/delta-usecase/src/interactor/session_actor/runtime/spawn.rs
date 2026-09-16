@@ -79,7 +79,7 @@ pub struct PendingSpawn {
     pub token: PaneToken,
     /// The pane keystrokes are sent to (`<token>:0.0`).
     pub pane: String,
-    /// When this spawn was recorded, for the watchdog deadline.
+    /// When this spawn's bind deadline started running.
     ///
     /// A spawn is fire-and-forget: only the first `UserPromptSubmit` hook binds
     /// it, so a launch that crashes/hangs before that hook never times out on
@@ -87,6 +87,10 @@ pub struct PendingSpawn {
     /// [`PENDING_SPAWN_DEADLINE`] to detect and clean up such a stuck spawn.
     /// `Instant` is monotonic, so it measures elapsed wall time without being
     /// perturbed by system-clock changes.
+    ///
+    /// Normally the moment the spawn was recorded, but not for a pane a browser
+    /// has been attached to: the last bridge leaving restarts the deadline from
+    /// there (see [`SessionRuntime::restart_pending_deadline`]).
     pub created_at: Instant,
     /// Whether the tmux session behind [`Self::pane`] actually exists yet.
     ///
@@ -208,6 +212,22 @@ impl SessionRuntime {
             .map(|spawn| spawn.pane.clone())
     }
 
+    /// Give the pending spawn its whole bind deadline again, measured from
+    /// `now`; a no-op when nothing is pending.
+    ///
+    /// Called when the last PTY bridge detaches (see
+    /// [`SessionRuntime::note_pty_detached`], which holds the reasoning): the
+    /// attachment only holds the reaper off, it does not stop
+    /// [`PendingSpawn::created_at`] running, so a pane that was watched through
+    /// its original deadline would be reaped the instant its watcher left.
+    /// Restarting the clock gives a spawn somebody has just stepped away from
+    /// the same grace as one nobody ever attached to.
+    pub(super) fn restart_pending_deadline(&mut self, now: Instant) {
+        if let Some(spawn) = self.pending_spawn.as_mut() {
+            spawn.created_at = now;
+        }
+    }
+
     /// Record that the pending spawn's pane now exists, reported by the launch
     /// task once `create_session` returned. Keyed by token so a late report
     /// cannot mark an unrelated spawn, and a no-op when nothing is pending (the
@@ -310,8 +330,10 @@ impl SessionRuntime {
         // hook will ever answer — and a browser holding a PTY bridge on this
         // pane is the answer to exactly that: killing it would tear the pane
         // out from under the person typing into it. The spawn stays pending, so
-        // a later tick reaps it once the last bridge is gone (see
-        // [`SessionRuntime::has_pty_attachment`]).
+        // a later tick reaps it once the last bridge is gone — a whole deadline
+        // later, since that detach restarts the clock (see
+        // [`SessionRuntime::has_pty_attachment`] and
+        // [`SessionRuntime::note_pty_detached`]).
         if self.has_pty_attachment() {
             return None;
         }

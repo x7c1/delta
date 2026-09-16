@@ -125,13 +125,16 @@ describe('FailedSessionPane', () => {
     expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument();
   });
 
-  it('keeps the newlines of a reason that quotes the pane', () => {
+  it('renders a reason that quotes the pane as the terminal screen it is', () => {
     // A reason the watchdog wrote is multi-line: a headline, a blank line, and
     // then the pane's last lines verbatim. Without `whitespace-pre-wrap` the
     // browser folds every newline into a space and the captured screen — the
     // one thing that says what stopped the launch — arrives as a single run-on
-    // line of scattered box-drawing characters. Asserted on the class because
-    // jsdom applies no CSS: `textContent` holds the newlines either way.
+    // line of scattered box-drawing characters. And without `font-mono` the
+    // box it draws is measured in the proportional UI face, where every row's
+    // closing `│` lands at a different x and the box falls apart. Asserted on
+    // the classes because jsdom applies no CSS: `textContent` holds the
+    // newlines either way, and knows nothing of fonts.
     renderPane(
       failedSession({
         failure_reason:
@@ -143,6 +146,7 @@ describe('FailedSessionPane', () => {
 
     expect(screen.getByTestId('failed-session-reason')).toHaveClass(
       'whitespace-pre-wrap',
+      'font-mono',
     );
   });
 

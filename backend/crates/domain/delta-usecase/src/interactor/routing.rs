@@ -303,12 +303,19 @@ where
             .await
     }
 
-    /// Record that a PTY bridge handed a pane by [`Self::attach_pane`] is gone.
+    /// Record that a PTY bridge handed a pane by [`Self::attach_pane`] is gone
+    /// as of `now`.
     ///
     /// A no-op for a session with no actor — it has no bookkeeping left to
     /// correct — so a bridge outliving its session's actor detaches harmlessly.
-    pub async fn detach_pane(&self, id: &SessionId) {
-        self.sessions.post_existing(id, SessionInput::DetachPane);
+    ///
+    /// `now` is the caller's, as for the tick drains: the last bridge leaving
+    /// restarts an unbound spawn's bind deadline
+    /// (`SessionRuntime::note_pty_detached`), so the bridge's exit and the
+    /// watchdog's sweeps are read off one clock the tests control.
+    pub async fn detach_pane(&self, id: &SessionId, now: Instant) {
+        self.sessions
+            .post_existing(id, SessionInput::DetachPane { now });
     }
 
     /// Whether a session is currently open (driven by a live pane).

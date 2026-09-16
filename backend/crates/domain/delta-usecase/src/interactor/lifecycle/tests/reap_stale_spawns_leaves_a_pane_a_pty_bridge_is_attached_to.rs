@@ -13,8 +13,9 @@ use crate::interactor::testing::*;
 /// dialog and can press the key that lets the launch continue. Reaping then
 /// would kill the pane mid-answer, which is what dogfooding hit twice in a row.
 ///
-/// Attaching only *defers* the reap: the spawn stays pending, so once the last
-/// bridge is gone the next sweep gives up on it as it always did.
+/// Attaching only *defers* the reap: the spawn stays pending, and once the last
+/// bridge is gone the deadline is enforced again — measured from that detach,
+/// so the user who steps away gets the full grace over again.
 #[tokio::test]
 async fn reap_stale_spawns_leaves_a_pane_a_pty_bridge_is_attached_to() {
     let ix = interactor();
@@ -71,7 +72,7 @@ async fn reap_stale_spawns_leaves_a_pane_a_pty_bridge_is_attached_to() {
         second.is_some(),
         "a second bridge attaches to the same pane"
     );
-    ix.detach_pane(&session_id).await;
+    ix.detach_pane(&session_id, now).await;
     let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
 
     assert!(
@@ -84,9 +85,15 @@ async fn reap_stale_spawns_leaves_a_pane_a_pty_bridge_is_attached_to() {
         "so the spawn is still pending"
     );
 
-    // The last browser goes away, and the deadline is enforced again.
-    ix.detach_pane(&session_id).await;
-    let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
+    // The last browser goes away, and the deadline is enforced again — from the
+    // detach, not from the launch: leaving restarts the clock, so the sweep that
+    // reaps this spawn is a whole deadline later (that grace has its own test,
+    // `detaching_from_a_pane_gives_the_launch_its_deadline_afresh`).
+    ix.detach_pane(&session_id, now).await;
+    let events = ix
+        .reap_stale_spawns(now + PENDING_SPAWN_DEADLINE, TICK_BOUND)
+        .await
+        .unwrap();
 
     assert_eq!(events.len(), 1, "with nobody attached, the spawn is reaped");
     assert_eq!(

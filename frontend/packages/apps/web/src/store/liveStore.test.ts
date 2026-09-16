@@ -1131,6 +1131,40 @@ describe('liveStore spawn tracking', () => {
     ]);
   });
 
+  it('announces only the first line of a reason that quotes the pane', () => {
+    // Since the watchdog began quoting what the pane was showing, a reason can
+    // run to a dozen lines of a TUI. The snackbar is a fixed-width box that
+    // dismisses itself after a few seconds, so the capture would be a wall of
+    // text nobody can read in time — and it has a better home: the failed
+    // session's own screen renders the whole reason. Only the headline here,
+    // for both tones: a cancel's reason is written by the same server path.
+    const captured =
+      'The launch did not start within 30 seconds, so Delta gave it up.' +
+      '\n\nIts terminal was showing:\n╭─ Do you trust the files in this folder?' +
+      '\n│ 1. Yes, proceed';
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      cancelled: false,
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+      reason: captured,
+    });
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      cancelled: true,
+      session_id: 'sess-spawn-2',
+      pane_token: 'pane-2',
+      reason: captured,
+    });
+
+    expect(
+      useNotificationStore.getState().notifications.map(({ detail }) => detail),
+    ).toEqual([
+      'The launch did not start within 30 seconds, so Delta gave it up.',
+      'The launch did not start within 30 seconds, so Delta gave it up.',
+    ]);
+  });
+
   it('announces an untracked cancel as information, not as an error', () => {
     // Same path as the untracked failure above (nothing on this screen would
     // otherwise say so), but the user asked for this one: dressing their own

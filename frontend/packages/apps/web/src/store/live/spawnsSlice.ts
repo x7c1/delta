@@ -142,13 +142,22 @@ function reportUntrackedSpawnFailure(
   cancelled: boolean,
 ): void {
   const notifications = useNotificationStore.getState();
+  // The headline alone. Since the watchdog began quoting the pane, a reason can
+  // be a line of explanation, a blank line, and then a dozen lines of a TUI —
+  // and the snackbar is a fixed-width box that dismisses itself after a few
+  // seconds, so a captured screen pasted into it is a wall of text nobody can
+  // read in time. It is also no longer where that content belongs: the failed
+  // session's own screen shows the reason in full, and nothing else here is
+  // narrowed. A single-line reason is its own first line, and an absent one
+  // stays absent.
+  const headline = reason?.split('\n', 1)[0];
   // A cancel is something the user asked for, so it states what happened
   // instead of alarming: only a launch that broke on its own is an error.
   if (cancelled) {
-    notifications.showInfo('Launch cancelled', reason);
+    notifications.showInfo('Launch cancelled', headline);
     return;
   }
-  notifications.showError('The session failed to start', reason);
+  notifications.showError('The session failed to start', headline);
 }
 
 export const createSpawnsSlice: StateCreator<

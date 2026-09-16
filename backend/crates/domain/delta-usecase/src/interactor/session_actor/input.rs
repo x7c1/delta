@@ -365,10 +365,15 @@ pub(in crate::interactor) enum SessionInput {
     QueryPane {
         reply: oneshot::Sender<Option<AttachablePane>>,
     },
-    /// A PTY bridge that had attached is gone (its socket closed, or the attach
-    /// never got off the ground). Fire-and-forget: nothing waits on the
-    /// bookkeeping.
-    DetachPane,
+    /// A PTY bridge that had attached is gone as of `now` (its socket closed,
+    /// or the attach never got off the ground). Fire-and-forget: nothing waits
+    /// on the bookkeeping.
+    ///
+    /// `now` is carried because the last bridge leaving restarts an unbound
+    /// spawn's bind deadline, and that instant is supplied by the caller for
+    /// the same reason the ticks above supply theirs: the deadline arithmetic
+    /// stays deterministic under test.
+    DetachPane { now: Instant },
     /// Whether the session is open (has a live, bound pane).
     QueryIsOpen { reply: oneshot::Sender<bool> },
     /// Whether any pane is live for the session (bound, or spawned and

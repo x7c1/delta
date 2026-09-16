@@ -204,8 +204,12 @@ impl AppState {
 
     /// Give back an attach recorded by [`Self::attach_pane`], when its bridge
     /// ends.
+    ///
+    /// `Instant::now()` is the live clock here, as it is for the background
+    /// ticks below: the use case takes the instant rather than reading one so
+    /// its tests can drive the deadline a detach restarts.
     pub async fn detach_pane(&self, id: &delta_usecase::SessionId) {
-        self.interactor.detach_pane(id).await;
+        self.interactor.detach_pane(id, Instant::now()).await;
     }
 
     /// Wipe the residual input of a session's open pane, for the PTY bridge.

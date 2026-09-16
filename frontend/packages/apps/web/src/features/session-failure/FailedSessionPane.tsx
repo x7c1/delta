@@ -115,9 +115,20 @@ export function FailedSessionPane({ item }: FailedSessionPaneProps) {
               blank line, then a verbatim block of a TUI's last lines (the
               contract is in `docs/guides/api/live-channels.md`, under
               `spawn_failed`). Folded onto one line, the captured screen the
-              user came here to read is box-drawing rubble. */}
+              user came here to read is box-drawing rubble.
+
+              `font-mono` for the same capture: it is a terminal screen, a box
+              drawn out of box-drawing characters whose every glyph is one cell
+              wide, so in the proportional UI face each row's closing `│` lands
+              somewhere else and the box falls apart. The reason is not always
+              a capture — a plain sentence in mono is merely a little unusual,
+              and the capture is the case worth getting right. `text-code`
+              rides along because that is the size this app pairs `font-mono`
+              with everywhere (the rationale is with the token in
+              `src/index.css`: mono reads optically larger than the sans at the
+              same nominal size). */}
           <p
-            className="whitespace-pre-wrap break-words text-secondary text-fg-muted"
+            className="whitespace-pre-wrap break-words font-mono text-code text-fg-muted"
             data-testid="failed-session-reason"
           >
             {item.session.failure_reason ??

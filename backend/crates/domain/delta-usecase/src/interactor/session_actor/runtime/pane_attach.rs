@@ -8,6 +8,8 @@
 //! found — the caller treats an unbound pane more carefully (see
 //! [`AttachablePane::bound`]).
 
+use std::time::Instant;
+
 use super::SessionRuntime;
 
 /// A pane the PTY bridge may attach to, and how far its session has got.
@@ -54,11 +56,37 @@ impl SessionRuntime {
         self.pty_attachments += 1;
     }
 
-    /// Record that a PTY bridge detached. Saturating, so an unbalanced detach —
-    /// a bridge whose session actor retired underneath it — reads as "nobody is
-    /// attached" rather than wrapping into a pane nothing can ever reap.
-    pub fn note_pty_detached(&mut self) {
-        self.pty_attachments = self.pty_attachments.saturating_sub(1);
+    /// Record that a PTY bridge detached, as of `now`.
+    ///
+    /// Saturating, so an unbalanced detach — a bridge whose session actor
+    /// retired underneath it — reads as "nobody is attached" rather than
+    /// wrapping into a pane nothing can ever reap.
+    ///
+    /// The **last** bridge leaving gives an unbound spawn its bind deadline
+    /// afresh ([`SessionRuntime::restart_pending_deadline`]). While anybody is
+    /// attached the watchdog will not reap the pane, but the deadline itself
+    /// keeps running underneath — so without this, somebody who opened the
+    /// terminal, read the dialog for a minute and then closed the column would
+    /// have the session reaped on the very next sweep, as if closing the
+    /// terminal had killed it. A pane somebody has just stepped away from gets
+    /// the same grace as one nobody ever attached to.
+    ///
+    /// Only the transition to zero does that: with two tabs open, closing one
+    /// leaves somebody watching and restarts nothing. Neither does a detach
+    /// that balances no attach — the deadline of a spawn nobody ever reached is
+    /// not something a stray decrement may extend.
+    ///
+    /// `now` is supplied by the caller rather than read here, like the watchdog
+    /// drains it competes with, so the whole attach/detach/reap sequence is
+    /// deterministic under test.
+    pub fn note_pty_detached(&mut self, now: Instant) {
+        if self.pty_attachments == 0 {
+            return;
+        }
+        self.pty_attachments -= 1;
+        if self.pty_attachments == 0 {
+            self.restart_pending_deadline(now);
+        }
     }
 
     /// Whether anybody is watching this session's pane through a PTY bridge
