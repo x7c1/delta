@@ -35,8 +35,11 @@ parsing and hook handling. It is two layers, cheapest first:
    (`backend/crates/apps/delta-server/tests/real_claude_canary.rs`): drive the
    real `claude` in tmux directly, with Delta's exact spawn shape (rendered
    `--settings`, `--session-id`, positional prompt), capturing the raw hook
-   POSTs and the raw transcript JSONL — no server, no browser. Each test's
-   doc comment lists exactly what it pins.
+   POSTs and the raw transcript JSONL — no server, no browser. On top of that
+   shape the canary pins `--permission-mode default`, which Delta's own spawn
+   leaves to the host, so a host's `defaultMode` cannot decide whether the
+   permission dialog appears. Each test's doc comment lists exactly what it
+   pins.
 2. **One Playwright smoke spec** (`packages/apps/web/e2e-real/`): browser →
    real `delta-server` → tmux → real claude → transcript → browser, proving
    the full loop closes against the real binary. `scripts/e2e-real-claude.sh` boots

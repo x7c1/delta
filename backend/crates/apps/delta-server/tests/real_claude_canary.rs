@@ -49,6 +49,15 @@
 //!   transcript, which would break every transcript assertion (verified
 //!   empirically on 2.1.x). Delta in production is launched from a normal
 //!   shell where these are unset; stripping reproduces that.
+//! - The launch pins `--permission-mode default` rather than inheriting the
+//!   host's `defaultMode` from `~/.claude/settings.json`. The permission
+//!   canary depends on `rm` raising an interactive dialog, which a host set
+//!   to `auto` would auto-approve — turning a host setting into a red canary
+//!   that says nothing about upstream drift. The CLI accepts `default` even
+//!   though `claude --help` no longer lists it among the `--permission-mode`
+//!   choices (2.1.x advertises `manual` there); an unknown value is rejected
+//!   at parse time, so were that spelling ever dropped the launch would fail
+//!   loudly instead of silently falling back to the host's mode.
 //! - Workdirs live under `CARGO_TARGET_TMPDIR` (inside the repository) so a
 //!   host that has already trusted this repository never sees a first-run
 //!   trust prompt. Transcripts written under `~/.claude/projects` are
@@ -197,9 +206,11 @@ struct ClaudeSession {
 }
 
 impl ClaudeSession {
-    /// Launch `claude --settings <rendered> --session-id <uuid> <prompt>` in a
-    /// fresh tmux session, exactly the argv Delta's spawn builds, with hooks
-    /// pointing at the capture server on `hook_port`.
+    /// Launch
+    /// `claude --settings <rendered> --session-id <uuid> --permission-mode default <prompt>`
+    /// in a fresh tmux session — Delta's spawn argv plus the explicit
+    /// permission mode the suite is written against — with hooks pointing at
+    /// the capture server on `hook_port`.
     async fn spawn(name: &str, hook_port: u16, prompt: &str) -> Self {
         let run_dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
             .join(format!("real-claude-canary-{name}-{}", std::process::id()));
@@ -234,6 +245,12 @@ impl ClaudeSession {
             settings_path.to_string_lossy().into_owned(),
             "--session-id".into(),
             session_id.clone(),
+            // Pin the permission mode instead of inheriting the host's
+            // `defaultMode` from ~/.claude/settings.json: a host set to
+            // `auto` auto-approves the permission canary's tool call, so no
+            // dialog and no `PermissionRequest` POST would ever appear.
+            "--permission-mode".into(),
+            "default".into(),
             prompt.to_owned(),
         ]);
 
@@ -713,9 +730,11 @@ async fn permission_dialog_fires_the_hook_and_the_allow_decision_is_honored() {
             server,
         };
 
-        // `rm` is never auto-approved in default permission mode, so this tool
-        // call reliably raises an interactive permission dialog. The file does
-        // not exist; `rm -f` on it is a no-op even when allowed.
+        // `rm` is never auto-approved in the default permission mode, which
+        // the launch pins via `--permission-mode default` rather than
+        // inheriting from the host, so this tool call reliably raises an
+        // interactive permission dialog. The file does not exist; `rm -f` on
+        // it is a no-op even when allowed.
         let prompt = "Use the Bash tool to run exactly this command: rm -f canary-scratch.txt\n\
                       Then reply with the single word: done";
         let session = ClaudeSession::spawn("permission", port, prompt).await;
