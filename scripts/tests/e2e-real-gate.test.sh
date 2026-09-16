@@ -93,6 +93,14 @@ $2" ;;
   esac
 }
 
+assert_not_contains() {
+  case "$2" in
+    *"$3"*) fail "$1" "  expected NOT to find $(printf '%q' "$3") in:
+$2" ;;
+    *) pass "$1" ;;
+  esac
+}
+
 assert_file_missing() {
   if [ -e "$2" ]; then
     fail "$1" "  unexpectedly exists: $2"
@@ -232,11 +240,33 @@ tick
 assert_eq "the tick after a red canary exits 0" 0 "$TICK_STATUS"
 assert_eq "the tick after a red canary runs nothing" "" "$(ran_providers)"
 assert_contains "a red last attempt stays visible on later ticks" "$TICK_OUT" \
-  "codex: that attempt did not pass (failure (exit 3)) and is not retried until codex updates again"
+  "codex: that attempt did not pass (failure (exit 3)) and has not been retried since"
 assert_contains "the summary carries the unresolved failure" "$TICK_OUT" \
   "codex: skipped (version unchanged; last attempt: failure (exit 3))"
 assert_contains "a green provider's skip line stays plain" "$TICK_OUT" \
   "claude: skipped (version unchanged since the last attempt: v1.0.0)"
+
+# The update that follows a red canary usually lands inside the debounce window
+# (both CLIs auto-update several times a day), and that tick must keep the red
+# visible too — it is deferred, not resolved. Claude updates in the same tick
+# off a green attempt, so its deferral stays plain.
+: >"$WITNESS"
+printf 'v2.2.0\n' >"$WORK_DIR/codex.version"
+printf 'v1.2.0\n' >"$WORK_DIR/claude.version"
+tick
+assert_eq "the debounced tick after a red canary exits 0" 0 "$TICK_STATUS"
+assert_eq "the debounced tick after a red canary runs nothing" "" "$(ran_providers)"
+# Pinned with the saved log path: that pointer is the actionable half of the
+# repeated verdict (canary.md sends the reader to that file), and it is what a
+# reader has left once the FAILURE line that printed it has scrolled away.
+assert_contains "a red last attempt stays visible while its update is deferred" "$TICK_OUT" \
+  "codex: that attempt did not pass (failure (exit 3)) and has not been retried since; log: $(state_field codex log)"
+assert_contains "the summary carries the unresolved failure while deferred" "$TICK_OUT" \
+  "codex: skipped (deferred by the debounce; last attempt: failure (exit 3))"
+assert_contains "a green provider's deferred summary stays plain" "$TICK_OUT" \
+  "claude: skipped (deferred by the debounce)"
+assert_not_contains "a green provider gets no unresolved verdict when deferred" "$TICK_OUT" \
+  "claude: that attempt did not pass"
 
 # --- Legacy state migration: the root state file was always claude's. -----------
 

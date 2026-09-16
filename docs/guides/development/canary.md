@@ -196,13 +196,16 @@ new information. A failure is loud instead: the wrapper exits non-zero (the
 systemd unit shows as failed), prints one `FAILURE:` line per failed provider
 with the saved log path, records `result=failure` in that provider's
 `last-attempt`, and fires a best-effort desktop notification. It stays visible
-afterwards: while that CLI's version is unchanged, every later tick repeats the
-verdict in that provider's skip line and in the tick summary (`skipped (version
-unchanged; last attempt: failure (exit 3))`) with the log path, so a red canary
-does not read as green once the `FAILURE:` line has scrolled away. When that
-happens, read the run log and follow the drift runbook above (for codex, a
-red schema-drift check means re-vendoring the app-server schema); the next
-automatic run happens once that CLI updates again (or run the suite manually
+afterwards: every later tick that skips that provider repeats the verdict in
+its skip line and in the tick summary, with the log path — `skipped (version
+unchanged; last attempt: failure (exit 3))` while the CLI has not updated, and
+`skipped (deferred by the debounce; last attempt: failure (exit 3))` once it
+has but the window has not passed yet. So a red canary does not read as green
+once the `FAILURE:` line has scrolled away, not even across the update that
+usually follows it within the day. When that happens, read the run log and
+follow the drift runbook above (for codex, a red schema-drift check means
+re-vendoring the app-server schema); the next automatic run happens once that
+CLI updates again and the debounce window has passed (or run the suite manually
 after the fix — manual runs are not gated).
 
 A manual run does not touch the gate's record, so the repeated verdict stays
@@ -251,10 +254,11 @@ state directory itself, but only once it runs, so a cron-level `>>` into it
 would fail before the gate ever got a chance on a host that has never run it.
 
 **Testing the gate without spending quota.** The test script exercises the
-gate's decision paths with stub CLIs and a stub suite:
+gate's decision paths with stub CLIs and a stub suite. It needs no network and
+no quota, and `make check` runs it:
 
 ```bash
-bash scripts/tests/e2e-real-gate.test.sh
+make e2e-real-gate-test    # bash scripts/tests/e2e-real-gate.test.sh
 ```
 
 To drive the gate by hand the same way: point `DELTA_CLAUDE_BIN` /
