@@ -25,6 +25,42 @@ export interface PendingQueueProps {
 }
 
 /**
+ * How a pending send's text renders in the rows where the strip holds the only
+ * copy of it on screen: `queued`, `dispatched`, held, an in-flight submit and
+ * the failed outcome rows.
+ *
+ * The text is shown in full rather than clipped to one line: the strip is the
+ * only place a queued send appears until it dispatches, and a queued send has
+ * no edit control — the user reads it, copies it, cancels the row and composes
+ * again. A clipped row makes all of that impossible, so `whitespace-pre-wrap`
+ * keeps the line breaks the user typed and `break-words` wraps a long unbroken
+ * token instead of letting it overflow the row.
+ *
+ * `max-h-40 overflow-y-auto` caps the height so a very long prompt scrolls
+ * inside its row. 10rem is the composer's own growth cap
+ * (`COMPOSER_MAX_HEIGHT` in `autoGrow.ts`), so the copy of a prompt that
+ * appears after Send never stands taller than the box it was typed in. The
+ * strip rides the bottom overlay, which is anchored to the pane's bottom edge
+ * and grows upward, so an uncapped row would not move the input — it would
+ * bury the transcript behind the strip and run off the top of the pane, where
+ * nothing scrolls it back into view.
+ */
+const pendingTextClass =
+  'max-h-40 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words text-fg';
+
+/**
+ * The one exception: a `local` row stands for a send already echoed into the
+ * transcript directly above the strip, so its full text is on screen a few
+ * pixels away. Repeating it here buys nothing and costs the area the reply
+ * arrives in, so that row clamps to a single line.
+ *
+ * `line-clamp-1` rather than `truncate`: this directory is checked for the
+ * `truncate` class the strip's spans used to carry, and the clamp box does the
+ * same job — the typed line breaks collapse into one ellipsised line.
+ */
+const clampedTextClass = 'min-w-0 flex-1 line-clamp-1 break-words text-fg';
+
+/**
  * The pending-send strip above the composer, a view over the server's
  * open-send list plus the thin client-side complements (see `usePendingSends`):
  *
@@ -123,34 +159,55 @@ export function PendingQueue({
      */
     reason?: string;
   }) => (
-    <li
-      key={key}
-      className="space-y-1 rounded border border-danger/30 bg-danger/10 px-2 py-1.5"
-      data-testid="pending-item"
-    >
-      <div className="flex items-start gap-2">
-        <Badge className="shrink-0" tone="warning">
-          failed
-        </Badge>
-        <span className="min-w-0 flex-1 truncate text-fg">{text}</span>
+    // The card sits in a plain `<li>` rather than being the `<li>`: the list's
+    // `divide-y` draws its line as a top border on the row element, which on a
+    // bordered card would repaint that card's own top edge in the neutral
+    // token and leave it mismatched with its other three sides.
+    <li key={key} className="py-1" data-testid="pending-item">
+      <div className="space-y-1 rounded border border-danger/30 bg-danger/10 px-2 py-1.5">
+        <div className="flex items-start gap-2">
+          <Badge className="shrink-0" tone="warning">
+            failed
+          </Badge>
+          <span className={pendingTextClass} data-testid="pending-text">
+            {text}
+          </span>
+        </div>
+        <p className="text-danger">{message}</p>
+        {reason && (
+          <p
+            className="break-words text-muted"
+            data-testid="pending-fail-reason"
+          >
+            {reason}
+          </p>
+        )}
+        <div className="flex justify-end gap-2">{actions}</div>
       </div>
-      <p className="text-danger">{message}</p>
-      {reason && (
-        <p className="break-words text-muted" data-testid="pending-fail-reason">
-          {reason}
-        </p>
-      )}
-      <div className="flex justify-end gap-2">{actions}</div>
     </li>
   );
 
-  const sendRow = (key: string, text: string, status: ReactNode) => (
+  const sendRow = (
+    key: string,
+    text: string,
+    status: ReactNode,
+    /** How the row's text renders; only the `local` row overrides it. */
+    textClass: string = pendingTextClass,
+  ) => (
     <li
       key={key}
-      className="flex items-center justify-between gap-2"
+      // `items-start`, not `items-center`: the text now wraps over as many
+      // lines as the user typed, and a status label vertically centred
+      // against a 20-line prompt floats in the middle of nowhere. Pinned to
+      // the top it stays next to the row's first line. On a one-line row the
+      // text sits a few pixels higher than before — the status controls are
+      // the taller side of the row, so centring used to nudge the text down.
+      className="flex items-start justify-between gap-2 py-1"
       data-testid="pending-item"
     >
-      <span className="min-w-0 flex-1 truncate text-fg">{text}</span>
+      <span className={textClass} data-testid="pending-text">
+        {text}
+      </span>
       {status}
     </li>
   );
@@ -166,7 +223,14 @@ export function PendingQueue({
           <Badge tone="warning">{queuedCount} queued</Badge>
         )}
       </div>
-      <ul className="space-y-1">
+      {/*
+        A hairline between rows, not just a gap: now that a row can be many
+        lines tall, two stacked multi-line prompts run together into one block
+        of text. The rows carry their own vertical padding (`py-1`) instead of
+        the list's former `space-y-1`, so each line sits evenly between the two
+        rows it separates rather than hugging the lower one.
+      */}
+      <ul className="divide-y divide-border-default">
         {entries.map((entry) => {
           switch (entry.kind) {
             case 'server': {
@@ -347,8 +411,15 @@ export function PendingQueue({
               // Accepted and already matched into the transcript; its turn is
               // still running. The header spinner already signals progress, so
               // the row carries no per-row indicator — adding one here shifted
-              // the message text the moment the icon appeared.
-              return sendRow(entry.key, entry.send.text, null);
+              // the message text the moment the icon appeared. The text is
+              // clamped to one line because the transcript right above already
+              // shows it in full (see `clampedTextClass`).
+              return sendRow(
+                entry.key,
+                entry.send.text,
+                null,
+                clampedTextClass,
+              );
             case 'sending':
               if (entry.item.status === 'failed') {
                 const target = entry.item.target;

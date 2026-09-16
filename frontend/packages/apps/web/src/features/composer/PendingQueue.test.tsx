@@ -104,10 +104,74 @@ describe('PendingQueue server sends', () => {
       },
     );
 
-    expect(screen.getAllByTestId('pending-item')).toHaveLength(2);
+    const items = screen.getAllByTestId('pending-item');
+    expect(items).toHaveLength(2);
     expect(screen.getByText('queued — sends when idle')).toBeInTheDocument();
     expect(screen.getByText('awaiting reply')).toBeInTheDocument();
     expect(screen.getByText('1 queued')).toBeInTheDocument();
+    // Stacked rows are separated by a hairline, not just a gap: with
+    // multi-line text two prompts would otherwise read as one block. jsdom
+    // has no layout, so the list's class is the only handle on it.
+    expect(items[0].closest('ul')).toHaveClass(
+      'divide-y',
+      'divide-border-default',
+    );
+  });
+
+  it('shows a multi-line send in full, capped to a scrollable height', () => {
+    // `truncate` collapsed the whole prompt into one ellipsised line; it now
+    // renders in full with the line breaks the user typed (`pendingTextClass`
+    // has the why). jsdom has no layout, so the classes are the only handle
+    // on the clipping/capping mechanism.
+    const text = 'first line\nsecond line\nthird line';
+    renderStrip(
+      { kind: 'thread', sessionId: SESSION_ID, threadId: 1 },
+      (queryClient) => {
+        queryClient.setQueryData(queryKeys.sessionSends(SESSION_ID), {
+          sends: [serverSend({ id: 1, text, status: 'queued' })],
+        });
+      },
+    );
+
+    const span = screen.getByTestId('pending-text');
+    expect(span.textContent).toBe(text);
+    expect(span).not.toHaveClass('truncate');
+    expect(span).toHaveClass('whitespace-pre-wrap', 'break-words');
+    expect(span).toHaveClass('max-h-40', 'overflow-y-auto');
+  });
+
+  it('shows a failed submit’s multi-line text in full too', () => {
+    // The outcome row renders the same text the same way: a rejected launch
+    // prompt is exactly the text the user wants back.
+    const text = 'line one\nline two\nline three';
+    useLiveStore.setState({
+      sending: [
+        {
+          id: 'l1',
+          target: {
+            kind: 'new-session',
+            workdir: null,
+            launchOptionIds: [],
+            provider: 'claude',
+            worktree: null,
+          },
+          text,
+          status: 'failed',
+          createdAt: 0,
+        },
+      ],
+    });
+    renderStrip({ kind: 'new-session' });
+
+    const span = screen.getByTestId('pending-text');
+    expect(span.textContent).toBe(text);
+    expect(span).not.toHaveClass('truncate');
+    expect(span).toHaveClass(
+      'whitespace-pre-wrap',
+      'break-words',
+      'max-h-40',
+      'overflow-y-auto',
+    );
   });
 
   it('says a queued send waits for the session while it is still starting', () => {
@@ -642,6 +706,34 @@ describe('PendingQueue server sends', () => {
       screen.getByRole('status', { name: 'in progress' }),
     ).toBeInTheDocument();
     expect(items[0].querySelector('[role="status"]')).toBeNull();
+  });
+
+  it('clamps an already-echoed send to one line instead of repeating it in full', () => {
+    // The `local` row is the one row whose text is already on screen: it
+    // matched its transcript line directly above the strip. Showing it in full
+    // a second time would only eat the area the reply arrives in, so this row
+    // alone clamps to one line (`clampedTextClass`) — and `line-clamp-1`, not
+    // `truncate`, which this directory is checked for.
+    useLiveStore.getState().recordLocalSend({
+      sendId: 7,
+      sessionId: SESSION_ID,
+      threadId: 1,
+      text: 'first line\nsecond line\nthird line',
+      createdAt: 0,
+    });
+    renderStrip(
+      { kind: 'thread', sessionId: SESSION_ID, threadId: 1 },
+      (queryClient) => {
+        queryClient.setQueryData(queryKeys.sessionSends(SESSION_ID), {
+          sends: [],
+        });
+      },
+    );
+
+    const span = screen.getByTestId('pending-text');
+    expect(span).toHaveClass('line-clamp-1');
+    expect(span).not.toHaveClass('whitespace-pre-wrap');
+    expect(span).not.toHaveClass('truncate');
   });
 
   it('does not double-render a tracked send that is still in the open list', () => {
