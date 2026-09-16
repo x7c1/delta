@@ -100,6 +100,10 @@ impl TmuxDriver for FakeTmux {
     async fn kill_session(&self, _name: &str) -> delta_usecase::Result<()> {
         Ok(())
     }
+
+    async fn capture_pane(&self, _pane: &str) -> delta_usecase::Result<String> {
+        Ok(String::new())
+    }
 }
 
 /// A local wrapper around a shared [`FakeTmux`] so the app can own the driver
@@ -135,6 +139,10 @@ impl TmuxDriver for SharedTmux {
 
     async fn kill_session(&self, name: &str) -> delta_usecase::Result<()> {
         self.0.kill_session(name).await
+    }
+
+    async fn capture_pane(&self, pane: &str) -> delta_usecase::Result<String> {
+        self.0.capture_pane(pane).await
     }
 }
 

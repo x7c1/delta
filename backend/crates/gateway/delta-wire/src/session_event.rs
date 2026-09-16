@@ -128,6 +128,18 @@ pub enum WireSessionEvent {
     },
     /// A previously-requested tool permission was resolved.
     PermissionResolved { session_id: String, request_id: i64 },
+    /// A freshly-spawned session's pane is up but nothing has bound it yet: the
+    /// launch was prepared, the tmux session exists and the agent is running in
+    /// it, and the embedded terminal can be attached to it from here. Pane-backed
+    /// (Claude) launches only — a Codex launch has no pane and binds as its own
+    /// last step.
+    SpawnPaneReady {
+        /// The Delta-minted session id whose pane came up.
+        session_id: String,
+        /// The tmux session backing it — the same name a later `spawn_failed`
+        /// for this launch would carry.
+        pane_token: String,
+    },
     /// A freshly-spawned session failed to come up before it ever registered.
     /// Emitted for every provider: an adapter-backed (Codex) launch is
     /// accepted and prepared in the background exactly like a Claude one.
@@ -145,12 +157,13 @@ pub enum WireSessionEvent {
         pane_token: Option<String>,
         /// Why the launch failed, when Delta can name the cause — the
         /// background launch preparation's own error (a git, tmux or adapter
-        /// message).
+        /// message), or, for a spawn the watchdog reaped, the deadline it
+        /// missed plus what its pane was still showing.
         ///
-        /// Absent from the frame entirely for the two watchdog-shaped
-        /// producers (a launch that exited, a spawn that never bound), which
-        /// observe only silence. A client renders it under its "failed to
-        /// start" text when present and shows that text alone otherwise.
+        /// Absent from the frame entirely where not even that is available: a
+        /// launch that exited, and a resume that never became ready. A client
+        /// renders it under its "failed to start" text when present and shows
+        /// that text alone otherwise.
         #[serde(skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         reason: Option<String>,
@@ -412,6 +425,13 @@ impl From<SessionEvent> for WireSessionEvent {
                 session_id: session_id.0,
                 request_id,
             },
+            SessionEvent::SpawnPaneReady {
+                session_id,
+                pane_token,
+            } => Self::SpawnPaneReady {
+                session_id: session_id.0,
+                pane_token,
+            },
             SessionEvent::SpawnFailed {
                 session_id,
                 pane_token,
@@ -535,6 +555,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
             | WireSessionEvent::PermissionRequested { .. }
             | WireSessionEvent::QuestionAsked { .. }
             | WireSessionEvent::PermissionResolved { .. }
+            | WireSessionEvent::SpawnPaneReady { .. }
             | WireSessionEvent::SpawnFailed { .. }
             | WireSessionEvent::AssistantStreaming { .. }
             | WireSessionEvent::SubagentStarted { .. }
@@ -608,6 +629,10 @@ fn sample_events() -> Vec<WireSessionEvent> {
         WireSessionEvent::PermissionResolved {
             session_id: session_id(),
             request_id: 1,
+        },
+        WireSessionEvent::SpawnPaneReady {
+            session_id: session_id(),
+            pane_token: "delta-sample".to_owned(),
         },
         WireSessionEvent::SpawnFailed {
             session_id: session_id(),
@@ -1058,6 +1083,7 @@ mod tests {
                 "permission_requested",
                 "question_asked",
                 "permission_resolved",
+                "spawn_pane_ready",
                 "spawn_failed",
                 "assistant_streaming",
                 "subagent_started",

@@ -25,7 +25,7 @@ async fn delete_session_removes_a_closed_session_and_leaves_disk_alone() {
     .await
     .unwrap();
     let id = SessionId::from("sess-closed");
-    assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
+    assert!(ix.bound_pane(&id).await.is_none(), "starts closed");
 
     ix.delete_session(&id)
         .await

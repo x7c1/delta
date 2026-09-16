@@ -100,6 +100,9 @@ impl TmuxDriver for NoopTmux {
     async fn kill_session(&self, _name: &str) -> Result<()> {
         Ok(())
     }
+    async fn capture_pane(&self, _pane: &str) -> Result<String> {
+        Ok(String::new())
+    }
 }
 
 fn adapter() -> ClaudeCodePtyHookAdapter<NoopTmux> {

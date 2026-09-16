@@ -10,9 +10,11 @@ use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcri
 /// The reason text rides inside the variant it belongs to, so a producer cannot
 /// report a breakage as a cancel — nor a cancel with no text to show for it.
 pub(in crate::interactor) enum UnboundLaunchEnd {
-    /// The launch broke on its own. `Some` carries the text that said why (the
-    /// launch preparation's own error); `None` is for the watchdog-shaped
-    /// producers, which observe only silence.
+    /// The launch broke on its own. `Some` carries the text that said why —
+    /// the launch preparation's own error, or the deadline a reaped spawn
+    /// missed together with what its pane was showing; `None` is for the
+    /// producers with nothing at all to report (a launch that exited, a resume
+    /// that never became ready).
     Failed(Option<String>),
     /// The user asked for it: an explicit close of a still-starting session.
     /// The text names the close rather than a breakage.

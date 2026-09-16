@@ -16,10 +16,7 @@ async fn close_session_kills_the_pane_and_keeps_the_data() {
     ))
     .await
     .unwrap();
-    assert!(
-        ix.pane_for_session(&id).await.is_some(),
-        "open before close"
-    );
+    assert!(ix.bound_pane(&id).await.is_some(), "open before close");
 
     ix.close_session(&id).await.unwrap();
 
@@ -28,7 +25,7 @@ async fn close_session_kills_the_pane_and_keeps_the_data() {
         ix.tmux_fake().killed.lock().unwrap().clone(),
         vec!["delta-1".to_owned()],
     );
-    assert!(ix.pane_for_session(&id).await.is_none(), "closed");
+    assert!(ix.bound_pane(&id).await.is_none(), "closed");
     // The data session remains.
     assert!(ix.store().session(&id).await.unwrap().is_some());
 }

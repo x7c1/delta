@@ -14,7 +14,7 @@ use std::time::Instant;
 use delta_model::{AgentProvider, Message, MessageUuid, Send, ThreadId};
 use tokio::sync::oneshot;
 
-use super::runtime::SessionLiveState;
+use super::runtime::{AttachablePane, SessionLiveState};
 use crate::agent::AgentEvent;
 use crate::error::Result;
 use crate::interactor::hooks::PermissionWait;
@@ -347,10 +347,28 @@ pub(in crate::interactor) enum SessionInput {
     },
 
     // ---- Queries (runtime reads) -------------------------------------------
-    /// The pane driving the session, if open (the PTY bridge's routing key).
-    QueryPane {
-        reply: oneshot::Sender<Option<String>>,
+    /// The pane the PTY bridge may attach to — the bound one, or a fresh
+    /// spawn's pane that is up but not yet bound — with which of the two it is,
+    /// plus the record that a bridge is now attached to what it returned.
+    ///
+    /// One input rather than a query followed by a separate register, so the
+    /// pane cannot be reaped in the gap between the two: the resolution and the
+    /// record happen in a single mailbox turn.
+    AttachPane {
+        reply: oneshot::Sender<Option<AttachablePane>>,
     },
+    /// [`Self::AttachPane`]'s lookup without its record. Test-only: the bridge
+    /// is the only caller that needs the lookup and it always wants the record,
+    /// while a test asserting on what the watchdog does with a pane cannot use
+    /// an attach that would itself hold the watchdog off it.
+    #[cfg(test)]
+    QueryPane {
+        reply: oneshot::Sender<Option<AttachablePane>>,
+    },
+    /// A PTY bridge that had attached is gone (its socket closed, or the attach
+    /// never got off the ground). Fire-and-forget: nothing waits on the
+    /// bookkeeping.
+    DetachPane,
     /// Whether the session is open (has a live, bound pane).
     QueryIsOpen { reply: oneshot::Sender<bool> },
     /// Whether any pane is live for the session (bound, or spawned and

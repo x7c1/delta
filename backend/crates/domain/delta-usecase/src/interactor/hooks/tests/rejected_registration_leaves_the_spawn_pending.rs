@@ -40,7 +40,7 @@ async fn rejected_registration_leaves_the_spawn_pending() {
         vec![session_id.clone()],
         "a refused registration must not consume the pending spawn"
     );
-    assert!(ix.pane_for_session(&session_id).await.is_none());
+    assert!(ix.bound_pane(&session_id).await.is_none());
     let row = ix
         .store()
         .session(&session_id)
@@ -66,7 +66,7 @@ async fn rejected_registration_leaves_the_spawn_pending() {
         session_id: session_id.clone(),
     }));
     assert_eq!(
-        ix.pane_for_session(&session_id).await,
+        ix.bound_pane(&session_id).await,
         Some("delta-1:0.0".to_owned())
     );
     assert!(ix.pending_session_ids().await.is_empty());

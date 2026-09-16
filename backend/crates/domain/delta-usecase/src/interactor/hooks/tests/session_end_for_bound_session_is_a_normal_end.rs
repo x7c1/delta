@@ -19,7 +19,7 @@ async fn session_end_for_bound_session_is_a_normal_end() {
     ))
     .await
     .unwrap();
-    assert!(ix.pane_for_session(&id).await.is_some(), "bound and open");
+    assert!(ix.bound_pane(&id).await.is_some(), "bound and open");
 
     let events = ix
         .on_session_end(SessionEndHook {
@@ -39,7 +39,7 @@ async fn session_end_for_bound_session_is_a_normal_end() {
         "SessionEnd must not kill a bound session's pane"
     );
     assert!(
-        ix.pane_for_session(&id).await.is_some(),
+        ix.bound_pane(&id).await.is_some(),
         "the session stays open; close/teardown is left to close_session"
     );
 }

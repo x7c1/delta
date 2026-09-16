@@ -3,6 +3,7 @@ import type { LiveState } from './live/liveState';
 import { createConnectionSlice } from './live/connectionSlice';
 import { createSendsSlice } from './live/sendsSlice';
 import { createSpawnsSlice } from './live/spawnsSlice';
+import { createStartingPanesSlice } from './live/startingPanesSlice';
 import { createRunningThreadsSlice } from './live/runningThreadsSlice';
 import { createNoticesSlice } from './live/noticesSlice';
 import { createUnreadSlice } from './live/unreadSlice';
@@ -58,6 +59,7 @@ export type {
   NewSessionLaunch,
 } from './live/sendsSlice';
 export type { SpawnItem } from './live/spawnsSlice';
+export { paneIsStarting } from './live/startingPanesSlice';
 export type { StreamingMessage } from './live/streamingSlice';
 export type { SubagentActivity } from './live/subagentsSlice';
 export { threadIsRunning } from './live/runningThreadsSlice';
@@ -76,6 +78,7 @@ export const useLiveStore = create<LiveState>()((...args) => ({
   ...createConnectionSlice(...args),
   ...createSendsSlice(...args),
   ...createSpawnsSlice(...args),
+  ...createStartingPanesSlice(...args),
   ...createRunningThreadsSlice(...args),
   ...createNoticesSlice(...args),
   ...createUnreadSlice(...args),

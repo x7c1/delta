@@ -77,7 +77,7 @@ async fn session_start_during_the_pane_launch_binds_the_spawn() {
         "the hook registered the session instead of being written off"
     );
     assert_eq!(
-        ix.pane_for_session(&session_id).await,
+        ix.bound_pane(&session_id).await,
         Some("delta-1:0.0".to_owned()),
         "the hook bound the spawn's pane"
     );

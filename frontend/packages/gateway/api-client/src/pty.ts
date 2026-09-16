@@ -13,8 +13,9 @@ export interface PtyConnectionOptions {
   url: string;
   /**
    * The session whose pane to attach to. Appended as `?session_id=<id>` so the
-   * bridge targets that session's PTY. The socket closes cleanly if the session
-   * is not open.
+   * bridge targets that session's PTY. Two states resolve a pane — an open
+   * session, and one whose launch has come up but not yet bound — and the
+   * socket closes cleanly for anything else.
    */
   sessionId: SessionId;
   /** Called with each chunk of PTY output. */

@@ -16,7 +16,7 @@ use tokio::sync::oneshot;
 use crate::error::{Error, Result};
 use crate::interactor::hooks::PermissionWait;
 use crate::interactor::session_actor::input::{Reply, SessionInput};
-use crate::interactor::session_actor::runtime::SessionLiveState;
+use crate::interactor::session_actor::runtime::{AttachablePane, SessionLiveState};
 use crate::interactor::{Interactor, PermissionDecision};
 use crate::pane_token::PaneToken;
 use crate::ports::{
@@ -284,14 +284,31 @@ where
 
     // ---- Runtime-state queries ----------------------------------------------
 
-    /// The pane driving a specific open session, if it is open.
+    /// The pane a PTY bridge may attach to for `id`, and whether the session is
+    /// bound to it, with the record that a bridge is now attached to what it
+    /// returns.
     ///
-    /// The PTY bridge routes by session id: with no live pane for `id` this
-    /// returns `None` so the bridge can refuse the attach rather than bind to
-    /// a non-existent pane.
-    pub async fn pane_for_session(&self, id: &SessionId) -> Option<String> {
-        self.query(id, |reply| SessionInput::QueryPane { reply }, None)
+    /// Routed by session id to the actor's `SessionRuntime::attachable_pane`,
+    /// which defines what resolves and what does not (and why an unbound
+    /// spawn's pane does).
+    ///
+    /// What the record buys: the launch watchdog leaves an unbound spawn's pane
+    /// alone while somebody is attached to it
+    /// (`SessionRuntime::take_stale_pending`).
+    ///
+    /// Every `Some` **must** be followed by a [`Self::detach_pane`] when the
+    /// bridge ends, or the pane stays unreapable for the life of the actor.
+    pub async fn attach_pane(&self, id: &SessionId) -> Option<AttachablePane> {
+        self.query(id, |reply| SessionInput::AttachPane { reply }, None)
             .await
+    }
+
+    /// Record that a PTY bridge handed a pane by [`Self::attach_pane`] is gone.
+    ///
+    /// A no-op for a session with no actor — it has no bookkeeping left to
+    /// correct — so a bridge outliving its session's actor detaches harmlessly.
+    pub async fn detach_pane(&self, id: &SessionId) {
+        self.sessions.post_existing(id, SessionInput::DetachPane);
     }
 
     /// Whether a session is currently open (driven by a live pane).
@@ -925,7 +942,7 @@ mod test_seams {
 
     use crate::interactor::session_actor::input::SessionInput;
     use crate::interactor::session_actor::runtime::{
-        OpenHandle, PendingSpawn, ResumingSession, SessionRuntime,
+        AttachablePane, OpenHandle, PendingSpawn, ResumingSession, SessionRuntime,
     };
     use crate::interactor::Interactor;
     use crate::pane_token::PaneToken;
@@ -1066,6 +1083,33 @@ mod test_seams {
             found.into_iter().map(|(_, id)| id).collect()
         }
 
+        /// The pane a session is **bound** to, or `None` while it is not.
+        ///
+        /// The narrow question most tests mean when they ask about a session's
+        /// pane: did this hook bind it, does closing it release it. The
+        /// attachable-pane lookup ([`Self::pane_for_session`]) answers a wider
+        /// one — it also resolves a spawn whose pane is up but unbound, which is
+        /// what the PTY bridge attaches to — so a bind assertion phrased against
+        /// it would pass before the bind it is checking for.
+        pub(crate) async fn bound_pane(&self, id: &SessionId) -> Option<String> {
+            self.with_runtime_existing(id, |state| state.handle().map(|handle| handle.pane.clone()))
+                .await
+                .flatten()
+        }
+
+        /// What [`Interactor::attach_pane`] would resolve for `id`, without
+        /// recording an attach.
+        ///
+        /// A seam rather than production API: the bridge is the only caller
+        /// that needs this lookup and it always wants the record, so a second
+        /// public method resolving the same thing would be a surface nothing
+        /// asks for. Tests want the read alone — the attach they are not making
+        /// would itself hold the watchdog off the pane they are asserting about.
+        pub(crate) async fn pane_for_session(&self, id: &SessionId) -> Option<AttachablePane> {
+            self.query(id, |reply| SessionInput::QueryPane { reply }, None)
+                .await
+        }
+
         /// Record a pending spawn with an explicit `created_at`, for watchdog
         /// tests.
         ///
@@ -1088,6 +1132,10 @@ mod test_seams {
                     token: PaneToken::from_raw(&token),
                     pane: pane_for(&token),
                     created_at,
+                    // The seam stands in for a launch that got as far as
+                    // creating its pane, which is the state every watchdog and
+                    // attach test is about.
+                    pane_created: true,
                 });
             })
             .await;

@@ -19,7 +19,7 @@ import {
   useNavStore,
   type FocusedSession,
 } from '../../store/navStore';
-import { useLiveStore } from '../../store/liveStore';
+import { paneIsStarting, useLiveStore } from '../../store/liveStore';
 import { useGarbageCollectSessionScopedStorage } from '../../store/sessionScopedStorage';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { CommsLogPane } from '../comms/CommsLogPane';
@@ -27,7 +27,7 @@ import { NavigatorPane } from '../navigator/NavigatorPane';
 import { FailedSessionPane } from '../session-failure/FailedSessionPane';
 import { SettingsView } from '../settings/SettingsView';
 import { TranscriptPane } from '../transcript/TranscriptPane';
-import { TerminalPane } from '../terminal/TerminalPane';
+import { TerminalPane, type TerminalPaneState } from '../terminal/TerminalPane';
 import { TerminalFallback } from '../terminal/TerminalFallback';
 import { TerminalResizeHandle } from '../terminal/TerminalResizeHandle';
 
@@ -191,6 +191,7 @@ export function WorkspaceScreen() {
   const terminalWidth = useNavStore((state) => state.terminalWidth);
   const clearUnread = useLiveStore((state) => state.clearUnread);
   const spawns = useLiveStore((state) => state.spawns);
+  const startingPanes = useLiveStore((state) => state.startingPanes);
   const markSpawnFocusHandedOver = useLiveStore(
     (state) => state.markSpawnFocusHandedOver,
   );
@@ -507,6 +508,25 @@ export function WorkspaceScreen() {
   const showCommsToggle =
     !commsOpen && !focusedHasTerminal && focusedHasCommsLog;
 
+  // How far the focused session's pane has got (see `TerminalPaneState`), which
+  // is wider than `focusedOpen`: a spawn's pane can be typed into before
+  // anything binds it.
+  //
+  // Ordered by how far the launch got, so each branch is reached in exactly one
+  // state: a bound session is open; a failed one has no pane left; a `spawning`
+  // one has a pane only once the server has said so; and anything else with no
+  // live pane is a closed session.
+  const terminalPaneState: TerminalPaneState = focusedOpen
+    ? 'open'
+    : focusedFailed
+      ? 'failed'
+      : focusedSpawning
+        ? focusedRealSessionId !== null &&
+          paneIsStarting(startingPanes, focusedRealSessionId)
+          ? 'starting'
+          : 'preparing'
+        : 'closed';
+
   // Fence the embedded terminal behind an error boundary: its attach runs in an
   // effect that can throw (e.g. an xterm addon failing to load), and without a
   // boundary that exception would unmount the whole app. Isolating it here keeps
@@ -520,7 +540,7 @@ export function WorkspaceScreen() {
     >
       <TerminalPane
         sessionId={focusedRealSessionId}
-        attachable={focusedOpen}
+        paneState={terminalPaneState}
         hasTerminal={focusedHasTerminal}
       />
     </ErrorBoundary>

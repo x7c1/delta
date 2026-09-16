@@ -34,9 +34,9 @@ pub use agent::{
 };
 pub use error::{Error, Result};
 pub use interactor::{
-    BoxedInteractor, ExternalHandler, ExternalHandlerId, Interactor, PendingPermission,
-    PendingQuestion, PermissionDecision, PermissionWait, RunningSubagent, SessionLiveState,
-    VSCODE_HANDLER_ID,
+    AttachablePane, BoxedInteractor, ExternalHandler, ExternalHandlerId, Interactor,
+    PendingPermission, PendingQuestion, PermissionDecision, PermissionWait, RunningSubagent,
+    SessionLiveState, VSCODE_HANDLER_ID,
 };
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use pane_token::{PaneToken, PaneTokenMinter};

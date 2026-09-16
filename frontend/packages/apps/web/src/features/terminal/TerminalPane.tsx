@@ -15,21 +15,46 @@ import {
   terminalFontSize,
 } from '../../theme';
 
+/**
+ * What the focused session offers the terminal, which is not the same question
+ * as whether it is open.
+ *
+ * A session's pane comes up before anything binds it, and that window is
+ * exactly when the embedded terminal matters most: a launch can stop on an
+ * interactive prompt (Claude Code's workspace-trust dialog) that fires no hook,
+ * so nothing but a human at the pane can get it moving. So "may be attached to"
+ * is wider than "is open", and the states that cannot be attached to differ in
+ * what they should say — a session that is starting is not a session that was
+ * closed.
+ */
+export type TerminalPaneState =
+  /** The launch is accepted but has no pane yet: nothing to attach to. */
+  | 'preparing'
+  /** The pane is up and nothing has bound it: attachable and interactive. */
+  | 'starting'
+  /** Bound: the ordinary open session, attached exactly as it always was. */
+  | 'open'
+  /** Closed, and resumable. */
+  | 'closed'
+  /** The launch never came up: no pane, and nothing to resume. */
+  | 'failed';
+
 export interface TerminalPaneProps {
   /**
    * The focused session whose PTY pane to show. Null for a not-yet-bound New
    * session (no pane exists), in which case the terminal is disabled.
    */
   sessionId: SessionId | null;
-  /** Whether the focused session is open (its pane is attachable). */
-  attachable: boolean;
+  /** How far the focused session's pane has got (see {@link TerminalPaneState}). */
+  paneState: TerminalPaneState;
   /**
    * Whether the focused session's provider offers an attachable terminal, read
    * from its capability profile (`GET /api/providers`) — never from the provider
    * id. A terminal-less provider (Codex's headless app-server) must NEVER open a
-   * `/pty` bridge, so this gates the attach as authoritatively as `attachable`:
-   * the enclosing pane is already withheld for such a provider, and this keeps
-   * the connect itself capability-driven even if the pane is ever mounted.
+   * `/pty` bridge, so this gates the attach as authoritatively as
+   * {@link TerminalPaneProps.paneState}: the enclosing pane is already withheld
+   * for such a provider, and this keeps the connect itself capability-driven
+   * even if the pane is ever mounted.
    */
   hasTerminal: boolean;
 }
@@ -49,10 +74,12 @@ interface PaneEntry {
 }
 
 /**
- * The embedded xterm.js terminal for the focused session's `/pty` pane. It is
- * the access path for answering permission prompts in the real TUI. In mock
- * mode the PTY socket is not available, so it renders an informational
- * placeholder; it is also disabled for a closed or not-yet-registered session.
+ * The embedded xterm.js terminal for the focused session's `/pty` pane — the
+ * access path for answering anything the TUI asks, which is why it attaches for
+ * a session that is merely *starting* as well as an open one
+ * ({@link TerminalPaneState}). In mock mode the PTY socket is not available, so
+ * it renders an informational placeholder; so do the states with no pane behind
+ * them.
  *
  * Each session gets its own xterm instance, created on first view and **kept
  * attached** while the terminal stays open — switching between *open* sessions
@@ -66,7 +93,7 @@ interface PaneEntry {
  */
 export function TerminalPane({
   sessionId,
-  attachable,
+  paneState,
   hasTerminal,
 }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -77,31 +104,48 @@ export function TerminalPane({
   // xterm instance below without requiring a session detach + reattach.
   const { resolved: resolvedTheme } = useThemeContext();
 
+  // The two states with a live pane behind them, and so the two the `/pty`
+  // bridge resolves.
+  const hasLivePane = paneState === 'open' || paneState === 'starting';
   const canAttach =
-    !isMockMode() && attachable && hasTerminal && sessionId !== null;
+    !isMockMode() && hasLivePane && hasTerminal && sessionId !== null;
 
   // Show the focused session's pane, keeping the others attached but hidden.
   useEffect(() => {
     const entries = entriesRef.current;
     const parent = containerRef.current;
     if (!canAttach || sessionId === null || !parent) {
-      // The focused session is known but not attachable — it was closed. Drop
-      // its live entry now so a later resume (a Send or the open button)
-      // rebuilds against the freshly-resumed pane. Relying on the bridge
-      // socket's async `closed` flag races with the resume: if the close event
-      // lands after this effect re-runs, the dead entry is reused and the
-      // terminal stays blank until a manual reload. Other early-return reasons
-      // (mock mode, a New session with no pane, the container not yet mounted)
-      // keep their entries hidden.
-      if (sessionId !== null && !attachable && !isMockMode()) {
+      // The focused session is known but has no live pane — it was closed, or
+      // its launch failed. Drop its live entry now so a later resume (a Send or
+      // the open button) rebuilds against the freshly-resumed pane. Relying on
+      // the bridge socket's async `closed` flag races with the resume: if the
+      // close event lands after this effect re-runs, the dead entry is reused
+      // and the terminal stays blank until a manual reload. Other early-return
+      // reasons (mock mode, a New session with no pane, the container not yet
+      // mounted) keep their entries hidden.
+      //
+      // A session that is merely `preparing` is neither dropped nor hidden. Its
+      // ordinary form has no entry to drop (there was no pane to build one
+      // against), but it is also what the focused session reads as for the
+      // moment between the bind landing and the session row saying so: the
+      // live event clears the starting-pane mark at once, while `open` comes
+      // off the row, which only flips after its refetch. Tearing the terminal
+      // down for that blink would close the `/pty` socket the instant the user
+      // answered the prompt they attached for — detaching the tmux client (the
+      // stray blank line this component exists to avoid), typing the pre-attach
+      // input wipe into the freshly-bound pane on the way back, and dropping
+      // whatever they were mid-way through typing.
+      const paneIsGone = paneState === 'closed' || paneState === 'failed';
+      if (sessionId !== null && paneIsGone && !isMockMode()) {
         const closedEntry = entries.get(sessionId);
         if (closedEntry) {
           disposeEntry(closedEntry);
           entries.delete(sessionId);
         }
       }
-      for (const entry of entries.values()) {
-        entry.el.style.display = 'none';
+      for (const [id, entry] of entries) {
+        entry.el.style.display =
+          id === sessionId && paneState === 'preparing' ? 'block' : 'none';
       }
       return;
     }
@@ -123,7 +167,10 @@ export function TerminalPane({
       current.el.style.display = id === sessionId ? 'block' : 'none';
     }
     entry.fit.fit();
-  }, [canAttach, sessionId]);
+    // `paneState` rather than `hasLivePane` alone: the branch above tells the
+    // three pane-less states apart (only `closed` and `failed` tear an entry
+    // down), so a move between two of them has to re-run it.
+  }, [canAttach, paneState, sessionId]);
 
   // When the active theme changes, repaint every live xterm: each Terminal
   // reads its background once at construction (see `createEntry`), so a
@@ -174,14 +221,14 @@ export function TerminalPane({
     };
   }, []);
 
-  // Message shown instead of the live terminal when no pane can be shown.
+  // Message shown instead of the live terminal when no pane can be shown. Each
+  // state says what is actually true of it: a session that is starting is told
+  // to wait, not told to resume something that was never closed.
   const unavailableNote = isMockMode()
     ? 'The terminal attaches to the live PTY bridge. It is unavailable in mock mode (no backend). Run against the Delta server to use it for answering permission prompts in the TUI.'
     : sessionId === null
       ? 'No session is attached yet. Start a session, then its terminal appears here.'
-      : !attachable
-        ? 'This session is closed. Resume it to attach its terminal.'
-        : null;
+      : NOTE_BY_PANE_STATE[paneState];
 
   return (
     <Panel
@@ -207,6 +254,23 @@ export function TerminalPane({
     </Panel>
   );
 }
+
+/**
+ * What to say for each state with no pane to show, and `null` for the two that
+ * have one (the live terminal is the message).
+ */
+const NOTE_BY_PANE_STATE: Record<TerminalPaneState, string | null> = {
+  // The launch is being prepared — a worktree checkout, a settings write — and
+  // its pane does not exist yet. Observed preparations run from instant to
+  // several seconds, so this is a real state the user sees, and the honest
+  // thing to say is that there is nothing yet rather than nothing at all.
+  preparing:
+    'This session is still starting up. Its terminal appears as soon as the agent is running.',
+  starting: null,
+  open: null,
+  closed: 'This session is closed. Resume it to attach its terminal.',
+  failed: 'This session never started, so it has no terminal.',
+};
 
 /** Build a live xterm bound to `sessionId`'s pane, appended into `parent`. */
 function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {

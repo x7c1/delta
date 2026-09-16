@@ -23,7 +23,7 @@ async fn open_session_missing_transcript_is_resume_unavailable() {
     .unwrap();
     let id = SessionId::from("sess-R");
     ix.transcript_fake().mark_missing("/elsewhere/t.jsonl");
-    assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
+    assert!(ix.bound_pane(&id).await.is_none(), "starts closed");
 
     let err = ix
         .open_session(&id)
@@ -45,7 +45,7 @@ async fn open_session_missing_transcript_is_resume_unavailable() {
         "a resume-unavailable open must not write session settings"
     );
     assert!(
-        ix.pane_for_session(&id).await.is_none(),
+        ix.bound_pane(&id).await.is_none(),
         "the session stays closed"
     );
 }

@@ -26,7 +26,7 @@ async fn enqueue_send_resumes_a_closed_session_then_dispatches() {
     .await
     .unwrap();
     let id = SessionId::from("sess-R");
-    assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
+    assert!(ix.bound_pane(&id).await.is_none(), "starts closed");
 
     let main = ix.store().main_thread_id(&id).await.unwrap();
     let (send, _) = ix
@@ -56,7 +56,7 @@ async fn enqueue_send_resumes_a_closed_session_then_dispatches() {
 
     // The session is open but resumed-but-not-ready, so the first prompt's
     // keystroke is held — not dispatched within the `enqueue_send` call.
-    let pane = ix.pane_for_session(&id).await.expect("now open after send");
+    let pane = ix.bound_pane(&id).await.expect("now open after send");
     assert!(
         ix.tmux_fake().sent.lock().unwrap().is_empty(),
         "the resume's first prompt is held until SessionStart(resume)"

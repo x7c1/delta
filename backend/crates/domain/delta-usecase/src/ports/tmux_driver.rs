@@ -58,6 +58,17 @@ pub trait TmuxDriver: Send + Sync {
     /// Used to close a session: the conversational data persists in the store,
     /// but the live pane and process are gone.
     async fn kill_session(&self, name: &str) -> Result<()>;
+
+    /// The text currently displayed in `pane`, as the pane's visible lines.
+    ///
+    /// Equivalent to `tmux capture-pane -p -t <pane>`. Read-only: it types
+    /// nothing and changes nothing about the pane.
+    ///
+    /// Used by the launch watchdog to say what a silent launch was doing: it
+    /// reads the pane just before killing it and keeps the text as the
+    /// failure's reason. `pane` is a fully-qualified tmux target such as
+    /// `<name>:0.0`.
+    async fn capture_pane(&self, pane: &str) -> Result<String>;
 }
 
 /// Derive the pane a session's launched command runs in: `<name>:0.0`.
@@ -93,5 +104,9 @@ impl TmuxDriver for Box<dyn TmuxDriver> {
 
     async fn kill_session(&self, name: &str) -> Result<()> {
         (**self).kill_session(name).await
+    }
+
+    async fn capture_pane(&self, pane: &str) -> Result<String> {
+        (**self).capture_pane(pane).await
     }
 }

@@ -56,7 +56,16 @@ thread_id: number,
  * The raw `{"questions":[…]}` tool input, serialized as JSON text, so
  * the browser can render the question card.
  */
-tool_input: string, } | { "kind": "permission_resolved", session_id: string, request_id: number, } | { "kind": "spawn_failed", 
+tool_input: string, } | { "kind": "permission_resolved", session_id: string, request_id: number, } | { "kind": "spawn_pane_ready", 
+/**
+ * The Delta-minted session id whose pane came up.
+ */
+session_id: string, 
+/**
+ * The tmux session backing it — the same name a later `spawn_failed`
+ * for this launch would carry.
+ */
+pane_token: string, } | { "kind": "spawn_failed", 
 /**
  * The Delta-minted session id — the only key a client correlates the
  * failure by.
@@ -73,12 +82,13 @@ pane_token?: string,
 /**
  * Why the launch failed, when Delta can name the cause — the
  * background launch preparation's own error (a git, tmux or adapter
- * message).
+ * message), or, for a spawn the watchdog reaped, the deadline it
+ * missed plus what its pane was still showing.
  *
- * Absent from the frame entirely for the two watchdog-shaped
- * producers (a launch that exited, a spawn that never bound), which
- * observe only silence. A client renders it under its "failed to
- * start" text when present and shows that text alone otherwise.
+ * Absent from the frame entirely where not even that is available: a
+ * launch that exited, and a resume that never became ready. A client
+ * renders it under its "failed to start" text when present and shows
+ * that text alone otherwise.
  */
 reason?: string, 
 /**

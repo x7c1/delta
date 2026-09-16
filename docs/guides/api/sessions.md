@@ -116,9 +116,9 @@ and flips to `active` at registration. The response likewise returns before the
 launch preparation runs — the same split
 [`POST /api/sends`](sends.md#post-apisends) makes — so a preparation failure
 arrives as a `spawn_failed` event with a `reason` rather than as a `500`, and
-deletes the row. The call is idempotent across that whole window: a second call
-made while the first session's launch is still being prepared reuses it instead
-of starting a rival session.
+marks the row `failed` rather than deleting it. The call is idempotent across
+that whole window: a second call made while the first session's launch is still
+being prepared reuses it instead of starting a rival session.
 
 Authentication is assumed: the server relies on a cached Claude Code token (or
 `CLAUDE_CODE_OAUTH_TOKEN`) and does not perform interactive OAuth. If the session

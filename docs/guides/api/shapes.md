@@ -35,10 +35,12 @@ name. Conventions (timestamps, id types, error bodies) are in
   bind deadline, or the user closed it while it was still starting. Its row is
   kept, so the failure is something the user can open, read, retry and remove.
 - `failure_reason` is why a `failed` session's launch ended, when Delta could
-  name a cause: the launch preparation's own error text, or, for a cancelled
-  launch, the sentence naming the close. `null` for every other status, for the
-  endings that observe only silence (a launch that exited, a spawn that never
-  bound before its deadline), and for rows written before the field existed.
+  name a cause. It is the row's copy of the `reason` the
+  [`spawn_failed`](live-channels.md#session-lifecycle) frame carried, which
+  documents what each producer can name and the shape the text takes — it is
+  **multi-line** when the watchdog quoted the pane into it. `null` for every
+  other status, for the producers that name nothing, and for rows written
+  before the field existed.
 - `transcript_path` is empty while the session is still `spawning`, before the
   first hook reports it — and stays empty on a `failed` row, whose launch never
   produced one.

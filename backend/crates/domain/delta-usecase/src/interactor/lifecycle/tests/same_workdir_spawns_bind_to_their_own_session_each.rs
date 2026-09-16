@@ -39,12 +39,6 @@ async fn same_workdir_spawns_bind_to_their_own_session_each() {
     .unwrap();
 
     // Each session bound to its own spawn's pane despite the shared cwd.
-    assert_eq!(
-        ix.pane_for_session(&id1).await,
-        Some("delta-1:0.0".to_owned()),
-    );
-    assert_eq!(
-        ix.pane_for_session(&id2).await,
-        Some("delta-2:0.0".to_owned()),
-    );
+    assert_eq!(ix.bound_pane(&id1).await, Some("delta-1:0.0".to_owned()),);
+    assert_eq!(ix.bound_pane(&id2).await, Some("delta-2:0.0".to_owned()),);
 }

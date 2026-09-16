@@ -106,6 +106,10 @@ impl TmuxDriver for RecordingTmux {
         self.killed.lock().unwrap().push(name.to_owned());
         Ok(())
     }
+
+    async fn capture_pane(&self, _pane: &str) -> Result<String> {
+        Ok(String::new())
+    }
 }
 
 // --- Fixtures ---------------------------------------------------------------

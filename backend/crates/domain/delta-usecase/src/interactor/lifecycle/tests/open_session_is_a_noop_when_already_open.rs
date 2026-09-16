@@ -18,12 +18,12 @@ async fn open_session_is_a_noop_when_already_open() {
     let id = SessionId::from("sess-R");
 
     ix.open_session(&id).await.unwrap();
-    let first_pane = ix.pane_for_session(&id).await.unwrap();
+    let first_pane = ix.bound_pane(&id).await.unwrap();
     let created_after_first = ix.tmux_fake().created.lock().unwrap().len();
 
     // A second open is a no-op: same pane, no new spawn.
     ix.open_session(&id).await.unwrap();
-    assert_eq!(ix.pane_for_session(&id).await.unwrap(), first_pane);
+    assert_eq!(ix.bound_pane(&id).await.unwrap(), first_pane);
     assert_eq!(
         ix.tmux_fake().created.lock().unwrap().len(),
         created_after_first,

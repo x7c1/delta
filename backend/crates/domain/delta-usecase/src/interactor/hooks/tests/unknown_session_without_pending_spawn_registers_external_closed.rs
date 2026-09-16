@@ -31,9 +31,7 @@ async fn unknown_session_without_pending_spawn_registers_external_closed() {
         SessionEvent::ExternalInput { prompt, .. } if prompt == "typed outside"
     )));
     assert!(
-        ix.pane_for_session(&SessionId::from("sess-X"))
-            .await
-            .is_none(),
+        ix.bound_pane(&SessionId::from("sess-X")).await.is_none(),
         "an external session has no open pane"
     );
 }

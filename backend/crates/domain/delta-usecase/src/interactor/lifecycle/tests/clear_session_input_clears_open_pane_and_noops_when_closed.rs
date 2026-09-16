@@ -19,7 +19,7 @@ async fn clear_session_input_clears_open_pane_and_noops_when_closed() {
     let id = SessionId::from("sess-C");
 
     // Closed: clearing is a no-op that records no driver call.
-    assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
+    assert!(ix.bound_pane(&id).await.is_none(), "starts closed");
     ix.clear_session_input(&id).await.unwrap();
     assert!(
         ix.tmux_fake().cleared.lock().unwrap().is_empty(),
@@ -28,7 +28,7 @@ async fn clear_session_input_clears_open_pane_and_noops_when_closed() {
 
     // Open it, then clearing targets the bound pane.
     ix.open_session(&id).await.unwrap();
-    let pane = ix.pane_for_session(&id).await.expect("now open");
+    let pane = ix.bound_pane(&id).await.expect("now open");
     ix.clear_session_input(&id).await.unwrap();
     assert_eq!(
         ix.tmux_fake().cleared.lock().unwrap().clone(),

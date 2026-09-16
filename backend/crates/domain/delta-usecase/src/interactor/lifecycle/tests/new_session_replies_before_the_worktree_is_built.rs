@@ -107,7 +107,7 @@ async fn new_session_replies_before_the_worktree_is_built() {
         .await
         .unwrap();
     assert!(
-        ix.pane_for_session(&session_id).await.is_some(),
+        ix.bound_pane(&session_id).await.is_some(),
         "the first hook binds the launched spawn as it always has"
     );
 }

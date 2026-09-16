@@ -47,7 +47,12 @@ vi.mock('../../data/useSessionEvents', () => ({
   useSessionEvents: () => {},
 }));
 vi.mock('../terminal/TerminalPane', () => ({
-  TerminalPane: () => <div data-testid="terminal-pane" />,
+  // `paneState` is surfaced as an attribute because it is a decision this
+  // screen makes — how far the focused session's pane has got — while what the
+  // pane does with it belongs to `TerminalPane.test.tsx`.
+  TerminalPane: ({ paneState }: { paneState: string }) => (
+    <div data-testid="terminal-pane" data-pane-state={paneState} />
+  ),
 }));
 // The comms pane opens a `/comms` WebSocket in its effect, which is as
 // meaningless in jsdom as the terminal's attach. Its own suite
@@ -253,7 +258,12 @@ describe('WorkspaceScreen multi-session', () => {
     });
     // `notices` is reset alongside the rest: a case that seeds a permission
     // notice would otherwise leak the card into every later case's screen.
-    useLiveStore.setState({ spawns: [], unread: {}, notices: {} });
+    useLiveStore.setState({
+      spawns: [],
+      startingPanes: [],
+      unread: {},
+      notices: {},
+    });
   });
 
   it('clears the focused session’s active thread unread on load', async () => {
@@ -1138,6 +1148,7 @@ describe('WorkspaceScreen multi-session', () => {
     provider: 'claude' | 'codex',
     mainThreadId: number,
     open = true,
+    status: 'active' | 'spawning' | 'failed' = 'active',
   ) {
     server.use(
       http.get('*/api/sessions', () =>
@@ -1149,7 +1160,7 @@ describe('WorkspaceScreen multi-session', () => {
                 cwd: '/work',
                 transcript_path: '/tmp/s.jsonl',
                 title: `${provider} session`,
-                status: 'active',
+                status,
                 created_at: '2026-01-01T00:00:00Z',
                 branch_at_launch: null,
                 repo_root: null,
@@ -1194,6 +1205,61 @@ describe('WorkspaceScreen multi-session', () => {
     renderScreen();
 
     expect(await screen.findByTestId('terminal-pane')).toBeInTheDocument();
+  });
+
+  it('offers a starting session its pane only once the server says the pane is up', async () => {
+    // The window this screen exists to express. The row reads `spawning` on
+    // both sides of it, so the only thing that separates "still preparing the
+    // launch" from "the agent is running in a pane" is the live announcement —
+    // which is what decides whether the terminal attaches or explains itself.
+    useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
+    useSingleSessionOfProvider(
+      SESSION_ID,
+      'claude',
+      MAIN_THREAD_ID,
+      false,
+      'spawning',
+    );
+
+    const { queryClient } = renderScreen();
+
+    expect(await screen.findByTestId('terminal-pane')).toHaveAttribute(
+      'data-pane-state',
+      'preparing',
+    );
+
+    deliverEvent(queryClient, {
+      kind: 'spawn_pane_ready',
+      session_id: SESSION_ID,
+      pane_token: 'delta-1',
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('terminal-pane')).toHaveAttribute(
+        'data-pane-state',
+        'starting',
+      ),
+    );
+  });
+
+  it('gives a failed launch no pane to attach to', async () => {
+    // A launch that never came up has no pane left, and saying it is closed
+    // would offer a resume that cannot happen.
+    useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
+    useSingleSessionOfProvider(
+      SESSION_ID,
+      'claude',
+      MAIN_THREAD_ID,
+      false,
+      'failed',
+    );
+
+    renderScreen();
+
+    expect(await screen.findByTestId('terminal-pane')).toHaveAttribute(
+      'data-pane-state',
+      'failed',
+    );
   });
 
   it('hides the terminal toggle and pane for a Codex session even with terminalOpen persisted', async () => {

@@ -48,12 +48,41 @@ pub async fn pty_handler(
     Query(query): Query<PtyQuery>,
     upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    // Resolve the named session's pane up front. If it is not open there is
-    // nothing to attach to, so the bridge closes the socket cleanly instead of
-    // attaching to a non-existent pane.
     let session_id = SessionId::from(query.session_id);
-    let pane = state.pane_for_session(&session_id).await;
     let tmux_socket = state.tmux_socket().to_owned();
+    upgrade.on_upgrade(move |socket| bridge(socket, state, session_id, tmux_socket))
+}
+
+/// Bridge a browser WebSocket to a tmux pane through a PTY.
+///
+/// Resolving the pane happens here, after the upgrade, rather than in the
+/// handler: resolving also *records* the attach, and an upgrade that never
+/// completes would leave that record behind with no bridge to release it —
+/// telling the launch watchdog forever that somebody is watching a pane nobody
+/// is. When nothing resolves, the socket is logged and closed.
+async fn bridge(
+    mut socket: WebSocket,
+    state: AppState,
+    session_id: SessionId,
+    tmux_socket: String,
+) {
+    // A bound session resolves its pane, and so does a fresh spawn whose pane is
+    // up but unbound; anything else resolves nothing, and the bridge closes the
+    // socket cleanly rather than attach to a pane that does not exist.
+    let Some(attached) = state.attach_pane(&session_id).await else {
+        tracing::warn!(
+            session_id = %session_id,
+            "pty bridge requested for a session with no attachable pane; closing"
+        );
+        let _ = socket.close().await;
+        return;
+    };
+    // The attach is now recorded on the session's actor and must be given back
+    // however this function leaves, a panic inside the bridge included.
+    let _guard = AttachGuard {
+        state: state.clone(),
+        session_id: session_id.clone(),
+    };
 
     // Clear any residual input before the fresh attach. When the previous PTY
     // bridge tore down (e.g. a browser reload detached the attach client), tmux
@@ -65,7 +94,14 @@ pub async fn pty_handler(
     // the guarantee for message integrity; this is the complementary
     // clear-on-attach. A failed clear must never block the attach, so it is
     // logged and ignored rather than propagated.
-    if pane.is_some() {
+    //
+    // Only for a BOUND pane. The wipe is `C-u` plus a run of backspaces — keys,
+    // not an abstract "empty the input" — and it is safe only because a bound
+    // pane is known to be an agent sitting at its prompt. An unbound spawn's
+    // pane may be showing anything, up to and including a dialog whose options
+    // those very keys would answer, and it has no residual input to wipe anyway:
+    // nothing has ever typed into it, and no client has detached from it.
+    if attached.bound {
         if let Err(err) = state.clear_session_input(&session_id).await {
             tracing::warn!(
                 session_id = %session_id,
@@ -75,29 +111,26 @@ pub async fn pty_handler(
         }
     }
 
-    upgrade.on_upgrade(move |socket| bridge(socket, session_id, pane, tmux_socket))
+    if let Err(err) = run_bridge(socket, attached.pane, &tmux_socket).await {
+        tracing::error!(error = %err, "pty bridge terminated with error");
+    }
 }
 
-/// Bridge a browser WebSocket to a tmux pane through a PTY.
+/// Holds the session's recorded PTY attach for as long as the bridge lives, and
+/// releases it on drop.
 ///
-/// When the named session is not open (`pane` is `None`) there is nothing to
-/// attach to: log it and let the socket close.
-async fn bridge(
-    mut socket: WebSocket,
+/// Dropping is the one place every exit path passes through, and the release is
+/// posted to the actor from a detached task because `Drop` cannot await.
+struct AttachGuard {
+    state: AppState,
     session_id: SessionId,
-    pane: Option<String>,
-    tmux_socket: String,
-) {
-    let Some(pane) = pane else {
-        tracing::warn!(
-            session_id = %session_id,
-            "pty bridge requested for a session that is not open; closing"
-        );
-        let _ = socket.close().await;
-        return;
-    };
-    if let Err(err) = run_bridge(socket, pane, &tmux_socket).await {
-        tracing::error!(error = %err, "pty bridge terminated with error");
+}
+
+impl Drop for AttachGuard {
+    fn drop(&mut self) {
+        let state = self.state.clone();
+        let session_id = self.session_id.clone();
+        tokio::spawn(async move { state.detach_pane(&session_id).await });
     }
 }
 

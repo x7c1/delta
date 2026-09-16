@@ -17,7 +17,7 @@ async fn list_sessions_page_annotates_open_state_and_threads() {
     ))
     .await
     .unwrap();
-    assert!(ix.pane_for_session(&id).await.is_some(), "bound = open");
+    assert!(ix.bound_pane(&id).await.is_some(), "bound = open");
 
     let page = ix.list_sessions_page(None, 30).await.unwrap();
     let listing = page

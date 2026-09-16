@@ -26,7 +26,7 @@ async fn open_session_resumes_with_resume_argv_then_send_uses_normal_path() {
     .await
     .unwrap();
     let id = SessionId::from("sess-R");
-    assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
+    assert!(ix.bound_pane(&id).await.is_none(), "starts closed");
 
     ix.open_session(&id).await.unwrap();
 
@@ -47,7 +47,7 @@ async fn open_session_resumes_with_resume_argv_then_send_uses_normal_path() {
         ],
     );
     assert_eq!(resume.workdir, "/elsewhere", "resumes in the stored cwd");
-    let pane = ix.pane_for_session(&id).await.expect("now open");
+    let pane = ix.bound_pane(&id).await.expect("now open");
 
     // A send writes the send (normal path) but its keystroke is held: the
     // pane is resumed-but-not-ready, so nothing is dispatched yet.

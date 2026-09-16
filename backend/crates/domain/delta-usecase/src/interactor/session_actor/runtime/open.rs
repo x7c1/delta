@@ -30,8 +30,9 @@ pub struct OpenHandle {
 /// exists (see [`SessionRuntime::is_empty`]).
 ///
 /// There is deliberately no [`OpenHandle`] for such a session, so Claude's
-/// pane-bound path is untouched: [`SessionRuntime::handle`] (the PTY routing
-/// key) stays `None`, and the PTY bridge therefore refuses to attach — a Codex
+/// pane-bound path is untouched: [`SessionRuntime::handle`] stays `None` and no
+/// spawn is pending, so the PTY bridge's lookup resolves nothing and refuses to
+/// attach — a Codex
 /// session has nothing to attach to ([`crate::agent::TerminalCapability::NoTerminal`]).
 #[derive(Clone)]
 pub struct OpenAgentSession {

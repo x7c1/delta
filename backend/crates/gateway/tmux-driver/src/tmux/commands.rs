@@ -125,6 +125,17 @@ pub(super) fn submit_command(pane: &str) -> Vec<String> {
     vec!["send-keys".into(), "-t".into(), pane.into(), "Enter".into()]
 }
 
+/// Build the `tmux capture-pane` invocation that prints what `pane` is showing
+/// to stdout.
+///
+/// `-p` sends the capture to stdout instead of a paste buffer, and no `-S`/`-E`
+/// range is given, so it is the visible screen rather than the scrollback —
+/// which is what "what is this pane showing right now" means, and bounds the
+/// output to one screenful without a second guess at how much to keep.
+pub(super) fn capture_pane_args(pane: &str) -> Vec<String> {
+    vec!["capture-pane".into(), "-p".into(), "-t".into(), pane.into()]
+}
+
 /// How long to settle after each injected navigation/selection keystroke, so
 /// the interactive TUI widget processes one key at a time (see
 /// [`send_keys`](delta_usecase::TmuxDriver::send_keys)).
@@ -299,6 +310,16 @@ mod tests {
         // standalone clear, so the two paths share one source of truth.
         let pane = "delta-1:0.0";
         assert_eq!(input_commands(pane, "hi")[0], clear_input_commands(pane));
+    }
+
+    #[test]
+    fn capture_pane_args_print_the_visible_screen_of_the_pane() {
+        // `-p` prints to stdout; no range flags, so it is the visible screen
+        // and not the scrollback.
+        assert_eq!(
+            capture_pane_args("delta-1:0.0"),
+            vec!["capture-pane", "-p", "-t", "delta-1:0.0"],
+        );
     }
 
     #[test]
