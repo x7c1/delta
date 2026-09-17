@@ -1,11 +1,18 @@
 //! The thread-resolution phase of the per-line fold: the thread a line is
 //! attributed to, and the send / subagent effects that follow from it.
+//!
+//! The `if`/`else` cascade over a line's classification lives here; the one
+//! branch whose correlation rules stand on their own — the
+//! `<task-notification>` completion signal — lives in [`task_notification`].
 
 use delta_model::{MessageUuid, SessionId, ThreadId};
 
 use crate::claude_format;
 
 use super::{AttributionState, Effect};
+
+mod task_notification;
+use task_notification::resolve_task_notification;
 
 /// Resolve the thread (and optional semantic parent) for one line, comparing it
 /// against the head outstanding send and the recorded background launches.
@@ -139,55 +146,13 @@ pub(super) fn resolve_line_thread(
             }
         }
     } else if is_task_notification {
-        // A background task's completion: attribute it to the thread that
-        // launched the task, not the thread that happens to be current now.
-        // The notification carries two correlation keys — `<tool-use-id>`
-        // and `<task-id>` — and Claude Code's user-message body sometimes
-        // ships only one of them. Prefer `<tool-use-id>` (the existing key,
-        // recorded at launch time); fall back to `<task-id>` (recorded
-        // later via `PostToolUse(Agent)` for a tool launch, already at
-        // launch for a forked skill). A match consumes the entry and
-        // emits `SubagentCompleted` so the persisted correlation is
-        // cleared. When neither key matches a recorded launch — the launch
-        // fell in an earlier window no longer seeded into
-        // `launched_threads`, or both elements were stripped from the body
-        // — fall back to inheriting `carry_thread`, the prior no-regression
-        // behaviour. A body carrying NEITHER element is logged so a future
-        // Claude Code format change surfaces in the logs instead of as
-        // stuck running indicators.
-        let notification_tool_use_id = claude_format::task_notification_tool_use_id(trimmed);
-        let notification_task_id = claude_format::task_notification_task_id(trimmed);
-        if notification_tool_use_id.is_none() && notification_task_id.is_none() {
-            tracing::warn!(
-                session_id = %session_id.as_str(),
-                thread_id = state.carry_thread.value(),
-                "<task-notification> body carries no <tool-use-id> nor <task-id>; \
-                 cannot match against any launched subagent — the running indicator \
-                 will not clear from this notification"
-            );
-        }
-        let by_tool_use_id = notification_tool_use_id
-            .filter(|id| state.launched_threads.contains_key(*id))
-            .map(str::to_owned);
-        let resolved =
-            by_tool_use_id.or_else(|| state.launch_key_by_task_id(notification_task_id?));
-        match resolved.and_then(|key| {
-            state
-                .launched_threads
-                .remove(&key)
-                .map(|launch| (key, launch))
-        }) {
-            Some((tool_use_id, launch)) => {
-                effects.push(Effect::SubagentCompleted { tool_use_id });
-                // Advance the turn onto the launching thread: the
-                // assistant's continuation of this notification belongs to
-                // the task's thread, not the thread that was current when
-                // the completion happened to land.
-                state.carry_thread = launch.thread_id;
-                (launch.thread_id, None)
-            }
-            None => (state.carry_thread, None),
-        }
+        // A background task's completion. `resolve_task_notification` owns the
+        // correlation rules (which recorded launch the notification reports)
+        // and the effects that follow; the line never names a semantic parent.
+        (
+            resolve_task_notification(session_id, state, effects, trimmed),
+            None,
+        )
     } else {
         (state.carry_thread, None)
     }

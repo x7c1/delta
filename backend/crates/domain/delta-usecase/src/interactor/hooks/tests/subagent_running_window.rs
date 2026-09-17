@@ -758,16 +758,18 @@ async fn a_task_notification_missing_tool_use_id_finishes_via_the_task_id_fallba
 }
 
 #[tokio::test]
-async fn a_task_notification_missing_both_ids_leaves_the_subagent_running_and_warns() {
+async fn a_task_notification_missing_both_ids_completes_the_only_running_subagent_and_warns() {
     use std::io::Write;
     use std::sync::{Arc, Mutex};
     use tracing_subscriber::fmt;
 
     // Capture warn-level tracing output into a buffer so the test can assert
     // the warn fires when a `<task-notification>` body carries neither
-    // correlation element. The subscriber is installed only for the duration
-    // of this test (via the `_guard` returned by `set_default`), so it does
-    // not leak across tests — the guard is held until the test ends.
+    // correlation element — the keyless shape stays visible in the logs even
+    // when it is matched, because it signals an upstream format change. The
+    // subscriber is installed only for the duration of this test (via the
+    // `_guard` returned by `set_default`), so it does not leak across tests —
+    // the guard is held until the test ends.
     #[derive(Clone, Default)]
     struct BufferWriter(Arc<Mutex<Vec<u8>>>);
     impl Write for BufferWriter {
@@ -812,9 +814,11 @@ async fn a_task_notification_missing_both_ids_leaves_the_subagent_running_and_wa
     .await
     .unwrap();
 
-    // A notification body without either `<tool-use-id>` or `<task-id>` —
-    // a future Claude Code shape — must not silently drop the subagent:
-    // the entry stays running and the fold logs a warn so we notice.
+    // A notification body without either `<tool-use-id>` or `<task-id>` — a
+    // Claude Code shape that names no launch — reports the ONLY outstanding
+    // launch there is, so it completes it: the running indicator clears
+    // instead of staying lit until the session is closed. The fold logs a
+    // warn either way so the body shape stays visible.
     ix.transcript_fake()
         .push(task_notification_line_both_missing("u-note"));
     let events = ix
@@ -826,21 +830,27 @@ async fn a_task_notification_missing_both_ids_leaves_the_subagent_running_and_wa
         .unwrap();
 
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::SubagentFinished { .. })),
-        "no SubagentFinished should fire when neither correlation key is present, got {events:?}"
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::SubagentFinished { tool_use_id, .. } if tool_use_id == "toolu_bg"
+        )),
+        "the only outstanding launch finishes on a no-key notification, got {events:?}"
     );
-    assert_eq!(
-        running_tool_use_ids(&ix.live_state_for(&session).await),
-        vec!["toolu_bg".to_owned()],
-        "the running entry survives a no-key notification — its completion is unknown"
+    assert!(
+        running_tool_use_ids(&ix.live_state_for(&session).await).is_empty(),
+        "the running entry is cleared — the notification can only be its completion"
     );
 
     let captured = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+    // The keyless body now has two possible warns — matched, and not matched
+    // (zero or several outstanding) — so the assertion names the matched one
+    // and the launch it resolved to; a warn that merely mentions
+    // `<task-notification>` would pass for either.
     assert!(
-        captured.contains("WARN") && captured.contains("<task-notification>"),
-        "expected a WARN log for the missing-keys notification, got: {captured}"
+        captured.contains("WARN")
+            && captured.contains("matched it to the only outstanding background launch")
+            && captured.contains("tool_use_id=toolu_bg"),
+        "expected a WARN naming the launch the keyless notification matched, got: {captured}"
     );
 }
 
