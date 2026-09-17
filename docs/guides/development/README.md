@@ -35,8 +35,8 @@ by both — see "Portability conventions" below.
 
 | Platform | Prerequisites |
 |----------|---------------|
-| Linux | `tmux`, `lsof`, GNU `make`, `bash` — install via the system package manager (e.g. `apt install tmux lsof make`). |
-| macOS | `tmux` via Homebrew (`brew install tmux`). `lsof`, `make` (GNU make 3.81), `awk`, `bash` 3.2, `date`, and `pkill` ship with the system. Installing the Xcode Command Line Tools (`xcode-select --install`) is the standard way to get `make`. |
+| Linux | `tmux`, `lsof`, `jq`, GNU `make`, `bash` — install via the system package manager (e.g. `apt install tmux lsof jq make`). |
+| macOS | `tmux` and `jq` via Homebrew (`brew install tmux jq`). `lsof`, `make` (GNU make 3.81), `awk`, `bash` 3.2, `date`, and `pkill` ship with the system. Installing the Xcode Command Line Tools (`xcode-select --install`) is the standard way to get `make`. |
 
 In addition, both platforms need the Rust toolchain (`cargo`) and pnpm (via
 `corepack enable`), plus the agent CLIs you plan to drive: an authenticated
@@ -73,10 +73,11 @@ regress:
 Quality gate — `make build`, `make test`, and `make lint` each cover both
 parts and stay fast, for the inner loop. `make check` is the pre-PR gate: it
 runs the whole thing for both parts at once (build, test, lint, the frontend
-typecheck, the generated-bindings freshness check, the canary gate's own
-stubbed tests) **plus both Playwright suites**, so passing it means CI will
-pass. It needs tmux, because `make e2e-fake` drives the real backend through
-one.
+typecheck, the generated-bindings freshness check, the vendored Codex schema's
+stored form, the canary gate's and the re-vendor script's own stubbed tests)
+**plus both Playwright suites**, so passing it means CI will pass. It needs
+tmux, because `make e2e-fake` drives the real backend through one, and `jq`,
+which is what the vendored schema's stored form is defined in terms of.
 
 Run the server (from `backend/`):
 
@@ -134,6 +135,23 @@ migrated, and the error it prints offers `make reset` — which deletes the
 thread overlay and the send queue with it. To keep those, stop the server,
 remove `delta.db` with its `-wal`/`-shm` sidecars, and put the `.bak-v<n>` copy
 back in its place.
+
+### Vendored `codex app-server` schema
+
+`backend/crates/gateway/codex-agent/vendor/app-server-schema/` holds the JSON
+Schema of the Codex app-server protocol, generated from a pinned Codex CLI and
+stored key-sorted. Re-vendor it with `make vendor-codex-schema` (needs that
+Codex CLI installed; `DELTA_CODEX_BIN` overrides the binary) rather than by
+running the generator by hand: its output order is unstable, and the target
+normalises the files so the diff shows the protocol changes instead of
+reorderings. `make vendor-codex-schema-check` fails when a vendored file has
+left that form — `make check` and CI's backend job both run it, and it needs
+only `jq`. `make vendor-codex-schema-test` exercises the re-vendor path against
+a stub generator, so it needs no Codex CLI at all.
+
+Why the files are stored that way, which generator outputs are vendored, and
+what to bump when the pinned version moves live in that directory's
+[README](../../../backend/crates/gateway/codex-agent/vendor/app-server-schema/README.md).
 
 ## Frontend (`frontend/`)
 

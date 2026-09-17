@@ -660,8 +660,9 @@ fn definitions(doc: &Value) -> &serde_json::Map<String, Value> {
 ///    parses is caught here) — order-independent for objects, and stable for
 ///    the arrays a single pinned version emits.
 ///
-/// A failure means `codex` moved the protocol: re-vendor `vendor/app-server-schema/`
-/// and bump `VENDORED_CODEX_VERSION` in the same change.
+/// A failure means `codex` moved the protocol: re-vendor with
+/// `make vendor-codex-schema` and bump `VENDORED_CODEX_VERSION` in the same
+/// change.
 #[tokio::test]
 #[ignore = "regenerates the schema with the real codex binary (no auth/network); excluded from the hermetic gate"]
 async fn vendored_schema_matches_the_real_generator() {
