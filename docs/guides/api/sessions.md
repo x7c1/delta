@@ -16,8 +16,12 @@ adapter-backed provider's process ends unexpectedly (a killed `codex app-server`
 the session settles — its in-flight turn ends as `turn_interrupted`, its pending
 permission requests are settled (see
 [sends.md](sends.md#the-pending-permission-queue)) — and it reports `open: false`,
-announced as `session_closed`. Delta does not respawn the process: a send to the
-settled session resumes it, exactly as after a server restart.
+announced as `session_closed`. A pane-backed (Claude) session also closes itself
+when a background sweep finds its tmux pane gone — its agent exited, crashed or
+was killed — but it announces that close with `session_closed`, without the
+per-turn and per-request events above
+([below](#closed-on-its-own-when-the-pane-is-gone)). Delta does not respawn the
+process: a send to such a session resumes it, exactly as after a server restart.
 
 ## Sessions
 
@@ -200,6 +204,32 @@ Either way `session_closed` is broadcast.
   was already closed).
 - **404** — no session with that id.
 - **500** — killing the tmux session failed.
+
+### Closed on its own when the pane is gone
+
+Delta also closes a session **on its own** when it notices the session's pane is
+gone. `open` means Delta holds a binding to a tmux session, and an agent that
+goes away without saying so — killed, crashed, its tmux session removed from
+outside — leaves that binding pointing at nothing. A background sweep probes each
+open session's pane on the same ~500ms tick as the launch watchdog, so a session
+whose agent is gone normally reads as open for under a second; a pane that no
+longer exists gets the same teardown pressing Close gives (one last transcript
+sync, the binding dropped, the turn ended, lingering background subagents swept)
+minus killing a pane that is already gone, and the same `session_closed`.
+
+This is also what ends a session whose agent simply *exited*: quitting `claude`
+in the embedded terminal ends its tmux session, and Delta's `SessionEnd` hook
+deliberately leaves the binding alone (it fires while the process is still on its
+way out), so the sweep is what turns the card closed a tick later.
+
+Only a definite "no such session" closes. A probe Delta could not run at all —
+the `tmux` command itself failing — leaves the session open and is retried on the
+next tick; a tmux server that is *not running* is not that case, since it answers
+"no such session" for every pane and those panes are genuinely gone with it. No
+session is ever closed for being merely old.
+
+The session is then closed-and-known like any other, so the next send resumes
+it.
 
 ### `DELETE /api/sessions/{id}`
 

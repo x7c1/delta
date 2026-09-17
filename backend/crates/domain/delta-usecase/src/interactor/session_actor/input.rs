@@ -328,8 +328,11 @@ pub(in crate::interactor) enum SessionInput {
         now: Instant,
         reply: Reply<Option<SessionEvent>>,
     },
-    /// Reap this session's launch (fresh spawn or resume) if it never became
-    /// ready before its deadline as of `now`.
+    /// The background liveness sweep for this session, as of `now`: reap its
+    /// launch (fresh spawn or resume) if it never became ready before its
+    /// deadline, and close it if it is open on a pane that no longer exists.
+    ///
+    /// Why the two checks share one input: `SessionContext::reap_tick`.
     ReapTick {
         now: Instant,
         reply: Reply<Vec<SessionEvent>>,

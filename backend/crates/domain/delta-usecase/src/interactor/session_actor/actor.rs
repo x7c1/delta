@@ -316,7 +316,7 @@ where
             let _ = reply.send(ctx.dispatch_ready_resume(now).await);
         }
         SessionInput::ReapTick { now, reply } => {
-            let _ = reply.send(ctx.reap_stale_launch(now).await);
+            let _ = reply.send(ctx.reap_tick(now).await);
         }
         SessionInput::EchoDeadlineTick { now, reply } => {
             let _ = reply.send(ctx.sweep_echo_deadline(now).await);

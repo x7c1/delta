@@ -114,6 +114,14 @@ pub(crate) struct FakeTmux {
     pub(crate) fail_create: bool,
     /// The session names currently "existing" for `has_session`.
     pub(crate) live: Mutex<Vec<String>>,
+    /// When set, `has_session` fails instead of answering, modelling the `tmux`
+    /// command itself failing to run — the shape a liveness probe must NOT read
+    /// as "the pane is gone" (a tmux *server* that is not running is a different
+    /// shape: it answers "no such session" for every token, and its panes really
+    /// are gone). Toggled mid-test via [`Self::fail_probes`], since the
+    /// interesting case is a probe that starts failing after a session is
+    /// already up.
+    pub(crate) probe_fails: Mutex<bool>,
     /// The sessions `create_session` was called with, in order.
     pub(crate) created: Mutex<Vec<CreatedSession>>,
     /// The session names `kill_session` was called with, in order.
@@ -139,6 +147,24 @@ impl FakeTmux {
         self
     }
 
+    /// Make the tmux session `name` disappear the way something outside Delta
+    /// would end it — a `tmux kill-session` typed by the user, the agent
+    /// crashing, a reboot of the terminal multiplexer.
+    ///
+    /// Deliberately not [`TmuxDriver::kill_session`]: that is Delta killing the
+    /// pane and it records the call, which is exactly what a test asserting
+    /// "Delta did not kill this pane, it merely found it gone" must not have in
+    /// the log.
+    pub(crate) fn vanish_session(&self, name: &str) {
+        self.live.lock().unwrap().retain(|n| n != name);
+    }
+
+    /// Make every later `has_session` return an error, modelling the `tmux`
+    /// command itself failing to run rather than a session being absent.
+    pub(crate) fn fail_probes(&self) {
+        *self.probe_fails.lock().unwrap() = true;
+    }
+
     /// Make `pane` "show" `content`, so a `capture_pane` of it reads that back.
     pub(crate) fn show_in_pane(&self, pane: &str, content: &str) {
         self.pane_content
@@ -151,6 +177,9 @@ impl FakeTmux {
 #[async_trait]
 impl TmuxDriver for FakeTmux {
     async fn has_session(&self, name: &str) -> Result<bool> {
+        if *self.probe_fails.lock().unwrap() {
+            return Err(crate::error::Error::Tmux("probe failed".into()));
+        }
         Ok(self.live.lock().unwrap().iter().any(|n| n == name))
     }
 

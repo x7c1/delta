@@ -1,7 +1,7 @@
 use delta_model::SessionStatus;
 
 use crate::error::{Error, Result};
-use crate::interactor::lifecycle::UnboundLaunchEnd;
+use crate::interactor::lifecycle::{PaneTeardown, UnboundLaunchEnd};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::LaunchTarget;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
@@ -78,13 +78,12 @@ where
     ///    [`Self::clean_up_failed_spawn_row`] keeps the row as `failed` instead
     ///    of deleting it — the report is the same, the data is not thrown away.
     ///
-    /// Once closed, a session loses its live pane and the background tail
-    /// no longer polls it. But Claude Code may flush the turn's final
-    /// assistant line to the JSONL just *after* its `Stop` hook fired, so
-    /// without one last sync that line would never be ingested. So before the
-    /// pane is dropped this runs [`Self::sync_transcript`] once — while the
-    /// on-disk transcript still reflects this session's own run — to capture
-    /// any straggler line.
+    /// The teardown of a bound session is [`Self::tear_down_bound_session`],
+    /// shared with the background tick that closes a session whose pane has
+    /// gone ([`Self::close_if_pane_vanished`]) — the two must leave a session in
+    /// exactly the same state, and killing the pane is the only step this path
+    /// adds. See that routine for what each step is for, including the last
+    /// transcript sync that catches a line Claude Code flushed after `Stop`.
     ///
     /// Returns the events for the caller to broadcast: any
     /// [`SessionEvent::SubagentFinished`]s produced by the process-gone sweep
@@ -140,41 +139,16 @@ where
                 .await;
             return Ok(vec![event]);
         }
-        // Final sync to capture a last line flushed after `Stop`, before the
-        // session loses its pane. A closed-but-known session that is being
-        // re-closed has no live pane; the sync is still safe (it just finds no
-        // new lines), so it runs unconditionally on the known path.
-        self.sync_transcript(&session).await?;
-        // Kept (not just killed) so the defensive cleanup at the bottom can
-        // still name the pane it tore down on the event it reports.
-        let closed_pane = self.state.remove_open();
-        if let Some(handle) = &closed_pane {
-            self.tmux.kill_session(handle.token.as_str()).await?;
-        }
-        // A terminal-less agent session (Codex) has no pane to kill; close it
-        // through its adapter instead, which tears down the session's local
-        // plumbing (the shared `codex app-server` connection stays up for any
-        // other threads). Claude sessions have no `open_agent`, so this is a
-        // no-op for them and their close path is unchanged.
-        if let Some(agent) = self.state.remove_open_agent() {
-            agent.adapter.close(&agent.handle).await?;
-        }
-        // Deliberate no-op for git worktrees (MVP): a session that started in a
-        // worktree keeps it on close. `session.cwd` is the worktree path, so a
-        // later resume reattaches to the still-present worktree rather than
-        // recreating it. Removing the worktree (and its branch) on close is
-        // deferred until there is an explicit cleanup story; doing it here would
-        // throw away uncommitted work the moment a session is closed.
-        // The pane is gone, so whatever turn was in flight can no longer
-        // progress: feed `Close` into the turn machine (an unechoed outstanding
-        // send is cancelled; an in-flight one is swept if it never matched).
-        self.apply_turn_input(crate::turn::TurnInput::Close).await?;
-        // The `claude` process is torn down, so no more transcript is ingested:
-        // a lingering BACKGROUND subagent's completion `<task-notification>` can
-        // never be folded to clear its indicator. The `Close` above swept the
-        // foreground entries; sweep the surviving background ones so they do not
-        // stick forever, returning a `SubagentFinished` per entry to broadcast.
-        let mut events = self.sweep_running_subagents_on_process_gone().await?;
+        // The bound teardown, shared with the pane-gone close that the
+        // background tick performs: one last transcript sync, the binding
+        // dropped (the pane killed, since closing is what ends the agent that
+        // is still running in it), the turn closed and the lingering background
+        // subagents swept. The released handle is kept — not just dropped — so
+        // the defensive cleanup below can still name the pane it tore down on
+        // the event it reports.
+        let (closed_pane, mut events) = self
+            .tear_down_bound_session(&session, PaneTeardown::Kill)
+            .await?;
         if session.status == SessionStatus::Spawning {
             // Shape 3: the row never left `spawning` and no launch record is
             // left to take — a bind that failed to activate the row, or a row
