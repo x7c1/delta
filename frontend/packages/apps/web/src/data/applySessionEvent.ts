@@ -26,9 +26,10 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
  *   `spawn_failed` for a launch that never bound, and `session_removed` for a
  *   session the user removed) invalidate the session list so a starting,
  *   registered, resumed, closed, failed or removed session's presence, status
- *   and open flag stay in sync. `spawn_pane_ready` is the lifecycle event with
- *   no REST counterpart at all — the row reads `spawning` on both sides of it —
- *   so it goes only to the live store.
+ *   and open flag stay in sync. `spawn_pane_ready` invalidates the list too:
+ *   the row reads `spawning` on both sides of it, but its `pane_starting` flag
+ *   — the browser's only durable record that the launch's pane can be attached
+ *   to — flips with it.
  * - **Nav store** (Zustand): the one event whose session stops existing, and
  *   only when it was the focused one. A `session_removed` hands focus to the
  *   first other session in the list cache, falling back to the new-session
@@ -287,10 +288,13 @@ export function applySessionEvent(
       // turn-end refetch), which is what supersedes the preview.
       break;
     case 'spawn_pane_ready':
-      // The starting session's pane came up. Nothing REST knows changed, so
-      // there is no query to invalidate; the store recorded it above
-      // (`store.applyEvent`), which is what lets the workspace attach the
-      // embedded terminal to a session that is still starting.
+      // The starting session's pane came up, which its row reports
+      // (`pane_starting`) — that is what lets the workspace attach the embedded
+      // terminal to a session that is still starting. The row is the only
+      // carrier of the fact, so refetch the list; the event itself is a
+      // one-shot nudge, never replayed, and a browser that missed it (a reload
+      // mid-launch, a second tab) learns the same thing from its own fetch.
+      invalidateSessions(queryClient);
       break;
     case 'spawn_failed':
       // A freshly-spawned session never bound. Its row is KEPT, marked

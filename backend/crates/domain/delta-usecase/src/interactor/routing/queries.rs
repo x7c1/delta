@@ -11,7 +11,9 @@ use delta_model::SessionId;
 use tokio::sync::oneshot;
 
 use crate::interactor::session_actor::input::SessionInput;
-use crate::interactor::session_actor::runtime::{AttachablePane, SessionLiveState};
+use crate::interactor::session_actor::runtime::{
+    AttachablePane, SessionListingState, SessionLiveState,
+};
 use crate::interactor::Interactor;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::turn::TurnState;
@@ -58,14 +60,35 @@ where
             .post_existing(id, SessionInput::DetachPane { now });
     }
 
+    /// The runtime facts the session list annotates one stored row with —
+    /// whether the session is open, and whether it holds an attachable pane
+    /// nothing has bound yet — read in a single actor message.
+    ///
+    /// Both are process-runtime state owned by the session's actor, so this is
+    /// the authority the session-list endpoint annotates each stored session
+    /// with. One query rather than two so the pair is a consistent snapshot:
+    /// the bind that flips `pane_starting` off is the same one that flips
+    /// `open` on, and between two round-trips a row could carry neither.
+    ///
+    /// A session with no actor is closed with no starting pane by definition.
+    pub(crate) async fn listing_state_for(&self, id: &SessionId) -> SessionListingState {
+        self.query(
+            id,
+            |reply| SessionInput::QueryListingState { reply },
+            SessionListingState {
+                open: false,
+                pane_starting: false,
+            },
+        )
+        .await
+    }
+
     /// Whether a session is currently open (driven by a live pane).
     ///
-    /// Open/closed is process-runtime state owned by the session's actor, so
-    /// this is the authority the session-list endpoint annotates each stored
-    /// session with; a session with no actor is closed by definition.
+    /// The `open` half of [`Self::listing_state_for`], for the callers that
+    /// only ask that one question.
     pub async fn is_session_open(&self, id: &SessionId) -> bool {
-        self.query(id, |reply| SessionInput::QueryIsOpen { reply }, false)
-            .await
+        self.listing_state_for(id).await.open
     }
 
     /// The ids of every session whose actor reports a live pane, in registry

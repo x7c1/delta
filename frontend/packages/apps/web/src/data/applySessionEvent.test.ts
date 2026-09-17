@@ -47,6 +47,7 @@ function seedSessionList(queryClient: QueryClient, ids: readonly string[]) {
       pull_request_number: null,
     },
     open: false,
+    pane_starting: false,
     main_thread_id: 1,
     last_activity_at: null,
   }));
@@ -605,6 +606,29 @@ describe('applySessionEvent', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions'] });
     // The failure named a session other than the focused one, so focus stays.
     expect(useNavStore.getState().focusedSessionId).toBe(FOCUSED);
+  });
+
+  it('refetches the session list on spawn_pane_ready', () => {
+    // The launch's pane came up. The row reads `spawning` on both sides of that,
+    // but its `pane_starting` flag flips with it — and that flag is the only
+    // thing the browser has to decide whether the embedded terminal may attach.
+    // So this event carries no state of its own: it is a nudge to refetch the
+    // row that does.
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    applySessionEvent(
+      {
+        kind: 'spawn_pane_ready',
+        session_id: 'sess-spawned',
+        pane_token: 'delta-1',
+      },
+      queryClient,
+      null,
+      FOCUSED,
+    );
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions'] });
   });
 
   it('leaves focus on the failed session when it is the focused one', () => {

@@ -19,7 +19,6 @@ function reset() {
     sending: [],
     localSends: {},
     spawns: [],
-    startingPanes: [],
     runningThreads: {},
     notices: {},
     unread: {},
@@ -706,63 +705,6 @@ describe('liveStore sending (pre-acceptance submits)', () => {
     expect(useLiveStore.getState().sending[0].reason).toBe(
       'launch option rejected: `cwd` cannot be used',
     );
-  });
-});
-
-describe('liveStore starting panes', () => {
-  beforeEach(reset);
-
-  const paneReady = (sessionId = 'sess-starting') =>
-    useLiveStore.getState().applyEvent({
-      kind: 'spawn_pane_ready',
-      session_id: sessionId,
-      pane_token: 'delta-1',
-    });
-
-  it('records a launch whose pane came up, and ignores a repeat', () => {
-    paneReady();
-    expect(useLiveStore.getState().startingPanes).toEqual(['sess-starting']);
-
-    const before = useLiveStore.getState().startingPanes;
-    paneReady();
-    expect(useLiveStore.getState().startingPanes).toBe(
-      before,
-      // Identity-stable, so a repeated announcement notifies no subscriber.
-    );
-  });
-
-  it('forgets the session once its launch binds', () => {
-    paneReady();
-    useLiveStore.getState().applyEvent({
-      kind: 'session_registered',
-      session_id: 'sess-starting',
-    });
-
-    expect(useLiveStore.getState().startingPanes).toEqual([]);
-  });
-
-  it('forgets the session once its launch fails', () => {
-    // The other end of the same window: the pane was killed with the launch,
-    // so there is nothing left to attach to.
-    paneReady();
-    useLiveStore.getState().applyEvent({
-      kind: 'spawn_failed',
-      session_id: 'sess-starting',
-      cancelled: false,
-    });
-
-    expect(useLiveStore.getState().startingPanes).toEqual([]);
-  });
-
-  it('leaves the panes of other sessions alone', () => {
-    paneReady('sess-a');
-    paneReady('sess-b');
-    useLiveStore.getState().applyEvent({
-      kind: 'session_registered',
-      session_id: 'sess-a',
-    });
-
-    expect(useLiveStore.getState().startingPanes).toEqual(['sess-b']);
   });
 });
 

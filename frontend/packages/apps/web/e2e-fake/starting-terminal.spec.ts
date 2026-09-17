@@ -19,6 +19,10 @@ import { startNewSession } from './support/app';
  * The launch watchdog is server-wide and the shared suite shrinks it to 3 s, so
  * this spec runs its own server generation with a production-shaped deadline and
  * restores the suite's value afterwards (see `ServerHandle.restart`).
+ *
+ * Two shapes of the same window: a browser that watched the pane come up, and
+ * one that reloaded and never saw the announcement. Both reach the pane, because
+ * the session row — not the live event — is what says it is there.
  */
 
 /** The launch deadline this spec's server generation runs with. */
@@ -82,7 +86,7 @@ test('the terminal attaches to a session that is still starting, and stays attac
   await expect(page.getByText('This session is closed.')).toHaveCount(0);
 });
 
-test('a starting session with no pane yet is described as starting, not as closed', async ({
+test('a reload mid-launch still reaches the starting session’s pane', async ({
   page,
   server,
 }) => {
@@ -95,25 +99,25 @@ test('a starting session with no pane yet is described as starting, not as close
   ).toHaveCount(1, { timeout: 5_000 });
   await page.getByRole('button', { name: 'Terminal', exact: true }).click();
 
-  // A browser with no pane to attach to. The real such window — between the
-  // send being accepted and the launch finishing its preparation — is
-  // milliseconds long on a session with no worktree to check out, far too short
-  // to drive; a reload reproduces it exactly, because the announcement that the
-  // pane came up is a live event and this browser was not there for it. Both are
-  // the same state: the session is starting and this client knows of no pane.
+  // The reload throws away everything this browser was told live — including
+  // the one-shot announcement that the launch's pane came up, which is never
+  // replayed. A launch stopped on the trust dialog never binds either, so if
+  // the terminal could not come back from here the user would have no way left
+  // to answer it. The session row carries the fact instead, and the refetched
+  // row is all the fresh browser needs.
   await page.reload();
   await expect(
     page.getByRole('status', { name: 'Starting', exact: true }),
   ).toHaveCount(1);
 
-  // It says so, rather than telling the user to resume a session that was never
-  // closed — the wording the terminal used to fall back to for anything that was
-  // not open.
-  await expect(page.getByText(/still starting up/i)).toBeVisible();
+  // Attached again, to a session that is still starting — not the note that
+  // there is nothing to show, and never the closed-session wording.
+  await expect(page.locator('.xterm-rows')).toContainText('fake-claude session');
+  await expect(page.getByText(/still starting up/i)).toHaveCount(0);
   await expect(page.getByText('This session is closed.')).toHaveCount(0);
 
-  // And it is a window, not a dead end: the launch binds and the terminal
-  // attaches to the session it is focused on.
+  // And the window closes the way it does without a reload: the launch binds
+  // and the card flips to Open with the terminal still on screen.
   await expect(
     page.getByRole('status', { name: 'Open', exact: true }),
   ).toHaveCount(1, { timeout: 20_000 });

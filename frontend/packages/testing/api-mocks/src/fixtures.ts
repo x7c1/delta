@@ -604,6 +604,14 @@ export interface MockStore {
      */
     spawning?: boolean;
     /**
+     * True while a still-`spawning` row's pane is up but nothing has bound it
+     * — the window in which the embedded terminal may attach to a launch that
+     * has stopped on an interactive prompt. Mirrors the real server's
+     * `pane_starting`, which is a fact about the row (not a one-shot event), so
+     * a reloaded browser sees it too. Absent means no attachable pane.
+     */
+    paneStarting?: boolean;
+    /**
      * The permission dialogs awaiting an answer, oldest first, mirrored from the
      * scripted `permission_requested`/`permission_resolved` events so the sends
      * envelope reports the queue head and its depth the way the real server does

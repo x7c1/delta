@@ -267,6 +267,10 @@ export function createMockApi(): MockApi {
       const items = store.sessions.map((entry) => ({
         session: entry.session,
         open: entry.open,
+        // The mock never launches a real pane, so no seeded row is in the
+        // launched-but-unbound window; a scenario that wants one sets the flag
+        // on its store entry.
+        pane_starting: entry.paneStarting ?? false,
         main_thread_id: entry.mainThreadId,
         last_activity_at: lastActivityAt(entry.threads.map((t) => t.id)),
       }));
@@ -1335,15 +1339,33 @@ export function createMockApi(): MockApi {
         setPendingQuestion(event.session_id, undefined);
         clearSubagents(event.session_id);
         break;
+      case 'spawn_pane_ready': {
+        // The launch's pane came up while the row is still `spawning`: the real
+        // server answers `pane_starting: true` from here, and the app refetches
+        // the list on this event to read it. Mirrored so a scenario that scripts
+        // the event gets that answer back, rather than the row a browser which
+        // never saw it would get.
+        const entry = store.sessions.find(
+          (s) => s.session.id === event.session_id,
+        );
+        if (entry?.spawning) {
+          entry.paneStarting = true;
+        }
+        break;
+      }
       case 'session_registered': {
         // The spawn bound: the already-listed row activates and gains a live
-        // pane — exactly what the real registration implies.
+        // pane — exactly what the real registration implies. Binding is one end
+        // of the starting window, so the attachable-but-unbound flag goes with
+        // it: the server reports `pane_starting` and `open` as alternatives,
+        // never both.
         const entry = store.sessions.find(
           (s) => s.session.id === event.session_id,
         );
         if (entry) {
           entry.spawning = false;
           entry.open = true;
+          entry.paneStarting = false;
           entry.session.status = 'active';
         }
         break;
@@ -1374,6 +1396,7 @@ export function createMockApi(): MockApi {
         );
         if (entry?.spawning) {
           entry.spawning = false;
+          entry.paneStarting = false;
           entry.session.status = 'failed';
           entry.session.failure_reason = event.reason ?? null;
         }

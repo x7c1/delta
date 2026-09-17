@@ -14,7 +14,7 @@ use std::time::Instant;
 use delta_model::{AgentProvider, Message, MessageUuid, Send, ThreadId};
 use tokio::sync::oneshot;
 
-use super::runtime::{AttachablePane, SessionLiveState};
+use super::runtime::{AttachablePane, SessionListingState, SessionLiveState};
 use crate::agent::AgentEvent;
 use crate::error::Result;
 use crate::interactor::hooks::PermissionWait;
@@ -374,8 +374,12 @@ pub(in crate::interactor) enum SessionInput {
     /// the same reason the ticks above supply theirs: the deadline arithmetic
     /// stays deterministic under test.
     DetachPane { now: Instant },
-    /// Whether the session is open (has a live, bound pane).
-    QueryIsOpen { reply: oneshot::Sender<bool> },
+    /// The facts one session-list row is annotated with — whether the session
+    /// is open, and whether it holds an unbound attachable pane — snapshotted
+    /// in one message so the row reports a consistent pair.
+    QueryListingState {
+        reply: oneshot::Sender<SessionListingState>,
+    },
     /// Whether any pane is live for the session (bound, or spawned and
     /// awaiting its first hook). Drives the cold-start idempotence check.
     QueryIsLive { reply: oneshot::Sender<bool> },

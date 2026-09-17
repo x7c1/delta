@@ -21,10 +21,6 @@ import {
   reduceSessionRemoved,
   reduceSpawnFailed,
 } from './spawnsSlice';
-import {
-  reduceSpawnPaneReady,
-  reduceStartingPaneEnded,
-} from './startingPanesSlice';
 import { reduceStatusUpdated } from './statusSlice';
 import { reduceAssistantStreaming } from './streamingSlice';
 import {
@@ -37,14 +33,6 @@ import {
   reduceTurnInterrupted,
 } from './turnLifecycleSlice';
 
-/**
- * The per-event-kind reducers, each defined next to the slice whose state it
- * owns (and assignable here because its narrow state is a structural subset
- * of {@link LiveState}). A kind with no entry (`transcript_updated`) never
- * touches live-store state — those events only drive query-cache refetches in
- * `applySessionEvent` — so `applyEvent` keeps the identity-stable state for
- * them.
- */
 /**
  * A reducer as the dispatch map sees it: over the full store state. Written
  * out structurally (rather than as `EventReducer<LiveState, K>`) on purpose —
@@ -91,6 +79,14 @@ function chain<K extends SessionEvent['kind']>(
   };
 }
 
+/**
+ * The per-event-kind reducers, each defined next to the slice whose state it
+ * owns (and assignable here because its narrow state is a structural subset
+ * of {@link LiveState}). A kind with no entry (`transcript_updated`,
+ * `spawn_pane_ready`) never touches live-store state — those events only drive
+ * query-cache refetches in `applySessionEvent` — so `applyEvent` keeps the
+ * identity-stable state for them.
+ */
 const EVENT_REDUCERS: {
   [K in SessionEvent['kind']]?: StoreEventReducer<K>;
 } = {
@@ -100,19 +96,14 @@ const EVENT_REDUCERS: {
   permission_requested: reducePermissionRequested,
   question_asked: reduceQuestionAsked,
   permission_resolved: reducePermissionResolved,
-  spawn_pane_ready: reduceSpawnPaneReady,
-  spawn_failed: chain(reduceSpawnFailed, reduceStartingPaneEnded),
+  spawn_failed: reduceSpawnFailed,
   assistant_streaming: reduceAssistantStreaming,
   subagent_started: reduceSubagentStarted,
   subagent_finished: reduceSubagentFinished,
   external_input: reduceExternalInput,
   send_dispatched: reduceSendDispatched,
   send_parked: reduceSendParked,
-  session_registered: chain(
-    reduceSessionRegistered,
-    reduceSpawnRegistered,
-    reduceStartingPaneEnded,
-  ),
+  session_registered: chain(reduceSessionRegistered, reduceSpawnRegistered),
   session_removed: reduceSessionRemoved,
   session_opened: reduceSessionOpened,
   session_closed: reduceSessionClosed,

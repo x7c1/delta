@@ -124,16 +124,18 @@ which frames arrive, and a client must handle each event whenever it lands.
   from here, showing the embedded terminal for a session that is still starting
   (see [`GET /pty`](#get-ptysession_idid-websocket) for what that window is for).
 
-  Nothing else marks this window. The session row reads `spawning` from the
-  moment its first send was accepted until it binds, so a client with only the
-  row cannot tell a launch still building a worktree — nothing to attach to yet —
-  from one waiting in a pane. Pane-backed (Claude) launches only: a Codex launch
-  has no pane, and binds as the last step of its own launch.
+  The session row carries the same fact: `pane_starting` is `true` from the
+  moment the pane is up until the launch binds (see
+  [`GET /api/sessions`](sessions.md#get-apisessions)), which is what tells a
+  launch still building a worktree — nothing to attach to yet — from one waiting
+  in a pane. Pane-backed (Claude) launches only: a Codex launch has no pane, and
+  binds as the last step of its own launch.
 
-  Fire-and-forget, like every frame here, and nothing breaks without it: a client
-  that misses it (a reload mid-launch) simply does not offer the terminal until
-  the session binds, and `session_registered` or `spawn_failed` ends the window
-  either way.
+  Fire-and-forget, like every frame here, and it is a nudge rather than the only
+  record of the window: a client that receives it refetches the session list to
+  pick the flag up, and one that misses it (a reload mid-launch, a second tab)
+  reads the same flag off its own first fetch. `session_registered` or
+  `spawn_failed` ends the window either way.
 - `spawn_failed` — a freshly-spawned session never came up, for **any**
   provider. Four producers emit it: the background launch when it fails (the
   worktree build, including one that landed on a path other than the one planned
@@ -560,7 +562,9 @@ TUI asks. Two states resolve a pane, so both can be attached to:
 - an **open** session, bound to its pane — a permission prompt mid-turn is
   answered here;
 - a **starting** session whose pane is up but which nothing has bound yet,
-  announced by [`spawn_pane_ready`](#session-lifecycle). This is the window a
+  reported by the session row's `pane_starting` flag (see
+  [`GET /api/sessions`](sessions.md#get-apisessions)) and announced live by
+  [`spawn_pane_ready`](#session-lifecycle). This is the window a
   launch waiting on an interactive prompt sits in (Claude Code's workspace-trust
   dialog, in a directory it has not been trusted in): no hook fires until
   somebody answers it, so the attach is the only way out. While a bridge is

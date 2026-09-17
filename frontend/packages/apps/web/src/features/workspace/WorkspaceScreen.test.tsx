@@ -260,7 +260,6 @@ describe('WorkspaceScreen multi-session', () => {
     // notice would otherwise leak the card into every later case's screen.
     useLiveStore.setState({
       spawns: [],
-      startingPanes: [],
       unread: {},
       notices: {},
     });
@@ -1147,8 +1146,19 @@ describe('WorkspaceScreen multi-session', () => {
     id: string,
     provider: 'claude' | 'codex',
     mainThreadId: number,
-    open = true,
-    status: 'active' | 'spawning' | 'failed' = 'active',
+    // Named rather than three trailing positionals: which state the caller is
+    // after (open, `spawning` with a pane, `spawning` without one, failed) is
+    // the point of every test that passes them, and `(…, false, 'spawning',
+    // true)` does not say.
+    {
+      open = true,
+      status = 'active',
+      paneStarting = false,
+    }: {
+      open?: boolean;
+      status?: 'active' | 'spawning' | 'failed';
+      paneStarting?: boolean;
+    } = {},
   ) {
     server.use(
       http.get('*/api/sessions', () =>
@@ -1171,6 +1181,7 @@ describe('WorkspaceScreen multi-session', () => {
                 pull_request_number: null,
               },
               open,
+              pane_starting: paneStarting,
               main_thread_id: mainThreadId,
               last_activity_at: '2026-01-01T00:00:02Z',
             },
@@ -1207,38 +1218,44 @@ describe('WorkspaceScreen multi-session', () => {
     expect(await screen.findByTestId('terminal-pane')).toBeInTheDocument();
   });
 
-  it('offers a starting session its pane only once the server says the pane is up', async () => {
-    // The window this screen exists to express. The row reads `spawning` on
-    // both sides of it, so the only thing that separates "still preparing the
-    // launch" from "the agent is running in a pane" is the live announcement —
-    // which is what decides whether the terminal attaches or explains itself.
+  it('leaves the terminal explaining itself for a starting session with no pane yet', async () => {
+    // The row reads `spawning` on both sides of the pane coming up, so the flag
+    // that separates "still preparing the launch" from "the agent is running in
+    // a pane" is `pane_starting` — false here, and the terminal says so rather
+    // than attaching to nothing.
     useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
-    useSingleSessionOfProvider(
-      SESSION_ID,
-      'claude',
-      MAIN_THREAD_ID,
-      false,
-      'spawning',
-    );
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID, {
+      open: false,
+      status: 'spawning',
+    });
 
-    const { queryClient } = renderScreen();
+    renderScreen();
 
     expect(await screen.findByTestId('terminal-pane')).toHaveAttribute(
       'data-pane-state',
       'preparing',
     );
+  });
 
-    deliverEvent(queryClient, {
-      kind: 'spawn_pane_ready',
-      session_id: SESSION_ID,
-      pane_token: 'delta-1',
+  it('offers a starting session its pane from the row alone, with no event', async () => {
+    // The reload case, and the reason `pane_starting` is on the row at all: the
+    // `spawn_pane_ready` announcement is a one-shot that this browser was not
+    // listening for (it reloaded mid-launch, or is a second tab), and it is
+    // never replayed. The first fetch of the list is all it gets — and a launch
+    // stopped on an interactive prompt never binds, so if the terminal did not
+    // attach from this, nothing would ever let the user answer it.
+    useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID, {
+      open: false,
+      status: 'spawning',
+      paneStarting: true,
     });
 
-    await waitFor(() =>
-      expect(screen.getByTestId('terminal-pane')).toHaveAttribute(
-        'data-pane-state',
-        'starting',
-      ),
+    renderScreen();
+
+    expect(await screen.findByTestId('terminal-pane')).toHaveAttribute(
+      'data-pane-state',
+      'starting',
     );
   });
 
@@ -1246,13 +1263,10 @@ describe('WorkspaceScreen multi-session', () => {
     // A launch that never came up has no pane left, and saying it is closed
     // would offer a resume that cannot happen.
     useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
-    useSingleSessionOfProvider(
-      SESSION_ID,
-      'claude',
-      MAIN_THREAD_ID,
-      false,
-      'failed',
-    );
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID, {
+      open: false,
+      status: 'failed',
+    });
 
     renderScreen();
 
@@ -1529,12 +1543,9 @@ describe('WorkspaceScreen multi-session', () => {
     // its idle state (asserted in `CommsLogPane.test.tsx`) — rather than
     // vanishing, crashing, or spinning forever.
     useNavStore.setState({ focusedSessionId: SESSION_ID_4, commsOpen: true });
-    useSingleSessionOfProvider(
-      SESSION_ID_4,
-      'codex',
-      SESSION_4_MAIN_THREAD_ID,
-      false,
-    );
+    useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID, {
+      open: false,
+    });
 
     renderScreen();
 

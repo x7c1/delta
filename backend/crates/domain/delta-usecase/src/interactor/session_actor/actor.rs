@@ -335,8 +335,8 @@ where
             let _ = reply.send(ctx.state.attachable_pane());
         }
         SessionInput::DetachPane { now } => ctx.state.note_pty_detached(now),
-        SessionInput::QueryIsOpen { reply } => {
-            let _ = reply.send(ctx.state.is_open());
+        SessionInput::QueryListingState { reply } => {
+            let _ = reply.send(ctx.state.listing_state());
         }
         SessionInput::QueryIsLive { reply } => {
             let _ = reply.send(ctx.state.has_live_pane());
