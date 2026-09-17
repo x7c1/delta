@@ -1,7 +1,8 @@
 //! Session lifecycle use cases: spawn, resume (open), close, remove, and the
-//! launch-readiness ticks. The `ensure`/`new` entry points live on the
-//! interactor's routing layer (they mint the session id and pick the actor);
-//! everything here runs inside a session's actor.
+//! background liveness ticks (launch readiness, and the pane probe that closes
+//! an open session whose pane has gone). The `ensure`/`new` entry points live
+//! on the interactor's routing layer (they mint the session id and pick the
+//! actor); everything here runs inside a session's actor.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -9,6 +10,7 @@ use std::path::{Path, PathBuf};
 mod adapter_launch;
 mod adapter_session;
 mod cancel_launch;
+mod close_if_pane_vanished;
 mod close_session;
 mod delete_session;
 mod dispatch_ready_resumes;
@@ -17,8 +19,10 @@ mod launch_prep;
 mod mint_free_token;
 mod open_session;
 mod reap_stale_spawns;
+mod reap_tick;
 mod record_launched_pane;
 mod spawn_fresh;
+mod tear_down_bound_session;
 mod workdir_for;
 mod worktree_launch_dir;
 
@@ -26,6 +30,7 @@ pub(in crate::interactor) use adapter_launch::PreparedAdapterLaunch;
 pub(in crate::interactor) use cancel_launch::UnboundLaunchEnd;
 pub(in crate::interactor) use record_launched_pane::LaunchApproval;
 pub(in crate::interactor) use spawn_fresh::FreshSpawn;
+pub(in crate::interactor) use tear_down_bound_session::PaneTeardown;
 
 #[cfg(test)]
 mod tests;

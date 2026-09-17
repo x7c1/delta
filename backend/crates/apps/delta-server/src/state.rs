@@ -311,13 +311,18 @@ impl AppState {
     ///   input-ready. A settled resume with no held prompt flushes the session's
     ///   oldest `queued` send instead, broadcasting the resulting
     ///   [`SessionEvent::SendDispatched`].
-    /// - **Launch watchdog**: reaps any fresh spawn that never bound, and any
+    /// - **Liveness reap**: reaps any fresh spawn that never bound, and any
     ///   resumed session that never became ready, before its deadline —
     ///   broadcasting the resulting [`SessionEvent::SpawnFailed`]s, so a launch
     ///   that crashed/hung (a fresh spawn before its first hook, or a
     ///   `claude --resume` that never reached `SessionStart(resume)`) can no
     ///   longer stall the UI on "pending" forever (the `SessionEnd` hook catches
-    ///   the exited case immediately; this catches the hang-forever case).
+    ///   the exited case immediately; this catches the hang-forever case). The
+    ///   same pass also probes every *open, pane-backed* session's pane and
+    ///   closes the session when that pane is gone, broadcasting
+    ///   `session_closed` — an agent that exited, or was killed or crashed
+    ///   without a `SessionEnd` hook, would otherwise leave a session reading as
+    ///   open forever, failing every send typed into its dead pane.
     /// - **Echo watchdog**: releases any dispatched send whose keystrokes were
     ///   swallowed with no trace at all — no echo, no turn boundary, nothing —
     ///   retrying it once and then parking it, which holds it in the queue for
@@ -368,10 +373,12 @@ impl AppState {
                     }
                 }
                 let resumes_done = Instant::now();
-                // Watchdog: reap fresh spawns that never bound and resumes that
-                // never became ready before their deadlines. `Instant::now()` is
-                // the live clock here; tests drive `reap_stale_spawns` directly
-                // with an injected `now`.
+                // Liveness reap: reap fresh spawns that never bound and
+                // resumes that never became ready before their deadlines, and
+                // close every open session whose tmux pane has gone (its agent
+                // exited, died or was killed, so there is nothing left to type
+                // into). `Instant::now()` is the live clock here; tests drive
+                // `reap_stale_spawns` directly with an injected `now`.
                 match interactor.reap_stale_spawns(now, SWEEP_TICK_BOUND).await {
                     Ok(failed_events) => {
                         for event in failed_events {
@@ -379,7 +386,7 @@ impl AppState {
                         }
                     }
                     Err(err) => {
-                        tracing::warn!(error = %err, "spawn watchdog reap failed");
+                        tracing::warn!(error = %err, "liveness reap failed");
                     }
                 }
                 let reap_done = Instant::now();

@@ -1,8 +1,9 @@
 //! Background ticks: the periodic fan-outs the server loop drives — the
-//! transcript poll, the resume dispatch, the stale-spawn reap and the
-//! echo-deadline sweep. Each posts one input to every live actor and collects
-//! the replies under a caller-supplied bound; `collect_tick_replies` holds the
-//! shape they all share.
+//! transcript poll, the resume dispatch, the liveness reap (stale launches and
+//! open sessions whose pane has gone) and the echo-deadline sweep. Each posts
+//! one input to every live actor and collects the replies under a
+//! caller-supplied bound; `collect_tick_replies` holds the shape they all
+//! share.
 
 use std::time::{Duration, Instant};
 
@@ -162,16 +163,28 @@ where
         Ok(replies.into_iter().flatten().collect())
     }
 
-    /// Reap launches that never became ready before their deadline (the
-    /// watchdog sweep), covering both fresh spawns and resumed sessions.
+    /// The liveness sweep: reap launches that never became ready before their
+    /// deadline (the watchdog, covering both fresh spawns and resumed
+    /// sessions), and close every open session whose tmux pane has gone.
     ///
     /// For each stale launch the owning actor kills the tmux pane
     /// (best-effort) and produces a [`SessionEvent::SpawnFailed`] so the
     /// browser can surface the failure and clear the optimistic pending chip.
+    /// For each open, pane-backed session whose pane no longer exists — its
+    /// agent exited, or went away without ever delivering a `SessionEnd` hook —
+    /// the actor runs the same teardown pressing Close does and produces a
+    /// [`SessionEvent::SessionClosed`] (plus whatever its background-subagent
+    /// sweep cleared), so the browser stops showing a session that cannot
+    /// accept input; the next send then resumes it. Both checks ride this one
+    /// tick rather than each owning a timer — see
+    /// [`SessionContext::reap_tick`].
+    ///
     /// `now` is injected so the watchdog is deterministic under test; the
     /// server owns the periodic tick that calls this and broadcasts the
     /// result. `bound` caps how long the fan-out waits on the actors; see
     /// [`Self::collect_tick_replies`].
+    ///
+    /// [`SessionContext::reap_tick`]: crate::interactor::session_actor::actor::SessionContext::reap_tick
     pub async fn reap_stale_spawns(
         &self,
         now: Instant,

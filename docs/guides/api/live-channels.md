@@ -103,8 +103,16 @@ which frames arrive, and a client must handle each event whenever it lands.
   settles (`turn_interrupted` for an in-flight turn, `permission_resolved` for
   every pending request) and then reports the close, so a watching browser
   converges from events alone — see
-  [sessions.md](sessions.md) for the recovery story. A close that instead
-  *cancelled* a still-starting launch
+  [sessions.md](sessions.md) for the recovery story. A pane-backed (Claude)
+  session closes itself too when Delta's background sweep
+  [finds its tmux session gone](sessions.md#closed-on-its-own-when-the-pane-is-gone)
+  — the agent exited, or was killed or crashed without ever delivering a
+  `SessionEnd` hook. That one announces itself with this event alone: any
+  `subagent_finished` the teardown produced goes out just before it, and nothing
+  else precedes it, so a client showing a turn as running or a dialog as
+  unanswered for that session ends both on `session_closed` itself. The next
+  send resumes the session as usual. A close that instead *cancelled* a
+  still-starting launch
   ([sessions.md](sessions.md#post-apisessionsidclose)) emits it too, right after
   the `spawn_failed` that reports the cancellation. That order is deliberate, so
   a client that refetches the session list (and that session's open sends) on

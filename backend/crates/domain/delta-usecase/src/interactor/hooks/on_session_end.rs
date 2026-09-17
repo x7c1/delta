@@ -37,7 +37,13 @@ where
     /// - **Normal end**: neither — the session is already-ready/bound, or
     ///   unknown. The launch succeeded and is simply ending; this handler does
     ///   **not** touch close/teardown semantics (owned by `close_session`), it
-    ///   just logs and returns cleanly.
+    ///   just settles the turn, sweeps the background subagents and returns.
+    ///   The binding is deliberately left in place — the hook fires *before*
+    ///   the pane is gone, so tearing the session down here would race the
+    ///   agent's own exit. What closes the session afterwards is the background
+    ///   pane probe ([`SessionContext::close_if_pane_vanished`]), which sees
+    ///   the pane actually disappear on the next liveness tick and runs the
+    ///   same teardown pressing Close does.
     ///
     /// Failure detection is limited to the not-yet-ready cases, so this hook can
     /// never tear down a healthy, already-ready session.
@@ -97,10 +103,12 @@ where
         }
 
         // Normal end (or an unrelated id): the session was ready/bound or unknown.
-        // Leave close/teardown semantics alone, but the `claude` process is
-        // gone, so whatever turn state it had can no longer progress — feed
-        // `Close` so the turn machine does not hold a phantom in-flight turn
-        // (a no-op for an idle/unknown session).
+        // Leave close/teardown semantics alone — the binding outlives this hook
+        // and the background pane probe closes the session once the pane is
+        // really gone — but the `claude` process is on its way out, so whatever
+        // turn state it had can no longer progress: feed `Close` so the turn
+        // machine does not hold a phantom in-flight turn (a no-op for an
+        // idle/unknown session).
         tracing::info!(
             session_id = %hook.session_id,
             reason = hook.reason.as_deref().unwrap_or("<none>"),

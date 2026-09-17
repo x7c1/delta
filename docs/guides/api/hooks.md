@@ -70,7 +70,12 @@ A bind typically broadcasts `session_registered`.
 Fires when a session terminates. Delta uses it as a precise early failure
 signal: if the ending session is a fresh spawn that never bound, the launch
 failed before it could register, so the session is removed and `spawn_failed` is
-broadcast. An already-bound session ending is a normal end and changes nothing.
+broadcast.
+An already-bound session ending is a normal end: the turn is settled and any
+lingering background subagent swept, but the binding is left in place — the
+background liveness sweep closes the session a tick later, once its pane is
+actually gone (see
+[sessions.md](sessions.md#closed-on-its-own-when-the-pane-is-gone)).
 
 Request:
 
