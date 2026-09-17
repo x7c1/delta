@@ -217,16 +217,21 @@ assert_contains "the failure fires a desktop notification" "$(cat "$NOTIFY_LOG")
   "notify-send -u critical Delta canary FAILED real-codex suite failed"
 
 # Without notify-send (the stock macOS case) the same failure falls back to
-# osascript. Only assertable where the host has no real notify-send to find
-# once the stub is out of the way.
+# osascript. The stub is removed to make notify-send absent, which only works
+# where the host has no real one to find once the stub is out of the way: on a
+# host that does have one, removing the stub would uncover the real binary and
+# pop the fake failure onto the developer's desktop, so there the stub stays
+# and the fallback goes unasserted.
 : >"$NOTIFY_LOG"
-rm -f "$BIN_DIR/notify-send"
+[ -z "$HOST_HAS_NOTIFY_SEND" ] && rm -f "$BIN_DIR/notify-send"
 printf 'v2.1.0\n' >"$WORK_DIR/codex.version"
 age_attempt codex $((25 * 60 * 60))
 tick
 assert_eq "the notifier fallback tick still exits non-zero" 3 "$TICK_STATUS"
 if [ -n "$HOST_HAS_NOTIFY_SEND" ]; then
   pass "osascript fallback check skipped (this host has a real notify-send)"
+  assert_contains "the failure still goes to the stubbed notify-send, not the desktop" \
+    "$(cat "$NOTIFY_LOG")" "notify-send -u critical Delta canary FAILED real-codex suite failed"
 else
   assert_contains "the failure falls back to osascript" "$(cat "$NOTIFY_LOG")" \
     "osascript -e display notification"
