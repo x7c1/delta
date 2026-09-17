@@ -3,7 +3,6 @@ import type { ClonesSlice } from './clonesSlice';
 import type { ConnectionSlice } from './connectionSlice';
 import type { SendsSlice } from './sendsSlice';
 import type { SpawnsSlice } from './spawnsSlice';
-import type { StartingPanesSlice } from './startingPanesSlice';
 import type { RunningThreadsSlice } from './runningThreadsSlice';
 import type { NoticesSlice } from './noticesSlice';
 import type { ThreadActivitySlice } from './threadActivitySlice';
@@ -47,7 +46,6 @@ export interface EventsSlice {
 export type LiveState = ConnectionSlice &
   SendsSlice &
   SpawnsSlice &
-  StartingPanesSlice &
   RunningThreadsSlice &
   NoticesSlice &
   UnreadSlice &

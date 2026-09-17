@@ -9,7 +9,17 @@ export type SessionListItem = { session: Session,
  * Whether the session currently has a live pane (resumable without
  * `--resume`). A closed session still appears, with `open: false`.
  */
-open: boolean, main_thread_id: number, 
+open: boolean, 
+/**
+ * Whether the session holds a pane the embedded terminal may attach to
+ * that nothing has bound yet — a launch whose pane is up while its first
+ * hook has not arrived. That is the window in which the launch may be
+ * waiting on an interactive prompt only a human can answer, so the row
+ * carries the fact and any browser (including one that reloaded mid-launch
+ * and never saw `spawn_pane_ready`) can offer the terminal. Mutually
+ * exclusive with `open`.
+ */
+pane_starting: boolean, main_thread_id: number, 
 /**
  * Timestamp of the session's most recent message (ISO-8601 UTC), or `null`
  * when the session has no messages yet.

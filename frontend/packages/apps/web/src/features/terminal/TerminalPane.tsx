@@ -126,15 +126,15 @@ export function TerminalPane({
       //
       // A session that is merely `preparing` is neither dropped nor hidden. Its
       // ordinary form has no entry to drop (there was no pane to build one
-      // against), but it is also what the focused session reads as for the
-      // moment between the bind landing and the session row saying so: the
-      // live event clears the starting-pane mark at once, while `open` comes
-      // off the row, which only flips after its refetch. Tearing the terminal
-      // down for that blink would close the `/pty` socket the instant the user
-      // answered the prompt they attached for — detaching the tmux client (the
-      // stray blank line this component exists to avoid), typing the pre-attach
-      // input wipe into the freshly-bound pane on the way back, and dropping
-      // whatever they were mid-way through typing.
+      // against), and a bind no longer takes a session through it: `open` and
+      // `pane_starting` are read off the same row in one snapshot, so a pane
+      // the user is attached to goes straight from `starting` to `open`. The
+      // entry is kept regardless, because tearing the terminal down for such a
+      // blink would close the `/pty` socket the instant the user answered the
+      // prompt they attached for — detaching the tmux client (the stray blank
+      // line this component exists to avoid), typing the pre-attach input wipe
+      // into the freshly-bound pane on the way back, and dropping whatever they
+      // were mid-way through typing.
       const paneIsGone = paneState === 'closed' || paneState === 'failed';
       if (sessionId !== null && paneIsGone && !isMockMode()) {
         const closedEntry = entries.get(sessionId);

@@ -33,6 +33,9 @@ mod turn;
 mod launching_spawn;
 pub use launching_spawn::{AdapterLaunch, LaunchTarget, LaunchingSpawn, PaneLaunch};
 
+mod listing_state;
+pub use listing_state::SessionListingState;
+
 mod planned_worktree;
 pub use planned_worktree::PlannedWorktree;
 

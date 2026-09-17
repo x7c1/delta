@@ -14,6 +14,14 @@ pub struct WireSessionListItem {
     /// Whether the session currently has a live pane (resumable without
     /// `--resume`). A closed session still appears, with `open: false`.
     pub open: bool,
+    /// Whether the session holds a pane the embedded terminal may attach to
+    /// that nothing has bound yet — a launch whose pane is up while its first
+    /// hook has not arrived. That is the window in which the launch may be
+    /// waiting on an interactive prompt only a human can answer, so the row
+    /// carries the fact and any browser (including one that reloaded mid-launch
+    /// and never saw `spawn_pane_ready`) can offer the terminal. Mutually
+    /// exclusive with `open`.
+    pub pane_starting: bool,
     pub main_thread_id: i64,
     /// Timestamp of the session's most recent message (ISO-8601 UTC), or `null`
     /// when the session has no messages yet.
@@ -25,6 +33,7 @@ impl From<SessionListing> for WireSessionListItem {
         WireSessionListItem {
             session: listing.session.into(),
             open: listing.open,
+            pane_starting: listing.pane_starting,
             main_thread_id: listing.main_thread_id.0,
             last_activity_at: listing.last_activity_at,
         }
@@ -71,6 +80,7 @@ mod tests {
                 failure_reason: None,
             },
             open: true,
+            pane_starting: false,
             main_thread_id: ThreadId(1),
             last_activity_at: None,
         };
@@ -99,6 +109,7 @@ mod tests {
                         "failure_reason": null,
                     },
                     "open": true,
+                    "pane_starting": false,
                     "main_thread_id": 1,
                     "last_activity_at": null,
                 }],

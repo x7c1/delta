@@ -113,15 +113,21 @@ where
     }
 
     /// Enrich one store row into a [`SessionListing`]: attach its trunk thread
-    /// and its live `open` state (process-runtime data the registry owns, not a
-    /// SQL column).
+    /// and the live state the registry owns (its `open` flag and whether it
+    /// holds an unbound attachable pane) — process-runtime data, not SQL
+    /// columns.
+    ///
+    /// Both runtime facts come from one actor query
+    /// ([`Interactor::listing_state_for`]), not a round-trip each, so the pair
+    /// the row carries is a consistent snapshot.
     async fn listing_for(&self, row: SessionPageRow) -> Result<SessionListing> {
         let (session, last_activity_at) = row;
         let main_thread_id = self.store.main_thread_id(&session.id).await?;
-        let open = self.is_session_open(&session.id).await;
+        let state = self.listing_state_for(&session.id).await;
         Ok(SessionListing {
             session,
-            open,
+            open: state.open,
+            pane_starting: state.pane_starting,
             main_thread_id,
             last_activity_at,
         })

@@ -19,7 +19,7 @@ import {
   useNavStore,
   type FocusedSession,
 } from '../../store/navStore';
-import { paneIsStarting, useLiveStore } from '../../store/liveStore';
+import { useLiveStore } from '../../store/liveStore';
 import { useGarbageCollectSessionScopedStorage } from '../../store/sessionScopedStorage';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { CommsLogPane } from '../comms/CommsLogPane';
@@ -191,7 +191,6 @@ export function WorkspaceScreen() {
   const terminalWidth = useNavStore((state) => state.terminalWidth);
   const clearUnread = useLiveStore((state) => state.clearUnread);
   const spawns = useLiveStore((state) => state.spawns);
-  const startingPanes = useLiveStore((state) => state.startingPanes);
   const markSpawnFocusHandedOver = useLiveStore(
     (state) => state.markSpawnFocusHandedOver,
   );
@@ -447,6 +446,12 @@ export function WorkspaceScreen() {
   }
 
   const focusedOpen = focusedItem?.open ?? false;
+  // The focused session's launch has a pane up that nothing has bound yet: it
+  // can be attached to, and doing so is the only way to answer a prompt the
+  // launch stopped on. Read off the row rather than off a live event, so a
+  // browser that reloaded mid-launch (or a second tab opened after the pane
+  // came up) offers the terminal just the same.
+  const focusedPaneStarting = focusedItem?.pane_starting ?? false;
   // The same session in the beat before its row reaches the loaded pages: it
   // was focused off the tracked spawn alone, so there is nothing to render yet
   // — but it is arriving, not gone.
@@ -521,8 +526,7 @@ export function WorkspaceScreen() {
     : focusedFailed
       ? 'failed'
       : focusedSpawning
-        ? focusedRealSessionId !== null &&
-          paneIsStarting(startingPanes, focusedRealSessionId)
+        ? focusedPaneStarting
           ? 'starting'
           : 'preparing'
         : 'closed';

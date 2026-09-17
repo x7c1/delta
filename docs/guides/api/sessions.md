@@ -55,6 +55,7 @@ Response:
       {
         "session": { /* Session */ },
         "open": true,
+        "pane_starting": false,
         "main_thread_id": 1,
         "last_activity_at": "2026-01-01T00:01:01Z"
       }
@@ -64,7 +65,12 @@ Response:
   ```
 
   `open` is `true` when the session currently has a live pane (resumable without
-  `--resume`). `last_activity_at` is the ISO-8601 UTC timestamp of the session's
+  `--resume`). `pane_starting` is `true` while a still-`spawning` row holds a
+  pane the `/pty` bridge may attach to that nothing has bound yet — the window in
+  which the launch may be waiting on an interactive prompt only a human can
+  answer (see [`spawn_pane_ready`](live-channels.md#session-lifecycle)). It is
+  never `true` together with `open`: binding the pane is what ends that window.
+  `last_activity_at` is the ISO-8601 UTC timestamp of the session's
   most recent message (`MAX(message.created_at)`), or `null` when the session has
   no messages yet. `next_cursor` is an opaque token to fetch the following page,
   or `null` on the last page — it advances through the closed sessions, since
