@@ -6,9 +6,11 @@
 
 pub mod corpus;
 
+use std::collections::BTreeMap;
+
 use delta_model::{ContentBlock, Message, MessageUuid, Role, SessionId, ThreadId};
 
-use delta_attribution::{Attributed, OutstandingSend, TranscriptMessage};
+use delta_attribution::{Attributed, OutstandingSend, SubagentLaunch, TranscriptMessage};
 
 /// The session id every test folds under.
 pub fn session() -> SessionId {
@@ -91,8 +93,9 @@ pub fn interrupt_line(uuid: &str) -> TranscriptMessage {
 /// A harness-injected `<task-notification>`: a background-task completion that
 /// current claude delivers as a plain `role: user` line (NOT a legacy
 /// `queued_command` attachment), so it carries no `is_queued_command` flag.
-/// Carries no `<tool-use-id>`, so it exercises the unknown-launch fallback
-/// (inherit `carry_thread`).
+/// KEYLESS — it carries neither `<tool-use-id>` nor `<task-id>`, so it matches
+/// a launch only under the single-outstanding-launch rule, and otherwise falls
+/// back to inheriting `carry_thread`.
 pub fn task_notification_line(uuid: &str) -> TranscriptMessage {
     user_line(uuid, "<task-notification>done</task-notification>")
 }
@@ -434,6 +437,25 @@ pub fn branch_send(id: i64, thread: ThreadId, parent: &str, text: &str) -> Outst
         semantic_parent_uuid: Some(MessageUuid::from(parent)),
         ..send(id, thread, text)
     }
+}
+
+/// A seeded `launched_threads` map: one `(tool_use_id -> launching thread)`
+/// entry per element, each with no `task_id` learned yet.
+pub fn launches<'a>(
+    entries: impl IntoIterator<Item = (&'a str, ThreadId)>,
+) -> BTreeMap<String, SubagentLaunch> {
+    entries
+        .into_iter()
+        .map(|(tool_use_id, thread_id)| {
+            (
+                tool_use_id.to_owned(),
+                SubagentLaunch {
+                    thread_id,
+                    task_id: None,
+                },
+            )
+        })
+        .collect()
 }
 
 // --- Assertion helpers ----------------------------------------------------------
