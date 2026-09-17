@@ -9,8 +9,9 @@
 /// The Codex CLI version the vendored schema was generated from.
 ///
 /// Drift detection regenerates the schema at this version and compares it
-/// against the vendored copy; when re-vendoring against a newer Codex, bump this
-/// and replace the files under `vendor/app-server-schema/` in the same change.
+/// against the vendored copy; when re-vendoring against a newer Codex
+/// (`make vendor-codex-schema`, which rewrites the files under
+/// `vendor/app-server-schema/`), bump this in the same change.
 pub const VENDORED_CODEX_VERSION: &str = "0.153.4";
 
 /// Path, relative to this crate's manifest directory, of the combined v2 schema

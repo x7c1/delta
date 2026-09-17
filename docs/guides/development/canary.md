@@ -120,6 +120,11 @@ while the `fake-codex` re-enactment is green — or let the gate below run it
 for you when `codex` updates, which is what keeps the vendored schema from
 drifting unnoticed.
 
+A red schema-drift check is answered with `make vendor-codex-schema`, which
+re-vendors the schema from the installed Codex in the form the repo pins, and a
+bump of `VENDORED_CODEX_VERSION` in the same change (see
+[development/README.md](README.md#vendored-codex-app-server-schema)).
+
 ## Automatic canary trigger (opt-in)
 
 ```bash
@@ -204,9 +209,9 @@ has but the window has not passed yet. So a red canary does not read as green
 once the `FAILURE:` line has scrolled away, not even across the update that
 usually follows it within the day. When that happens, read the run log and
 follow the drift runbook above (for codex, a red schema-drift check means
-re-vendoring the app-server schema); the next automatic run happens once that
-CLI updates again and the debounce window has passed (or run the suite manually
-after the fix — manual runs are not gated).
+re-vendoring the app-server schema with `make vendor-codex-schema`); the next
+automatic run happens once that CLI updates again and the debounce window has
+passed (or run the suite manually after the fix — manual runs are not gated).
 
 A manual run does not touch the gate's record, so the repeated verdict stays
 until the gate itself runs that provider again;

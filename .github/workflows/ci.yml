@@ -61,6 +61,14 @@ jobs:
             exit 1
           fi
 
+      # The vendored `codex app-server` schema is stored key-sorted (`jq -S -j .`)
+      # so a re-vendor diff shows the protocol changes rather than the
+      # generator's unstable output order. This step only reads the committed
+      # files — no codex binary, no network — and `jq` is preinstalled on the
+      # runner image. `make check` runs the same check locally.
+      - name: Check the vendored codex schema is key-sorted
+        run: ../scripts/vendor-codex-schema.sh --check
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

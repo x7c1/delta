@@ -58,6 +58,23 @@ gen-check: gen
 		exit 1; \
 	fi
 
+# --- Vendored codex app-server schema -----------------------------------------
+
+## vendor-codex-schema: re-vendor backend/crates/gateway/codex-agent/vendor/app-server-schema from the installed codex (DELTA_CODEX_BIN overrides the binary)
+.PHONY: vendor-codex-schema
+vendor-codex-schema:
+	scripts/vendor-codex-schema.sh
+
+## vendor-codex-schema-check: fail when a vendored codex schema file is not in its pinned key-sorted form (needs only jq; part of `make check` and of CI's backend job)
+.PHONY: vendor-codex-schema-check
+vendor-codex-schema-check:
+	scripts/vendor-codex-schema.sh --check
+
+## vendor-codex-schema-test: exercise the re-vendor script against a stub generator in a throwaway directory (needs no codex; part of `make check`)
+.PHONY: vendor-codex-schema-test
+vendor-codex-schema-test:
+	bash scripts/tests/vendor-codex-schema.test.sh
+
 # --- Quality gate -------------------------------------------------------------
 
 ## build: build backend and frontend
@@ -78,7 +95,7 @@ lint:
 	cd backend && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy + generated-bindings freshness + frontend build/typecheck/test/lint + both Playwright suites (needs tmux) — plus the canary gate's own stubbed tests, which CI does not run
+## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint + both Playwright suites (needs tmux) — plus the canary gate's and the re-vendor script's own stubbed tests, which CI does not run
 # The point of this target is that passing it means CI will pass, so it has to
 # stay a superset of what the workflow runs — including BOTH Playwright suites.
 # `e2e` is the mock-backed one and `e2e-fake` drives the real backend through
@@ -90,6 +107,8 @@ lint:
 check:
 	cd backend && cargo fmt --all -- --check && cargo build && cargo test && cargo clippy --all-targets -- -D warnings
 	$(MAKE) gen-check
+	$(MAKE) vendor-codex-schema-check
+	$(MAKE) vendor-codex-schema-test
 	$(MAKE) e2e-real-gate-test
 	cd frontend && pnpm -r build && pnpm -r typecheck && pnpm -r test && pnpm -r lint
 	$(MAKE) e2e
