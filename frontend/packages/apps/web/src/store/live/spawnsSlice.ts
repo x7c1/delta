@@ -300,15 +300,14 @@ export const reduceSpawnFailed: EventReducer<SpawnsState, 'spawn_failed'> = (
 /**
  * The spawn came up: its launch bound and the server activated the row. The
  * tracked entry has done its job — the workspace focused the session if the
- * user was still waiting on the new-session screen when the POST was accepted,
- * and the pending chip now renders from the session's own open-send list — so
- * drop it here.
+ * user was still waiting on the new-session screen when the POST was accepted
+ * — so drop it here. The entry feeds no pending row: the session's own strip
+ * renders from its open sends and the local sends tracked alongside them.
  *
  * This is the release point precisely because it is the LAST thing the entry
  * is needed for: while a spawn is tracked the workspace refuses to reconcile
- * focus away from its id (the row may not be in the loaded page yet), and
- * `usePendingSends` shows its first prompt on the new-session surface for a
- * user who navigated back there. Only a `spawning` entry is dropped: a
+ * focus away from its id (the row may not be in the loaded page yet), which it
+ * has to hold until the row is listed. Only a `spawning` entry is dropped: a
  * `failed` one still holds the launch configuration its session's Retry reads,
  * and a registration for a session this client never spawned matches nothing.
  */

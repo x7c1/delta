@@ -11,8 +11,9 @@ import {
 
 /**
  * The surface a pending strip renders for: an existing thread, or the
- * new-session composer screen (which shows the in-flight first sends of
- * tracked spawns). `null` renders nothing.
+ * new-session composer screen (which shows only its own submits: the POST
+ * still in flight, or the launch the server rejected). `null` renders
+ * nothing.
  */
 export type PendingSurface =
   | { kind: 'thread'; sessionId: SessionId; threadId: ThreadId }
@@ -25,6 +26,8 @@ export type PendingEntry =
   /**
    * A server-accepted send that already left the open list (it matched its
    * transcript line) but whose turn has not ended yet — still in progress.
+   * Only ever a thread surface's row: the new-session screen lists no send
+   * that has already been accepted.
    */
   | { kind: 'local'; key: string; send: LocalSend }
   /** A submit whose POST is still in flight, or was rejected (`failed`). */
@@ -44,7 +47,6 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
   const client = useApiClient();
   const sending = useLiveStore((state) => state.sending);
   const localSends = useLiveStore((state) => state.localSends);
-  const spawns = useLiveStore((state) => state.spawns);
 
   const sessionId = surface?.kind === 'thread' ? surface.sessionId : null;
   const sendsQuery = useSessionSendsQuery(client, sessionId);
@@ -150,37 +152,30 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
       return entries;
     }
 
-    // The new-session screen: the in-flight first send of each tracked spawn
-    // (its real ids are known, but the screen has no thread to query under —
-    // the tracked local send carries everything the chip needs), then submits
-    // still awaiting their POST. A launch that FAILED is deliberately absent:
-    // its session row is kept and marked failed, so its prompt, its reason and
-    // its Retry / Remove actions are on that session's own screen — putting a
-    // card here too would say the same thing twice, on a screen that has
-    // nothing to do with the session that failed.
+    // The new-session screen: only its own submits — the sends this very
+    // screen is in the middle of making, still awaiting their POST or
+    // rejected by it (that row keeps the text alongside Retry / Dismiss, so
+    // the launch stays recoverable on the screen it was started from).
+    // Sessions the server already accepted are deliberately absent, whichever
+    // way their launch then goes.
+    //
+    // A launch still STARTING has its own row in the navigator and its own
+    // screen, and that screen is where its first prompt is shown — whether
+    // `useSubmitSend` handed focus over to it the moment the send was accepted
+    // or the user had already moved elsewhere by then and stayed there.
+    // Repeating that text here would say the same thing twice, on the screen
+    // where the user is about to write their next prompt — and it would read
+    // as if the new one had already gone out.
+    //
+    // A launch that was accepted and then FAILED is absent for the same
+    // reason: its session row is kept and marked failed, so its prompt, its
+    // reason and its Retry / Remove actions are on that session's own screen.
     const entries: PendingEntry[] = [];
-    const spawningIds = new Set(
-      spawns
-        .filter((spawn) => spawn.status === 'spawning')
-        .map((spawn) => spawn.sessionId),
-    );
-    const accepted = Object.values(localSends)
-      .filter((send) => spawningIds.has(send.sessionId))
-      .sort((a, b) => a.sendId - b.sendId);
-    entries.push(
-      ...accepted.map(
-        (send): PendingEntry => ({
-          kind: 'local',
-          key: `local-${send.sendId}`,
-          send,
-        }),
-      ),
-    );
     for (const item of sending) {
       if (item.target.kind === 'new-session') {
         entries.push({ kind: 'sending', key: item.id, item });
       }
     }
     return entries;
-  }, [surface, serverSends, localSends, sending, spawns]);
+  }, [surface, serverSends, localSends, sending]);
 }
