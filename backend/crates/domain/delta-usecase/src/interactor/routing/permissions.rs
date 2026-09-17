@@ -24,12 +24,13 @@ where
     ///
     /// Returns [`Error::PermissionNotPending`] when no waiter can be reached:
     /// the request is unknown, was already decided, its hook wait timed out and
-    /// fell back to the TUI prompt, or its agent session ended — no decision can
-    /// reach a wire that is gone, and the two ends reject it from different
-    /// places: a death's settle drops the index entry here, while a close leaves
-    /// the entry in place and the actor rejects the decision (its open agent, and
-    /// with it the wire to answer on, is gone). In every case a UI decision can
-    /// no longer take effect, and the caller surfaces that as a conflict.
+    /// fell back to the TUI prompt, or its agent stopped driving the session —
+    /// no decision can reach an agent that is gone. That last case is rejected
+    /// right here: both a death and a close settle the requests they strand
+    /// through the same routine (`SessionContext::settle_pending_permissions`),
+    /// which drops the index entry as it denies the row. In every case a UI
+    /// decision can no longer take effect, and the caller surfaces that as a
+    /// conflict.
     ///
     /// Returns [`Error::PermissionDecisionUnsupported`] when the decision itself
     /// is one this session's provider cannot express (a session-scoped allow

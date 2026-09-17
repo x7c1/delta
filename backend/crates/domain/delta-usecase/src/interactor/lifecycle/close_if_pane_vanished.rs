@@ -56,8 +56,14 @@ where
     /// the same thing pressing Close does, minus killing a pane that is already
     /// gone — followed by [`SessionEvent::SessionClosed`] so the browser
     /// refetches the list and the session's open sends. The teardown's own
-    /// events (a swept background subagent's `SubagentFinished`) go out first,
-    /// mirroring the explicit close's order.
+    /// events (a `PermissionResolved` per stranded dialog, then a swept
+    /// background subagent's `SubagentFinished`) go out first, mirroring the
+    /// explicit close's order: nothing about the session follows the close.
+    ///
+    /// That the dialogs settle here matters most on this path, because nobody
+    /// pressed anything: the agent is killed while a dialog is on screen, and
+    /// without the settle a tick later the browser would re-raise it over a
+    /// session that is now closed, where Allow can only answer `409`.
     pub(in crate::interactor) async fn close_if_pane_vanished(
         &mut self,
     ) -> Result<Vec<SessionEvent>> {

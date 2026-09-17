@@ -184,14 +184,14 @@ where
     /// So a death settles, in this order — each step reusing the reducer that
     /// already owns that piece of state:
     ///
-    /// 1. **Permissions.** Every still-`pending` row of the session is denied
-    ///    with a reason (the audit trail then says why it settled — see
-    ///    [`SessionStore::deny_pending_permission_requests`]), the queryable
-    ///    mirror is emptied in one step, the decision-routing index entries are
-    ///    dropped (so a decision POST for one of them is a clean conflict rather
-    ///    than a write to a dead wire), and one
-    ///    [`SessionEvent::PermissionResolved`] per request goes out so a live
-    ///    browser's notice clears without a refetch.
+    /// 1. **Permissions.** The shared settle
+    ///    ([`Self::settle_pending_permissions`]) denies every still-`pending`
+    ///    row of the session with [`PERMISSION_DENIED_ON_SESSION_DEATH`],
+    ///    empties the queryable mirror, drops the decision-routing index
+    ///    entries, and produces one [`SessionEvent::PermissionResolved`] per
+    ///    request — emitted on the async seam here, so a live browser's notice
+    ///    clears without a refetch.
+    ///    The same routine runs on the bound-session teardown.
     /// 2. **The turn.** A turn still in flight is ended through the same path an
     ///    interrupted or failed turn takes ([`Self::complete_agent_turn`]), so
     ///    the stuck chip clears via [`SessionEvent::TurnInterrupted`]. An idle
@@ -209,8 +209,6 @@ where
     /// An orderly [`SessionEndReason::Closed`] is a no-op here: `close_session`
     /// already did all of the above synchronously, and re-running it would
     /// double-broadcast the close.
-    ///
-    /// [`SessionStore::deny_pending_permission_requests`]: crate::ports::SessionStore::deny_pending_permission_requests
     async fn settle_agent_session_end(&mut self, reason: SessionEndReason) {
         if matches!(reason, SessionEndReason::Closed) {
             return;
@@ -222,7 +220,12 @@ where
              pending permissions and open state"
         );
 
-        self.settle_pending_permissions_on_death().await;
+        for event in self
+            .settle_pending_permissions(PERMISSION_DENIED_ON_SESSION_DEATH)
+            .await
+        {
+            self.emit_async_event(event);
+        }
 
         if self.state.turn() != TurnState::Idle {
             // `Failed` (not `Interrupted`): nobody asked for this end. Both map
@@ -237,65 +240,6 @@ where
             self.emit_async_event(SessionEvent::SessionClosed {
                 session_id: self.id.clone(),
             });
-        }
-    }
-
-    /// Settle the permission dialogs a dead agent session leaves behind: deny
-    /// their rows with a reason, empty the queryable mirror, drop the
-    /// decision-routing entries, and broadcast one resolution each.
-    ///
-    /// The store sweep and the runtime queue are unioned rather than trusting
-    /// either alone: the sweep is the authority on rows (it also catches a row
-    /// the mirror never held), while the queue is what a browser is actually
-    /// showing (it also catches a dialog whose row was settled by some other
-    /// path). Every id from either side gets its settle broadcast, so no notice
-    /// is left on screen and no row is left `pending`.
-    ///
-    /// A sweep failure is logged and the rest of the settle continues: a stuck
-    /// dialog and a stuck turn are worse than an unsettled audit row.
-    async fn settle_pending_permissions_on_death(&mut self) {
-        let denied = match self
-            .store
-            .deny_pending_permission_requests(self.id, PERMISSION_DENIED_ON_SESSION_DEATH)
-            .await
-        {
-            Ok(ids) => ids,
-            Err(err) => {
-                tracing::error!(
-                    session_id = %self.id,
-                    error = %err,
-                    "failed to deny the pending permission requests of a dead agent session; \
-                     their rows stay pending, but their dialogs are still cleared below"
-                );
-                Vec::new()
-            }
-        };
-        // Emptied in one step *before* the per-request settles: resolving the
-        // queue entry by entry would promote each successive head and
-        // re-broadcast it as a fresh dialog (see
-        // `SessionRuntime::clear_pending_permissions`).
-        let mirrored = self.state.clear_pending_permissions();
-        let request_ids: BTreeSet<i64> = denied.into_iter().chain(mirrored).collect();
-        for request_id in request_ids {
-            // A decision can no longer be delivered, so drop the routing entry:
-            // a decision POST that races this settle then answers
-            // `permission_not_pending` (409) instead of reaching the actor and
-            // failing on a broken pipe (500).
-            self.permission_index
-                .lock()
-                .expect("permission index poisoned")
-                .remove(&request_id);
-            // Through the shared reducer, so the broadcast is byte-identical to
-            // every other resolution. The mirror is already empty, so it
-            // produces exactly the settle and promotes nothing.
-            let event = AgentEvent::PermissionResolved {
-                request_id: request_id.to_string(),
-                // The row was recorded denied: the tool never ran.
-                decision: PermissionDecision::Deny,
-            };
-            for event in reduce_permission_event(self.state, self.id, &event) {
-                self.emit_async_event(event);
-            }
         }
     }
 

@@ -61,9 +61,11 @@ impl SessionRuntime {
     /// A transition back to [`TurnState::Idle`] (stop, interrupt, close) also
     /// drops every pending permission dialog and the pending question: they all
     /// blocked that turn, so the turn ending — however it ended — makes them moot.
-    /// This is the same lifecycle the browser notices have. The provider has
-    /// already settled or abandoned those requests by then; Delta only drops its
-    /// mirror of them.
+    /// This is the same lifecycle the browser notices have. After a stop or an
+    /// interrupt the provider has already settled or abandoned those requests, so
+    /// Delta only drops its mirror of them; a close settles them itself first
+    /// (`SessionContext::settle_pending_permissions`, run before `TurnInput::Close`
+    /// precisely because this drop announces nothing), leaving nothing here to drop.
     pub fn apply_turn(&mut self, input: TurnInput) -> Transition {
         let previous = self.turn;
         let result = transition(self.turn, input);

@@ -457,21 +457,27 @@ above report it as **head plus depth**: `permission` is the request to show,
   is reported, though — the queued requests' ids come from their
   `permission_requested` events alone. So a client that missed those answers the
   queue front to back, one promoted head at a time, which drains it either way.
-- **The queue cannot outlive its turn.** When the turn returns to idle (stop,
-  interrupt, close) the whole queue is dropped: the provider has settled or
-  abandoned those requests by then, and Delta only drops its mirror.
-- **A session whose agent process dies settles the whole queue.** An
+- **The queue cannot outlive its turn.** When a stop or an interrupt returns the
+  turn to idle the whole queue is dropped and Delta only drops its mirror: the
+  provider has settled or abandoned those requests by then. A close ends the
+  turn too, but it settles the queue *first* — see the next bullet — so nothing
+  is dropped silently there.
+- **A session whose agent stops driving it settles the whole queue.** An
   adapter-backed provider's process can go away mid-turn (a killed
-  `codex app-server`), and its pending requests can then never be answered — no
-  decision can be written to a connection that no longer exists. So the queue is
-  settled in one pass: one `permission_resolved` per request (so a live client's
-  dialog clears with no refetch, and no promoted head is raised), and each row is
-  recorded **denied** with the reason "the agent session ended before this request
-  could be answered" — the tool never ran, no row is left pending, and the audit
-  trail still distinguishes it from a user's Deny. The same pass settles the turn
-  (`turn_interrupted`) and closes the session (`session_closed`); recovery is the
-  next send, which resumes it. A decision that arrives for one of those requests
-  is a `409` (see below).
+  `codex app-server`), and closing a session ends the agent that was asking —
+  whether a person pressed Close or the sweep
+  [found the pane gone](sessions.md#closed-on-its-own-when-the-pane-is-gone).
+  Either way the pending requests can never be answered: no decision can be
+  written to an agent that is not there. So the queue is settled in one pass:
+  one `permission_resolved` per request (so a live client's dialog clears with
+  no refetch, and no promoted head is raised), and each row is recorded
+  **denied** with a reason — "the agent session ended before this request could
+  be answered" for a death, "the session was closed before this request could be
+  answered" for a close. The tool never ran, no row is left pending, and the
+  audit trail still distinguishes either from a user's Deny. A death's pass also
+  settles the turn (`turn_interrupted`) and closes the session
+  (`session_closed`); recovery is the next send, which resumes it. A decision
+  that arrives for one of those requests is a `409` (see below).
 
 ### `POST /api/permissions/{id}/decision`
 
@@ -518,9 +524,10 @@ was permitted, exactly as for a plain `allow`.
   rest of the card usable.
 - **409** (body `code: "permission_not_pending"`) — the request is no longer
   awaiting a browser decision: it was already decided, its hook wait timed out
-  and the interactive TUI prompt owns it now, or its adapter-backed session
-  ended (closed, or its agent process died and the settle resolved every
-  pending request — see
+  and the interactive TUI prompt owns it now, or its session stopped being
+  driven by an agent — closed by hand, closed because its pane went away, or an
+  adapter-backed agent process that died — in which case the settle has already
+  resolved every pending request (see
   [the queue semantics](#the-pending-permission-queue)). A retry of a decision
   that already failed downstream (the **500** a dying agent connection can
   produce) answers the same 409: the server's claim on the request is taken

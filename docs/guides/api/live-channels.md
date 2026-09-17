@@ -107,11 +107,16 @@ which frames arrive, and a client must handle each event whenever it lands.
   session closes itself too when Delta's background sweep
   [finds its tmux session gone](sessions.md#closed-on-its-own-when-the-pane-is-gone)
   — the agent exited, or was killed or crashed without ever delivering a
-  `SessionEnd` hook. That one announces itself with this event alone: any
-  `subagent_finished` the teardown produced goes out just before it, and nothing
-  else precedes it, so a client showing a turn as running or a dialog as
-  unanswered for that session ends both on `session_closed` itself. The next
-  send resumes the session as usual. A close that instead *cancelled* a
+  `SessionEnd` hook. Either close — pressed or noticed — settles what the
+  session strands first: a `permission_resolved` for every request still
+  awaiting an answer (nobody can answer a request whose agent is gone; the row
+  is recorded denied with a reason saying the session was closed), then any
+  `subagent_finished` the teardown produced, and `session_closed` last. So a
+  client showing a dialog as unanswered is told it is settled *before* it hears
+  the session closed, and the refetch that `session_closed` triggers has nothing
+  left to re-raise. Nothing about the session follows `session_closed`, so a
+  client showing a turn as running still ends it on that event. The next send
+  resumes the session as usual. A close that instead *cancelled* a
   still-starting launch
   ([sessions.md](sessions.md#post-apisessionsidclose)) emits it too, right after
   the `spawn_failed` that reports the cancellation. That order is deliberate, so
@@ -367,9 +372,10 @@ which frames arrive, and a client must handle each event whenever it lands.
   answers, so the notice persists until then. It settles exactly the named
   `request_id`: with several approvals pending, the others stay pending and
   answerable, and the next one is raised by the follow-up
-  `permission_requested` described above. A session whose agent process ended is
-  the one case where *every* pending request is settled at once — one of these
-  each, with no promotion, since none of them can be answered any more (see
+  `permission_requested` described above. A session whose agent stopped driving
+  it — its process died, or the session was closed — is the one case where
+  *every* pending request is settled at once: one of these each, with no
+  promotion, since none of them can be answered any more (see
   [sends.md](sends.md#the-pending-permission-queue)).
 
 ### Streaming and subagents

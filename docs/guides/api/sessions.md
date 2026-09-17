@@ -18,8 +18,8 @@ permission requests are settled (see
 [sends.md](sends.md#the-pending-permission-queue)) — and it reports `open: false`,
 announced as `session_closed`. A pane-backed (Claude) session also closes itself
 when a background sweep finds its tmux pane gone — its agent exited, crashed or
-was killed — but it announces that close with `session_closed`, without the
-per-turn and per-request events above
+was killed — and that close settles its pending permission requests the same
+way, though no `turn_interrupted` accompanies it
 ([below](#closed-on-its-own-when-the-pane-is-gone)). Delta does not respawn the
 process: a send to such a session resumes it, exactly as after a server restart.
 
@@ -176,9 +176,16 @@ dropped from the registry (a terminal-less Codex session is closed through its
 adapter instead); the conversation remains in the store and can be reopened.
 Closing a session that is already closed is a no-op.
 
-Closing also sweeps any lingering background subagent whose completion
-notification can no longer arrive, broadcasting a `subagent_finished` for each so
-live viewers' running indicators clear immediately.
+Closing also settles what the session would otherwise strand. Every permission
+request still awaiting an answer is **denied** — the agent that asked is gone, so
+nobody can answer it — with the reason "the session was closed before this
+request could be answered" recorded on the row, and a `permission_resolved`
+broadcast for each so a live viewer's dialog clears and the refetch this close
+triggers has nothing left to re-raise. A pending `AskUserQuestion` settles the
+same way, over the same event. Closing also sweeps any lingering background
+subagent whose completion notification can no longer arrive, broadcasting a
+`subagent_finished` for each so live viewers' running indicators clear
+immediately. All of that goes out before `session_closed`.
 
 **A session that is still starting has its launch cancelled and its row marked
 `failed`.** Such a session holds no conversation: its row was written eagerly
@@ -214,8 +221,9 @@ outside — leaves that binding pointing at nothing. A background sweep probes e
 open session's pane on the same ~500ms tick as the launch watchdog, so a session
 whose agent is gone normally reads as open for under a second; a pane that no
 longer exists gets the same teardown pressing Close gives (one last transcript
-sync, the binding dropped, the turn ended, lingering background subagents swept)
-minus killing a pane that is already gone, and the same `session_closed`.
+sync, the binding dropped, the pending permission requests settled, the turn
+ended, lingering background subagents swept) minus killing a pane that is already
+gone, and the same `session_closed` after them.
 
 This is also what ends a session whose agent simply *exited*: quitting `claude`
 in the embedded terminal ends its tmux session, and Delta's `SessionEnd` hook
