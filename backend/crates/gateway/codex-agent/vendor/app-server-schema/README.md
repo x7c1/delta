@@ -1,7 +1,10 @@
 # Vendored `codex app-server` protocol schema
 
+## Overview
+
 This directory holds the authoritative JSON Schema for the `codex app-server`
-JSON-RPC protocol, generated verbatim from a pinned Codex CLI. It is the
+JSON-RPC protocol, generated from a pinned Codex CLI and stored key-sorted (see
+[Stored form](#stored-form-generated-then-key-sorted)). It is the
 **ground-truth reference** that Delta's Codex adapter wire types are reconciled
 against: later work diffs Delta's own types (in `codex-agent`'s `wire`,
 `translate`, and adapter layers) against this schema to detect drift.
@@ -11,15 +14,45 @@ against: later work diffs Delta's own types (in `codex-agent`'s `wire`,
 | Field | Value |
 | ----- | ----- |
 | Codex CLI | `codex-cli 0.153.4` |
-| Generated with | `codex app-server generate-json-schema --out <dir>` |
+| Generated with | `make vendor-codex-schema` |
 
 The version is also encoded in code as
 [`codex_agent::schema::VENDORED_CODEX_VERSION`], so drift detection has a single
 programmatic baseline. When you re-generate against a newer Codex, bump that
-constant and re-vendor these files in the same change.
+constant in the same change (see [Re-vendoring](#re-vendoring)).
 
-Regenerating is offline and needs no auth or network — the generator is a static
-dump of the compiled-in schema.
+## Stored form: generated, then key-sorted
+
+These files are not the generator's bytes. Each one is `jq -S -j .` of the
+generator's output — sorted keys, two-space indent, no trailing newline.
+
+The generator's output order is **not stable**: the same Codex version can emit
+the same definitions in a different order from one run to the next. Vendored as
+emitted, a re-vendor would therefore produce a diff full of reorderings, with
+the handful of real protocol changes buried in it; sorting the keys makes the
+diff show what actually changed. Nothing depends on the byte layout — the drift
+canary below compares definition key sets and definition values, not bytes, so
+the normalisation is invisible to it.
+
+`make vendor-codex-schema-check` fails when a file here stops being its own
+`jq -S -j .`. It needs only `jq`, and both `make check` and CI's backend job run
+it.
+
+## Re-vendoring
+
+```bash
+make vendor-codex-schema    # DELTA_CODEX_BIN overrides the codex binary
+```
+
+`scripts/vendor-codex-schema.sh` runs the generator into a temp directory, keeps
+exactly the outputs listed under [Files](#files) below, normalises each of them,
+and replaces the files here — removing any the generator no longer emits, and
+leaving this README alone. It prints the generator's version and, when that is
+not the pin above, reminds you to bump `VENDORED_CODEX_VERSION` and the version
+pin table in the same change. Re-vendoring is offline and needs no auth or
+network — the generator is a static dump of the compiled-in schema.
+
+## Drift detection
 
 Drift is guarded by the `#[ignore]` canary
 `vendored_schema_matches_the_real_generator` in
@@ -90,3 +123,6 @@ the whole approval surface was missing; this directory now vendors it (below).
 The generator's other outputs are deliberately **not** vendored: the v1 files
 (legacy, see above) and the loose top-level per-type files other than the
 server-request/approval ones listed above (superseded by the combined documents).
+`scripts/vendor-codex-schema.sh` encodes exactly this selection, so a re-vendor
+applies it for you; changing what is vendored means changing both the list above
+and the one in that script.
