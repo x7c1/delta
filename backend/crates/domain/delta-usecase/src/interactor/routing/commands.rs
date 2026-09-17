@@ -81,9 +81,12 @@ where
     /// pane, and drop its binding. The conversational data remains in the
     /// store. Unknown ids are a clean `SessionNotFound`.
     ///
-    /// Returns any [`SessionEvent::SubagentFinished`]s the process-gone sweep
-    /// produced (a lingering background subagent cleared because its completion
-    /// notification can no longer arrive); the transport broadcasts them.
+    /// Returns the events the teardown produced, in order: a
+    /// [`SessionEvent::PermissionResolved`] for every request the close
+    /// stranded, then any [`SessionEvent::SubagentFinished`]s the process-gone
+    /// sweep produced (a lingering background subagent cleared because its
+    /// completion notification can no longer arrive). The transport broadcasts
+    /// them, then `SessionClosed`.
     pub async fn close_session(&self, id: &SessionId) -> Result<Vec<SessionEvent>> {
         self.request(id, |reply| SessionInput::CloseSession { reply })
             .await

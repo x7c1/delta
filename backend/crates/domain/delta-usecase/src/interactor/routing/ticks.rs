@@ -173,9 +173,11 @@ where
     /// For each open, pane-backed session whose pane no longer exists — its
     /// agent exited, or went away without ever delivering a `SessionEnd` hook —
     /// the actor runs the same teardown pressing Close does and produces a
-    /// [`SessionEvent::SessionClosed`] (plus whatever its background-subagent
-    /// sweep cleared), so the browser stops showing a session that cannot
-    /// accept input; the next send then resumes it. Both checks ride this one
+    /// [`SessionEvent::PermissionResolved`] for every request the close
+    /// stranded, whatever its background-subagent sweep cleared, and a
+    /// [`SessionEvent::SessionClosed`] after them, so the browser stops showing
+    /// a session that cannot accept input; the next send then resumes it. Both
+    /// checks ride this one
     /// tick rather than each owning a timer — see
     /// [`SessionContext::reap_tick`].
     ///

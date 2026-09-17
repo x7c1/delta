@@ -138,10 +138,12 @@ pub(crate) async fn open_session(
 /// or, for a session that is still starting, cancel its launch.
 ///
 /// For a bound session it kills the live pane and drops it from the registry;
-/// the conversation remains in the store and can be reopened. Closing also
-/// sweeps any lingering background subagent whose completion notification can no
-/// longer arrive; the resulting `SubagentFinished` events are broadcast so live
-/// viewers' indicators clear immediately.
+/// the conversation remains in the store and can be reopened. Closing settles
+/// what the session strands: every permission request still awaiting an answer
+/// is denied and broadcast as a `permission_resolved`, and any lingering
+/// background subagent whose completion notification can no longer arrive is
+/// swept, broadcasting a `subagent_finished` so live viewers' indicators clear
+/// immediately.
 ///
 /// A session that is **still starting** holds no conversation yet, so closing it
 /// cancels the launch instead: whatever the launch stood up is reclaimed and the

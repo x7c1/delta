@@ -46,6 +46,10 @@ where
     ///   passthrough: Claude Code falls back to its interactive TUI prompt
     ///   exactly as before, the row stays `pending`, and the eventual
     ///   `tool_result` resolves it (see `sync_transcript`).
+    /// - A close or a vanished pane settles the request before either happens:
+    ///   the teardown takes this waiter and answers it `Deny` — the row is
+    ///   recorded denied with the same reason — so the hook returns at once
+    ///   rather than holding Claude Code until the deadline.
     pub(in crate::interactor) async fn on_permission_request(
         &mut self,
         tool_name: &str,

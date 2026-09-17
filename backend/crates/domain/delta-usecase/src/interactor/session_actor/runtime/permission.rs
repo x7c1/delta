@@ -18,8 +18,10 @@ use super::SessionRuntime;
 /// sends envelope (`GET /api/sessions/{id}/sends`) reports the queue's head plus
 /// its depth and a reconnecting client rebuilds its notice from a plain refetch,
 /// exactly like the turn state. An entry leaves when its request resolves (a
-/// browser decision or the correlated `tool_result`), and the whole queue is
-/// dropped whenever the turn returns to idle — a dialog cannot outlive its turn.
+/// browser decision, the correlated `tool_result`, or the settle that a session
+/// whose agent stopped driving it runs over every request it stranded), and the
+/// whole queue is dropped whenever the turn returns to idle — a dialog cannot
+/// outlive its turn.
 ///
 /// Several of these can be outstanding at once: an adapter-backed provider
 /// (Codex) runs tool calls in parallel, so one turn can raise N approvals in the

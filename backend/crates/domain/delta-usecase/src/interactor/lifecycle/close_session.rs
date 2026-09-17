@@ -85,13 +85,15 @@ where
     /// adds. See that routine for what each step is for, including the last
     /// transcript sync that catches a line Claude Code flushed after `Stop`.
     ///
-    /// Returns the events for the caller to broadcast: any
-    /// [`SessionEvent::SubagentFinished`]s produced by the process-gone sweep
-    /// (see [`Self::sweep_running_subagents_on_process_gone`]) — closing tears
-    /// down the `claude` process, so a lingering background subagent's
+    /// Returns the events for the caller to broadcast, in the order the teardown
+    /// produced them: a [`SessionEvent::PermissionResolved`] for every dialog
+    /// the close stranded (nobody can answer a request whose agent is gone),
+    /// then any [`SessionEvent::SubagentFinished`]s produced by the process-gone
+    /// sweep (see [`Self::sweep_running_subagents_on_process_gone`]) — closing
+    /// tears down the `claude` process, so a lingering background subagent's
     /// completion notification can no longer arrive to clear its indicator, and
     /// the sweep clears it here instead — plus the `SpawnFailed` of a cancelled
-    /// launch.
+    /// launch. The caller announces `SessionClosed` after all of them.
     ///
     /// [`SessionRuntime::take_launching`]: crate::interactor::session_actor::runtime::SessionRuntime::take_launching
     pub(in crate::interactor) async fn close_session(&mut self) -> Result<Vec<SessionEvent>> {
@@ -142,10 +144,11 @@ where
         // The bound teardown, shared with the pane-gone close that the
         // background tick performs: one last transcript sync, the binding
         // dropped (the pane killed, since closing is what ends the agent that
-        // is still running in it), the turn closed and the lingering background
-        // subagents swept. The released handle is kept — not just dropped — so
-        // the defensive cleanup below can still name the pane it tore down on
-        // the event it reports.
+        // is still running in it), the permission requests the close strands
+        // settled, the turn closed and the lingering background subagents
+        // swept. The released handle is kept — not just dropped — so the
+        // defensive cleanup below can still name the pane it tore down on the
+        // event it reports.
         let (closed_pane, mut events) = self
             .tear_down_bound_session(&session, PaneTeardown::Kill)
             .await?;
