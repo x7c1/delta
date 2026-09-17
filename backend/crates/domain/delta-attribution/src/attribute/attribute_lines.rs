@@ -49,10 +49,13 @@ use super::{Attributed, AttributionState, Effect};
 ///   notification body while keeping `<task-id>`, so the lookup falls back to
 ///   the `<task-id>` element matched against each entry's persisted `task_id`
 ///   (learned at `PostToolUse(Agent)` time for a tool launch, and already known
-///   at launch for a forked skill). Only when neither key matches a
-///   recorded launch (the launch fell in an earlier, no-longer-seeded window,
-///   or both elements were stripped) does it fall back to inheriting
-///   `carry_thread`.
+///   at launch for a forked skill). A body carrying NEITHER element names no
+///   launch at all, but with exactly one launch outstanding it resolves to
+///   that one — the notification can only be its completion. It falls back to
+///   inheriting `carry_thread` in the remaining cases: a key that matches no
+///   recorded launch (its launch fell in an earlier, no-longer-seeded window,
+///   so the key is evidence the notification belongs to some other launch),
+///   and a keyless body meeting zero or several outstanding launches.
 ///
 /// Whenever an assistant line carries a tool_use that
 /// [`claude_format::launches_in_background`] classifies as background — an

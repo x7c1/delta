@@ -407,8 +407,10 @@ pub(crate) fn task_output_result_line(
 }
 
 /// A `<task-notification>` body that carries NEITHER `<tool-use-id>` nor
-/// `<task-id>` — the future-Claude-Code shape we want the fold to log a
-/// warning for. Used by the tracing-warn test.
+/// `<task-id>` — a shape that names no launch, which the fold resolves to the
+/// only outstanding launch when there is exactly one (and warns either way,
+/// since the shape signals an upstream format change). Used by the
+/// tracing-warn test.
 pub(crate) fn task_notification_line_both_missing(uuid: &str) -> TranscriptMessage {
     user_line(
         uuid,
