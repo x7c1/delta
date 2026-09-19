@@ -258,12 +258,13 @@ which frames arrive, and a client must handle each event whenever it lands.
   to fire. So never wait for this event to learn that a turn is running; the
   answer that is always there is the `turn` in
   [`GET /api/sessions/{id}/sends`](sends.md#get-apisessionsidsends).
-- `external_input` — a prompt that matched no outstanding send. Usually the user
-  typed straight into the pane, but a dispatched send whose echo came back
-  mangled also lands here: the text does not match, so the prompt looks
-  external, while that send returns to `queued` for its one retry (and is parked
-  after that). Session-scoped — it names no thread. Pane-backed sessions only:
-  an adapter-backed session has no pane to type into and no echo to mismatch.
+- `external_input` — a prompt that consumed no send: the user typed straight
+  into the pane while no send was outstanding (or while a send resuming the
+  session was still held back). A dispatched send's echo never lands here, even
+  when Claude Code rewrote its text: the prompt that arrives while a send is
+  outstanding is that send's. `prompt` is the submitted text with Claude Code's
+  `<pasted_content>` wrapper removed. Session-scoped — it names no thread.
+  Pane-backed sessions only: an adapter-backed session has no pane to type into.
 - `turn_completed` — a response finished (Claude's `Stop` hook, or a headless
   provider's turn-end frame). `thread_id` is the thread whose in-flight turn
   just ended, so the client clears the running indicator on the exact thread

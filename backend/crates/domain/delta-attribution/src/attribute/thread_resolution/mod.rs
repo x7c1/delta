@@ -101,19 +101,23 @@ pub(super) fn resolve_line_thread(
         // pane, so the first human user line to arrive while it is outstanding
         // IS its echo — whatever the text turned out to be. Claude Code rewrites
         // a prompt freely between the keystrokes landing and the transcript
-        // being written (the `[Image #N]` attachment placeholder, and shapes we
-        // have not catalogued yet), and a prompt genuinely typed into the pane
-        // in that window was credited to the send by the turn machine anyway.
+        // being written (the `[Image #N]` attachment placeholder, the
+        // `<pasted_content>` wrapper around a pasted body, and shapes we have
+        // not catalogued yet), and a prompt genuinely typed into the pane in
+        // that window was credited to the send by the turn machine anyway.
         // Deciding by text here would file the send's own user line — and the
         // whole reply that follows it — on `main`, so from the send's thread the
         // turn simply vanishes.
         //
         // The text comparison keeps exactly one job: `prompt_echoes_send` (exact
         // equality for a plain send, widened to absorb the image-attachment
-        // rewrite) says whether the echo is recognizable as the send's text, and
-        // that verdict rides along as `SendMatched::attributed` so a new rewrite
-        // shape is visible in the log the first time it happens. It gates
-        // nothing.
+        // rewrite and the pasted-content wrapper) says whether the echo is
+        // recognizable as the send's text, and that verdict rides along as
+        // `SendMatched::attributed` so a new rewrite shape is visible in the log
+        // the first time it happens. It gates nothing. `trimmed` is the line as
+        // Claude Code submitted it — the fold unwraps the pasted-content wrapper
+        // only for the stored message — so this verdict and the
+        // `UserPromptSubmit` path's are the same rule over the same text.
         match state.outstanding.pop_front() {
             Some(pending) => {
                 effects.push(Effect::SendMatched {

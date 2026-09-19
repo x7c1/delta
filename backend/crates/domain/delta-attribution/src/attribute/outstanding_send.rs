@@ -16,7 +16,8 @@ pub struct OutstandingSend {
     /// The dispatched prompt text. A human echo consumes this send by POSITION,
     /// so the text no longer decides consumption: it is what the echo line is
     /// compared against (by trimmed equality, widened for the image-attachment
-    /// rewrite) to compute the `attributed` flag on [`Effect::SendMatched`]. A
+    /// rewrite and the pasted-content wrapper) to compute the `attributed` flag
+    /// on [`Effect::SendMatched`]. A
     /// local-command name line and an unknown-command notice consume the send
     /// positionally as well; they read this text only to check that it is a
     /// slash command at all ([`claude_format::is_slash_command_send`], the guard

@@ -1,6 +1,8 @@
 //! [`attribute_lines`]: the per-line orchestration loop of the attribution fold.
 
-use delta_model::{Message, Role, SessionId, ThreadId};
+use std::borrow::Cow;
+
+use delta_model::{ContentBlock, Message, Role, SessionId, ThreadId};
 
 use crate::claude_format;
 use crate::transcript_message::TranscriptMessage;
@@ -236,6 +238,21 @@ pub fn attribute_lines(
             is_task_notification,
         );
 
+        // A human line stores and displays what the user wrote: Claude Code's
+        // pasted-content wrapper is transport, so its tags (and the newlines it
+        // added) are dropped from the text blocks, and `content_text` is
+        // re-derived from them. Everything above classified and correlated the
+        // line on the text as submitted — `prompt_echoes_send` sees through the
+        // wrapper itself, and applying the same rule as the `UserPromptSubmit`
+        // path keeps the two verdicts in step.
+        let (content, content_text) = if is_human_turn {
+            let content = unwrap_pasted_content_blocks(line.content);
+            let content_text = Message::flatten_text(&content);
+            (content, content_text)
+        } else {
+            (line.content, content_text)
+        };
+
         messages.push(Message {
             uuid: line.uuid,
             // Claude reconstructs messages from JSONL lines, not provider items,
@@ -254,7 +271,7 @@ pub fn attribute_lines(
             // so ordering follows true file position with no drift.
             seq: line.seq,
             content_text,
-            content: line.content,
+            content,
             created_at: line.created_at,
             // Transcript-derived per-message metadata, carried straight through.
             model: line.model,
@@ -269,4 +286,26 @@ pub fn attribute_lines(
         effects,
         state,
     }
+}
+
+/// A human line's content blocks with every well-formed pasted-content wrapper
+/// in its text blocks unwrapped (see [`claude_format::unwrap_pasted_content`]).
+/// Non-text blocks, and text holding no well-formed wrapper, pass through
+/// untouched.
+fn unwrap_pasted_content_blocks(content: Vec<ContentBlock>) -> Vec<ContentBlock> {
+    content
+        .into_iter()
+        .map(|block| match block {
+            ContentBlock::Text { text } => {
+                let unwrapped = match claude_format::unwrap_pasted_content(&text) {
+                    Cow::Owned(unwrapped) => Some(unwrapped),
+                    Cow::Borrowed(_) => None,
+                };
+                ContentBlock::Text {
+                    text: unwrapped.unwrap_or(text),
+                }
+            }
+            other => other,
+        })
+        .collect()
 }
