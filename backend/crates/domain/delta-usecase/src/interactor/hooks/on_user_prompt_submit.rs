@@ -29,8 +29,9 @@ where
     /// `UserPromptSubmit` carries no id Delta could round-trip, only text — and
     /// Claude Code freely rewrites a prompt between the keystrokes landing and
     /// the submission (local-command folding, the unknown-command notice,
-    /// namespace expansion, the `[Image #N]` prefix), so text equality cannot
-    /// answer "did my send's turn start?". Position can: under the
+    /// namespace expansion, the `[Image #N]` prefix, the `<pasted_content>`
+    /// wrapper around a pasted body), so text equality cannot answer "did my
+    /// send's turn start?". Position can: under the
     /// single-outstanding dispatch rule at most one `dispatched` send exists
     /// per session, and while it is outstanding its keystrokes are already in
     /// the pane — so a prompt arriving now is *that send's*, whatever it says.
@@ -59,14 +60,15 @@ where
     /// `dispatched` and is never reported as failed.
     ///
     /// [`claude_format::prompt_echoes_send`] (exact equality for a plain send,
-    /// widened to absorb the image-attachment rewrite) is left with the two
-    /// announcements made *here*, before any line has been ingested.
-    /// [`SessionEvent::TurnStarted`] needs it: it names a matched uuid, and only
-    /// a prompt that still reads as the send's own text can be paired with one
-    /// this early. The `additionalContext` locator quote (and the branch-entry
-    /// note) is keyed on the same verdict, which this change leaves as it was —
-    /// so a rewritten prompt still reaches Claude without its quote frame, even
-    /// though the line it produces is now attributed to the send's branch.
+    /// widened to absorb the image-attachment rewrite and the pasted-content
+    /// wrapper) is left with the two announcements made *here*, before any
+    /// line has been ingested. [`SessionEvent::TurnStarted`] needs it: it names
+    /// a matched uuid, and only a prompt that still reads as the send's own
+    /// text can be paired with one this early. The `additionalContext` locator
+    /// quote (and the branch-entry note) is keyed on the same verdict — so a
+    /// prompt rewritten in a shape `prompt_echoes_send` does not recognize
+    /// reaches Claude without its quote frame, even though the line it produces
+    /// is still attributed to the send's branch.
     ///
     /// [`SessionEvent::ExternalInput`] follows consumption, not text: it is
     /// emitted only when NO send was consumed. Announcing a rewritten echo as
@@ -118,8 +120,13 @@ where
         // RECOGNITION, by text: the transcript fold attributes the send's lines
         // by position, but the turn announcement made here names a matched uuid
         // and so still needs the prompt to read as the send's own text. The
-        // locator-quote note below is keyed on the same verdict — unchanged
-        // here, so a rewritten prompt gets no quote frame.
+        // locator-quote note below is keyed on the same verdict. The rewrites
+        // `prompt_echoes_send` recognizes still count as the send's own text:
+        // the `[Image #N]` attachment placeholder, and the
+        // `<pasted_content id="XXXX">` wrapper recent Claude Code builds put
+        // around every send of 20+ characters (Delta types sends as a
+        // bracketed paste; older builds submit it unwrapped). Any other
+        // rewrite gets no quote frame.
         let attributed = outstanding
             .as_ref()
             .filter(|send| claude_format::prompt_echoes_send(&send.text, &hook.prompt))
@@ -213,7 +220,11 @@ where
                 if !claude_format::is_task_notification(&hook.prompt) {
                     events.push(SessionEvent::ExternalInput {
                         session_id: hook.session_id.clone(),
-                        prompt: hook.prompt.clone(),
+                        // The browser shows this text in its external-input
+                        // notice, so a paste into the pane drops the
+                        // pasted-content wrapper here as its stored human
+                        // line does.
+                        prompt: claude_format::unwrap_pasted_content(&hook.prompt).into_owned(),
                     });
                 }
             }

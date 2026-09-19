@@ -9,6 +9,10 @@
 mod forked_skill_launch;
 pub use forked_skill_launch::{forked_skill_launch, has_forked_skill_launch, ForkedSkillLaunch};
 
+mod pasted_content;
+use pasted_content::sole_pasted_content_body;
+pub use pasted_content::unwrap_pasted_content;
+
 mod task_output;
 pub use task_output::{
     is_task_output_result, is_terminal_task_status, task_output_status, task_output_task_id,
@@ -165,36 +169,67 @@ const ATTACHMENT_IMAGE_EXTENSIONS: [&str; 5] = [".png", ".jpg", ".jpeg", ".gif",
 /// of `send_text` — the message Delta typed into the pane.
 ///
 /// Plain text echoes back byte-for-byte, so the primary rule is what it has
-/// always been: exact equality after trimming.
+/// always been: exact equality after trimming. Two rewrites Claude Code applies
+/// between the keystrokes and the submission are recognized on top of it.
 ///
-/// An **image-attachment** send does not: the composed text carries the
-/// attachment's path on its own line, and Claude Code's composer swallows that
-/// path, reads the file, and submits `[Image #N]<body>` instead — so exact
-/// equality can never hold and the send would be treated as unechoed forever.
-/// The second rule recognizes that rewrite: strip the leading `[Image #N]`
-/// placeholders from the prompt, strip the attachment path lines from the
-/// send, and compare what is left.
+/// An **image-attachment** send does not echo verbatim: the composed text
+/// carries the attachment's path on its own line, and Claude Code's composer
+/// swallows that path, reads the file, and submits `[Image #N]<body>` instead —
+/// so exact equality can never hold and the send would be treated as unechoed
+/// forever. That rule strips the leading `[Image #N]` placeholders from the
+/// prompt, strips the attachment path lines from the send, and compares what
+/// is left.
 ///
-/// It is deliberately conservative — a mismatch is always the safe answer here,
-/// because a false *positive* would attribute someone else's typing to the
-/// user's composed message:
+/// A **pasted-content** send does not either: Delta types every send as a
+/// bracketed paste, and recent Claude Code builds wrap pasted text (20 or more
+/// trimmed characters, as observed) in
+/// `<pasted_content id="XXXX">` … `</pasted_content id="XXXX">` before
+/// submitting it (see [`unwrap_pasted_content`] for the exact shape). That rule
+/// accepts a prompt that is exactly one well-formed wrapper block, surrounding
+/// whitespace ignored, and compares the block's body with the send instead of
+/// the prompt.
 ///
-/// - at least one placeholder must be present, and the number of placeholders
-///   must equal the number of path lines removed (a partially-recognized
-///   attachment set does not match);
+/// The two rewrites can meet on one prompt — an attachment send long enough to
+/// be wrapped — and the order Claude Code applies them in has not been
+/// observed, so both nestings are accepted: the placeholders in front of a
+/// sole block (`[Image #N]` then the wrapper), and the placeholders inside the
+/// block's body (the wrapper around `[Image #N]<body>`).
+///
+/// Every rule is deliberately conservative — a mismatch is always the safe
+/// answer here, because a false *positive* would attribute someone else's
+/// typing to the user's composed message:
+///
+/// - an attachment echo needs at least one placeholder, and the number of
+///   placeholders must equal the number of path lines removed (a
+///   partially-recognized attachment set does not match);
 /// - a path line must be absolute, carry an image extension, and contain no
 ///   unescaped whitespace;
-/// - the remaining bodies must be equal line-for-line (each line trimmed, blank
-///   lines dropped) — Claude Code drops the newline that separated the body
-///   from the path, so the comparison cannot be raw equality, but it is not
-///   loosened any further than that.
+/// - the remaining attachment bodies must be equal line-for-line (each line
+///   trimmed, blank lines dropped) — Claude Code drops the newline that
+///   separated the body from the path, so the comparison cannot be raw
+///   equality, but it is not loosened any further than that;
+/// - a wrapper must be well-formed (matching open/close ids of four lowercase
+///   hex characters, the wrapper's own newlines in place) and must be the
+///   whole prompt: a malformed or partial block, a second block, or text typed
+///   before or after the block is a mismatch. Claude Code escapes a tag-like
+///   `<pasted_content` inside the pasted body to `<\pasted_content`; that is
+///   not reversed, so a send whose own text contains the tag compares as a
+///   mismatch.
 ///
-/// A send with no attachment path line therefore takes exactly the old
-/// exact-match path. Slash commands are untouched as well: a local-command
-/// name line is resolved in its own branch at the call site, guarded by
+/// A send with neither rewrite therefore takes exactly the old exact-match
+/// path. Slash commands are untouched as well: a local-command name line is
+/// resolved in its own branch at the call site, guarded by
 /// [`is_slash_command_send`] and reported on by
 /// [`local_command_name_line_matches_send`].
 pub fn prompt_echoes_send(send_text: &str, prompt: &str) -> bool {
+    echoes_without_wrapper(send_text, prompt)
+        || sole_pasted_content_body(prompt)
+            .is_some_and(|body| echoes_without_wrapper(send_text, body))
+}
+
+/// [`prompt_echoes_send`] for a prompt already taken out of any pasted-content
+/// wrapper: the exact-match fast path, then the attachment rewrite.
+fn echoes_without_wrapper(send_text: &str, prompt: &str) -> bool {
     send_text.trim() == prompt.trim() || attachment_echo_matches_send(send_text, prompt)
 }
 
@@ -205,6 +240,10 @@ fn attachment_echo_matches_send(send_text: &str, prompt: &str) -> bool {
     if placeholders == 0 {
         return false;
     }
+    // The placeholders may sit in front of a pasted-content block rather than
+    // inside it (see `prompt_echoes_send`); the block must then be all that
+    // follows them.
+    let prompt_body = sole_pasted_content_body(prompt_body).unwrap_or(prompt_body);
     let mut attachments = 0;
     let mut send_body = Vec::new();
     for line in body_lines(send_text) {
@@ -784,6 +823,92 @@ mod tests {
         }
         // A prompt with no placeholder never takes the attachment path at all.
         assert!(!prompt_echoes_send("look\n/home/dev/diagram.png", "look"));
+    }
+
+    /// The two-line send Claude Code was observed to wrap, and its echo verbatim.
+    const PASTED_MULTI_LINE_SEND: &str =
+        "これって今どこまで進んでますか\nそれともこれから開始するところですか";
+    const PASTED_MULTI_LINE_ECHO: &str = "\n\n<pasted_content id=\"d626\">\nこれって今どこまで進んでますか\nそれともこれから開始するところですか\n</pasted_content id=\"d626\">\n";
+
+    /// A single-line send of 20+ characters, wrapped the same way.
+    const PASTED_SINGLE_LINE_SEND: &str = "実装に着手してほしいのですが、その前に認証をこちらで済ませておかないといけない、という理解であっていますか";
+    const PASTED_SINGLE_LINE_ECHO: &str = "\n\n<pasted_content id=\"d626\">\n実装に着手してほしいのですが、その前に認証をこちらで済ませておかないといけない、という理解であっていますか\n</pasted_content id=\"d626\">\n";
+
+    #[test]
+    fn a_pasted_content_echo_matches_the_send_it_wraps() {
+        assert!(prompt_echoes_send(
+            PASTED_MULTI_LINE_SEND,
+            PASTED_MULTI_LINE_ECHO
+        ));
+        assert!(prompt_echoes_send(
+            PASTED_SINGLE_LINE_SEND,
+            PASTED_SINGLE_LINE_ECHO
+        ));
+        // Surrounding whitespace on the send side is ignored, as for plain text.
+        assert!(prompt_echoes_send(
+            &format!("  {PASTED_SINGLE_LINE_SEND}\n"),
+            PASTED_SINGLE_LINE_ECHO
+        ));
+    }
+
+    #[test]
+    fn a_malformed_or_partial_pasted_content_echo_does_not_match() {
+        let send = "please summarize the design notes above";
+        for prompt in [
+            // Mismatched open/close ids.
+            "\n\n<pasted_content id=\"d626\">\nplease summarize the design notes above\n</pasted_content id=\"d627\">\n",
+            // Non-hex id, and ids of the wrong length.
+            "\n\n<pasted_content id=\"g626\">\nplease summarize the design notes above\n</pasted_content id=\"g626\">\n",
+            "\n\n<pasted_content id=\"d62\">\nplease summarize the design notes above\n</pasted_content id=\"d62\">\n",
+            "\n\n<pasted_content id=\"d6260\">\nplease summarize the design notes above\n</pasted_content id=\"d6260\">\n",
+            // Missing closing tag.
+            "\n\n<pasted_content id=\"d626\">\nplease summarize the design notes above\n",
+            // A wrapped body that differs from the send.
+            "\n\n<pasted_content id=\"d626\">\nplease summarize the meeting notes above\n</pasted_content id=\"d626\">\n",
+            // A well-formed block followed by extra typed text.
+            "\n\n<pasted_content id=\"d626\">\nplease summarize the design notes above\n</pasted_content id=\"d626\">\nand the tests",
+            // Typed text in front of the block.
+            "also: \n\n<pasted_content id=\"d626\">\nplease summarize the design notes above\n</pasted_content id=\"d626\">\n",
+        ] {
+            assert!(
+                !prompt_echoes_send(send, prompt),
+                "expected {prompt:?} not to echo {send:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_send_containing_the_tag_itself_compares_as_a_mismatch() {
+        // Claude Code escapes a tag-like `<pasted_content` inside the pasted
+        // body; the escape is not reversed, so the safe answer is a mismatch.
+        let send = "why does <pasted_content id=\"d626\"> show up in the log output";
+        let echo = "\n\n<pasted_content id=\"d626\">\nwhy does <\\pasted_content id=\"d626\"> show up in the log output\n</pasted_content id=\"d626\">\n";
+        assert!(!prompt_echoes_send(send, echo));
+    }
+
+    #[test]
+    fn an_attachment_send_matches_whichever_way_the_two_rewrites_nest() {
+        let send = "can you describe what this diagram is showing\n/home/dev/pictures/diagram.png";
+        // Placeholder in front of a sole wrapper block.
+        assert!(prompt_echoes_send(
+            send,
+            "[Image #3]\n\n<pasted_content id=\"a0b1\">\ncan you describe what this diagram is showing\n</pasted_content id=\"a0b1\">\n"
+        ));
+        // Wrapper around the placeholder and the body.
+        assert!(prompt_echoes_send(
+            send,
+            "\n\n<pasted_content id=\"a0b1\">\n[Image #3]can you describe what this diagram is showing\n</pasted_content id=\"a0b1\">\n"
+        ));
+        // A different body is still a mismatch in either nesting.
+        assert!(!prompt_echoes_send(
+            send,
+            "[Image #3]\n\n<pasted_content id=\"a0b1\">\nsomething else entirely here\n</pasted_content id=\"a0b1\">\n"
+        ));
+        // And the attachment count still has to line up.
+        assert!(!prompt_echoes_send(
+            send,
+            "\n\n<pasted_content id=\"a0b1\">\ncan you describe what this diagram is showing\n</pasted_content id=\"a0b1\">\n"
+        ));
     }
 
     #[test]

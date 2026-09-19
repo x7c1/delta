@@ -61,8 +61,11 @@ pub enum Effect {
     /// that send's echo whatever text it carries, exactly as the turn machine
     /// already decides it. `attributed` reports the leftover text question:
     /// `true` when the line still reads as the send's own text
-    /// ([`claude_format::prompt_echoes_send`]), `false` when Claude Code
-    /// rewrote it between the keystrokes and the transcript. It changes no
+    /// ([`claude_format::prompt_echoes_send`], which sees through the rewrites
+    /// Claude Code is known to apply: the `[Image #N]` attachment placeholder
+    /// and the `<pasted_content id="XXXX">` wrapper around a pasted body),
+    /// `false` when Claude Code rewrote it in some other way between the
+    /// keystrokes and the transcript. It changes no
     /// attribution — the line lands on the send's thread either way — and
     /// exists so a new rewrite shape surfaces in the logs instead of silently.
     /// The command branches (a local command's name line, an unknown-command
