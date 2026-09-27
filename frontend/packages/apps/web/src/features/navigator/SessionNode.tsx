@@ -618,9 +618,15 @@ export const SessionNode = memo(function SessionNode({
         </div>
 
         {hasSubThreads && threads && (
+          // No horizontal padding here: each tree row carries the card's inset
+          // itself (see the `paddingLeft` in {@link ThreadTree}), so a first-level
+          // row's arrow lines up with the header's status dot instead of sitting
+          // one inset further in — which read as an indent the first level
+          // does not have. A side effect is that a row's hover/active tint spans
+          // the card's full inner width, like the header above it.
           <div
             className={cn(
-              'border-t px-2 py-1.5',
+              'border-t py-1.5',
               isFocused ? 'border-accent-disabled' : 'border-border-default',
             )}
           >
