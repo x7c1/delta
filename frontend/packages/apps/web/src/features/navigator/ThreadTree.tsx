@@ -138,6 +138,11 @@ function ThreadTreeNode({
       <button
         type="button"
         onClick={() => onSelectThread(node.thread.id)}
+        // The 0.5rem base is the card's horizontal inset — the same `px-2` the
+        // header uses — so a depth-0 arrow starts flush with the header's status
+        // dot. The tree's wrapper in {@link SessionNode} adds no padding of its
+        // own; if it did, the first level would read as indented. Only the
+        // per-depth step is indentation proper.
         style={{ paddingLeft: `${0.5 + depth * 0.85}rem` }}
         className={cn(
           'flex w-full items-center justify-between gap-2 py-0.5 pr-2 text-left text-secondary leading-5 hover:bg-surface-elevated-hover',
