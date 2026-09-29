@@ -4,6 +4,9 @@
 //! What each endpoint is for — and which wire shapes it speaks — is documented
 //! at the declaration in [`delta_wire::endpoint`], so this file stays a list of
 //! bindings, with `RouteBinder` rejecting any drift between the two.
+//!
+//! Under the `embed-web` feature the built web frontend is mounted behind those
+//! bindings, as the router's fallback — see [`static_web`].
 
 use axum::Router;
 
@@ -17,12 +20,27 @@ use crate::route_binder::RouteBinder;
 use crate::state::AppState;
 use crate::ws;
 
-/// Build the application router with all routes wired to shared state.
+/// Build the application router with all routes wired to shared state, plus the
+/// built web frontend when the `embed-web` feature is on.
 ///
 /// # Panics
 ///
-/// If the bound routes are not exactly the declared ones — see `RouteBinder`.
+/// If the bound routes are not exactly the declared ones — see `RouteBinder` —
+/// or, with `embed-web`, if the embedded build is broken — see
+/// [`static_web::mount`].
 pub fn router(state: AppState) -> Router {
+    #[cfg(feature = "embed-web")]
+    {
+        let token = state.token().to_owned();
+        static_web::mount(api_router(state), &static_web::BUILT, &token)
+    }
+    #[cfg(not(feature = "embed-web"))]
+    api_router(state)
+}
+
+/// The declared endpoints alone, behind their guards — [`router`] without the
+/// static frontend.
+fn api_router(state: AppState) -> Router {
     RouteBinder::new()
         .bind(endpoint::Health, health)
         // Control plane: Claude Code HTTP hooks.
@@ -82,6 +100,9 @@ pub fn router(state: AppState) -> Router {
 async fn health() -> &'static str {
     "ok"
 }
+
+#[cfg(any(test, feature = "embed-web"))]
+mod static_web;
 
 #[cfg(test)]
 mod tests;

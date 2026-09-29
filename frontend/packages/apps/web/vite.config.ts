@@ -15,9 +15,16 @@ const backendPort = process.env.DELTA_PORT ?? '7878';
 // notably mock mode (`make mock` / `make e2e`), which never reaches a real
 // backend — nothing is injected, and the frontend treats the absent token as
 // "attach nothing". A static meta tag is permitted by the existing CSP.
+//
+// Dev server only (`apply: 'serve'`): a production build must never bake a
+// token into `dist/`, even when DELTA_AUTH_TOKEN happens to be exported. The
+// built page served by delta-server (`embed-web`) gets the same tag injected by
+// the server at serve time instead
+// (backend/crates/apps/delta-server/src/app/static_web/index_page.rs).
 function injectAuthToken(): Plugin {
   return {
     name: 'delta-inject-auth-token',
+    apply: 'serve',
     transformIndexHtml() {
       const token = process.env.DELTA_AUTH_TOKEN;
       if (!token) {

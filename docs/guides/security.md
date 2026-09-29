@@ -28,11 +28,15 @@ the local machine, four guards defend the surface:
   loopback `Host`, so it passes this guard — which is why the next one exists.
 - **Per-run bearer token** — a secret minted once per server run and required on
   every REST call (`Authorization: Bearer <token>`) and live socket
-  (`token=<token>` query parameter). Anything without the valid token gets
-  `401`. This closes the gap the Origin/Host guard leaves open for a local
-  non-browser process. Two paths are exempt from *this* guard: `/health` (an
-  unauthenticated liveness probe) and `/hooks/*`, which carries the per-run hook
-  secret instead of a bearer token (next guard) rather than being left open.
+  (`token=<token>` query parameter). The browser page receives it in a
+  `<meta name="delta-auth-token">` tag (injected by Vite in development, by the
+  server itself for the built frontend — see
+  [api/README.md](api/README.md#the-built-frontend-embed-web)). Anything without
+  the valid token gets `401`. This closes the gap the Origin/Host guard leaves
+  open for a local non-browser process. Two paths are exempt from *this* guard:
+  `/health` (an unauthenticated liveness probe) and `/hooks/*`, which carries
+  the per-run hook secret instead of a bearer token (next guard) rather than
+  being left open.
 - **Per-run hook secret** — the `/hooks/*` control plane is called by Claude
   Code (not the browser), so it cannot carry a bearer token. Instead Delta
   renders a per-run secret into the hook URLs (`?hs=<secret>`) and requires it

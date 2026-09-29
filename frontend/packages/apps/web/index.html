@@ -9,10 +9,12 @@
       or an autolinked URL), so without a policy the browser would make an
       outbound request to an arbitrary host — an exfiltration channel carrying
       data in the request path/query. This is the primary control: it protects
-      the HTML document in every serving mode (the page is served by the Vite
-      dev server, not delta-server, so a backend response header would not
-      cover the document). The same policy is mirrored as a dev response header
-      in vite.config.ts (`server.headers`). Keep the two in sync.
+      the HTML document in every serving mode. The same policy is mirrored as
+      a dev response header in vite.config.ts (`server.headers`), and as the
+      response header delta-server sends with the built page under its
+      `embed-web` feature
+      (backend/crates/apps/delta-server/src/app/static_web/index_page.rs).
+      Keep the three in sync.
 
       Directive rationale:
         default-src 'self'          — deny by default; only same-origin.
@@ -33,16 +35,15 @@
                                       used because adding any hash makes the
                                       browser ignore 'unsafe-inline', which
                                       would break Vite's dev inline scripts.
-                                      Acceptable: this repo has no production
-                                      static-serving path (see task Out of
-                                      scope); if one is ever added, tighten it
-                                      there (nonce/hash, no 'unsafe-*').
+                                      The built page served by delta-server
+                                      gets a stricter header policy on top
+                                      (both are enforced): no 'unsafe-eval'.
         style-src 'self' 'unsafe-inline'
                                     — xterm and the Vite dev client inject
                                       inline styles.
         frame-ancestors 'none'      — the floor: no embedding (clickjacking).
                                       Ignored in a <meta> CSP by spec, but the
-                                      mirrored dev response header enforces it.
+                                      mirrored response headers enforce it.
         object-src 'none'           — the floor: no plugins/embeds.
     -->
     <meta
