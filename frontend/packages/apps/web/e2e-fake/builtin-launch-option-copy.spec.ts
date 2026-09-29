@@ -1,4 +1,5 @@
 import { test, expect } from './support/fixtures';
+import { waitForSettledApp } from './support/app';
 
 /**
  * The copy-and-adapt flow for a launch option Delta ships, end to end against
@@ -49,9 +50,7 @@ test('a shipped Codex config option is readable, duplicable and undeletable', as
   page,
 }) => {
   await page.goto('/');
-  await expect(
-    page.getByTestId('session-node').first().or(page.getByTestId('new-session-empty')),
-  ).toBeVisible();
+  await waitForSettledApp(page);
 
   await page.getByTestId('settings-entry').click();
   const dialog = page.getByRole('dialog');

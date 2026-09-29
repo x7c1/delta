@@ -1,4 +1,5 @@
 import { test, expect, type Page } from './support/fixtures';
+import { waitForSettledApp } from './support/app';
 
 /**
  * End-to-end verification that the Settings appearance picker drives the
@@ -67,12 +68,7 @@ test('Settings appearance picker flips data-theme and CSS variables live', async
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto('/');
 
-  await expect(
-    page
-      .getByTestId('session-node')
-      .first()
-      .or(page.getByTestId('new-session-empty')),
-  ).toBeVisible();
+  await waitForSettledApp(page);
 
   // Open Settings → Appearance. The picker is reachable from the cold-start
   // navigator footer; no session is needed.

@@ -1,4 +1,5 @@
 import { test, expect } from './support/fixtures';
+import { waitForSettledApp } from './support/app';
 
 /**
  * The Settings dialog hosts a VS Code-style 2-pane layout: a vertical category
@@ -23,9 +24,7 @@ test('Settings dialog swaps the right pane when categories are clicked', async (
   // The cold-start placeholder OR an existing session node settles the app
   // before reaching for the gear. Either is fine — both render with the
   // navigator's settings entry mounted in the footer.
-  await expect(
-    page.getByTestId('session-node').first().or(page.getByTestId('new-session-empty')),
-  ).toBeVisible();
+  await waitForSettledApp(page);
 
   await page.getByTestId('settings-entry').click();
   const dialog = page.getByRole('dialog');
@@ -78,9 +77,7 @@ test('Settings registers a prompt template and lists it by label', async ({
   page,
 }) => {
   await page.goto('/');
-  await expect(
-    page.getByTestId('session-node').first().or(page.getByTestId('new-session-empty')),
-  ).toBeVisible();
+  await waitForSettledApp(page);
 
   await page.getByTestId('settings-entry').click();
   const dialog = page.getByRole('dialog');
@@ -158,9 +155,7 @@ test('Settings dialog keeps a fixed frame across category switches', async ({
   page,
 }) => {
   await page.goto('/');
-  await expect(
-    page.getByTestId('session-node').first().or(page.getByTestId('new-session-empty')),
-  ).toBeVisible();
+  await waitForSettledApp(page);
 
   await page.getByTestId('settings-entry').click();
   const dialog = page.getByRole('dialog');
