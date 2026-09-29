@@ -21,6 +21,9 @@ const BACKEND_PORT = Number(process.env.E2E_REAL_BACKEND_PORT ?? 7897);
 
 export default defineConfig({
   testDir: './e2e-real',
+  // A subdirectory of its own, like the other two suites, so running this one
+  // never empties their output (see playwright.config.ts).
+  outputDir: 'test-results/e2e-real',
   forbidOnly: !!process.env.CI,
   // Real-claude responses are non-deterministic and the loop crosses a live
   // model; allow exactly one retry per canary for flakiness.

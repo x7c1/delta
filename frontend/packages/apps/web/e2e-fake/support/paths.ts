@@ -17,8 +17,9 @@ export const REPO_ROOT = path.resolve(HERE, '../../../../../..');
  * The per-run state (server logs, fake transcripts) lives in a temp dir
  * deleted on teardown, which is useless once CI tears the runner down. The
  * fixture mirrors the diagnostics to this stable, repo-relative path that the
- * CI upload step references (alongside Playwright's own traces/videos/
- * screenshots under `test-results/`).
+ * CI upload step references. It is also the suite's Playwright `outputDir`
+ * (playwright.fake.config.ts), so Playwright's own traces/videos/screenshots
+ * land beside them and nothing the mock suite writes can empty it.
  *
  * Emptied once per run by `globalSetup.ts`; every server boot then writes
  * under its own `boot-<N>/` subdirectory (see `server.ts`).

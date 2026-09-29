@@ -18,6 +18,12 @@ const PORT = Number(process.env.E2E_PORT ?? 5173);
 
 export default defineConfig({
   testDir: './e2e',
+  // Playwright empties its outputDir at the start of every run. The default
+  // (`test-results/`) is shared with the fake-mode suite, so under
+  // `make -j check` — both suites at once — whichever started second would
+  // wipe the other's traces and preserved backend logs mid-run. Each suite
+  // therefore owns a subdirectory of its own (CI still uploads the parent).
+  outputDir: 'test-results/e2e',
   // Deterministic mock mode: fail fast on any flake rather than masking it.
   forbidOnly: !!process.env.CI,
   retries: 0,

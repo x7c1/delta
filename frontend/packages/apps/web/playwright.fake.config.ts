@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { ARTIFACT_DIR } from './e2e-fake/support/paths';
 
 /**
  * Playwright config for the fake-mode end-to-end suite: the real frontend
@@ -36,6 +37,11 @@ export default defineConfig({
   // a scope the per-worker server fixture cannot express. globalSetup.ts says
   // why the wipe cannot live in the fixture.
   globalSetup: './e2e-fake/support/globalSetup.ts',
+  // The suite's own output dir, so the mock suite — which may run at the same
+  // time under `make -j check` — never empties it (see playwright.config.ts).
+  // It is the artifact dir itself: traces/videos/screenshots and the preserved
+  // backend logs land side by side under test-results/e2e-fake/.
+  outputDir: ARTIFACT_DIR,
   forbidOnly: !!process.env.CI,
   retries: 0,
   // One worker, no intra-file parallelism: every spec talks to the one shared
@@ -69,7 +75,7 @@ export default defineConfig({
     // than being masked by a passing retry), `on-first-retry` would never
     // capture anything; retain-on-failure captures the trace/video and a
     // screenshot for exactly the failing run instead. All land under the
-    // suite's output dir (test-results/), which CI uploads on failure.
+    // suite's output dir (test-results/e2e-fake/), which CI uploads on failure.
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
