@@ -13,7 +13,8 @@ use serde_json::{json, Value};
 
 use crate::args::Args;
 use crate::hooks::post_json;
-use crate::input::{self, InputEvent};
+use crate::input::{self, InputEvent, Submission};
+use crate::pasted_content;
 use crate::scenario::{Scenario, SessionStartMode, Step};
 use crate::settings::HookEndpoints;
 use crate::transcript::TranscriptWriter;
@@ -75,6 +76,9 @@ pub fn run() -> Result<(), String> {
         endpoints,
         events,
         pending_prompt: args.prompt,
+        paste_wrap_id: scenario
+            .wrap_pastes
+            .then(|| pasted_content::session_paste_id(&session_id)),
         queued_prompts: VecDeque::new(),
         last_tool_use: None,
         tool_use_seq: 0,
@@ -180,6 +184,9 @@ struct Engine {
     /// The launch's positional prompt, consumed by the first `await_prompt` —
     /// mirroring how `claude` auto-submits a positional prompt at startup.
     pending_prompt: Option<String>,
+    /// The `<pasted_content>` block id when the scenario wraps long pastes
+    /// (`wrap_pastes`), `None` when every prompt is submitted bare.
+    paste_wrap_id: Option<String>,
     /// Prompts the scenario enqueued mid-turn (`enqueue_prompt`), awaiting
     /// their `dequeue_prompt` replay — mirroring claude's prompt queue.
     queued_prompts: VecDeque<String>,
@@ -200,7 +207,13 @@ impl Engine {
     fn execute(&mut self, step: &Step) -> Result<(), String> {
         match step {
             Step::AwaitPrompt => {
-                let prompt = self.next_prompt()?;
+                let submission = self.next_prompt()?;
+                // What Claude Code submits: the entered text, with a long
+                // paste wrapped when the scenario opts into the wrapper.
+                let prompt = match &self.paste_wrap_id {
+                    Some(id) => pasted_content::wrap_submission(&submission, id),
+                    None => submission.text(),
+                };
                 self.submit_prompt(&prompt, false)
             }
             Step::Reply { text, thinking } => {
@@ -549,13 +562,15 @@ impl Engine {
     /// The next submitted prompt: the launch's positional prompt first, then
     /// whatever the pane input submits. Escapes pressed while idle are ignored
     /// (there is no turn to interrupt), like a TUI at its prompt.
-    fn next_prompt(&mut self) -> Result<String, String> {
+    /// The positional prompt never went through the pane, so it counts as
+    /// typed.
+    fn next_prompt(&mut self) -> Result<Submission, String> {
         if let Some(prompt) = self.pending_prompt.take() {
-            return Ok(prompt);
+            return Ok(Submission::typed(&prompt));
         }
         loop {
             match self.events.recv() {
-                Ok(InputEvent::Prompt(text)) => return Ok(text),
+                Ok(InputEvent::Prompt(submission)) => return Ok(submission),
                 Ok(InputEvent::Interrupt) => continue,
                 Err(_) => return Err("stdin closed while awaiting a prompt".to_owned()),
             }
@@ -575,7 +590,10 @@ impl Engine {
             match self.events.recv() {
                 Ok(InputEvent::Interrupt) => return Ok(()),
                 Ok(InputEvent::Prompt(dropped)) => {
-                    eprintln!("fake-claude: dropping prompt submitted mid-turn: {dropped}");
+                    eprintln!(
+                        "fake-claude: dropping prompt submitted mid-turn: {}",
+                        dropped.text()
+                    );
                 }
                 Err(_) => return Err("stdin closed while awaiting an escape".to_owned()),
             }

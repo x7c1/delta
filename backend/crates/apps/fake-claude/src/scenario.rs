@@ -6,6 +6,7 @@
 //! {
 //!   "session_start": "immediate",
 //!   "loop": false,
+//!   "wrap_pastes": false,
 //!   "steps": [
 //!     { "type": "await_prompt" },
 //!     { "type": "reply", "text": "scripted reply", "thinking": "optional" },
@@ -23,6 +24,15 @@
 //! - `loop` (default `false`): when `true`, the step list restarts from the
 //!   top after the last step, so one short script can serve an arbitrarily
 //!   long conversation.
+//! - `wrap_pastes` (default `false`): when `true`, a prompt that arrived as a
+//!   bracketed paste of 20 or more (trimmed) characters is wrapped in Claude
+//!   Code's `<pasted_content id="xxxx">` block — in both the
+//!   `UserPromptSubmit` hook's `prompt` and the `type: "user"` transcript
+//!   line — the way recent Claude Code builds submit a paste. Every Delta
+//!   send is delivered as a bracketed paste, so this puts a scenario on the
+//!   tagged echo path. A typed prompt, a shorter paste, and the launch's
+//!   positional prompt stay bare. See [`crate::pasted_content`] for the exact
+//!   shape.
 //! - `steps`: executed strictly in order. The vocabulary:
 //!
 //! | step | effect |
@@ -181,6 +191,9 @@ pub struct Scenario {
     /// Restart the step list from the top after the last step.
     #[serde(default, rename = "loop")]
     pub looped: bool,
+    /// Wrap a long pasted prompt in Claude Code's `<pasted_content>` block.
+    #[serde(default)]
+    pub wrap_pastes: bool,
     pub steps: Vec<Step>,
 }
 
@@ -218,6 +231,7 @@ impl Scenario {
         Self {
             session_start: SessionStartMode::default(),
             looped: true,
+            wrap_pastes: false,
             steps: vec![
                 Step::AwaitPrompt,
                 Step::Reply {
@@ -240,6 +254,7 @@ mod tests {
             r#"{
                 "session_start": { "delay_ms": 250 },
                 "loop": true,
+                "wrap_pastes": true,
                 "steps": [
                     { "type": "await_prompt" },
                     { "type": "stream_text", "deltas": ["hi", " there"] },
@@ -270,6 +285,7 @@ mod tests {
             SessionStartMode::Delayed { delay_ms: 250 }
         );
         assert!(scenario.looped);
+        assert!(scenario.wrap_pastes);
         assert_eq!(scenario.steps.len(), 18);
         assert_eq!(scenario.steps[0], Step::AwaitPrompt);
         assert_eq!(
@@ -310,11 +326,12 @@ mod tests {
     }
 
     #[test]
-    fn defaults_are_immediate_session_start_and_no_loop() {
+    fn defaults_are_immediate_session_start_no_loop_and_bare_pastes() {
         let scenario: Scenario =
             serde_json::from_str(r#"{ "steps": [ { "type": "await_prompt" } ] }"#).unwrap();
         assert_eq!(scenario.session_start, SessionStartMode::default());
         assert!(!scenario.looped);
+        assert!(!scenario.wrap_pastes);
     }
 
     #[test]

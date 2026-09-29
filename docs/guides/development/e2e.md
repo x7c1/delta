@@ -109,11 +109,12 @@ never masquerade as this one's. Nothing the e2e-fake run touches collides with
 `packages/apps/web/e2e-fake/scenarios/`, executed step by step by the fake:
 `await_prompt`, `reply`, `tool_use`, `permission_request`, `tool_result`,
 `stop`, `await_interrupt`, `write_queued_command`, `delay`, `hang`, plus
-`session_start` timing (`immediate` / `skip` / `{ "delay_ms": N }`) and an
-optional `loop`. The full vocabulary is documented in the fake's `scenario`
-module (`backend/crates/apps/fake-claude/src/scenario.rs`). A spec selects its
-scenario through the **first word of the first prompt it sends**: sending
-`"first-send hold then answer"` makes the spawned fake load
+`session_start` timing (`immediate` / `skip` / `{ "delay_ms": N }`), an
+optional `loop`, and an optional `wrap_pastes` that wraps a long pasted prompt
+in Claude Code's `<pasted_content>` block. The full vocabulary is documented in
+the fake's `scenario` module (`backend/crates/apps/fake-claude/src/scenario.rs`).
+A spec selects its scenario through the **first word of the first prompt it
+sends**: sending `"first-send hold then answer"` makes the spawned fake load
 `scenarios/first-send.json`. Keep specs structural — assert presence, absence,
 and ordering of UI elements, never scripted reply text.
 

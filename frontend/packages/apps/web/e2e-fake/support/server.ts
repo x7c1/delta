@@ -109,6 +109,12 @@ export interface ServerHandle {
   /** The backend port the server (and the Vite proxy) is bound to. */
   readonly port: number;
   /**
+   * The directory the fake writes its JSONL transcripts into (one
+   * `<session-id>.jsonl` per launch), for a spec asserting on the exact bytes
+   * the fake submitted.
+   */
+  readonly transcriptDir: string;
+  /**
    * SIGKILL the current server child (a hard death — the production incident
    * was never a graceful shutdown) and relaunch against the SAME database,
    * tmux socket, and scripted-agent wrappers, polling `/health` until the new
@@ -424,6 +430,7 @@ export async function bootServer(): Promise<ServerHandle> {
 
   return {
     port: BACKEND_PORT,
+    transcriptDir: transcripts,
     async restart(env: Record<string, string> = {}): Promise<void> {
       envOverrides = env;
       await killChild();
