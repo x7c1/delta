@@ -1,6 +1,6 @@
 import { test, expect } from './support/fixtures';
 import { scenarioPath } from './support/server';
-import { startNewCodexSession } from './support/app';
+import { composerInput, startNewCodexSession } from './support/app';
 
 /**
  * A new **Codex** session is the user's the moment the server accepts its first
@@ -54,7 +54,7 @@ test('a slow Codex launch is focused as a starting session, then comes up in pla
   await expect(startingCard).toHaveCount(1, { timeout: 2_000 });
   // The new-session screen is behind us: this is the spawned session's screen.
   await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
-  const textbox = page.getByRole('textbox');
+  const textbox = composerInput(page);
   await expect(textbox).toHaveAttribute(
     'placeholder',
     'Message sends when the session is ready…',

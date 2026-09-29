@@ -119,14 +119,16 @@ test('a Claude session keeps the terminal pane, not the comms one', async ({
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/');
 
-  // The cold-load focus is the open Claude session.
-  const terminalToggle = page.getByRole('button', { name: 'Terminal' });
-  await expect(terminalToggle).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Comms' })).toHaveCount(0);
-
-  await terminalToggle.click();
+  // The cold-load focus is the open Claude session, and a session nobody has
+  // chosen for opens with its terminal on this layout.
   await expect(page.getByRole('separator', { name: 'Resize terminal' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Comms' })).toHaveCount(0);
   await expect(page.getByTestId('comms-pane')).toHaveCount(0);
+
+  // Closing it returns the terminal toggle — never the comms one.
+  await page.getByRole('button', { name: 'Close terminal' }).click();
+  await expect(page.getByRole('button', { name: 'Terminal' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Comms' })).toHaveCount(0);
 });
 
 test('the comms log leaks no scrollable overflow past its own scroll box', async ({

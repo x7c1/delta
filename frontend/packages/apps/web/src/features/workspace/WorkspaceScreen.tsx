@@ -16,6 +16,7 @@ import { useApiClient } from '../../data/apiContext';
 import { useSessionEvents } from '../../data/useSessionEvents';
 import {
   NEW_SESSION_FOCUS,
+  isTerminalOpen,
   useNavStore,
   type FocusedSession,
 } from '../../store/navStore';
@@ -184,8 +185,9 @@ export function WorkspaceScreen() {
     (state) => state.reconcileFocusedSession,
   );
   const setActiveThread = useNavStore((state) => state.setActiveThread);
-  const terminalOpen = useNavStore((state) => state.terminalOpen);
   const toggleTerminal = useNavStore((state) => state.toggleTerminal);
+  const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
+  const pruneTerminalOpen = useNavStore((state) => state.pruneTerminalOpen);
   const commsOpen = useNavStore((state) => state.commsOpen);
   const toggleComms = useNavStore((state) => state.toggleComms);
   const terminalWidth = useNavStore((state) => state.terminalWidth);
@@ -196,6 +198,25 @@ export function WorkspaceScreen() {
   );
 
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
+  // The focused session's terminal choice, or the layout's default for one
+  // nobody has chosen for yet (see `isTerminalOpen`).
+  const terminalOpen = useNavStore((state) =>
+    isTerminalOpen(state, isLargeScreen),
+  );
+
+  // Forget the terminal choice of sessions that are gone, on the same complete
+  // list the session-scoped storage GC sweeps against. Tracked spawns count as
+  // listed: a just-accepted launch is focused before its row reaches the loaded
+  // pages, and a choice made in that beat must survive the refetch.
+  useEffect(() => {
+    if (gcSessionIds === null) {
+      return;
+    }
+    pruneTerminalOpen([
+      ...gcSessionIds,
+      ...spawns.map((spawn) => spawn.sessionId),
+    ]);
+  }, [gcSessionIds, spawns, pruneTerminalOpen]);
 
   const isNewSessionFocus = focusedSessionId === NEW_SESSION_FOCUS;
   const focusedItem =
@@ -455,9 +476,11 @@ export function WorkspaceScreen() {
   // The same session in the beat before its row reaches the loaded pages: it
   // was focused off the tracked spawn alone, so there is nothing to render yet
   // — but it is arriving, not gone.
-  const focusedAwaitingItsRow =
-    focusedItem === null &&
-    spawns.some((spawn) => spawn.sessionId === focusedSessionId);
+  const focusedAwaitingSpawn =
+    focusedItem === null
+      ? spawns.find((spawn) => spawn.sessionId === focusedSessionId)
+      : undefined;
+  const focusedAwaitingItsRow = focusedAwaitingSpawn !== undefined;
 
   // Whether the focused session's provider offers an attachable terminal, read
   // from its capability profile — never from `provider === 'claude'`. A provider
@@ -467,17 +490,22 @@ export function WorkspaceScreen() {
   //
   // The providers-loading window is the subtle case. Failing OPEN to `true` while
   // the query is still in flight would briefly mount the pane for the focused
-  // session and open its `/pty` bridge before the capability is known: with
-  // `terminalOpen` persisted `true` (from a previous Claude session) and a Codex
-  // session focused on reload, that fires a PTY websocket the backend rejects
-  // with a "session is not open" warning. So while the profile is unresolved we
+  // session and open its `/pty` bridge before the capability is known: with the
+  // terminal open for a focused Codex session on reload (the large-layout
+  // default for a session nobody has chosen for), that fires a PTY websocket
+  // the backend rejects with a "session is not open" warning. So while the profile is unresolved we
   // WITHHOLD the terminal rather than fail open; a real terminal provider
   // (Claude) attaches the instant the query resolves, and the `/pty` behaviour it
   // then drives is byte-identical to before. Fail open only in the two cases
   // where there is genuinely nothing to wait for: the new-session screen (no
   // focused session), and a query that has SUCCEEDED but does not list the
   // focused provider (an unrecognised provider — keep the historical default).
-  const focusedProvider = focusedItem?.session.provider ?? null;
+  // In the beat before a just-launched session's row arrives, the provider is
+  // the one its launch asked for: without it the terminal (open by default on
+  // the large layout) would flash up beside a Codex launch and vanish once the
+  // row reported that provider has none.
+  const focusedProvider =
+    focusedItem?.session.provider ?? focusedAwaitingSpawn?.provider ?? null;
   const focusedCapabilities =
     focusedProvider === null
       ? undefined
@@ -506,6 +534,7 @@ export function WorkspaceScreen() {
   // somehow reported both behaves exactly as it does today.
   const showTerminalPane = terminalOpen && focusedHasTerminal;
   const showCommsPane = commsOpen && !focusedHasTerminal && focusedHasCommsLog;
+  const showRightPane = showTerminalPane || showCommsPane;
   // And which reopen button. Each is its pane's condition with the open flag
   // flipped — the button is what you press while that pane is closed — so the
   // same "at most one, terminal first" split decides both.
@@ -521,6 +550,10 @@ export function WorkspaceScreen() {
   // state: a bound session is open; a failed one has no pane left; a `spawning`
   // one has a pane only once the server has said so; and anything else with no
   // live pane is a closed session.
+  //
+  // A session focused before its row arrives is on its way up, so it is
+  // `preparing` too, not `closed`: its pane says it is starting rather than
+  // asking the user to start the session they just started.
   const terminalPaneState: TerminalPaneState = focusedOpen
     ? 'open'
     : focusedFailed
@@ -529,7 +562,9 @@ export function WorkspaceScreen() {
         ? focusedPaneStarting
           ? 'starting'
           : 'preparing'
-        : 'closed';
+        : focusedAwaitingItsRow
+          ? 'preparing'
+          : 'closed';
 
   // Fence the embedded terminal behind an error boundary: its attach runs in an
   // effect that can throw (e.g. an xterm addon failing to load), and without a
@@ -540,12 +575,15 @@ export function WorkspaceScreen() {
     <ErrorBoundary
       label="terminal"
       resetKey={focusedRealSessionId}
-      fallback={() => <TerminalFallback onClose={toggleTerminal} />}
+      fallback={() => (
+        <TerminalFallback onClose={() => setTerminalOpen(false)} />
+      )}
     >
       <TerminalPane
         sessionId={focusedRealSessionId}
         paneState={terminalPaneState}
         hasTerminal={focusedHasTerminal}
+        hidden={!showTerminalPane}
       />
     </ErrorBoundary>
   );
@@ -568,7 +606,7 @@ export function WorkspaceScreen() {
   const paneToggleButton = showTerminalToggle ? (
     <button
       type="button"
-      onClick={toggleTerminal}
+      onClick={() => toggleTerminal(isLargeScreen)}
       data-testid="terminal-toggle"
       className={PANE_TOGGLE_BUTTON_CLASS}
     >
@@ -656,25 +694,37 @@ export function WorkspaceScreen() {
       </div>
 
       {/* Right: the focused session's window — the terminal for a provider with
-          an attachable pane, the comms log for a headless one. Each is gated on
-          its own capability AND its own persisted open flag, so a flag left
-          `true` by a session of the OTHER provider can never open the wrong
-          pane (and, since mounting the terminal pane is what opens `/pty`, a
-          terminal-less provider never fires that socket at all). */}
-      {(showTerminalPane || showCommsPane) &&
-        (isLargeScreen ? (
-          <div
-            className="relative z-20 shrink-0"
-            style={{ width: terminalWidth }}
-          >
-            <TerminalResizeHandle />
-            {showTerminalPane ? terminal : commsLog}
-          </div>
-        ) : (
-          <div className="absolute inset-y-0 right-0 z-20 w-[min(90vw,28rem)] shadow-xl">
-            {showTerminalPane ? terminal : commsLog}
-          </div>
-        ))}
+          an attachable pane, the comms log for a headless one. Each is shown
+          on its own capability AND its own open state, so the terminal's
+          large-layout default never shows a terminal for a terminal-less
+          provider.
+
+          The terminal pane stays MOUNTED even when it is not shown — the
+          column is hidden (`display: none`) rather than unmounted when the
+          focused session's terminal is closed or it has none, and the terminal
+          is hidden beside the comms log. The open state is per session, and
+          the pane holds the other bound sessions' `/pty` bridges: unmounting it
+          on a focus switch through such a session would drop them all, and the
+          way back would rebuild each xterm and run the server's pre-attach
+          input wipe on it. A hidden pane attaches nothing for the focused
+          session (so a terminal-less provider still never fires `/pty`) and
+          drops a starting session's entry as soon as it is off screen. */}
+      <div
+        className={
+          isLargeScreen
+            ? `relative z-20 shrink-0${showRightPane ? '' : ' hidden'}`
+            : `absolute inset-y-0 right-0 z-20 w-[min(90vw,28rem)] shadow-xl${showRightPane ? '' : ' hidden'}`
+        }
+        style={isLargeScreen ? { width: terminalWidth } : undefined}
+      >
+        {isLargeScreen && showRightPane && <TerminalResizeHandle />}
+        {/* `contents` leaves no box of its own, so the shown terminal lays out
+            exactly as a direct child of the column. */}
+        <div className={showTerminalPane ? 'contents' : 'hidden'}>
+          {terminal}
+        </div>
+        {showCommsPane && commsLog}
+      </div>
 
       {/* Settings is a modal overlay layered over the workspace rather than a
           full-pane mode: it self-gates on `settingsOpen` (renders nothing when

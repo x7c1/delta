@@ -1,7 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { test, expect, type Page } from './support/fixtures';
-import { sendMessage, startNewSession } from './support/app';
+import {
+  sendMessage,
+  shownTerminal,
+  startNewSession,
+} from './support/app';
 import { fetchSends, latestSession } from './support/rest';
 
 /**
@@ -155,10 +159,12 @@ test('a branch whose echo is pasted-content-tagged still gets its quote frame', 
   await expect(page.getByText('queued — sends when idle')).toBeVisible();
 
   // End the turn from the embedded terminal.
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
-  const xtermInput = page.locator('.xterm-helper-textarea');
+  // A new session's terminal is open by default on this (large) layout.
+  const xtermInput = shownTerminal(page).locator('.xterm-helper-textarea');
   await expect(xtermInput).toBeAttached();
-  await expect(page.locator('.xterm-rows')).toContainText('fake-claude session');
+  await expect(shownTerminal(page).locator('.xterm-rows')).toContainText(
+    'fake-claude session',
+  );
   await expect(async () => {
     await xtermInput.focus();
     await xtermInput.press('Escape');

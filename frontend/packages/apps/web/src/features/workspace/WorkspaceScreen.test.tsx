@@ -46,14 +46,35 @@ import { WorkspaceScreen } from './WorkspaceScreen';
 vi.mock('../../data/useSessionEvents', () => ({
   useSessionEvents: () => {},
 }));
-vi.mock('../terminal/TerminalPane', () => ({
-  // `paneState` is surfaced as an attribute because it is a decision this
-  // screen makes — how far the focused session's pane has got — while what the
-  // pane does with it belongs to `TerminalPane.test.tsx`.
-  TerminalPane: ({ paneState }: { paneState: string }) => (
-    <div data-testid="terminal-pane" data-pane-state={paneState} />
-  ),
+// Mounts of the stubbed terminal pane, so a test can tell a pane that was only
+// hidden from one that was unmounted and rebuilt (which would drop every bridge
+// it holds).
+const { terminalPaneMounts } = vi.hoisted(() => ({
+  terminalPaneMounts: { count: 0 },
 }));
+vi.mock('../terminal/TerminalPane', async () => {
+  const { useEffect } = await vi.importActual<typeof import('react')>('react');
+  return {
+    // `paneState` is surfaced as an attribute because it is a decision this
+    // screen makes — how far the focused session's pane has got — while what
+    // the pane does with it belongs to `TerminalPane.test.tsx`. A hidden pane
+    // renders nothing here, so "is the terminal shown" stays a presence check.
+    TerminalPane: ({
+      paneState,
+      hidden,
+    }: {
+      paneState: string;
+      hidden?: boolean;
+    }) => {
+      useEffect(() => {
+        terminalPaneMounts.count += 1;
+      }, []);
+      return hidden ? null : (
+        <div data-testid="terminal-pane" data-pane-state={paneState} />
+      );
+    },
+  };
+});
 // The comms pane opens a `/comms` WebSocket in its effect, which is as
 // meaningless in jsdom as the terminal's attach. Its own suite
 // (`CommsLogPane.test.tsx`) covers what it renders per session state; here the
@@ -247,7 +268,8 @@ describe('WorkspaceScreen multi-session', () => {
       activeThreadId: null,
       preNewSessionFocus: null,
       settingsOpen: false,
-      terminalOpen: false,
+      terminalOpenBySession: {},
+      terminalOpenWithoutSession: false,
       commsOpen: false,
     });
     useComposerStore.setState({
@@ -485,6 +507,93 @@ describe('WorkspaceScreen multi-session', () => {
     // And the centre pane says the session is on its way. "Select a session"
     // here would read as if the user's Send had gone nowhere.
     expect(screen.getByText('Starting the session…')).toBeInTheDocument();
+  });
+
+  it('shows a tracked spawn’s terminal as starting, and none for a Codex launch, before its row is listed', async () => {
+    // The beat between an accepted launch and its row reaching the loaded
+    // pages. The provider is the launch's own, so a Codex launch gets no
+    // terminal to flash up and vanish, and a Claude launch's terminal says it
+    // is starting rather than asking for a session to be started.
+    useNavStore.setState({
+      focusedSessionId: UNLISTED_SPAWN_ID,
+      terminalOpenBySession: { [UNLISTED_SPAWN_ID]: true },
+    });
+    useLiveStore.setState({ spawns: [trackedSpawn(UNLISTED_SPAWN_ID)] });
+
+    const { unmount } = renderScreen();
+
+    expect(await screen.findByTestId('terminal-pane')).toHaveAttribute(
+      'data-pane-state',
+      'preparing',
+    );
+    unmount();
+
+    useLiveStore.setState({
+      spawns: [{ ...trackedSpawn(UNLISTED_SPAWN_ID), provider: 'codex' }],
+    });
+    renderScreen();
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('session-node').length).toBeGreaterThan(0),
+    );
+    expect(screen.getByText('Starting the session…')).toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-pane')).toBeNull();
+    expect(screen.queryByTestId('terminal-toggle')).toBeNull();
+  });
+
+  it('forgets the terminal choice of a session no longer listed, but not a tracked spawn’s', async () => {
+    // The prune runs against the complete list. A tracked spawn is not in it
+    // yet (its refetch is still in flight), but a choice made on its screen in
+    // that beat must survive; a session the list no longer has is dropped.
+    // A single-page list, so the prune's complete-list gate opens on the first
+    // response.
+    server.use(
+      http.get('*/api/sessions', () =>
+        HttpResponse.json({
+          sessions: [
+            {
+              session: {
+                id: SESSION_ID,
+                cwd: '/work',
+                transcript_path: '/tmp/s1.jsonl',
+                title: null,
+                status: 'active',
+                created_at: '2026-01-01T00:00:00Z',
+                branch_at_launch: null,
+                repo_root: null,
+                repository_display_name: null,
+                provider: 'claude',
+                provider_session_id: null,
+                provider_thread_id: null,
+                pull_request_number: null,
+              },
+              open: true,
+              main_thread_id: MAIN_THREAD_ID,
+              last_activity_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+    );
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      terminalOpenBySession: {
+        [SESSION_ID]: false,
+        [UNLISTED_SPAWN_ID]: false,
+        'sess-deleted-elsewhere': true,
+      },
+    });
+    useLiveStore.setState({ spawns: [trackedSpawn(UNLISTED_SPAWN_ID)] });
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useNavStore.getState().terminalOpenBySession).toEqual({
+        [SESSION_ID]: false,
+        [UNLISTED_SPAWN_ID]: false,
+      }),
+    );
   });
 
   it('hands a spawn’s focus over once, leaving New session usable', async () => {
@@ -1207,10 +1316,13 @@ describe('WorkspaceScreen multi-session', () => {
     expect(await screen.findByTestId('terminal-toggle')).toBeInTheDocument();
   });
 
-  it('shows the terminal pane for a Claude session when terminalOpen is set', async () => {
+  it('shows the terminal pane for a Claude session when its terminal is open', async () => {
     // With the terminal open, the right pane mounts for a provider that has a
     // terminal — the gating must not strip it from Claude.
-    useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      terminalOpenBySession: { [SESSION_ID]: true },
+    });
     useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID);
 
     renderScreen();
@@ -1218,12 +1330,48 @@ describe('WorkspaceScreen multi-session', () => {
     expect(await screen.findByTestId('terminal-pane')).toBeInTheDocument();
   });
 
+  it('keeps the terminal pane mounted through a session whose terminal is closed', async () => {
+    // The open state is per session, and the pane holds the bound sessions'
+    // bridges. Unmounting it for B (terminal closed) would drop A's, and the
+    // way back would rebuild A's xterm and run the pre-attach input wipe on it.
+    terminalPaneMounts.count = 0;
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      terminalOpenBySession: { [SESSION_ID]: true, [SESSION_ID_2]: false },
+    });
+
+    renderScreen();
+
+    expect(await screen.findByTestId('terminal-pane')).toBeInTheDocument();
+
+    act(() => {
+      useNavStore.setState({
+        focusedSessionId: SESSION_ID_2,
+        activeThreadId: SESSION_2_MAIN_THREAD_ID,
+      });
+    });
+    expect(await screen.findByTestId('terminal-toggle')).toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+
+    act(() => {
+      useNavStore.setState({
+        focusedSessionId: SESSION_ID,
+        activeThreadId: MAIN_THREAD_ID,
+      });
+    });
+    expect(await screen.findByTestId('terminal-pane')).toBeInTheDocument();
+    expect(terminalPaneMounts.count).toBe(1);
+  });
+
   it('leaves the terminal explaining itself for a starting session with no pane yet', async () => {
     // The row reads `spawning` on both sides of the pane coming up, so the flag
     // that separates "still preparing the launch" from "the agent is running in
     // a pane" is `pane_starting` — false here, and the terminal says so rather
     // than attaching to nothing.
-    useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      terminalOpenBySession: { [SESSION_ID]: true },
+    });
     useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID, {
       open: false,
       status: 'spawning',
@@ -1244,7 +1392,10 @@ describe('WorkspaceScreen multi-session', () => {
     // never replayed. The first fetch of the list is all it gets — and a launch
     // stopped on an interactive prompt never binds, so if the terminal did not
     // attach from this, nothing would ever let the user answer it.
-    useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      terminalOpenBySession: { [SESSION_ID]: true },
+    });
     useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID, {
       open: false,
       status: 'spawning',
@@ -1262,7 +1413,10 @@ describe('WorkspaceScreen multi-session', () => {
   it('gives a failed launch no pane to attach to', async () => {
     // A launch that never came up has no pane left, and saying it is closed
     // would offer a resume that cannot happen.
-    useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      terminalOpenBySession: { [SESSION_ID]: true },
+    });
     useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID, {
       open: false,
       status: 'failed',
@@ -1276,14 +1430,14 @@ describe('WorkspaceScreen multi-session', () => {
     );
   });
 
-  it('hides the terminal toggle and pane for a Codex session even with terminalOpen persisted', async () => {
+  it('hides the terminal toggle and pane for a Codex session even with its terminal open', async () => {
     // A focused Codex session: the default `/api/providers` mock reports Codex
-    // with no terminal. Even though `terminalOpen` was persisted `true` (e.g.
-    // from a previous Claude session), the capability gating must hide both the
+    // with no terminal. Even though its terminal is saved open (and would be
+    // by default on the large layout), the capability gating must hide both the
     // toggle and the pane — a Codex session can never open a terminal.
     useNavStore.setState({
       focusedSessionId: SESSION_ID_4,
-      terminalOpen: true,
+      terminalOpenBySession: { [SESSION_ID_4]: true },
     });
     useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID);
 
@@ -1408,7 +1562,7 @@ describe('WorkspaceScreen multi-session', () => {
   });
 
   it('withholds the terminal pane for a Claude session until the providers query resolves', async () => {
-    // The providers-loading window. `terminalOpen` is persisted `true`, so the
+    // The providers-loading window. The terminal is saved open, so the
     // pane's mount hinges entirely on the capability gate. Until the profile is
     // known the gate must NOT fail open — otherwise the pane would mount and open
     // its `/pty` bridge before the capability resolves, which for a terminal-less
@@ -1426,7 +1580,10 @@ describe('WorkspaceScreen multi-session', () => {
         return HttpResponse.json({ providers: mockProviders() });
       }),
     );
-    useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      terminalOpenBySession: { [SESSION_ID]: true },
+    });
     useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID);
 
     renderScreen();
@@ -1446,7 +1603,7 @@ describe('WorkspaceScreen multi-session', () => {
   });
 
   it('never mounts the terminal pane for a Codex session across the providers-loading window', async () => {
-    // The Codex leak this fix targets: with `terminalOpen` persisted `true` and a
+    // The Codex leak this fix targets: with the terminal saved open for a
     // Codex session focused on reload, the pane must never mount — not during the
     // loading window (gate withholds) and not after (Codex reports no terminal).
     // Since the pane is what opens the `/pty` bridge, a never-mounted pane is a
@@ -1463,7 +1620,7 @@ describe('WorkspaceScreen multi-session', () => {
     );
     useNavStore.setState({
       focusedSessionId: SESSION_ID_4,
-      terminalOpen: true,
+      terminalOpenBySession: { [SESSION_ID_4]: true },
     });
     useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID);
 
@@ -1513,7 +1670,7 @@ describe('WorkspaceScreen multi-session', () => {
     // row, in this direction; the other direction is asserted below).
     useNavStore.setState({
       focusedSessionId: SESSION_ID,
-      terminalOpen: false,
+      terminalOpenBySession: { [SESSION_ID]: false },
       commsOpen: true,
     });
     useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID);
@@ -1553,13 +1710,13 @@ describe('WorkspaceScreen multi-session', () => {
     expect(pane.dataset.attachable).toBe('false');
   });
 
-  it('does not open the comms pane from a terminalOpen persisted by a Claude session', async () => {
+  it('does not open the comms pane from an open terminal', async () => {
     // The stale-persisted-state row. Each pane has its OWN flag precisely so a
-    // `true` left behind by the other provider cannot open the wrong window: with
-    // only `terminalOpen` set, a focused Codex session shows NEITHER pane.
+    // open terminal cannot open the wrong window: with only the terminal open, a
+    // focused Codex session shows NEITHER pane.
     useNavStore.setState({
       focusedSessionId: SESSION_ID_4,
-      terminalOpen: true,
+      terminalOpenBySession: { [SESSION_ID_4]: true },
       commsOpen: false,
     });
     useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID);

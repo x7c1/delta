@@ -67,15 +67,26 @@ vi.mock('@xterm/addon-unicode11', () => {
   return { Unicode11Addon };
 });
 
-// A spy for `connectPty` so tests can assert whether the PTY bridge was opened.
-// Hoisted so it is defined before the (hoisted) `vi.mock` factory references it.
-const { connectPtyMock } = vi.hoisted(() => ({
-  connectPtyMock: vi.fn(() => ({
-    close: () => {},
-    send: () => {},
-    resize: () => {},
-  })),
-}));
+// A spy for `connectPty` so tests can assert whether the PTY bridge was opened,
+// and a count of bridge closes per session so they can assert it was dropped.
+// Hoisted so both are defined before the (hoisted) `vi.mock` factory
+// references them.
+const { connectPtyMock, ptyCloses } = vi.hoisted(() => {
+  const ptyCloses = new Map<string, number>();
+  return {
+    ptyCloses,
+    connectPtyMock: vi.fn((options: { sessionId: string }) => ({
+      close: () => {
+        ptyCloses.set(
+          options.sessionId,
+          (ptyCloses.get(options.sessionId) ?? 0) + 1,
+        );
+      },
+      send: () => {},
+      resize: () => {},
+    })),
+  };
+});
 
 vi.mock('@delta/api-client', async () => {
   const actual =
@@ -235,6 +246,21 @@ describe('TerminalPane attaching to a session that is still starting', () => {
     expect(queryByText(/This session is closed/i)).toBeNull();
   });
 
+  it('says a just-launched session is starting before its id reaches the pane', () => {
+    // Focused off its tracked launch in the beat before its row is listed: the
+    // pane has no session id yet, but inviting the user to start a session
+    // would contradict the Send they just made.
+    const { getByText, queryByText } = render(
+      <ThemeProvider>
+        <TerminalPane sessionId={null} paneState="preparing" hasTerminal={true} />
+      </ThemeProvider>,
+    );
+
+    expect(connectPtyMock).not.toHaveBeenCalled();
+    expect(getByText(/still starting up/i)).toBeTruthy();
+    expect(queryByText(/Start a session/i)).toBeNull();
+  });
+
   it('does not attach to a session whose launch failed', () => {
     const { getByText } = render(
       <ThemeProvider>
@@ -312,5 +338,130 @@ describe('TerminalPane capability gate on the PTY bridge', () => {
 
     expect(fakeTerminals).toHaveLength(0);
     expect(connectPtyMock).not.toHaveBeenCalled();
+  });
+
+  it('never opens the PTY bridge while the pane is hidden', () => {
+    // The workspace keeps the pane mounted while the focused session's terminal
+    // is closed; that must not attach the session nobody asked to see.
+    render(
+      <ThemeProvider>
+        <TerminalPane
+          sessionId={'s1' as SessionId}
+          paneState="open"
+          hasTerminal
+          hidden
+        />
+      </ThemeProvider>,
+    );
+
+    expect(fakeTerminals).toHaveLength(0);
+    expect(connectPtyMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('TerminalPane holding a bridge on an unfocused session', () => {
+  beforeEach(() => {
+    fakeTerminals.length = 0;
+    ptyCloses.clear();
+    connectPtyMock.mockClear();
+    installMatchMediaStub(false);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function pane(
+    sessionId: string | null,
+    paneState: 'open' | 'starting',
+    hidden = false,
+  ) {
+    return (
+      <ThemeProvider>
+        <TerminalPane
+          sessionId={sessionId as SessionId | null}
+          paneState={paneState}
+          hasTerminal
+          hidden={hidden}
+        />
+      </ThemeProvider>
+    );
+  }
+
+  it('keeps a bound session attached through a session whose terminal is closed', () => {
+    // The workspace hides the pane (rather than unmounting it) while the
+    // focused session's terminal is closed, so A's bridge and its xterm node
+    // survive the trip through B.
+    const { container, rerender } = render(pane('s1', 'open'));
+    const entryEl = container.querySelector('.absolute.inset-0');
+    expect(entryEl).not.toBeNull();
+
+    rerender(pane('s2', 'open', true));
+    rerender(pane('s1', 'open'));
+
+    expect(connectPtyMock).toHaveBeenCalledTimes(1);
+    expect(ptyCloses.get('s1')).toBeUndefined();
+    expect(container.querySelector('.absolute.inset-0')).toBe(entryEl);
+    expect((entryEl as HTMLElement).style.display).toBe('block');
+  });
+
+  it('drops a starting session’s bridge when its pane is hidden', () => {
+    // Off screen is off screen: a hidden starting entry would count as someone
+    // watching the launch.
+    const { rerender } = render(pane('s1', 'starting'));
+    rerender(pane('s1', 'starting', true));
+    expect(ptyCloses.get('s1')).toBe(1);
+  });
+
+  it('drops the focused session’s bridge when its own terminal is closed, keeping the others', () => {
+    const { rerender } = render(pane('s1', 'open'));
+    rerender(pane('s2', 'open'));
+    rerender(pane('s2', 'open', true));
+
+    expect(ptyCloses.get('s2')).toBe(1);
+    expect(ptyCloses.get('s1')).toBeUndefined();
+  });
+
+  it('keeps a bound session attached while another is focused', () => {
+    // Detaching a bound pane puts a stray blank line into Claude's input, so a
+    // bound session's bridge outlives its focus.
+    const { rerender } = render(pane('s1', 'open'));
+    rerender(pane('s2', 'open'));
+    rerender(pane('s1', 'open'));
+
+    expect(ptyCloses.get('s1')).toBeUndefined();
+    // No rebuild on the way back: one bridge per session.
+    expect(connectPtyMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops a starting session’s bridge when it loses focus, and rebuilds it on return', () => {
+    // An attached starting pane is never reaped by the launch watchdog, so a
+    // bridge kept hidden would count as someone watching when nobody is.
+    const { rerender } = render(pane('s1', 'starting'));
+    rerender(pane('s2', 'open'));
+    expect(ptyCloses.get('s1')).toBe(1);
+
+    rerender(pane('s1', 'starting'));
+    expect(connectPtyMock).toHaveBeenCalledTimes(3);
+    // The bound session left behind is kept.
+    expect(ptyCloses.get('s2')).toBeUndefined();
+  });
+
+  it('drops a starting session’s bridge when the new-session screen takes focus', () => {
+    const { rerender } = render(pane('s1', 'starting'));
+    rerender(pane(null, 'open'));
+    expect(ptyCloses.get('s1')).toBe(1);
+  });
+
+  it('keeps a session attached across its bind, then past its focus', () => {
+    // The bind itself never rebuilds the entry (the user may be mid-way through
+    // answering the prompt they attached for), and once bound it is held like
+    // any open session.
+    const { rerender } = render(pane('s1', 'starting'));
+    rerender(pane('s1', 'open'));
+    rerender(pane('s2', 'open'));
+
+    expect(ptyCloses.get('s1')).toBeUndefined();
+    expect(connectPtyMock).toHaveBeenCalledTimes(2);
   });
 });
