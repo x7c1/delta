@@ -13,8 +13,10 @@ mod settings;
 pub use error::{Error, Result};
 pub use settings::render_session_settings;
 
-mod launch_option_danger;
-pub use launch_option_danger::{is_launch_option_dangerous, GatewayLaunchOptionDanger};
+mod launch_option_vocabulary;
+pub use launch_option_vocabulary::{
+    is_launch_option_dangerous, launch_option_cardinality, GatewayLaunchOptionVocabulary,
+};
 
 mod ensure_tmux_available;
 use ensure_tmux_available::ensure_tmux_available;
@@ -41,7 +43,7 @@ use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{
     AgentAdapterFactory, AgentCapabilities, AgentProvider, BinaryDetector, BoxedInteractor,
-    CommsLogSink, ExternalOpener, GhCli, Interactor, LaunchOptionDangerPolicy, LaunchOptionPreset,
+    CommsLogSink, ExternalOpener, GhCli, Interactor, LaunchOptionPreset, LaunchOptionVocabulary,
 };
 use external_opener::SystemOpener;
 use gh_cli::Gh;
@@ -293,8 +295,8 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     .with_adapter_factory(codex_adapter_factory)
     .with_codex_bin(codex_bin)
     .with_binary_detector(binary_detector)
-    .with_launch_option_danger_policy(
-        Arc::new(GatewayLaunchOptionDanger) as Arc<dyn LaunchOptionDangerPolicy>
+    .with_launch_option_vocabulary(
+        Arc::new(GatewayLaunchOptionVocabulary) as Arc<dyn LaunchOptionVocabulary>
     );
     // Boot-time launch-option reconcile (see this function's doc), in the same
     // place as the send sweep above. The whole declared catalog in one call,
@@ -435,14 +437,14 @@ mod tests {
         );
     }
 
-    /// The wired policy is the gateway predicates, per provider — and it reads
-    /// the pair, not the name alone.
+    /// The wired vocabulary is the gateway classifications, per provider — the
+    /// danger predicate reads the pair, not the name alone.
     ///
     /// Pinned through the port (not the free function) because the port is what
     /// the domain consults; a `build` that forgot to inject it would leave the
     /// permissive default in place with every gateway test still green.
     #[tokio::test]
-    async fn build_wires_the_gateway_launch_option_danger_policy() {
+    async fn build_wires_the_gateway_launch_option_vocabulary() {
         let interactor = build(&test_config(), NullCommsLog::arc()).await.unwrap();
         let dangerous = |provider, name: &str, value: Option<&str>| {
             interactor.is_launch_option_pair_dangerous(provider, name, value)
@@ -472,6 +474,23 @@ mod tests {
             "--dangerously-skip-permissions",
             None
         ));
+
+        // Cardinality goes through the same port: each provider's default and
+        // its exception.
+        let cardinality =
+            |provider, name: &str| interactor.launch_option_cardinality(provider, name);
+        assert_eq!(
+            cardinality(AgentProvider::Claude, "--model"),
+            delta_usecase::LaunchOptionCardinality::Single
+        );
+        assert_eq!(
+            cardinality(AgentProvider::Claude, "--plugin-dir"),
+            delta_usecase::LaunchOptionCardinality::Multiple
+        );
+        assert_eq!(
+            cardinality(AgentProvider::Codex, "config"),
+            delta_usecase::LaunchOptionCardinality::Multiple
+        );
     }
 
     /// [`build`] materializes every declared preset, so a shipped launch option

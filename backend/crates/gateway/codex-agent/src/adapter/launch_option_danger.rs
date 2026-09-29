@@ -4,7 +4,7 @@
 //! Its own module inside the adapter, beside the declared catalog, because it is
 //! Codex vocabulary and nothing above the gateway layer may hold it. The
 //! composition root reads it through one per-provider accessor and hands it to
-//! the domain as a [`LaunchOptionDangerPolicy`], which is what makes the registry
+//! the domain as a [`LaunchOptionVocabulary`], which is what makes the registry
 //! refuse to default-enable such an option and the browser mark it.
 //!
 //! ## What is reachable
@@ -28,7 +28,7 @@
 //! rejection check and reach the server.
 //!
 //! [`DELTA_OWNED_THREAD_FIELDS`]: super::DELTA_OWNED_THREAD_FIELDS
-//! [`LaunchOptionDangerPolicy`]: delta_usecase::LaunchOptionDangerPolicy
+//! [`LaunchOptionVocabulary`]: delta_usecase::LaunchOptionVocabulary
 
 use serde_json::Value;
 

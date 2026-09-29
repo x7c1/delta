@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -36,6 +37,7 @@ import {
   DANGEROUS_OPTION_DISARM_HINT,
   DANGEROUS_OPTION_HINT,
   DangerousBadge,
+  partitionByChoiceGroup,
 } from '../../launchOptions';
 import { useThemeContext } from '../../hooks/themeContext';
 import { useNavStore } from '../../store/navStore';
@@ -329,6 +331,15 @@ const FALLBACK_LAUNCH_OPTION_STYLE: LaunchOptionStyle = 'cli_flag';
  * on the provider name — so the labels, examples and placeholders describe the
  * vocabulary that provider actually accepts (see {@link LAUNCH_OPTION_COPY}).
  *
+ * Rows the server puts in one choice group (`choice_group`) are listed together
+ * under the group key, with one default radio group per group (see
+ * {@link LaunchOptionGroup}) once the group holds two or more rows; a group
+ * holding a single row is listed like an ungrouped row, with the plain default
+ * checkbox, because a radio with one real option is worse than a checkbox (see
+ * `partitionByChoiceGroup`). The add form stays as it is: a row registered as
+ * `--model` / `E` joins the `--model` group on the next list fetch, because
+ * the grouping is the server's verdict.
+ *
  * `active` mirrors the dialog's `settingsOpen` AND the category being the
  * visible one, so the query only runs while this section is mounted in the
  * right pane.
@@ -372,6 +383,16 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
     () => options.filter((option) => option.provider === provider),
     [options, provider],
   );
+  const entries = useMemo(
+    () => partitionByChoiceGroup(providerOptions),
+    [providerOptions],
+  );
+  // The last failed default switch in a choice group, keyed by the group, so
+  // the refusal is shown beside the group it belongs to.
+  const [defaultSwitchError, setDefaultSwitchError] = useState<{
+    group: string;
+    error: unknown;
+  } | null>(null);
   // `name` is the only required field; trim so an all-whitespace entry cannot
   // be submitted (the server rejects it too, but gating here avoids a round-trip
   // and keeps the button state honest).
@@ -393,6 +414,41 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
     setName(option.name);
     setValue(option.value ?? '');
     valueInputRef.current?.focus();
+  };
+
+  /**
+   * Make `id` the default of a choice group (`null` clears the group).
+   *
+   * Two writes, in order: clear every row of the group that currently holds a
+   * default, then set the new one. The server holds one default per group and
+   * never flips a sibling itself, so the reverse order would be refused. More
+   * than one holder is possible only for rows stored before that rule; all of
+   * them are cleared.
+   */
+  const chooseGroupDefault = async (
+    group: string,
+    members: LaunchOption[],
+    id: number | null,
+  ) => {
+    setDefaultSwitchError(null);
+    try {
+      for (const holder of members) {
+        if (holder.default_enabled && holder.id !== id) {
+          await updateLaunchOption.mutateAsync({
+            id: holder.id,
+            body: { default_enabled: false },
+          });
+        }
+      }
+      if (id !== null) {
+        await updateLaunchOption.mutateAsync({
+          id,
+          body: { default_enabled: true },
+        });
+      }
+    } catch (error) {
+      setDefaultSwitchError({ group, error });
+    }
   };
 
   const onSubmit = (event: FormEvent) => {
@@ -584,31 +640,165 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
         </p>
       ) : (
         <ul className="flex flex-col gap-2" data-testid="launch-options-list">
-          {providerOptions.map((option) => (
-            <LaunchOptionRow
-              key={option.id}
-              option={option}
-              onToggleDefault={(next) =>
+          {entries.map((entry) => {
+            const rowProps = (option: LaunchOption) => ({
+              option,
+              onToggleDefault: (next: boolean) =>
                 updateLaunchOption.mutate({
                   id: option.id,
                   body: { default_enabled: next },
-                })
-              }
-              toggling={
+                }),
+              toggling:
                 updateLaunchOption.isPending &&
-                updateLaunchOption.variables?.id === option.id
-              }
-              onDelete={() => deleteLaunchOption.mutate(option.id)}
-              deleting={
+                updateLaunchOption.variables?.id === option.id,
+              onDelete: () => deleteLaunchOption.mutate(option.id),
+              deleting:
                 deleteLaunchOption.isPending &&
-                deleteLaunchOption.variables === option.id
-              }
-              onDuplicate={() => onDuplicate(option)}
-            />
-          ))}
+                deleteLaunchOption.variables === option.id,
+              onDuplicate: () => onDuplicate(option),
+            });
+            if (entry.kind === 'option') {
+              return (
+                <LaunchOptionRow
+                  key={entry.option.id}
+                  {...rowProps(entry.option)}
+                />
+              );
+            }
+            return (
+              <LaunchOptionGroup
+                key={`group:${entry.key}`}
+                provider={provider}
+                groupKey={entry.key}
+                options={entry.options}
+                switching={
+                  updateLaunchOption.isPending &&
+                  entry.options.some(
+                    (option) => option.id === updateLaunchOption.variables?.id,
+                  )
+                }
+                onChooseDefault={(id) =>
+                  void chooseGroupDefault(entry.key, entry.options, id)
+                }
+                error={
+                  defaultSwitchError !== null &&
+                  defaultSwitchError.group === entry.key
+                    ? defaultSwitchError.error
+                    : null
+                }
+                renderRow={(option, defaultChoice) => (
+                  <LaunchOptionRow
+                    key={option.id}
+                    {...rowProps(option)}
+                    defaultChoice={defaultChoice}
+                  />
+                )}
+              />
+            );
+          })}
         </ul>
       )}
     </section>
+  );
+}
+
+/**
+ * How a grouped row's default control behaves: one radio of its group's
+ * default radio group instead of an independent checkbox.
+ */
+interface DefaultChoice {
+  /** The radio `name` every row of the group shares. */
+  name: string;
+  /** Whether this row is the group's default. */
+  checked: boolean;
+  /** Make this row the group's default. */
+  onChoose: () => void;
+  /** Disabled while the group's default is being switched. */
+  switching: boolean;
+}
+
+/**
+ * The rows of one choice group of two or more rows — values of one
+ * single-valued setting, such as every Claude `--model` row — listed together
+ * under the group key, with their `default_enabled` controls as one radio group
+ * and an explicit "No default" option first. The server holds one default per group, so switching it is
+ * clear-then-set (see `chooseGroupDefault`); a legacy group carrying two
+ * defaults shows the first one in list order as chosen — the row the composer
+ * picker seeds too, unless that row is dangerous (the picker never seeds one).
+ *
+ * The dangerous-row rules apply unchanged inside a group: an undefaulted
+ * dangerous row's radio is disabled, and one that already carries a stale
+ * default keeps its disarm hint — "No default" (or another row) is how it is
+ * cleared.
+ */
+function LaunchOptionGroup({
+  provider,
+  groupKey,
+  options,
+  switching,
+  onChooseDefault,
+  error,
+  renderRow,
+}: {
+  provider: AgentProvider;
+  groupKey: string;
+  options: LaunchOption[];
+  switching: boolean;
+  onChooseDefault: (id: number | null) => void;
+  error: unknown;
+  renderRow: (option: LaunchOption, defaultChoice: DefaultChoice) => ReactNode;
+}) {
+  const headingId = useId();
+  const name = `launch-option-default-${provider}-${groupKey}`;
+  const holder = options.find((option) => option.default_enabled);
+  return (
+    <li
+      className="flex flex-col gap-2"
+      data-testid={`launch-option-group-${groupKey}`}
+    >
+      <div
+        role="radiogroup"
+        aria-labelledby={headingId}
+        className="flex flex-col gap-2"
+      >
+        <div className="flex items-center justify-between gap-3 px-1">
+          <span
+            id={headingId}
+            className="truncate font-mono text-code text-fg-muted"
+          >
+            {groupKey}
+          </span>
+          <label className="flex shrink-0 items-center gap-1.5 text-caption text-fg-muted">
+            <input
+              type="radio"
+              name={name}
+              checked={holder === undefined}
+              onChange={() => onChooseDefault(null)}
+              disabled={switching}
+              aria-label={`No default for ${groupKey}`}
+              data-testid={`launch-option-group-${groupKey}-none`}
+              className="h-3.5 w-3.5"
+            />
+            No default
+          </label>
+        </div>
+        <ul className="flex flex-col gap-2 pl-3">
+          {options.map((option) =>
+            renderRow(option, {
+              name,
+              checked: holder?.id === option.id,
+              onChoose: () => onChooseDefault(option.id),
+              switching,
+            }),
+          )}
+        </ul>
+      </div>
+      {error !== null && (
+        <p className="px-1 text-caption text-danger" role="alert">
+          {settingsMutationErrorMessage(error, 'Could not change the default.')}
+        </p>
+      )}
+    </li>
   );
 }
 
@@ -1421,6 +1611,11 @@ interface LaunchOptionRowProps {
   onDelete: () => void;
   deleting: boolean;
   onDuplicate: () => void;
+  /**
+   * Set for a row of a choice group: its default control becomes one radio of
+   * the group's default radio group rather than an independent checkbox.
+   */
+  defaultChoice?: DefaultChoice;
 }
 
 /**
@@ -1450,6 +1645,10 @@ interface LaunchOptionRowProps {
  * the tick that it is no longer pre-checked: the tick alone would promise
  * something that stopped being true.
  *
+ * A row of a choice group (see {@link LaunchOptionGroup}) renders its default
+ * control as one radio of the group's radio group instead of a checkbox; the
+ * rules above apply to it unchanged.
+ *
  * Every row shows its value in full, wrapped, however long it is: saying what
  * the row will pass to the agent is the row's whole purpose, so there is nothing
  * to gain by putting that behind a click. It stays selectable, so a registered
@@ -1462,10 +1661,17 @@ function LaunchOptionRow({
   onDelete,
   deleting,
   onDuplicate,
+  defaultChoice,
 }: LaunchOptionRowProps) {
-  // Only *setting* the flag is refused, so the checkbox is locked only where
+  // Only *setting* the flag is refused, so the control is locked only where
   // ticking it is what it would do (see this component's doc).
   const defaultLocked = option.dangerous && !option.default_enabled;
+  // Inside a group the siblings share one `name`, so the control's label adds
+  // the value to say which row it is.
+  const described =
+    defaultChoice && option.value !== null
+      ? `${option.name} ${option.value}`
+      : option.name;
   return (
     <li
       className="flex flex-col gap-2 rounded-lg border border-border-default px-3 py-2"
@@ -1518,14 +1724,26 @@ function LaunchOptionRow({
                 : undefined
             }
           >
-            <input
-              type="checkbox"
-              checked={option.default_enabled}
-              onChange={(event) => onToggleDefault(event.target.checked)}
-              disabled={toggling || defaultLocked}
-              aria-label={`Enable launch option ${option.name} by default`}
-              className="h-3.5 w-3.5"
-            />
+            {defaultChoice ? (
+              <input
+                type="radio"
+                name={defaultChoice.name}
+                checked={defaultChoice.checked}
+                onChange={defaultChoice.onChoose}
+                disabled={defaultChoice.switching || defaultLocked}
+                aria-label={`Enable launch option ${described} by default`}
+                className="h-3.5 w-3.5"
+              />
+            ) : (
+              <input
+                type="checkbox"
+                checked={option.default_enabled}
+                onChange={(event) => onToggleDefault(event.target.checked)}
+                disabled={toggling || defaultLocked}
+                aria-label={`Enable launch option ${described} by default`}
+                className="h-3.5 w-3.5"
+              />
+            )}
             Default
             {/* Without this the `title` is the only place saying the tick is
                 inert (see this component's doc); the wording negates what the

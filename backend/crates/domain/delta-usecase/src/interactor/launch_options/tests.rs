@@ -401,34 +401,9 @@ async fn delete_refuses_a_shipped_option() {
     ix.delete_launch_option(9999).await.unwrap();
 }
 
-/// A [`LaunchOptionDangerPolicy`] for the domain's own tests: one named option
-/// is dangerous, everything else is not.
-///
-/// The real vocabulary lives in the gateway adapters (and is tested there), so
-/// what these tests need is only *a* dangerous option — a stub keeps the
-/// use-case rule under test without dragging Claude's or Codex's spellings into
-/// the domain.
-///
-/// [`LaunchOptionDangerPolicy`]: crate::agent::LaunchOptionDangerPolicy
-struct OneDangerousOption;
-
-/// The name [`OneDangerousOption`] classifies as dangerous.
-const DANGEROUS_NAME: &str = "--dangerously-skip-permissions";
-
-impl crate::agent::LaunchOptionDangerPolicy for OneDangerousOption {
-    fn is_dangerous(
-        &self,
-        _provider: crate::AgentProvider,
-        name: &str,
-        _value: Option<&str>,
-    ) -> bool {
-        name == DANGEROUS_NAME
-    }
-}
-
-/// A test interactor wired with [`OneDangerousOption`].
-fn interactor_with_a_dangerous_option() -> TestInteractor {
-    interactor().with_launch_option_danger_policy(std::sync::Arc::new(OneDangerousOption))
+/// A test interactor wired with [`FakeLaunchOptionVocabulary`].
+fn interactor_with_a_vocabulary() -> TestInteractor {
+    interactor().with_launch_option_vocabulary(std::sync::Arc::new(FakeLaunchOptionVocabulary))
 }
 
 /// A dangerous option can be registered, but never as default-enabled: the
@@ -438,7 +413,7 @@ fn interactor_with_a_dangerous_option() -> TestInteractor {
 /// [`Error::LaunchOptionRejected`]: crate::Error::LaunchOptionRejected
 #[tokio::test]
 async fn create_refuses_a_dangerous_option_as_default_enabled() {
-    let ix = interactor_with_a_dangerous_option();
+    let ix = interactor_with_a_vocabulary();
 
     let err = ix
         .create_launch_option(
@@ -493,7 +468,7 @@ async fn create_refuses_a_dangerous_option_as_default_enabled() {
 /// off always works, which is how a row that predates the rule is disarmed.
 #[tokio::test]
 async fn set_default_enabled_refuses_a_dangerous_option() {
-    let ix = interactor_with_a_dangerous_option();
+    let ix = interactor_with_a_vocabulary();
     // Undefaulted, which is the only shape the create path lets a dangerous
     // option in as.
     let dangerous = ix
@@ -531,4 +506,199 @@ async fn set_default_enabled_refuses_a_dangerous_option() {
         .await
         .unwrap()
         .is_none());
+}
+
+/// A choice group holds one default: creating a second default-enabled row of
+/// a single-valued name is refused, naming the row that holds the default, and
+/// stores nothing. The same row undefaulted is created normally.
+#[tokio::test]
+async fn rejects_creating_a_second_default_in_one_choice_group() {
+    let ix = interactor_with_a_vocabulary();
+    ix.create_launch_option(
+        Some("Fable"),
+        "--model",
+        Some("fable"),
+        true,
+        crate::AgentProvider::Claude,
+    )
+    .await
+    .unwrap();
+
+    let err = ix
+        .create_launch_option(
+            None,
+            "--model",
+            Some("e"),
+            true,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, crate::Error::LaunchOptionRejected(message)
+            if message.contains("--model") && message.contains("Fable")),
+        "the refusal names the group and the row holding its default, got {err:?}"
+    );
+    assert_eq!(
+        ix.list_launch_options().await.unwrap().len(),
+        1,
+        "a refused create stores nothing"
+    );
+
+    let undefaulted = ix
+        .create_launch_option(
+            None,
+            "--model",
+            Some("e"),
+            false,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    assert!(!undefaulted.default_enabled);
+}
+
+/// The group is per provider: the same single-valued name under another
+/// provider is a different group with its own default, and a repeatable name
+/// may carry any number of defaults.
+#[tokio::test]
+async fn a_default_is_one_per_group_per_provider_and_repeatable_names_are_free() {
+    let ix = interactor_with_a_vocabulary();
+    for provider in [crate::AgentProvider::Claude, crate::AgentProvider::Codex] {
+        ix.create_launch_option(None, "--model", Some("a"), true, provider)
+            .await
+            .unwrap();
+    }
+    for value in ["/a", "/b"] {
+        ix.create_launch_option(
+            None,
+            "--plugin-dir",
+            Some(value),
+            true,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    }
+    assert_eq!(ix.list_launch_options().await.unwrap().len(), 4);
+}
+
+/// Turning a row's default on is refused while a sibling holds the group's
+/// default; clearing the sibling first — the two writes a client makes to
+/// switch the default — then lets it through. Clearing is always allowed, and
+/// re-enabling the holder itself is not a conflict with itself.
+#[tokio::test]
+async fn rejects_enabling_a_second_default_in_one_choice_group() {
+    let ix = interactor_with_a_vocabulary();
+    let fable = ix
+        .create_launch_option(
+            Some("Fable"),
+            "--model",
+            Some("fable"),
+            true,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    let custom = ix
+        .create_launch_option(
+            None,
+            "--model",
+            Some("e"),
+            false,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+
+    let err = ix
+        .set_launch_option_default_enabled(custom.id, true)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, crate::Error::LaunchOptionRejected(message)
+            if message.contains("Fable")),
+        "the refusal names the row holding the default, got {err:?}"
+    );
+
+    // The holder may be re-enabled: it is not a sibling of itself.
+    ix.set_launch_option_default_enabled(fable.id, true)
+        .await
+        .unwrap();
+
+    // Clear, then set.
+    let cleared = ix
+        .set_launch_option_default_enabled(fable.id, false)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!cleared.default_enabled);
+    let switched = ix
+        .set_launch_option_default_enabled(custom.id, true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(switched.default_enabled);
+}
+
+/// Without an injected vocabulary nothing is grouped and nothing is refused:
+/// every row is its own option, and two defaults of one name are accepted as
+/// they were before the rule existed.
+#[tokio::test]
+async fn the_null_vocabulary_groups_and_rejects_nothing() {
+    let ix = interactor();
+    let first = ix
+        .create_launch_option(
+            None,
+            "--model",
+            Some("a"),
+            true,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    let second = ix
+        .create_launch_option(
+            None,
+            "--model",
+            Some("b"),
+            true,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    assert_eq!(ix.launch_option_choice_group(&first), None);
+    assert_eq!(ix.launch_option_choice_group(&second), None);
+}
+
+/// With the vocabulary wired, a single-valued row's group is its name and a
+/// repeatable row has none.
+#[tokio::test]
+async fn a_single_valued_row_is_grouped_by_its_name() {
+    let ix = interactor_with_a_vocabulary();
+    let model = ix
+        .create_launch_option(
+            None,
+            "--model",
+            Some("a"),
+            false,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    let plugin = ix
+        .create_launch_option(
+            None,
+            "--plugin-dir",
+            Some("/p"),
+            false,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        ix.launch_option_choice_group(&model).as_deref(),
+        Some("--model")
+    );
+    assert_eq!(ix.launch_option_choice_group(&plugin), None);
 }

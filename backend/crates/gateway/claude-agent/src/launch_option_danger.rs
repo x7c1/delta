@@ -3,7 +3,7 @@
 //! Its own module, beside the declared catalog, for the same reason the catalog
 //! is here: the adapter that owns Claude owns Claude's vocabulary. The
 //! composition root reads this through one per-provider accessor and hands it to
-//! the domain as a [`LaunchOptionDangerPolicy`], which is what makes the registry
+//! the domain as a [`LaunchOptionVocabulary`], which is what makes the registry
 //! refuse to default-enable such an option and the browser mark it.
 //!
 //! Deliberately a **closed, short** list of spellings that mean "stop asking":
@@ -12,7 +12,7 @@
 //! is not on it — the permission system is still running and still refuses the
 //! rest.
 //!
-//! [`LaunchOptionDangerPolicy`]: delta_usecase::LaunchOptionDangerPolicy
+//! [`LaunchOptionVocabulary`]: delta_usecase::LaunchOptionVocabulary
 
 /// The `claude` flag that turns the permission system off wholesale.
 ///

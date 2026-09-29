@@ -54,7 +54,7 @@ use std::time::{Duration, Instant};
 
 use delta_model::{AgentProvider, SessionId};
 
-use crate::agent::{AgentAdapterFactory, LaunchOptionDangerPolicy, NoDangerousLaunchOptions};
+use crate::agent::{AgentAdapterFactory, LaunchOptionVocabulary, NullLaunchOptionVocabulary};
 use crate::launch_config::LaunchConfig;
 use crate::pane_token::PaneTokenMinter;
 use crate::ports::{
@@ -196,15 +196,17 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// constructor, tests).
     pub(in crate::interactor) adapter_factories:
         HashMap<AgentProvider, Arc<dyn AgentAdapterFactory>>,
-    /// Which launch options switch an agent's own safety mechanisms off, in that
-    /// agent's vocabulary (see [`LaunchOptionDangerPolicy`]).
+    /// How a launch option reads in its agent's vocabulary — whether it switches
+    /// the agent's own safety mechanisms off, and whether its name takes one
+    /// value or several (see [`LaunchOptionVocabulary`]).
     ///
     /// Held as one trait object rather than per-provider, and not on the adapter
     /// factories, because Claude registers no factory at all while being the
     /// provider with the loudest dangerous flag. Defaults to
-    /// [`NoDangerousLaunchOptions`]; production wiring installs the gateway-backed
-    /// policy through [`Interactor::with_launch_option_danger_policy`].
-    pub(in crate::interactor) launch_option_danger: Arc<dyn LaunchOptionDangerPolicy>,
+    /// [`NullLaunchOptionVocabulary`]; production wiring installs the
+    /// gateway-backed vocabulary through
+    /// [`Interactor::with_launch_option_vocabulary`].
+    pub(in crate::interactor) launch_option_vocabulary: Arc<dyn LaunchOptionVocabulary>,
     /// Resolves whether a provider's launch binary is present on this host, for
     /// the `/api/providers` availability endpoint. Held as a trait object for
     /// the same reason as [`Self::gh_cli`] — it is not routed through the
@@ -348,7 +350,7 @@ where
             gh_cli: Arc::new(UnavailableGhCli),
             external_opener: Arc::new(UnwiredExternalOpener),
             adapter_factories: HashMap::new(),
-            launch_option_danger: Arc::new(NoDangerousLaunchOptions),
+            launch_option_vocabulary: Arc::new(NullLaunchOptionVocabulary),
             binary_detector: Arc::new(UnwiredBinaryDetector),
             codex_bin: DEFAULT_CODEX_COMMAND.to_owned(),
             event_sink: None,
@@ -461,25 +463,27 @@ where
         Self { core, sessions }
     }
 
-    /// Inject the [`LaunchOptionDangerPolicy`] that says which launch options
-    /// disable an agent's own safety mechanisms.
+    /// Inject the [`LaunchOptionVocabulary`] that classifies launch options in
+    /// each agent's vocabulary: which ones disable an agent's own safety
+    /// mechanisms, and which names take a single value.
     ///
-    /// The default constructor wires [`NoDangerousLaunchOptions`], so a
-    /// configuration that has not injected the real policy (the domain tests, dev
-    /// harnesses) classifies nothing as dangerous and behaves as it did before
-    /// the rule existed. Production wiring installs the gateway-backed policy.
+    /// The default constructor wires [`NullLaunchOptionVocabulary`], so a
+    /// configuration that has not injected the real vocabulary (the domain
+    /// tests, dev harnesses) classifies nothing as dangerous and every name as
+    /// repeatable, and behaves as it did before those rules existed. Production
+    /// wiring installs the gateway-backed vocabulary.
     /// Same constraint as [`Self::with_launch_config`]: must run before any
     /// session actor is spawned.
-    pub fn with_launch_option_danger_policy(
+    pub fn with_launch_option_vocabulary(
         self,
-        policy: Arc<dyn LaunchOptionDangerPolicy>,
+        vocabulary: Arc<dyn LaunchOptionVocabulary>,
     ) -> Self {
         let Ok(mut core) = Arc::try_unwrap(self.core) else {
             panic!(
-                "with_launch_option_danger_policy must be called before any session actor is spawned"
+                "with_launch_option_vocabulary must be called before any session actor is spawned"
             );
         };
-        core.launch_option_danger = policy;
+        core.launch_option_vocabulary = vocabulary;
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
         Self { core, sessions }

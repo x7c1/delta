@@ -379,3 +379,115 @@ async fn create_launch_option_rejects_a_blank_name() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+/// Every row carries its `choice_group`, derived from the provider's
+/// vocabulary: the shipped Claude `--model` rows share the `--model` group, and
+/// a repeatable `--plugin-dir` row belongs to none.
+#[tokio::test]
+async fn launch_options_list_carries_each_rows_choice_group() {
+    let app = router(test_state().await);
+    let (status, _) = post_launch_option(&app, r#"{"name":"--plugin-dir","value":"/opt/p"}"#).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let listed = list_launch_options(&app).await;
+    let models: Vec<_> = listed
+        .iter()
+        .filter(|option| option["provider"] == "claude" && option["name"] == "--model")
+        .collect();
+    assert!(!models.is_empty(), "the shipped model rows are listed");
+    for model in models {
+        assert_eq!(
+            model["choice_group"],
+            serde_json::json!("--model"),
+            "{model}"
+        );
+    }
+    let plugin = listed
+        .iter()
+        .find(|option| option["name"] == "--plugin-dir")
+        .expect("the registered row is listed");
+    assert_eq!(plugin["choice_group"], serde_json::Value::Null, "{plugin}");
+}
+
+/// A choice group takes one default: with a shipped `--model` row ticked, a
+/// second `--model` default is a `400` `launch_option_rejected` on create and
+/// on `PATCH`, and clearing the first lets the second through.
+#[tokio::test]
+async fn a_second_default_in_one_choice_group_is_rejected() {
+    let app = router(test_state().await);
+    let listed = list_launch_options(&app).await;
+    let shipped_model = listed
+        .iter()
+        .find(|option| option["provider"] == "claude" && option["name"] == "--model")
+        .expect("a shipped model row")["id"]
+        .as_i64()
+        .unwrap();
+    let (status, _) = patch_default_enabled(&app, shipped_model, true).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = post_launch_option(
+        &app,
+        r#"{"name":"--model","value":"custom","default_enabled":true}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "launch_option_rejected", "{body}");
+
+    let (status, custom) = post_launch_option(&app, r#"{"name":"--model","value":"custom"}"#).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(custom["choice_group"], serde_json::json!("--model"));
+    let custom = custom["id"].as_i64().unwrap();
+
+    let (status, body) = patch_default_enabled(&app, custom, true).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "launch_option_rejected", "{body}");
+
+    // Clear, then set.
+    let (status, _) = patch_default_enabled(&app, shipped_model, false).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = patch_default_enabled(&app, custom, true).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["default_enabled"], serde_json::json!(true));
+}
+
+/// A Claude session start selecting two rows of the `--model` group is refused
+/// by the send itself with `400` `launch_option_rejected` — the Claude launch
+/// used to put `--model` into argv twice — before any session is created.
+#[tokio::test]
+async fn a_claude_send_selecting_two_rows_of_one_choice_group_is_rejected() {
+    let app = router(test_state().await);
+    let models: Vec<i64> = list_launch_options(&app)
+        .await
+        .iter()
+        .filter(|option| option["provider"] == "claude" && option["name"] == "--model")
+        .map(|option| option["id"].as_i64().unwrap())
+        .take(2)
+        .collect();
+    assert_eq!(models.len(), 2, "two shipped model rows");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
+                .method("POST")
+                .uri("/api/sends")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "new_session": true,
+                        "text": "hello",
+                        "launch_option_ids": models,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["code"], "launch_option_rejected", "{body}");
+}

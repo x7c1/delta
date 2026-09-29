@@ -802,6 +802,7 @@ export function seedData(): MockStore {
         provider: 'claude',
         builtin: true,
         dangerous: false,
+        choice_group: '--model',
       },
       {
         id: 101,
@@ -814,6 +815,7 @@ export function seedData(): MockStore {
         provider: 'codex',
         builtin: true,
         dangerous: false,
+        choice_group: null,
       },
       {
         id: 3,
@@ -825,6 +827,7 @@ export function seedData(): MockStore {
         provider: 'codex',
         builtin: false,
         dangerous: false,
+        choice_group: 'model',
       },
       {
         id: 2,
@@ -836,6 +839,7 @@ export function seedData(): MockStore {
         provider: 'claude',
         builtin: false,
         dangerous: false,
+        choice_group: '--permission-mode',
       },
       {
         id: 1,
@@ -847,6 +851,7 @@ export function seedData(): MockStore {
         provider: 'claude',
         builtin: false,
         dangerous: false,
+        choice_group: null,
       },
     ],
     nextLaunchOptionId: 4,

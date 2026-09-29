@@ -112,12 +112,38 @@ registrable and selectable per session; what they may never be is *silent*:
 provider's own vocabulary rather than stored, so a row registered before a
 spelling was recognised starts being flagged as soon as the server learns it.
 
-One selection rule is provider-specific and worth knowing before ticking two
-rows that set the same thing. For Codex, `name` is a session-start request
-field, and a field can only be set once — so selecting two rows with the same
-`name` fails the send (`400`, `code: launch_option_rejected`). The exception is
-`config`, which is not one setting but a JSON object holding many: **several
-`config` rows may be selected together and are deep-merged** into the one object
+Rows that share a `(provider, name)` are candidate values of one setting, and
+whether that setting takes one value or several is the provider's vocabulary.
+When it takes one, its rows form an exclusive **choice group**, and every
+response that carries a launch option says so in **`choice_group`** — the
+group's key (today the shared `name`), or `null` for an independent option.
+A client groups rows by `choice_group` and never by `name`: the grouping rule
+stays on the server, which can later group differently-named rows without a
+client change. The server enforces what a group implies:
+
+- a session start selecting two rows of one group fails the send (`400`,
+  `code: launch_option_rejected`, naming both rows) before anything is created,
+  on every provider;
+- a group holds at most one default: `POST` with `default_enabled: true` and a
+  `PATCH` turning it on both answer `400`, `code: launch_option_rejected`
+  (naming the row that holds the default) when another row of the group already
+  has it. Clearing is always allowed, and the server never flips a sibling
+  itself — switching a group's default is two requests, clear then set. Rows
+  stored before this rule may still both say `default_enabled: true`, so a
+  client takes the first one in list order.
+
+Per provider:
+
+- **Claude** — `name` is a CLI flag, and a flag is single-valued (`--model`,
+  `--permission-mode`, …) unless it is one of the repeatable ones: `--add-dir`,
+  `--allowedTools` / `--allowed-tools`, `--disallowedTools` /
+  `--disallowed-tools`, `--betas`, `--file`, `--mcp-config`, `--tools`,
+  `--plugin-dir` and `--plugin-url`. So the shipped `Opus` / `Fable` / `Sonnet`
+  rows and any `--model` row you register form one `--model` group.
+- **Codex** — `name` is a session-start request field, and a field can only be
+  set once, so every name is single-valued except `config`, which is not one
+  setting but a JSON object holding many: **several
+  `config` rows may be selected together and are deep-merged** into the one object
 the request carries: nested tables merge key by key, and
 `sandbox_workspace_write.writable_roots` — a set of paths, where two rows each
 naming their machine's roots mean both — is unioned in selection order without
@@ -161,7 +187,8 @@ the user adds or removes their own rows.
         "created_at": "2026-01-01T00:00:00Z",
         "provider": "claude",
         "builtin": false,
-        "dangerous": false
+        "dangerous": false,
+        "choice_group": null
       }
     ]
   }
@@ -174,7 +201,13 @@ the user adds or removes their own rows.
   behind a built-in is internal and never on the wire. `dangerous` is `true` for
   an option that switches the agent's own safety mechanism off (see above): mark
   it, never pre-check it, and let its default-enabled control clear a stale flag
-  but never set one.
+  but never set one. `choice_group` is the exclusive group the row belongs to
+  (see above) — `"--model"` on every Claude `--model` row, `null` on a
+  repeatable row such as `--plugin-dir` or a Codex `config` row: render a group
+  as one single choice, with an explicit "none of these" option, and group by
+  this field, never by `name`. A group of one row can stay a plain toggle —
+  unticking it already means "none of these" — while the rules above still
+  apply to it once a sibling is registered.
 
 ### `POST /api/launch-options`
 
@@ -220,18 +253,21 @@ string.
     "created_at": "2026-01-01T00:00:00Z",
     "provider": "claude",
     "builtin": false,
-    "dangerous": false
+    "dangerous": false,
+    "choice_group": null
   }
   ```
 
   `builtin` is always `false` here: anything registered through this endpoint is
-  the user's own row. There is no way to create a built-in. `dangerous` is the
-  server's verdict on the `(provider, name, value)` just registered.
+  the user's own row. There is no way to create a built-in. `dangerous` and
+  `choice_group` are the server's verdicts on the `(provider, name, value)` just
+  registered.
 
 - **400** — a blank `name`.
 - **400** (`code: launch_option_rejected`) — `default_enabled: true` on an option
-  that switches the agent's own safety mechanism off (see above). The same option
-  with `default_enabled: false` (or omitted) is created normally.
+  that switches the agent's own safety mechanism off, or on a row whose choice
+  group already has a default (see above). The same option with
+  `default_enabled: false` (or omitted) is created normally.
 
 ### `PATCH /api/launch-options/{id}`
 
@@ -252,8 +288,9 @@ Request:
 
 - **200** — the updated record, in the same shape as the create response.
 - **400** (`code: launch_option_rejected`) — `default_enabled: true` on an option
-  flagged `dangerous` (see above). `false` is always accepted, which is how such
-  a row is disarmed.
+  flagged `dangerous`, or on a row whose choice group has its default on another
+  row (see above; clear that row first). `false` is always accepted, which is how
+  such a row is disarmed.
 - **404** — no launch option with that id. An unknown id answers `404` even for
   `default_enabled: true`: there is no row to classify.
 

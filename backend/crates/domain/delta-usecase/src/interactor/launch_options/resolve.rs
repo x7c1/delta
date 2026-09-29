@@ -9,8 +9,11 @@
 //! result is a list of neutral [`LaunchOptionSpec`] pairs; how a pair becomes a
 //! CLI flag or a request field is the adapter's business, not this layer's.
 
-use crate::agent::LaunchOptionSpec;
-use crate::error::Result;
+use delta_model::{AgentProvider, LaunchOption};
+
+use crate::agent::{LaunchOptionCardinality, LaunchOptionSpec};
+use crate::error::{Error, Result};
+use crate::interactor::launch_options::crud::describe_launch_option;
 use crate::interactor::launch_options::expand_leading_tilde;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
@@ -36,6 +39,14 @@ where
     /// the picker rendered) is skipped with a warning rather than failing the
     /// launch, so a stale UI selection cannot kill a spawn.
     ///
+    /// Two selected rows of one choice group — a shared `name` that `provider`
+    /// classifies [`LaunchOptionCardinality::Single`], such as two Claude
+    /// `--model` rows — are refused with [`Error::LaunchOptionRejected`] naming
+    /// both rows: the setting can take one value, so rendering both would leave
+    /// the outcome to the agent. Checked here, for every provider, rather than
+    /// in each adapter, so the rule the picker shows as a radio group is the
+    /// rule every launch enforces.
+    ///
     /// Values get a leading `~` expanded here rather than in a provider's
     /// renderer: no shell ever runs over a launch-option value — Claude's
     /// values ride an argv tail, Codex's ride a JSON-RPC field — so a `~/...`
@@ -43,6 +54,7 @@ where
     /// its (worktree) cwd as a bogus `<cwd>/~/...` path.
     pub(in crate::interactor) async fn resolve_launch_options(
         &self,
+        provider: AgentProvider,
         launch_option_ids: &[i64],
     ) -> Result<Vec<LaunchOptionSpec>> {
         if launch_option_ids.is_empty() {
@@ -55,18 +67,10 @@ where
             .into_iter()
             .map(|option| (option.id, option))
             .collect::<std::collections::HashMap<_, _>>();
-        // Read HOME once for the tilde expansion below.
-        let home = std::env::var("HOME").ok().filter(|h| !h.is_empty());
-        let mut resolved = Vec::new();
+        let mut selected: Vec<&LaunchOption> = Vec::new();
         for id in launch_option_ids {
             match by_id.get(id) {
-                Some(option) => resolved.push(LaunchOptionSpec {
-                    name: option.name.clone(),
-                    value: option
-                        .value
-                        .as_deref()
-                        .map(|value| expand_leading_tilde(value, home.as_deref())),
-                }),
+                Some(option) => selected.push(option),
                 None => tracing::warn!(
                     launch_option_id = id,
                     session_id = %self.id,
@@ -74,6 +78,46 @@ where
                 ),
             }
         }
-        Ok(resolved)
+        self.reject_two_choices_of_one_group(provider, &selected)?;
+        // Read HOME once for the tilde expansion below.
+        let home = std::env::var("HOME").ok().filter(|h| !h.is_empty());
+        Ok(selected
+            .into_iter()
+            .map(|option| LaunchOptionSpec {
+                name: option.name.clone(),
+                value: option
+                    .value
+                    .as_deref()
+                    .map(|value| expand_leading_tilde(value, home.as_deref())),
+            })
+            .collect())
+    }
+
+    /// Refuse a selection holding two rows of one choice group: the first pair
+    /// found, in selection order, is named in the error.
+    fn reject_two_choices_of_one_group(
+        &self,
+        provider: AgentProvider,
+        selected: &[&LaunchOption],
+    ) -> Result<()> {
+        let mut first_by_name: std::collections::HashMap<&str, &LaunchOption> =
+            std::collections::HashMap::new();
+        for option in selected {
+            if self.launch_option_cardinality(provider, &option.name)
+                != LaunchOptionCardinality::Single
+            {
+                continue;
+            }
+            if let Some(first) = first_by_name.insert(option.name.as_str(), option) {
+                return Err(Error::LaunchOptionRejected(format!(
+                    "`{}` takes a single value, but both {} and {} are selected. \
+                     Select one of them",
+                    option.name,
+                    describe_launch_option(first),
+                    describe_launch_option(option)
+                )));
+            }
+        }
+        Ok(())
     }
 }

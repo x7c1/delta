@@ -97,6 +97,9 @@ pub const CLAUDE_CAPABILITIES: AgentCapabilities = AgentCapabilities {
 mod launch_option_catalog;
 pub use launch_option_catalog::CLAUDE_LAUNCH_OPTION_CATALOG;
 
+mod launch_option_cardinality;
+pub use launch_option_cardinality::launch_option_cardinality;
+
 mod launch_option_danger;
 pub use launch_option_danger::is_dangerous_launch_option;
 

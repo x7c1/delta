@@ -109,7 +109,9 @@ where
         // neutral `(name, value?)` pairs and are rendered there (Codex maps
         // them onto `thread/start` fields), so this layer never learns a
         // provider's launch wire shape.
-        let launch_options = self.resolve_launch_options(&launch_option_ids).await?;
+        let launch_options = self
+            .resolve_launch_options(provider, &launch_option_ids)
+            .await?;
 
         // Resolve the registered factory now, while a caller is still listening:
         // absent means the provider was never wired into this interactor, which

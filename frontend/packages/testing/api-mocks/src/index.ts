@@ -6,6 +6,7 @@ export {
   MOCK_CLOSED_WHILE_STARTING_REASON,
   type MockApi,
 } from './handlers';
+export { launchOptionChoiceGroup } from './launchOptionChoiceGroup';
 export { isDangerousLaunchOption } from './launchOptionDanger';
 export {
   FakeEventSource,

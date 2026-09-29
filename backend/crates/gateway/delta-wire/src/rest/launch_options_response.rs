@@ -14,8 +14,9 @@ use crate::session::WireAgentProvider;
 /// `default_enabled` marks it to start pre-checked in the session-start picker.
 /// `provider` is the provider the option applies to; the session-start picker
 /// only offers options matching the new session's provider.
-/// `builtin` marks a row Delta ships rather than one the user registered, and
-/// `dangerous` a row that disables the agent's own safety mechanism.
+/// `builtin` marks a row Delta ships rather than one the user registered,
+/// `dangerous` a row that disables the agent's own safety mechanism, and
+/// `choice_group` the exclusive group a row belongs to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(rename = "LaunchOption")]
 pub struct WireLaunchOption {
@@ -53,18 +54,42 @@ pub struct WireLaunchOption {
     /// and to offer the default control only as the way to clear such a stale
     /// flag.
     pub dangerous: bool,
+    /// The exclusive choice group this row belongs to, or `null` for an
+    /// independent option.
+    ///
+    /// Rows sharing one `choice_group` are candidate values of one setting, of
+    /// which a session takes at most one — Claude's `--model` rows, for
+    /// instance. Today the key is the row's `name` whenever the provider
+    /// classifies that name as single-valued (Claude: every flag but a short
+    /// list of repeatable ones such as `--add-dir` and `--plugin-dir`; Codex:
+    /// every `thread/start` field but `config`), and `null` when the name may
+    /// repeat.
+    ///
+    /// **Derived, never stored**, like `dangerous`: computed per response from
+    /// the gateway that owns the provider's vocabulary. A client groups rows by
+    /// this field and never by `name` — the field exists so the grouping rule
+    /// stays on the server, which can later group differently-named rows
+    /// without a client change.
+    ///
+    /// The server enforces what the grouping implies: a session start selecting
+    /// two rows of one group, and turning `default_enabled` on for a row whose
+    /// group already has a default, are both `400` `launch_option_rejected`.
+    /// Rows stored before that rule may still carry two defaults in one group,
+    /// so a client takes the first one in list order.
+    pub choice_group: Option<String>,
 }
 
 impl WireLaunchOption {
-    /// Render a registered option for the wire, with the danger verdict the
-    /// caller has resolved through the provider's predicate.
+    /// Render a registered option for the wire, with the danger verdict and the
+    /// choice group the caller has resolved through the provider's vocabulary.
     ///
-    /// Not a [`From`] impl: `dangerous` cannot be derived from a [`LaunchOption`]
-    /// alone — the vocabulary that decides it lives in the gateway layer, and the
-    /// use case reads it through a port — so the flag has to be passed in. Making
-    /// it an argument rather than a defaulted field means a new call site has to
-    /// answer the question instead of silently rendering `false`.
-    pub fn new(option: LaunchOption, dangerous: bool) -> Self {
+    /// Not a [`From`] impl: neither `dangerous` nor `choice_group` can be
+    /// derived from a [`LaunchOption`] alone — the vocabulary that decides them
+    /// lives in the gateway layer, and the use case reads it through a port — so
+    /// both have to be passed in. Making them arguments rather than defaulted
+    /// fields means a new call site has to answer the questions instead of
+    /// silently rendering `false` / `null`.
+    pub fn new(option: LaunchOption, dangerous: bool, choice_group: Option<String>) -> Self {
         WireLaunchOption {
             id: option.id,
             label: option.label,
@@ -75,6 +100,7 @@ impl WireLaunchOption {
             provider: option.provider.into(),
             builtin: option.builtin_key.is_some(),
             dangerous,
+            choice_group,
         }
     }
 }
@@ -108,6 +134,7 @@ mod tests {
                         builtin_key: None,
                     },
                     false,
+                    None,
                 )],
             })
             .unwrap(),
@@ -122,6 +149,7 @@ mod tests {
                     "provider": "claude",
                     "builtin": false,
                     "dangerous": false,
+                    "choice_group": null,
                 }],
             }),
         );
@@ -145,6 +173,7 @@ mod tests {
                     builtin_key: None,
                 },
                 true,
+                Some("--dangerously-skip-permissions".to_owned()),
             ))
             .unwrap(),
             serde_json::json!({
@@ -157,6 +186,7 @@ mod tests {
                 "provider": "claude",
                 "builtin": false,
                 "dangerous": true,
+                "choice_group": "--dangerously-skip-permissions",
             }),
         );
     }
@@ -176,6 +206,7 @@ mod tests {
                     builtin_key: None,
                 },
                 false,
+                Some("model".to_owned()),
             ))
             .unwrap()["provider"],
             serde_json::json!("codex"),
@@ -199,9 +230,11 @@ mod tests {
                 builtin_key: Some("claude:model-opus".to_owned()),
             },
             false,
+            Some("--model".to_owned()),
         ))
         .unwrap();
         assert_eq!(body["builtin"], serde_json::json!(true));
+        assert_eq!(body["choice_group"], serde_json::json!("--model"));
         assert!(
             body.as_object().unwrap().get("builtin_key").is_none(),
             "the catalog key is internal and must not reach the wire: {body}"

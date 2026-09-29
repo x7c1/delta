@@ -9,8 +9,9 @@
 //!   UI and behaviour off this, not off the provider.
 //! - [`AgentEvent`] — the single neutral fact stream the core reasons over.
 //! - [`AgentAdapter`] — the trait every provider is driven through.
-//! - [`LaunchOptionDangerPolicy`] — which launch options switch a provider's own
-//!   safety mechanisms off, in that provider's vocabulary.
+//! - [`LaunchOptionVocabulary`] — how a launch option reads in its provider's
+//!   vocabulary: whether it switches the agent's own safety mechanisms off, and
+//!   whether its name takes one value or several.
 //!
 //! Only neutral types live here. Provider-specific wire schema (JSON-RPC
 //! shapes, hook payloads, transcript formats) belongs to the gateway adapters
@@ -21,7 +22,6 @@ mod capabilities;
 mod content_source;
 mod event;
 mod factory;
-mod launch_option_danger;
 mod provider;
 
 pub use adapter::{
@@ -40,5 +40,13 @@ pub use event::{
     AgentPermissionRequest, AgentTokenUsage, SessionEndReason, TurnStatus,
 };
 pub use factory::AgentAdapterFactory;
-pub use launch_option_danger::{LaunchOptionDangerPolicy, NoDangerousLaunchOptions};
 pub use provider::AgentProvider;
+
+mod launch_option_cardinality;
+pub use launch_option_cardinality::LaunchOptionCardinality;
+
+mod launch_option_vocabulary;
+pub use launch_option_vocabulary::LaunchOptionVocabulary;
+
+mod null_launch_option_vocabulary;
+pub use null_launch_option_vocabulary::NullLaunchOptionVocabulary;

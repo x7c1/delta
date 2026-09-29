@@ -17,7 +17,8 @@ use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{
     AgentAdapterFactory, AgentProvider, CommsLogSink, GitWorktree, Interactor,
-    LaunchOptionDangerPolicy, SessionEvent, TmuxDriver, Transcript, Workspace,
+    LaunchOptionCardinality, LaunchOptionVocabulary, SessionEvent, TmuxDriver, Transcript,
+    Workspace,
 };
 use git_worktree::Git;
 use tmux_driver::Tmux;
@@ -193,9 +194,9 @@ pub(crate) fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (R
     )
     .with_adapter_factory(factory)
     // The launch-option registry's safety rules are part of the surface this
-    // suite drives through the real endpoints, so the policy is wired here too.
-    .with_launch_option_danger_policy(
-        Arc::new(CodexLaunchOptionDanger) as Arc<dyn LaunchOptionDangerPolicy>
+    // suite drives through the real endpoints, so the vocabulary is wired here too.
+    .with_launch_option_vocabulary(
+        Arc::new(CodexLaunchOptionVocabulary) as Arc<dyn LaunchOptionVocabulary>
     );
 
     let state =
@@ -204,19 +205,28 @@ pub(crate) fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (R
     (router(state.clone()), state)
 }
 
-/// The [`LaunchOptionDangerPolicy`] this suite's backend is wired with: Codex's
-/// gateway predicate, read through the port the domain consults.
+/// The [`LaunchOptionVocabulary`] this suite's backend is wired with: Codex's
+/// gateway classifications, read through the port the domain consults.
 ///
 /// A local adapter rather than the composition root's own, because this crate
 /// does not depend on it — and a harness that drives only Codex needs only
-/// Codex's vocabulary. The predicate itself is the production one, so a
+/// Codex's vocabulary. The classifications are the production ones, so a
 /// registry write refused here is refused for the same reason it would be in a
 /// real server.
-struct CodexLaunchOptionDanger;
+struct CodexLaunchOptionVocabulary;
 
-impl LaunchOptionDangerPolicy for CodexLaunchOptionDanger {
+impl LaunchOptionVocabulary for CodexLaunchOptionVocabulary {
     fn is_dangerous(&self, provider: AgentProvider, name: &str, value: Option<&str>) -> bool {
         provider == AgentProvider::Codex && codex_agent::is_dangerous_launch_option(name, value)
+    }
+
+    /// Codex's own rule for a Codex row; anything else is left ungrouped, as the
+    /// null vocabulary would leave it.
+    fn cardinality(&self, provider: AgentProvider, name: &str) -> LaunchOptionCardinality {
+        match provider {
+            AgentProvider::Codex => codex_agent::launch_option_cardinality(name),
+            _ => LaunchOptionCardinality::Multiple,
+        }
     }
 }
 
