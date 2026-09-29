@@ -1,11 +1,12 @@
 //! A CSRF-style guard that rejects requests arriving from a foreign web origin.
 //!
-//! Delta binds loopback only (`main.rs`), but loopback binding is not a defense
-//! on its own: the port is predictable (`DELTA_PORT`, default 7878), and
-//! WebSockets are exempt from the browser's same-origin policy and CORS, so any
-//! web page the user happens to visit can open `ws://127.0.0.1:7878/pty?…` and
-//! get a live read/write PTY into the agent pane. This guard, applied to every
-//! route, closes that hole by inspecting two request headers:
+//! Delta binds loopback only (`serve::bind_loopback`), but loopback binding is
+//! not a defense on its own: the port is predictable (`DELTA_PORT`, default
+//! 7878), and WebSockets are exempt from the browser's same-origin policy and
+//! CORS, so any web page the user happens to visit can open
+//! `ws://127.0.0.1:7878/pty?…` and get a live read/write PTY into the agent
+//! pane. This guard, applied to every route, closes that hole by inspecting two
+//! request headers:
 //!
 //! 1. **`Origin`** — if present, its host must be a loopback host. A browser
 //!    sends `Origin` on cross-site requests (and on all WebSocket upgrades), and

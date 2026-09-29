@@ -151,14 +151,16 @@ pub struct Config {
     pub tmux_socket: String,
     /// The per-run bearer token the API and live sockets require, enforced by
     /// the server's auth guard. Minted (or handed in) once for the server's
-    /// lifetime by `main.rs::config_from_env`; the frontend presents it on every
-    /// request. Not a wire field and never rotated — see the auth guard.
+    /// lifetime by `delta_server::config::config_from_env`; the frontend
+    /// presents it on every request. Not a wire field and never rotated — see
+    /// the auth guard.
     pub auth_token: String,
     /// The per-run hook secret carried back on every hook URL as `?hs=<secret>`,
     /// enforced by the server's hook auth guard. Minted once for the server's
-    /// lifetime by `main.rs::config_from_env` and rendered into the session
-    /// settings by [`render_session_settings`] so genuine Claude Code callbacks
-    /// present it and a forged local POST cannot. Not a wire field.
+    /// lifetime by `delta_server::config::config_from_env` and rendered into
+    /// the session settings by [`render_session_settings`] so genuine Claude
+    /// Code callbacks present it and a forged local POST cannot. Not a wire
+    /// field.
     pub hook_secret: String,
     /// The directory a hook-reported `transcript_path` must resolve under to be
     /// persisted and read. Defaults to

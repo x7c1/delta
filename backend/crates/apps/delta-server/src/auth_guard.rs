@@ -5,7 +5,7 @@
 //! but they do not stop a local non-browser process: a `curl` on the same host
 //! sends no `Origin` and a loopback `Host`, so the Origin/Host guard passes it
 //! through. This guard closes that gap by requiring a secret the server mints
-//! (or is handed) once for its lifetime — see `main.rs::config_from_env` and
+//! (or is handed) once for its lifetime — see `config::config_from_env` and
 //! `AppState::token`. Every browser request carries it; anything without the
 //! valid token gets `401`.
 //!
