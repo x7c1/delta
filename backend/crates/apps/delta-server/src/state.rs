@@ -62,13 +62,13 @@ pub struct AppState {
     tmux_socket: Arc<str>,
     /// The per-run bearer token every browser request must present, enforced by
     /// [`crate::auth_guard`]. Minted (or handed in) once for the server's
-    /// lifetime — see `main.rs::config_from_env` — and never rotated. Held as an
+    /// lifetime — see `config::config_from_env` — and never rotated. Held as an
     /// `Arc<str>` mirroring [`Self::tmux_socket`], so cloning the state is cheap.
     auth_token: Arc<str>,
     /// The per-run hook secret every `/hooks/*` request must carry as an `?hs=`
     /// query parameter, enforced by [`crate::hook_auth_guard`]. Minted (or
     /// handed in) once for the server's lifetime alongside [`Self::auth_token`]
-    /// — see `main.rs::config_from_env` — and rendered into the session settings
+    /// — see `config::config_from_env` — and rendered into the session settings
     /// so genuine Claude Code callbacks present it. Held as an `Arc<str>`
     /// mirroring [`Self::auth_token`], so cloning the state is cheap.
     hook_secret: Arc<str>,
