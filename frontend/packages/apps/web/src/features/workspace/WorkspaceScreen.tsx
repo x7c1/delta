@@ -21,6 +21,7 @@ import {
   type FocusedSession,
 } from '../../store/navStore';
 import { useLiveStore } from '../../store/liveStore';
+import { useNotificationStore } from '../../store/notificationStore';
 import { useGarbageCollectSessionScopedStorage } from '../../store/sessionScopedStorage';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { CommsLogPane } from '../comms/CommsLogPane';
@@ -162,6 +163,26 @@ export function WorkspaceScreen() {
     [sessionsQuery.isSuccess, sessionsQuery.hasNextPage, sessions],
   );
   useGarbageCollectSessionScopedStorage(gcSessionIds);
+
+  // A background refetch that fails leaves the last good list in `data` while
+  // TanStack Query still flags the query `isError`. That list stays on screen
+  // (see the error branch below), and the failure is reported once per episode
+  // through the snackbar: the flag stays true across TanStack's own retries and
+  // later failing refetches, so the effect fires on the transition into the
+  // error state and not again until a refetch has succeeded and a new one
+  // fails. The notice is transient on purpose — the list is still usable and
+  // the query keeps retrying on its own.
+  const showError = useNotificationStore((state) => state.showError);
+  const refreshFailed =
+    sessionsQuery.isError && sessionsQuery.data !== undefined;
+  useEffect(() => {
+    if (refreshFailed) {
+      showError(
+        'Could not refresh the session list',
+        'Showing the last loaded sessions.',
+      );
+    }
+  }, [refreshFailed, showError]);
 
   // Provider capability profiles (`GET /api/providers`), indexed by provider id
   // so a focused session's terminal surface can be resolved from its provider.
@@ -452,7 +473,10 @@ export function WorkspaceScreen() {
     );
   }
 
-  if (sessionsQuery.isError) {
+  // Only when there is nothing to show: a failed background refetch keeps the
+  // cached list (and everything mounted below it, such as the terminal
+  // column) on screen instead of tearing the workspace down.
+  if (sessionsQuery.isError && sessionsQuery.data === undefined) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-secondary text-fg-muted">
         <p>Could not load sessions.</p>

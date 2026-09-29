@@ -31,13 +31,14 @@ import {
   createHandlers,
   mockProviders,
 } from '@delta/api-mocks';
-import { ApiClient } from '@delta/api-client';
+import { ApiClient, queryKeys } from '@delta/api-client';
 import type { SessionEvent } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { applySessionEvent } from '../../data/applySessionEvent';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { useLiveStore } from '../../store/liveStore';
+import { useNotificationStore } from '../../store/notificationStore';
 import { useNewSessionSend } from '../composer/useNewSessionSend';
 import { WorkspaceScreen } from './WorkspaceScreen';
 
@@ -112,7 +113,10 @@ afterAll(() => server.close());
 /** Render the workspace, optionally with a test harness beside it. */
 function renderScreen(harness?: ReactNode) {
   const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+    // `retryDelay: 0` because the session list sets its own `retry`, which
+    // overrides the `retry: false` default; without it a failing sessions
+    // request would sit through TanStack's back-off before settling.
+    defaultOptions: { queries: { retry: false, retryDelay: 0 } },
   });
   const client = new ApiClient({ baseUrl: 'http://localhost' });
   return {
@@ -1807,5 +1811,106 @@ describe('WorkspaceScreen multi-session', () => {
     // Line 1 falls back to the session label when no branch was recorded.
     const branch = screen.getByTestId('session-branch');
     expect(branch).toHaveTextContent(`session ${SESSION_ID.slice(0, 8)}`);
+  });
+});
+
+describe('WorkspaceScreen session list failures', () => {
+  /**
+   * Whether `GET /api/sessions` currently fails. Flipped by each case to turn
+   * the server off and on under a mounted workspace; when false the handler
+   * returns nothing and the request falls through to the default mock.
+   */
+  let sessionsFailing = false;
+
+  beforeEach(() => {
+    sessionsFailing = false;
+    server.use(
+      http.get('*/api/sessions', () =>
+        sessionsFailing
+          ? HttpResponse.json({ error: 'unavailable' }, { status: 503 })
+          : undefined,
+      ),
+    );
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      activeThreadId: null,
+      preNewSessionFocus: null,
+      settingsOpen: false,
+      terminalOpen: true,
+      commsOpen: false,
+    });
+    useLiveStore.setState({ spawns: [], unread: {}, notices: {} });
+    useNotificationStore.setState({ notifications: [] });
+  });
+
+  /** Run one background refetch of the session list to completion. */
+  async function refetchSessions(queryClient: QueryClient) {
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: queryKeys.sessions });
+    });
+  }
+
+  function errorNotifications() {
+    return useNotificationStore
+      .getState()
+      .notifications.filter((n) => n.tone === 'error');
+  }
+
+  it('shows the full-screen error when the first load fails, and Retry refetches', async () => {
+    sessionsFailing = true;
+
+    renderScreen();
+
+    expect(
+      await screen.findByText('Could not load sessions.'),
+    ).toBeInTheDocument();
+    // Nothing was ever on screen, so there is no list to keep and no snackbar
+    // to raise on top of the full-screen message.
+    expect(errorNotifications()).toHaveLength(0);
+
+    sessionsFailing = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findAllByTestId('session-card')).not.toHaveLength(0);
+    expect(screen.queryByText('Could not load sessions.')).toBeNull();
+  });
+
+  it('keeps the list and the focused session mounted across a failing refetch, notifying once per episode', async () => {
+    const { queryClient } = renderScreen();
+
+    const terminal = await screen.findByTestId('terminal-pane');
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID),
+    );
+    const cardCount = screen.getAllByTestId('session-card').length;
+
+    // The server goes away under a loaded workspace.
+    sessionsFailing = true;
+    await refetchSessions(queryClient);
+
+    await waitFor(() => expect(errorNotifications()).toHaveLength(1));
+    expect(errorNotifications()[0]?.title).toBe(
+      'Could not refresh the session list',
+    );
+    expect(screen.queryByText('Could not load sessions.')).toBeNull();
+    expect(screen.getAllByTestId('session-card')).toHaveLength(cardCount);
+    // The very same terminal element: not merely re-rendered, never unmounted.
+    expect(screen.getByTestId('terminal-pane')).toBe(terminal);
+    expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID);
+
+    // Still down: the same failure episode raises no second notice.
+    await refetchSessions(queryClient);
+    expect(errorNotifications()).toHaveLength(1);
+    expect(screen.getByTestId('terminal-pane')).toBe(terminal);
+
+    // The server comes back, then fails again: a new episode, a new notice.
+    sessionsFailing = false;
+    await refetchSessions(queryClient);
+    expect(errorNotifications()).toHaveLength(1);
+
+    sessionsFailing = true;
+    await refetchSessions(queryClient);
+    await waitFor(() => expect(errorNotifications()).toHaveLength(2));
+    expect(screen.getByTestId('terminal-pane')).toBe(terminal);
   });
 });
