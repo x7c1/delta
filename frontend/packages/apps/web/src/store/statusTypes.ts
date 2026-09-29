@@ -20,8 +20,9 @@ export type RateLimitWindows = RateLimitWindow[];
  * slot would therefore show whichever provider spoke last — including showing
  * Claude's limits while a Codex session is focused, which reads as a statement
  * about Codex and is simply false. Keying by provider makes that impossible:
- * the footer looks up the focused session's provider and can only ever find
- * that provider's numbers.
+ * the footer groups the windows by provider, and in a thread looks up only the
+ * focused session's provider, so it can only ever find that provider's
+ * numbers.
  *
  * Within a provider it is last-writer-wins: the latest snapshot for a provider
  * replaces its windows. A provider with no entry has never reported limits.

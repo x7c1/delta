@@ -27,8 +27,10 @@ export interface StatusSlice {
   /**
    * The account-wide rate-limit windows, keyed by provider. See
    * {@link RateLimitsByProvider} for why the key is load-bearing: the navigator
-   * footer renders the windows of the FOCUSED session's provider, so one
-   * provider's account limits can never be presented as another's.
+   * footer renders each provider's windows as its own group — only the
+   * FOCUSED session's provider in a thread, every reporting provider on the
+   * new-session screen — so one provider's account limits can never be
+   * presented as another's.
    */
   rateLimits: RateLimitsByProvider;
   /**
