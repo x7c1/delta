@@ -1,7 +1,10 @@
 import type { Components } from 'react-markdown';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { remarkTrimAutolinkPunctuation } from './remarkTrimAutolinkPunctuation';
+import {
+  markAutolinkBoundaries,
+  remarkStripAutolinkBoundaries,
+} from './autolinkBoundary';
 
 /**
  * Everything react-markdown computed for the anchor is passed through — `href`
@@ -32,8 +35,12 @@ const components: Components = {
  * A small, chat-tuned Markdown stylesheet scoped to the `markdown-body` class
  * (see index.css) styles just the elements Claude emits, rather than a full
  * typography framework. GFM enables tables, strikethrough, task lists, and
- * autolinks, which Claude routinely emits; `remarkTrimAutolinkPunctuation`
- * then moves the CJK text the autolinker absorbs back into the prose.
+ * autolinks, which Claude routinely emits. Before parsing,
+ * `markAutolinkBoundaries` marks where each bare URL ends, so the autolinker
+ * stops there instead of absorbing the CJK prose that follows it — and an
+ * emphasis delimiter closing right after the URL, as in
+ * `**https://…/pull/1**（…）`, still closes. `remarkStripAutolinkBoundaries`
+ * removes those marks from the parsed tree again.
  *
  * Every link opens in a new tab, matching the session card's pull-request
  * link, so that following one never navigates the conversation away and costs
@@ -48,10 +55,10 @@ export function AssistantMarkdown({ text }: { text: string }) {
   return (
     <div className="markdown-body text-fg">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkTrimAutolinkPunctuation]}
+        remarkPlugins={[remarkGfm, remarkStripAutolinkBoundaries]}
         components={components}
       >
-        {text}
+        {markAutolinkBoundaries(text)}
       </ReactMarkdown>
     </div>
   );

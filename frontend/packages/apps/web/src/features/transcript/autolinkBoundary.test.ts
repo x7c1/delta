@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   trimAutolinkPunctuation,
   trimGitHubIssueUrl,
-} from './remarkTrimAutolinkPunctuation';
+} from './autolinkBoundary';
 
 const PR_URL = 'https://github.com/x7c1/delta/pull/375';
 const ISSUE_URL = 'https://github.com/x7c1/delta/issues/12';
@@ -59,7 +59,7 @@ describe('trimAutolinkPunctuation', () => {
     });
   });
 
-  it('leaves ASCII punctuation alone — GFM has already trimmed it', () => {
+  it('leaves ASCII punctuation alone — trimming it is GFM\'s job', () => {
     // An ASCII paren that survived GFM's own trimming is the author's.
     expect(trimAutolinkPunctuation(`${PR_URL}(a)`)).toEqual({
       url: `${PR_URL}(a)`,

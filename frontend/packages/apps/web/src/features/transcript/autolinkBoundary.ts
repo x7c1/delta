@@ -1,16 +1,28 @@
-import type { Link, Parent, Root, Text } from 'mdast';
-import { SKIP, visit } from 'unist-util-visit';
+import type { Root } from 'mdast';
+import { visit } from 'unist-util-visit';
 
 /**
- * Keeps CJK punctuation out of autolinked URLs.
+ * Keeps CJK prose out of autolinked URLs.
  *
  * GFM's autolink-literal extension turns a bare `https://…` into a link by
- * reading up to the next whitespace and then trimming only *ASCII* trailing
- * punctuation. Full-width punctuation is not trimmed, so a URL written inside
- * Japanese prose swallows whatever follows it — `…/pull/375）。` becomes part
- * of the href and the resulting link points nowhere. That is the behaviour the
- * GFM spec mandates (GitHub renders it the same way), so it is corrected here,
- * after parsing, rather than waited on upstream.
+ * reading up to the next whitespace and then dropping trailing *ASCII*
+ * punctuation, and only when an end — whitespace, `<` or the end of input —
+ * follows it. Full-width punctuation is neither an end nor trimmed, so a URL
+ * written inside Japanese prose swallows whatever follows it — `…/pull/375）。`
+ * becomes part of the href and the resulting link points nowhere. Worse, a
+ * closing `**` right after the URL is absorbed along with the prose, so the
+ * strong around it never closes. That is the behaviour the GFM spec mandates
+ * (GitHub renders it the same way), so it is corrected here rather than waited
+ * on upstream.
+ *
+ * The correction happens before parsing, because emphasis is resolved while
+ * tokenizing and a delimiter the autolink swallowed cannot be given back
+ * afterwards. `markAutolinkBoundaries` finds where each URL should end and
+ * puts an invisible sentinel there, which GFM reads as whitespace: the link
+ * ends at it, the ASCII punctuation just before it (`**`, `_`, `~~`, `.`) is
+ * trimmed from the link as usual, and a closing emphasis delimiter there
+ * closes. `remarkStripAutolinkBoundaries` then removes every sentinel from the
+ * parsed tree so none reaches the DOM.
  *
  * Known limit: non-punctuation text glued to a URL
  * (`https://ja.wikipedia.org/wiki/東京です`) is left alone, and so is a
@@ -89,8 +101,9 @@ export function trimGitHubIssueUrl(
 }
 
 /**
- * Splits an autolinked URL into the address itself and the trailing text the
- * autolinker wrongly absorbed. `url + suffix` always reconstructs the input;
+ * Splits an autolink-literal candidate — the text GFM's autolinker would read,
+ * up to the next whitespace — into the address itself and the trailing text
+ * that belongs to the prose. `url + suffix` always reconstructs the input;
  * `suffix` is empty when there is nothing to trim.
  *
  * `trimGitHubIssueUrl` is tried first and, where it applies, answers on its
@@ -130,64 +143,54 @@ export function trimAutolinkPunctuation(url: string): {
 }
 
 /**
- * The scheme GFM prepends to a `www.…` autolink literal, whose url therefore is
- * its text with `http://` in front rather than the text itself.
+ * The boundary `markAutolinkBoundaries` inserts: U+FEFF, zero-width and, to
+ * micromark, Unicode whitespace — `micromark-util-character` classifies it with
+ * JavaScript's `\s`, which includes U+FEFF. Relying on that is relying on the
+ * parser's implementation; `AssistantMarkdown.test.tsx` pins it, so a
+ * dependency update that changes it fails the tests.
  */
-const WWW_URL_PREFIX = 'http://';
+const BOUNDARY = '\uFEFF';
 
 /**
- * The text child of an autolink literal, or `undefined` for any other link.
- * GFM's autolink literals are a link whose only child is the address as
- * written: identical to `node.url` for `https://…`, and `node.url` minus the
- * `http://` it prepends for `www.…`. An explicit `[label](url)` carries a
- * different label, and its URL was chosen by the author, so it is left
- * untouched.
+ * An autolink-literal candidate: a `http://`, `https://` or `www.` start,
+ * case-insensitively, and everything up to the next whitespace or `<` — the
+ * span GFM's autolinker reads. It is looser than GFM's own start conditions
+ * (no check of the preceding character or of the domain), which is harmless:
+ * a boundary placed in text GFM does not link is stripped again after parsing.
  */
-function autolinkLiteralText(node: Link): Text | undefined {
-  const [child] = node.children;
-  if (node.children.length !== 1 || child === undefined) {
-    return undefined;
-  }
-  if (child.type !== 'text') {
-    return undefined;
-  }
-  if (child.value === node.url) {
-    return child;
-  }
-  // GFM recognises the prefix case-insensitively, so `WWW.…` counts too.
-  const isWww =
-    child.value.toLowerCase().startsWith('www.') &&
-    node.url === `${WWW_URL_PREFIX}${child.value}`;
-  return isWww ? child : undefined;
+const AUTOLINK_CANDIDATE = /(?:https?:\/\/|www\.)[^\s<]*/gi;
+
+/**
+ * Inserts a boundary into `markdown` wherever `trimAutolinkPunctuation` would
+ * end an autolink-literal candidate, so GFM ends the link there itself. The
+ * text is otherwise unchanged; `remarkStripAutolinkBoundaries` removes the
+ * boundaries from the parsed tree.
+ */
+export function markAutolinkBoundaries(markdown: string): string {
+  return markdown.replace(AUTOLINK_CANDIDATE, (candidate) => {
+    const { url, suffix } = trimAutolinkPunctuation(candidate);
+    return suffix === '' ? candidate : `${url}${BOUNDARY}${suffix}`;
+  });
 }
 
 /**
- * Remark plugin that moves the text an autolink literal wrongly absorbed back
- * into the surrounding prose. Runs after `remark-gfm`, whose autolink literals
- * it post-processes.
+ * Remark plugin that removes every boundary `markAutolinkBoundaries` put into
+ * the source, from every string field of every node. That covers more than
+ * text `value`s: a boundary lands wherever the cut fell, including an explicit
+ * link's destination (`[wiki](https://ja.wikipedia.org/wiki/東京。)`), a
+ * reference label, a code block's info string or raw HTML. Left in place it
+ * would reach the DOM, invisible but carried along by a copy. A U+FEFF the
+ * text already carried is indistinguishable from a boundary and is removed too.
  */
-export function remarkTrimAutolinkPunctuation() {
+export function remarkStripAutolinkBoundaries() {
   return (tree: Root) => {
-    visit(tree, 'link', (node: Link, index, parent: Parent | undefined) => {
-      if (parent === undefined || index === undefined) {
-        return;
+    visit(tree, (node) => {
+      const fields = node as unknown as Record<string, unknown>;
+      for (const [key, value] of Object.entries(fields)) {
+        if (typeof value === 'string' && value.includes(BOUNDARY)) {
+          fields[key] = value.replaceAll(BOUNDARY, '');
+        }
       }
-      const child = autolinkLiteralText(node);
-      if (child === undefined) {
-        return;
-      }
-      const { url, suffix } = trimAutolinkPunctuation(child.value);
-      if (suffix === '') {
-        return;
-      }
-      // Keep whatever scheme GFM put in front of the text it linked.
-      const scheme = node.url.slice(0, node.url.length - child.value.length);
-      node.url = `${scheme}${url}`;
-      child.value = url;
-      const trailing: Text = { type: 'text', value: suffix };
-      parent.children.splice(index + 1, 0, trailing);
-      // Continue after the text node just inserted.
-      return [SKIP, index + 2];
     });
   };
 }
