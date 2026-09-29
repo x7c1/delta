@@ -17,6 +17,12 @@ import { useManualEventControl, emitEvent } from './support/app';
  * layout, with no `provider === …` branch anywhere in the app — the store keys
  * by the snapshot's provider and the rows label themselves from each window's
  * duration.
+ *
+ * The third test is the new-session one: with no session focused yet, the
+ * user is choosing which provider to start on, so the footer lists every
+ * provider that has reported windows — each in its own named group — and
+ * narrows back to one unnamed group as soon as a session is focused (the
+ * provider is known there, so the heading would be redundant).
  */
 
 /** A full snapshot, with the fields not under test defaulted to null. */
@@ -199,4 +205,56 @@ test('rate limits follow the focused session provider, with no cross-provider le
     '25',
   );
   await expect(page.getByTestId('rate-limit-1d-pct')).toHaveText('61%');
+});
+
+test('the new-session screen shows every reporting provider\'s meters', async ({
+  page,
+}) => {
+  await useManualEventControl(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await expect(page.getByTestId('composer-card')).toBeVisible();
+
+  // Both accounts report a 5h window, so the rows can only be told apart
+  // through their group containers.
+  await emitEvent(page, {
+    kind: 'status_updated',
+    session_id: SESSION_ID,
+    snapshot: snapshot({
+      rate_limits: [
+        { duration_seconds: FIVE_HOURS, used_percentage: 35, resets_at: null },
+      ],
+    }),
+  });
+  await emitEvent(page, {
+    kind: 'status_updated',
+    session_id: SESSION_ID_4,
+    snapshot: snapshot({
+      provider: 'codex',
+      rate_limits: [
+        { duration_seconds: FIVE_HOURS, used_percentage: 61, resets_at: null },
+      ],
+    }),
+  });
+
+  await page.getByRole('button', { name: 'New session', exact: true }).click();
+  await expect(page.getByTestId('new-session-node')).toBeVisible();
+
+  const claudeGroup = page.getByTestId('rate-limits-claude');
+  const codexGroup = page.getByTestId('rate-limits-codex');
+  await expect(claudeGroup).toBeVisible();
+  await expect(claudeGroup).toContainText('Claude Code');
+  await expect(claudeGroup.getByTestId('rate-limit-5h-pct')).toHaveText('35%');
+  await expect(codexGroup).toBeVisible();
+  await expect(codexGroup).toContainText('Codex');
+  await expect(codexGroup.getByTestId('rate-limit-5h-pct')).toHaveText('61%');
+
+  // Focusing a Claude session narrows the footer back to that account alone.
+  const claudeRow = rowByBranch(page, 'feat/scratch-ideas');
+  await scrollUntilVisible(page, claudeRow);
+  await claudeRow.click();
+
+  await expect(codexGroup).toHaveCount(0);
+  await expect(claudeGroup).not.toContainText('Claude Code');
+  await expect(claudeGroup.getByTestId('rate-limit-5h-pct')).toHaveText('35%');
 });

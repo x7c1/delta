@@ -6,6 +6,7 @@ import {
   cn,
   Meter,
   Panel,
+  ProviderName,
   Spinner,
   StatusDot,
   type DotTone,
@@ -16,6 +17,7 @@ import { useLiveStore } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
+import { footerRateLimitGroups } from './footerRateLimitGroups';
 import {
   computeBudgetLinePercentage,
   formatObservedAt,
@@ -382,10 +384,8 @@ export function NavigatorPane({
 
   const connection = useLiveStore((state) => state.connection);
   // Account-wide rate limits, keyed by provider (see RateLimitsByProvider in
-  // statusTypes). The footer is the natural home for this app-global state, and
-  // the rows below show the windows of the FOCUSED session's provider — so one
-  // provider's limits never appear under another's session, and with nothing
-  // focused there is no account to speak for and so no rows.
+  // statusTypes). The footer is the natural home for this app-global state;
+  // `footerRateLimitGroups` decides which providers it lists.
   const rateLimitsByProvider = useLiveStore((state) => state.rateLimits);
   // The providers whose windows are still a restored guess — an observation
   // over an hour old (a fresher restore is left looking live) that no live
@@ -409,26 +409,21 @@ export function NavigatorPane({
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   // Memoized because this pane re-renders on every scroll frame of the windowed
   // session list, and the lookup walks the whole loaded list.
-  const { rateLimits, rateLimitsObservedAt } = useMemo(() => {
-    const provider = sessions.find(
-      (item) => item.session.id === focusedSessionId,
-    )?.session.provider;
-    if (!provider) {
-      return { rateLimits: [], rateLimitsObservedAt: null };
-    }
-    return {
-      rateLimits: rateLimitsByProvider[provider] ?? [],
-      // Non-null only while this provider's windows are a restored guess; the
-      // whole row group shares one observation, since a provider's windows
-      // arrive (and are persisted) together.
-      rateLimitsObservedAt: restoredRateLimitsObservedAt[provider] ?? null,
-    };
-  }, [
-    sessions,
-    focusedSessionId,
-    rateLimitsByProvider,
-    restoredRateLimitsObservedAt,
-  ]);
+  const rateLimitGroups = useMemo(
+    () =>
+      footerRateLimitGroups(
+        sessions,
+        focusedSessionId,
+        rateLimitsByProvider,
+        restoredRateLimitsObservedAt,
+      ),
+    [
+      sessions,
+      focusedSessionId,
+      rateLimitsByProvider,
+      restoredRateLimitsObservedAt,
+    ],
+  );
   const settingsOpen = useNavStore((state) => state.settingsOpen);
   const openSettings = useNavStore((state) => state.openSettings);
   const startNewSession = useNavStore((state) => state.startNewSession);
@@ -476,39 +471,67 @@ export function NavigatorPane({
       }
       footer={
         // A quiet utility bar, distinct from the primary action up top. The
-        // focused provider's account rate-limit meters stack ABOVE the
-        // connection row — one per window that account reported. Below them: the
-        // live connection status (dot + a status word like "Connected") on the
-        // left, and an icon-only Settings entry on the right (claude.ai-style,
-        // opens the settings dialog overlaid on the workspace).
+        // account rate-limit meters stack ABOVE the connection row, grouped by
+        // provider — one row per window that account reported. In a thread
+        // that is the one group of the focused session's provider; on the
+        // new-session screen it is every provider that has reported windows
+        // (see `footerRateLimitGroups`). A group carries a provider-name
+        // caption only when the selector says so: on the new-session screen,
+        // where the provider is not chosen yet and rows are labeled by
+        // duration only (two providers can report windows of the same
+        // length); in a thread the caption would be redundant, since the user
+        // knows the session's provider. Below the meters: the live connection
+        // status (dot + a status word like "Connected") on the left, and an
+        // icon-only Settings entry on the right (claude.ai-style, opens the
+        // settings dialog overlaid on the workspace).
         <div className="flex flex-col gap-1.5">
-          {rateLimits.length > 0 && (
-            <div className="flex flex-col gap-1 pt-1.5" data-testid="rate-limits">
-              {rateLimits.map((window, index) => {
-                // A window carries no id, so its label — its duration, which IS
-                // its identity — names the row: it is both React's key and the
-                // testId suffix (`rate-limit-5h` / `rate-limit-7d` still mean
-                // the rows they always did). A window whose length the provider
-                // did not report falls back to its position, which is stable
-                // because the provider sends the windows in a stable order.
-                const rowId =
-                  windowLabel(window.duration_seconds) ?? `w${index + 1}`;
-                return (
-                  <RateLimitRow
-                    key={rowId}
-                    window={window}
-                    // Shared neutral accent — rows are told apart by the label.
-                    fillClassName="bg-fg-muted"
-                    // `flex justify-end` on the Meter's outer track pushes its
-                    // inner fill div to the right edge, so the bar grows
-                    // leftward from the reset side without modifying the Meter
-                    // primitive.
-                    meterClassName="flex justify-end"
-                    restoredObservedAt={rateLimitsObservedAt}
-                    testId={`rate-limit-${rowId}`}
-                  />
-                );
-              })}
+          {rateLimitGroups.length > 0 && (
+            <div className="flex flex-col gap-2 pt-1.5" data-testid="rate-limits">
+              {rateLimitGroups.map((group) => (
+                <div
+                  key={group.provider}
+                  className="flex flex-col gap-1"
+                  data-testid={`rate-limits-${group.provider}`}
+                >
+                  {group.showHeading && (
+                    <ProviderName
+                      provider={group.provider}
+                      className="text-caption"
+                    />
+                  )}
+                  {group.windows.map((window, index) => {
+                    // A window carries no id, so its label — its duration,
+                    // which IS its identity — names the row: it is both React's
+                    // key and the testId suffix (`rate-limit-5h` /
+                    // `rate-limit-7d` still mean the rows they always did). A
+                    // window whose length the provider did not report falls
+                    // back to its position, which is stable because the
+                    // provider sends the windows in a stable order. The ids are
+                    // unique within a group only; the group container
+                    // disambiguates across providers.
+                    const rowId =
+                      windowLabel(window.duration_seconds) ?? `w${index + 1}`;
+                    return (
+                      <RateLimitRow
+                        key={rowId}
+                        window={window}
+                        // Shared neutral accent — rows are told apart by the
+                        // label.
+                        fillClassName="bg-fg-muted"
+                        // `flex justify-end` on the Meter's outer track pushes
+                        // its inner fill div to the right edge, so the bar
+                        // grows leftward from the reset side without modifying
+                        // the Meter primitive.
+                        meterClassName="flex justify-end"
+                        // Per provider: one account can be a restored guess
+                        // while another is live.
+                        restoredObservedAt={group.restoredObservedAt}
+                        testId={`rate-limit-${rowId}`}
+                      />
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           )}
           <div className="flex items-center justify-between gap-2">
