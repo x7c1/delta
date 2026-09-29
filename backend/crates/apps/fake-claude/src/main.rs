@@ -24,6 +24,7 @@
 mod args;
 mod hooks;
 mod input;
+mod pasted_content;
 mod run;
 mod scenario;
 mod settings;
