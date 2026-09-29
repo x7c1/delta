@@ -16,6 +16,10 @@ const TERMINAL_GUIDANCE = 'Answer the prompt in the terminal.';
 const UNANSWERABLE_GUIDANCE =
   'This request can no longer be answered — it was already resolved, or the agent connection was lost.';
 
+/** The guidance a closed session gets, whichever provider it runs. */
+const SESSION_CLOSED_GUIDANCE =
+  'This request can no longer be answered — the session was closed.';
+
 const NOT_PENDING = new ApiError(409, 'not pending', 'permission_not_pending');
 
 /** The 400 a provider without the session-scoped capability answers with. */
@@ -52,6 +56,8 @@ interface RenderOptions {
    * it is the opposite of the terminal flag's.
    */
   providerHasAllowForSession?: boolean;
+  /** Whether the card's session is closed (omitted = open). */
+  sessionClosed?: boolean;
   /** What the decision POST rejects with (no failure = a 204). */
   failWith?: unknown;
   /**
@@ -64,6 +70,7 @@ interface RenderOptions {
 function renderCard({
   providerHasTerminal,
   providerHasAllowForSession,
+  sessionClosed,
   failWith,
   noticeOverrides,
 }: RenderOptions = {}) {
@@ -83,6 +90,7 @@ function renderCard({
         notice={{ ...notice(), ...noticeOverrides }}
         providerHasTerminal={providerHasTerminal}
         providerHasAllowForSession={providerHasAllowForSession}
+        sessionClosed={sessionClosed}
         onOpenTerminal={onOpenTerminal}
         onDismiss={onDismiss}
       />
@@ -150,6 +158,60 @@ describe('PermissionNoticeCard conflict fallback', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
 
     expect(await screen.findByText(TERMINAL_GUIDANCE)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Open terminal' }),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    ['a terminal provider', true],
+    ['a terminal-less provider', false],
+    ['an unknown capability', undefined],
+  ])(
+    'tells %s that a closed session can no longer be answered',
+    async (_label, providerHasTerminal) => {
+      // Closing the session denied the request and took any terminal with it,
+      // so the timed-out-hook guidance would point at a pane that is gone.
+      const { onDismiss } = renderCard({
+        providerHasTerminal,
+        sessionClosed: true,
+        failWith: NOT_PENDING,
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+
+      expect(
+        await screen.findByText(SESSION_CLOSED_GUIDANCE),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(TERMINAL_GUIDANCE)).not.toBeInTheDocument();
+      expect(screen.queryByText(UNANSWERABLE_GUIDANCE)).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Open terminal' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Allow' }),
+      ).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+      expect(onDismiss).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('keeps the terminal guidance for an open session', async () => {
+    // An explicitly open session is the timed-out-hook case the terminal
+    // guidance was written for.
+    renderCard({
+      providerHasTerminal: true,
+      sessionClosed: false,
+      failWith: NOT_PENDING,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+
+    expect(await screen.findByText(TERMINAL_GUIDANCE)).toBeInTheDocument();
+    expect(
+      screen.queryByText(SESSION_CLOSED_GUIDANCE),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Open terminal' }),
     ).toBeInTheDocument();

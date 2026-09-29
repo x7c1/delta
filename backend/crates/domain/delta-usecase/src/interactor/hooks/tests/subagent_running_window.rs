@@ -759,43 +759,11 @@ async fn a_task_notification_missing_tool_use_id_finishes_via_the_task_id_fallba
 
 #[tokio::test]
 async fn a_task_notification_missing_both_ids_completes_the_only_running_subagent_and_warns() {
-    use std::io::Write;
-    use std::sync::{Arc, Mutex};
-    use tracing_subscriber::fmt;
-
-    // Capture warn-level tracing output into a buffer so the test can assert
-    // the warn fires when a `<task-notification>` body carries neither
-    // correlation element — the keyless shape stays visible in the logs even
-    // when it is matched, because it signals an upstream format change. The
-    // subscriber is installed only for the duration of this test (via the
-    // `_guard` returned by `set_default`), so it does not leak across tests —
-    // the guard is held until the test ends.
-    #[derive(Clone, Default)]
-    struct BufferWriter(Arc<Mutex<Vec<u8>>>);
-    impl Write for BufferWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    impl<'a> fmt::MakeWriter<'a> for BufferWriter {
-        type Writer = BufferWriter;
-        fn make_writer(&'a self) -> Self::Writer {
-            self.clone()
-        }
-    }
-
-    let buffer = BufferWriter::default();
-    let subscriber = fmt()
-        .with_writer(buffer.clone())
-        .with_max_level(tracing::Level::WARN)
-        .without_time()
-        .with_ansi(false)
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    // Capture warn-level tracing output so the test can assert the warn fires
+    // when a `<task-notification>` body carries neither correlation element —
+    // the keyless shape stays visible in the logs even when it is matched,
+    // because it signals an upstream format change.
+    let (logs, _guard) = capture_warnings();
 
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
@@ -841,7 +809,7 @@ async fn a_task_notification_missing_both_ids_completes_the_only_running_subagen
         "the running entry is cleared — the notification can only be its completion"
     );
 
-    let captured = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+    let captured = logs.text();
     // The keyless body now has two possible warns — matched, and not matched
     // (zero or several outstanding) — so the assertion names the matched one
     // and the launch it resolved to; a warn that merely mentions

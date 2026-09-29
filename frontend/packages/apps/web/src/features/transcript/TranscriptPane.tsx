@@ -911,6 +911,9 @@ export function TranscriptPane({
       notice={permission}
       providerHasTerminal={providerHasTerminal}
       providerHasAllowForSession={providerHasAllowForSession}
+      // `readOnly` alone also covers a session that is still starting, which
+      // was never closed; see `spawning`.
+      sessionClosed={readOnly && !spawning}
       onOpenTerminal={() => setTerminalOpen(true)}
       onDismiss={() => dismissPermission(activeThread.session_id)}
     />

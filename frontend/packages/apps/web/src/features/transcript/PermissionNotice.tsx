@@ -180,6 +180,14 @@ export interface PermissionNoticeCardProps {
    * see {@link HAS_ALLOW_FOR_SESSION_WHEN_UNKNOWN}.
    */
   providerHasAllowForSession?: boolean;
+  /**
+   * Whether the session is closed. A closed session's agent is gone and its
+   * pane with it, so a `409` there means the close settled the request, not
+   * that the terminal prompt took it over — the fallback must not point at a
+   * terminal that no longer exists. Resolved by the pane that hosts the card,
+   * which already knows the focused session's state; `false` when omitted.
+   */
+  sessionClosed?: boolean;
   /** Open the embedded terminal (the fallback's "answer there" affordance). */
   onOpenTerminal: () => void;
   /** Dismiss the notice without deciding. */
@@ -257,6 +265,17 @@ const HAS_ALLOW_FOR_SESSION_WHEN_UNKNOWN = false;
  *   connection died with the dialog open. Say so, and offer only Dismiss —
  *   an "Open terminal" button would open a pane this provider does not have.
  *
+ * Both of those assume the session is still open. A closed one gets neither:
+ * closing it denied every request still pending, and whatever terminal it had
+ * went with it, so the card says the session was closed and offers only
+ * Dismiss, whichever provider it runs. The `permission_resolved` that arrives
+ * with the close normally removes the card before anyone clicks. A reconnect
+ * the tab notices removes it too: the resync drops the permission notice and
+ * re-seeds it from the server, which has nothing pending for a closed session.
+ * So this branch is what a tab sees when it missed that `permission_resolved`
+ * without noticing the gap, yet has since learned the session closed from a
+ * session-list refetch.
+ *
  * When the request would change files and the provider said which, the card
  * shows those paths and their change kinds instead of a truncated blob of
  * request params, with the diff behind an expand control (see
@@ -287,6 +306,7 @@ export function PermissionNoticeCard({
   notice,
   providerHasTerminal,
   providerHasAllowForSession,
+  sessionClosed = false,
   onOpenTerminal,
   onDismiss,
 }: PermissionNoticeCardProps) {
@@ -383,7 +403,21 @@ export function PermissionNoticeCard({
         </p>
       )}
       {fallback ? (
-        canAnswerInTerminal ? (
+        sessionClosed ? (
+          <>
+            <p
+              className="text-fg-muted"
+              data-testid="permission-notice-session-closed"
+            >
+              This request can no longer be answered — the session was closed.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={onDismiss}>
+                Dismiss
+              </Button>
+            </div>
+          </>
+        ) : canAnswerInTerminal ? (
           <>
             <p className="text-fg-muted">Answer the prompt in the terminal.</p>
             <div className="flex flex-wrap items-center gap-2">
