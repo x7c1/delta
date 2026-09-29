@@ -42,7 +42,8 @@ async fn raise_dialog(ix: &TestInteractor, session: &SessionId, transcript: &str
 
 /// `sess-1` open and bound, with a send dispatched but not yet echoed — so the
 /// teardown's `TurnInput::Close` has a row to cancel — and a dialog up.
-async fn session_with_an_unechoed_send_and_a_dialog() -> (TestInteractor, SessionId, i64) {
+/// Returns the interactor, the session, the send id and the dialog's request id.
+async fn session_with_an_unechoed_send_and_a_dialog() -> (TestInteractor, SessionId, i64, i64) {
     let ix = interactor();
     let session = SessionId::from("sess-1");
     ix.seed_session().await;
@@ -54,7 +55,18 @@ async fn session_with_an_unechoed_send_and_a_dialog() -> (TestInteractor, Sessio
         "the close has an outstanding send to cancel"
     );
     let request_id = raise_dialog(&ix, &session, SEED_TRANSCRIPT_PATH).await;
-    (ix, session, request_id)
+    (ix, session, send.id, request_id)
+}
+
+/// The turn must still await `send`'s echo right before the close, so the
+/// injected `cancel_send` failure is the write the `TurnInput::Close` performs.
+async fn assert_still_awaiting_echo(ix: &TestInteractor, session: &SessionId, send_id: i64) {
+    let turn = ix.live_state_for(session).await.turn;
+    assert_eq!(
+        turn,
+        TurnState::AwaitingEcho { send_id },
+        "the close must cancel the unechoed send, but the turn was {turn:?}"
+    );
 }
 
 fn assert_denied(ix: &TestInteractor, request_id: i64) {
@@ -69,8 +81,9 @@ fn assert_denied(ix: &TestInteractor, request_id: i64) {
 #[tokio::test]
 async fn a_close_whose_turn_close_fails_still_announces_the_settled_dialog() {
     let (logs, _guard) = capture_warnings();
-    let (ix, session, request_id) = session_with_an_unechoed_send_and_a_dialog().await;
+    let (ix, session, send_id, request_id) = session_with_an_unechoed_send_and_a_dialog().await;
     ix.store().inner.lock().unwrap().fail_cancel_send = true;
+    assert_still_awaiting_echo(&ix, &session, send_id).await;
 
     let events = ix
         .close_session(&session)
@@ -189,6 +202,7 @@ async fn a_vanished_pane_whose_turn_close_fails_still_announces_the_settled_dial
     );
     let request_id = raise_dialog(&ix, &session, TRANSCRIPT).await;
     ix.store().inner.lock().unwrap().fail_cancel_send = true;
+    assert_still_awaiting_echo(&ix, &session, send.id).await;
 
     ix.tmux_fake().vanish_session("delta-1");
     let events = ix
