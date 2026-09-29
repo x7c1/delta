@@ -32,7 +32,7 @@ import type {
 } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
-import { useNavStore } from '../../store/navStore';
+import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { NavigatorPane } from './NavigatorPane';
 
@@ -169,9 +169,10 @@ describe('NavigatorPane rate-limit meters', () => {
       // Live by default: the restored-from-localStorage cases opt in below.
       restoredRateLimitsObservedAt: {},
     });
-    // The footer shows the FOCUSED session's provider's limits, so every case
-    // here focuses a session — an unfocused navigator speaks for no account and
-    // deliberately shows no rows (asserted in its own case below).
+    // In a thread the footer shows the FOCUSED session's provider's limits, so
+    // every case here focuses a session by default — an unfocused navigator
+    // speaks for no account and deliberately shows no rows (asserted in its own
+    // case below). The new-session cases override this with NEW_SESSION_FOCUS.
     useNavStore.setState({ focusedSessionId: SESSION_ID, activeThreadId: null });
   });
   afterEach(() => {
@@ -549,6 +550,121 @@ describe('NavigatorPane rate-limit meters', () => {
     renderPane();
 
     expect(screen.queryByTestId('rate-limits')).not.toBeInTheDocument();
+  });
+
+  it('leaves a focused thread\'s single group without a provider heading', () => {
+    // The user already knows which provider the session runs on, so the
+    // heading would be redundant: the group renders its rows alone, still
+    // inside its provider container.
+    const items = [makeItem(SESSION_ID, 1, 'claude')];
+    useLiveStore.setState({
+      rateLimits: {
+        claude: [window(FIVE_HOURS, 37, null)],
+        codex: [window(SEVEN_DAYS, 8, null)],
+      },
+    });
+
+    renderPane(items);
+
+    const claude = screen.getByTestId('rate-limits-claude');
+    expect(claude).not.toHaveTextContent('Claude Code');
+    expect(within(claude).getByTestId('rate-limit-5h-pct')).toHaveTextContent(
+      '37%',
+    );
+    expect(screen.queryByTestId('rate-limits-codex')).not.toBeInTheDocument();
+  });
+
+  it('lists every reporting provider on the new-session screen, in provider order', () => {
+    // The user is about to choose a provider, so every account's budget is
+    // shown. Codex is inserted into the map FIRST: the groups must still read
+    // Claude then Codex, never the order the snapshots happened to arrive in.
+    useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    useLiveStore.setState({
+      rateLimits: {
+        codex: [window(FIVE_HOURS, 61, null)],
+        claude: [window(FIVE_HOURS, 37, null), window(SEVEN_DAYS, 8, null)],
+      },
+    });
+
+    renderPane();
+
+    const block = screen.getByTestId('rate-limits');
+    const groups = within(block).getAllByTestId(/^rate-limits-/);
+    expect(groups.map((group) => group.dataset.testid)).toEqual([
+      'rate-limits-claude',
+      'rate-limits-codex',
+    ]);
+    const [claude, codex] = groups;
+    expect(claude).toHaveTextContent('Claude Code');
+    expect(codex).toHaveTextContent('Codex');
+    // Both accounts report a 5h window; the group container tells them apart.
+    expect(within(claude).getByTestId('rate-limit-5h-pct')).toHaveTextContent(
+      '37%',
+    );
+    expect(within(claude).getByTestId('rate-limit-7d-pct')).toHaveTextContent(
+      '8%',
+    );
+    expect(within(codex).getByTestId('rate-limit-5h-pct')).toHaveTextContent(
+      '61%',
+    );
+    expect(within(codex).queryByTestId('rate-limit-7d')).not.toBeInTheDocument();
+  });
+
+  it('lists no group on the new-session screen for a provider that has reported nothing', () => {
+    // No entry (never used) and an empty list (reports none) both mean no
+    // group — the same "no empty bars" rule a single provider's rows follow.
+    useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    useLiveStore.setState({
+      rateLimits: { claude: [window(FIVE_HOURS, 37, null)] },
+    });
+
+    const { unmount } = renderPane();
+    expect(screen.getByTestId('rate-limits-claude')).toBeInTheDocument();
+    expect(screen.queryByTestId('rate-limits-codex')).not.toBeInTheDocument();
+    unmount();
+
+    useLiveStore.setState({
+      rateLimits: { claude: [window(FIVE_HOURS, 37, null)], codex: [] },
+    });
+    renderPane();
+    expect(screen.getByTestId('rate-limits-claude')).toBeInTheDocument();
+    expect(screen.queryByTestId('rate-limits-codex')).not.toBeInTheDocument();
+  });
+
+  it('renders no footer meters on the new-session screen when no provider has reported', () => {
+    useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    useLiveStore.setState({ rateLimits: { claude: [], codex: [] } });
+
+    renderPane();
+
+    expect(screen.queryByTestId('rate-limits')).not.toBeInTheDocument();
+  });
+
+  it('de-emphasizes only the restored group on the new-session screen', () => {
+    // "Codex is a restored guess, Claude is live": each group carries its own
+    // observation, so the dimming lands on the Codex rows alone.
+    const observedAt = Date.now() - 9 * 60 * 60 * 1000;
+    useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    useLiveStore.setState({
+      rateLimits: {
+        claude: [window(FIVE_HOURS, 37, null)],
+        codex: [window(FIVE_HOURS, 61, null)],
+      },
+      restoredRateLimitsObservedAt: { codex: observedAt },
+    });
+
+    renderPane();
+
+    const claudeRow = within(
+      screen.getByTestId('rate-limits-claude'),
+    ).getByTestId('rate-limit-5h');
+    const codexRow = within(
+      screen.getByTestId('rate-limits-codex'),
+    ).getByTestId('rate-limit-5h');
+    expect(claudeRow).not.toHaveAttribute('data-stale');
+    expect(claudeRow.className).not.toContain('opacity-');
+    expect(codexRow).toHaveAttribute('data-stale', 'true');
+    expect(codexRow.className).toContain('opacity-60');
   });
 });
 
