@@ -19,6 +19,12 @@ jobs:
       contents: write
       pull-requests: write
 
+    # Read by the bundles job.
+    outputs:
+      changed: ${{ steps.version-check.outputs.changed }}
+      version: ${{ steps.version-check.outputs.version }}
+      release_id: ${{ steps.gh-release.outputs.id }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -85,6 +91,7 @@ jobs:
 
       - name: Create GitHub release
         if: steps.version-check.outputs.changed == 'true'
+        id: gh-release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version-check.outputs.version }}
@@ -97,3 +104,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEW_VERSION: ${{ steps.version-check.outputs.version }}
         run: .github/scripts/update-release-pr-links.sh "$NEW_VERSION"
+
+  # Runs after the Release exists, so a bundle failure never blocks the tag:
+  # it shows up as a failed run of this job to re-run (docs/guides/release.md,
+  # "Desktop bundles").
+  bundles:
+    needs: release
+    if: ${{ needs.release.outputs.changed == 'true' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/bundle.yml
+    with:
+      ref: v${{ needs.release.outputs.version }}
+      release_id: ${{ needs.release.outputs.release_id }}

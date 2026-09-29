@@ -10,7 +10,8 @@ Delta uses a "merge the PR" release model. A bot opens and updates one
 rolling release PR against `main`; merging it triggers the `Release`
 workflow, which creates the matching `vX.Y.Z` tag and a GitHub Release. The
 Release body is a summary written by hand in the release PR; the generated
-per-commit changelog stays on the PR.
+per-commit changelog stays on the PR. Once the Release exists, the desktop
+bundles are built and attached to it (see [Desktop bundles](#desktop-bundles)).
 
 ## Normal flow (patch bump)
 
@@ -111,6 +112,39 @@ is fixed for the lifetime of the PR. Promoting the title from patch to
 minor or major keeps reusing the same branch, so the PR's head pointer
 stays in sync with every force-push.
 
+## Desktop bundles
+
+Every Release carries unsigned bundles of the desktop shell
+(`backend/crates/apps/delta-app`), built by `.github/workflows/bundle.yml`:
+
+| File | Platform |
+|---|---|
+| `Delta_<version>_aarch64.dmg` | macOS, Apple silicon |
+| `Delta_<version>_x64.dmg` | macOS, Intel |
+| `Delta_<version>_aarch64.app.tar.gz` | macOS, Apple silicon (the `.app` the `.dmg` holds, as a tarball) |
+| `Delta_<version>_x64.app.tar.gz` | macOS, Intel (the `.app` the `.dmg` holds, as a tarball) |
+| `Delta_<version>_amd64.deb` | Linux (Debian/Ubuntu), x86_64 |
+| `Delta_<version>_amd64.AppImage` | Linux, x86_64 |
+
+The version in each file name is the workspace version Tauri reads from the
+shell crate, so it matches the tag by construction. The bundles are neither
+signed nor notarized.
+
+- **Order.** The `bundles` job of the `Release` workflow runs only after the
+  `release` job has created the tag and the Release, and uploads to that
+  Release. A bundle failure therefore never blocks the tag or the Release; it
+  shows up as a failed `bundles` job.
+- **Rerunning.** Open the failed `Release` run in the Actions tab and use
+  "Re-run failed jobs": only the failed matrix entries of `bundles` run again,
+  against the same tag and Release. To rebuild a tag from scratch without a
+  Release upload, run the `Bundle` workflow by hand (`workflow_dispatch`) with
+  the tag as `ref`; it uploads workflow artifacts instead.
+- **Pull requests.** A pull request that touches the shell or its build
+  inputs (the `paths` filter in `bundle.yml`) runs the same builds and uploads
+  each platform's bundles as a workflow artifact (`delta-macos-aarch64`,
+  `delta-macos-x86_64`, `delta-linux-x86_64`), so a broken bundle is caught
+  before a release depends on it and reviewers can download and try it.
+
 ## Workflows involved
 
 - `.github/workflows/create-release-pr.yml` — opens or updates the
@@ -124,7 +158,12 @@ stays in sync with every force-push.
 - `.github/workflows/release.yml` — when CI completes successfully on
   `main`, checks whether the workspace version changed; if it did, reads the
   summary from the merged release PR and then creates the matching tag and
-  GitHub Release.
+  GitHub Release; its `bundles` job then calls `bundle.yml` to attach the
+  desktop bundles.
+- `.github/workflows/bundle.yml` — builds the desktop bundles on macOS
+  (Apple silicon and Intel) and Linux; attaches them to a Release when called
+  from `release.yml`, and uploads them as workflow artifacts on pull requests
+  and manual runs. See [Desktop bundles](#desktop-bundles).
 
 For the underlying setup (the `RELEASE_PAT` secret, why a user PAT is
 required instead of `GITHUB_TOKEN`), see "Release automation setup" below.
