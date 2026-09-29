@@ -20,6 +20,7 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { createHandlers } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
+import type { LaunchOption } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { ThemeProvider } from '../../hooks/themeContext';
 import {
@@ -177,9 +178,9 @@ describe('SettingsView', () => {
     // beforeEach), so only the Claude fixtures are listed — the user's two flags
     // plus the shipped `--model opus` — and the Codex ones (`model`, `config`)
     // are filtered out.
-    expect(within(list).getByText('--permission-mode')).toBeInTheDocument();
+    expect(within(list).getAllByText('--permission-mode')[0]).toBeInTheDocument();
     expect(within(list).getByText('--plugin-dir')).toBeInTheDocument();
-    expect(within(list).getByText('--model')).toBeInTheDocument();
+    expect(within(list).getAllByText('--model')[0]).toBeInTheDocument();
     expect(within(list).queryByText('model')).toBeNull();
     expect(within(list).queryByText('config')).toBeNull();
   });
@@ -191,7 +192,7 @@ describe('SettingsView', () => {
     renderSettings();
     const list = await findList();
     expect(providerRadio('codex')).toBeChecked();
-    expect(within(list).getByText('model')).toBeInTheDocument();
+    expect(within(list).getAllByText('model')[0]).toBeInTheDocument();
     expect(within(list).queryByText('--permission-mode')).toBeNull();
   });
 
@@ -210,7 +211,7 @@ describe('SettingsView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add option' }));
 
     await waitFor(() =>
-      expect(within(list).getByText('--append-system-prompt')).toBeInTheDocument(),
+      expect(within(list).getAllByText('--append-system-prompt')[0]).toBeInTheDocument(),
     );
   });
 
@@ -229,14 +230,14 @@ describe('SettingsView', () => {
 
     // Only the Codex fixture (`model gpt-5`) remains listed.
     const codexList = await findList();
-    expect(within(codexList).getByText('model')).toBeInTheDocument();
+    expect(within(codexList).getAllByText('model')[0]).toBeInTheDocument();
     expect(within(codexList).queryByText('--permission-mode')).toBeNull();
     expect(within(codexList).queryByText('--plugin-dir')).toBeNull();
 
     // And back: the Claude options return.
     selectProvider('claude');
     const claudeList = await findList();
-    expect(within(claudeList).getByText('--permission-mode')).toBeInTheDocument();
+    expect(within(claudeList).getAllByText('--permission-mode')[0]).toBeInTheDocument();
     expect(within(claudeList).queryByText('model')).toBeNull();
   });
 
@@ -255,6 +256,9 @@ describe('SettingsView', () => {
               default_enabled: true,
               created_at: '2026-01-01T00:00:00Z',
               provider: 'claude',
+              builtin: false,
+              dangerous: false,
+              choice_group: null,
             },
           ],
         }),
@@ -292,7 +296,7 @@ describe('SettingsView', () => {
     // The new option appears in the still-Codex-scoped list, proving the chosen
     // provider was sent and round-tripped.
     const list = await findList();
-    await within(list).findByText('reasoning-effort');
+    await within(list).findAllByText('reasoning-effort');
     expect(within(list).queryByText('--permission-mode')).toBeNull();
 
     // The selector stays on Codex while the other fields are cleared.
@@ -359,18 +363,44 @@ describe('SettingsView', () => {
   it('toggles a launch option default_enabled flag and persists it', async () => {
     renderSettings();
     const list = await findList();
-    // `--permission-mode` (id 2) starts off; `--plugin-dir` (id 1) starts on.
-    const permissionModeToggle = within(list).getByRole('checkbox', {
-      name: 'Enable launch option --permission-mode by default',
-    });
+    // `--plugin-dir` (id 1) is repeatable, so its default is an independent
+    // checkbox; it starts on.
     const pluginDirToggle = within(list).getByRole('checkbox', {
       name: 'Enable launch option --plugin-dir by default',
     });
-    expect(permissionModeToggle).not.toBeChecked();
     expect(pluginDirToggle).toBeChecked();
 
-    // Toggling it on round-trips through the mock store (the list refetches).
-    fireEvent.click(permissionModeToggle);
+    // Toggling it off round-trips through the mock store (the list refetches).
+    fireEvent.click(pluginDirToggle);
+    await waitFor(() =>
+      expect(
+        within(list).getByRole('checkbox', {
+          name: 'Enable launch option --plugin-dir by default',
+        }),
+      ).not.toBeChecked(),
+    );
+  });
+
+  it('lists a group holding a single row like an ungrouped row', async () => {
+    renderSettings();
+    const list = await findList();
+    // `--permission-mode` (id 2) is single-valued, but no sibling is
+    // registered, so there is no exclusivity to show: the row keeps the plain
+    // default checkbox, with no radio group and no "No default" option.
+    expect(
+      within(list).queryByTestId('launch-option-group---permission-mode'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(list).queryByTestId('launch-option-group---permission-mode-none'),
+    ).not.toBeInTheDocument();
+    expect(within(list).queryByRole('radiogroup')).not.toBeInTheDocument();
+    expect(within(list).getByTestId('launch-option-row-2')).toBeInTheDocument();
+    const toggle = within(list).getByRole('checkbox', {
+      name: 'Enable launch option --permission-mode by default',
+    });
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
     await waitFor(() =>
       expect(
         within(list).getByRole('checkbox', {
@@ -380,10 +410,93 @@ describe('SettingsView', () => {
     );
   });
 
+  it('switches a group default by clearing the old one, then setting the new one', async () => {
+    const rows: LaunchOption[] = [
+      {
+        id: 20,
+        label: 'Fable',
+        name: '--model',
+        value: 'fable',
+        default_enabled: true,
+        created_at: '2026-01-05T00:00:00Z',
+        provider: 'claude',
+        builtin: true,
+        dangerous: false,
+        choice_group: '--model',
+      },
+      {
+        id: 21,
+        label: null,
+        name: '--model',
+        value: 'e',
+        default_enabled: false,
+        created_at: '2026-01-05T00:00:00Z',
+        provider: 'claude',
+        builtin: false,
+        dangerous: false,
+        choice_group: '--model',
+      },
+    ];
+    const patches: Array<[number, unknown]> = [];
+    server.use(
+      http.get('*/api/launch-options', () =>
+        HttpResponse.json({ launch_options: rows }),
+      ),
+      http.patch('*/api/launch-options/:id', async ({ params, request }) => {
+        const id = Number(params.id);
+        const body = (await request.json()) as { default_enabled: boolean };
+        patches.push([id, body]);
+        const row = rows.find((each) => each.id === id)!;
+        row.default_enabled = body.default_enabled;
+        return HttpResponse.json(row);
+      }),
+    );
+    renderSettings();
+    const list = await findList();
+
+    // Two rows share the group, so they are listed together under one default
+    // radio group headed by the key.
+    const group = within(list).getByTestId('launch-option-group---model');
+    expect(within(group).getByRole('radiogroup', { name: '--model' }))
+      .toBeInTheDocument();
+    expect(within(group).getByTestId('launch-option-row-20')).toBeInTheDocument();
+    expect(within(group).getByTestId('launch-option-row-21')).toBeInTheDocument();
+
+    const custom = within(list).getByRole('radio', {
+      name: 'Enable launch option --model e by default',
+    });
+    expect(
+      within(list).getByRole('radio', {
+        name: 'Enable launch option --model fable by default',
+      }),
+    ).toBeChecked();
+
+    fireEvent.click(custom);
+    await waitFor(() => {
+      expect(patches).toEqual([
+        [20, { default_enabled: false }],
+        [21, { default_enabled: true }],
+      ]);
+    });
+    await waitFor(() =>
+      expect(
+        within(list).getByRole('radio', {
+          name: 'Enable launch option --model e by default',
+        }),
+      ).toBeChecked(),
+    );
+
+    // "No default" is a single clear.
+    fireEvent.click(within(list).getByTestId('launch-option-group---model-none'));
+    await waitFor(() => {
+      expect(patches.slice(2)).toEqual([[21, { default_enabled: false }]]);
+    });
+  });
+
   it('deletes a launch option', async () => {
     renderSettings();
     const list = await findList();
-    const target = within(list).getByText('--permission-mode');
+    const target = within(list).getAllByText('--permission-mode')[0];
 
     fireEvent.click(
       within(list).getByRole('button', {
@@ -418,9 +531,11 @@ describe('SettingsView', () => {
     ).toBeInTheDocument();
   });
 
-  it('keeps the default_enabled checkbox operable on a built-in row', async () => {
+  it('keeps the default_enabled control operable on a built-in row', async () => {
     // Ticking a shipped option is the point of shipping it, so the one control
-    // a built-in row keeps must actually round-trip.
+    // a built-in row keeps must actually round-trip. The shipped `--model` row
+    // is alone in the `--model` choice group, so that control is the plain
+    // default checkbox.
     renderSettings();
     const list = await findList();
     const toggle = within(list).getByRole('checkbox', {
@@ -530,6 +645,7 @@ describe('SettingsView', () => {
             provider: 'codex',
             builtin: false,
             dangerous: false,
+            choice_group: null,
           },
           { status: 201 },
         );
@@ -571,6 +687,7 @@ describe('SettingsView', () => {
               provider: 'claude',
               builtin: false,
               dangerous: true,
+              choice_group: null,
             },
             {
               id: 9,
@@ -582,6 +699,7 @@ describe('SettingsView', () => {
               provider: 'claude',
               builtin: false,
               dangerous: true,
+              choice_group: null,
             },
             {
               id: 8,
@@ -593,6 +711,7 @@ describe('SettingsView', () => {
               provider: 'claude',
               builtin: false,
               dangerous: false,
+              choice_group: null,
             },
           ],
         }),
@@ -662,6 +781,7 @@ describe('SettingsView', () => {
           provider: 'claude',
           builtin: false,
           dangerous: true,
+          choice_group: null,
         });
       }),
     );

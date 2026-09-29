@@ -176,7 +176,7 @@ where
         // resolved `(name, value?)` pair renders as its flag followed by its
         // argument — a valueless flag contributes only the name.
         let launch_option_args: Vec<String> = self
-            .resolve_launch_options(&launch_option_ids)
+            .resolve_launch_options(AgentProvider::Claude, &launch_option_ids)
             .await?
             .iter()
             .flat_map(LaunchOptionSpec::to_argv)

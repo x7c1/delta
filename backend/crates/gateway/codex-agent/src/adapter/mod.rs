@@ -126,10 +126,10 @@ use delta_usecase::{
     AgentFileChange, AgentPermissionRequest, AgentProvider, AgentSessionHandle, CommsDirection,
     CommsEntry, CommsFrameKind, CommsLogSink, ContentSourceRequest, ContextInjectionCapability,
     Error as UsecaseError, EventCapability, ForkCapability, InterruptCapability, LaunchCapability,
-    LaunchOptionSpec, LaunchRequest, PermissionCapability, PermissionDecision, PtyHandle,
-    Result as UsecaseResult, ResumeCapability, ResumeRequest, SendReceipt, SendRequest,
-    SessionEndReason, SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability,
-    TerminalCapability, TranscriptCapability,
+    LaunchOptionCardinality, LaunchOptionSpec, LaunchRequest, PermissionCapability,
+    PermissionDecision, PtyHandle, Result as UsecaseResult, ResumeCapability, ResumeRequest,
+    SendReceipt, SendRequest, SessionEndReason, SessionIdentityCapability,
+    SessionScopedAllowCapability, SteerCapability, TerminalCapability, TranscriptCapability,
 };
 
 use crate::file_change_items::FileChangeItems;
@@ -174,6 +174,8 @@ pub const CODEX_CAPABILITIES: AgentCapabilities = AgentCapabilities {
 mod config_merge;
 mod launch_option_catalog;
 pub use launch_option_catalog::CODEX_LAUNCH_OPTION_CATALOG;
+mod launch_option_cardinality;
+pub use launch_option_cardinality::launch_option_cardinality;
 mod launch_option_danger;
 pub use launch_option_danger::is_dangerous_launch_option;
 mod worktree_git_grant;
@@ -549,7 +551,10 @@ impl CodexAppServerAdapter {
 ///   one setting but an object holding many: two `config` options are
 ///   **deep-merged** (see [`config_merge::merge_config`]), and only a genuine
 ///   disagreement between them — two values for one setting — is rejected, with
-///   every such disagreement reported together.
+///   every such disagreement reported together. Which names are single-valued
+///   is [`launch_option_cardinality`], the same classification the domain
+///   enforces before a launch reaches this builder; the check stays here too so
+///   the builder is correct on its own (the canary lane drives it directly).
 ///
 /// `worktree_repo_root`, when the session runs in a Delta-created worktree,
 /// contributes the sandbox grant for that worktree's real git directory (see
@@ -579,6 +584,8 @@ pub fn thread_start_params(
                 option.name
             )));
         }
+        // `config` is the one name [`launch_option_cardinality`] classifies as
+        // repeatable; every other name is a single-valued field.
         if option.name == CONFIG_FIELD {
             config_selections.push(ConfigSelection {
                 raw: option.value.clone(),
@@ -586,7 +593,9 @@ pub fn thread_start_params(
             });
             continue;
         }
-        if params.contains_key(&option.name) {
+        if launch_option_cardinality(&option.name) == LaunchOptionCardinality::Single
+            && params.contains_key(&option.name)
+        {
             return Err(UsecaseError::LaunchOptionRejected(format!(
                 "`{}` is selected more than once: a thread/start field can only \
                  be set once",

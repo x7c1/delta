@@ -26,11 +26,11 @@ pub use agent::{
     AgentEventStream, AgentFileChange, AgentFileChangeDetail, AgentFileChangeKind,
     AgentPermissionRequest, AgentProvider, AgentSessionHandle, AgentTokenUsage,
     ContentSourceRequest, ContextInjectionCapability, EventCapability, ForkCapability,
-    InterruptCapability, LaunchCapability, LaunchOptionDangerPolicy, LaunchOptionSpec,
-    LaunchRequest, NoDangerousLaunchOptions, PermissionCapability, PtyHandle, ResumeCapability,
-    ResumeRequest, SendReceipt, SendRequest, SessionEndReason, SessionIdentityCapability,
-    SessionScopedAllowCapability, SteerCapability, TerminalCapability, TranscriptCapability,
-    TurnStatus,
+    InterruptCapability, LaunchCapability, LaunchOptionCardinality, LaunchOptionSpec,
+    LaunchOptionVocabulary, LaunchRequest, NullLaunchOptionVocabulary, PermissionCapability,
+    PtyHandle, ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionEndReason,
+    SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability, TerminalCapability,
+    TranscriptCapability, TurnStatus,
 };
 pub use error::{Error, Result};
 pub use interactor::{

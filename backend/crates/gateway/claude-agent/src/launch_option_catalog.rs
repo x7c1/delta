@@ -26,21 +26,23 @@ use delta_usecase::{AgentProvider, LaunchOptionPreset};
 /// `acceptEdits`, `bypassPermissions`, `manual`, `dontAsk` and `plan`, but
 /// listing values nobody selects would only make the picker longer.
 ///
-/// The three `--model` entries are **mutually exclusive**, and nothing enforces
-/// that: the picker is a plain multi-select, so a user can tick two, and this
-/// adapter's `launch` then puts `--model` into argv twice and leaves the outcome
-/// to the CLI. Shipping one row per alias is still the right
-/// shape — a single row could only name one model — but it is worth knowing that
-/// the exclusivity is the user's to respect, the same way it already is for two
-/// hand-registered rows naming one flag.
+/// The three `--model` entries are **mutually exclusive** values of one
+/// setting. Shipping one row per alias is still the right shape — a single row
+/// could only name one model — and the exclusivity is carried by the flag, not
+/// by the catalog: [`launch_option_cardinality`] classifies `--model` as
+/// single-valued, so these rows and any `--model` row the user registers form
+/// one choice group. The picker renders it as a radio group, the registry holds
+/// at most one default in it, and a launch selecting two of its rows is refused
+/// before anything starts rather than putting `--model` into argv twice.
 ///
 /// No entry may name a flag Delta sets itself — `--settings`, `--session-id`,
 /// `--resume`, the consts the parent module declares beside the launch path. The
-/// guard test below pins that, because unlike Codex the Claude launch has no
-/// rejection path at all: such an entry would ride into argv beside Delta's own
+/// guard test below pins that, because unlike Codex the Claude adapter has no
+/// rejection path of its own: such an entry would ride into argv beside Delta's own
 /// copy and break every session started with it, silently.
 ///
 /// [`CLAUDE_CAPABILITIES`]: super::CLAUDE_CAPABILITIES
+/// [`launch_option_cardinality`]: super::launch_option_cardinality
 pub const CLAUDE_LAUNCH_OPTION_CATALOG: &[LaunchOptionPreset] = &[
     LaunchOptionPreset {
         key: "claude:model-opus",

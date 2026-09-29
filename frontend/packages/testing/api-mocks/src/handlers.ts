@@ -52,6 +52,7 @@ import {
   workdirListing,
   type MockStore,
 } from './fixtures';
+import { launchOptionChoiceGroup } from './launchOptionChoiceGroup';
 import { isDangerousLaunchOption } from './launchOptionDanger';
 
 /** Discriminate a `POST /api/sends` body: new-session spawn vs thread target. */
@@ -69,6 +70,43 @@ function dangerousDefaultRejected(name: string) {
   return HttpResponse.json(
     {
       error: `\`${name}\` turns off the agent's own safety mechanism, so it cannot be enabled by default`,
+      code: 'launch_option_rejected',
+    },
+    { status: 400 },
+  );
+}
+
+/**
+ * The row of `option`'s choice group, other than `option` itself, that already
+ * holds the group's default — the mock's copy of the server's one-default rule.
+ */
+function choiceGroupDefaultHolder(
+  options: LaunchOption[],
+  option: Pick<LaunchOption, 'id' | 'provider' | 'choice_group'>,
+): LaunchOption | undefined {
+  if (option.choice_group === null) {
+    return undefined;
+  }
+  return options.find(
+    (other) =>
+      other.id !== option.id &&
+      other.provider === option.provider &&
+      other.choice_group === option.choice_group &&
+      other.default_enabled,
+  );
+}
+
+/**
+ * The refusal both launch-option write paths answer when a second row of one
+ * choice group is asked to be default-enabled, naming the row that holds it.
+ */
+function secondDefaultRejected(group: string, holder: LaunchOption) {
+  const described =
+    holder.label ??
+    (holder.value === null ? holder.name : `${holder.name} ${holder.value}`);
+  return HttpResponse.json(
+    {
+      error: `\`${group}\` takes a single value and "${described}" is already enabled by default. Clear that default first, or leave this one off by default`,
       code: 'launch_option_rejected',
     },
     { status: 400 },
@@ -961,6 +999,17 @@ export function createMockApi(): MockApi {
         // it.
         return dangerousDefaultRejected(name);
       }
+      const choice_group = launchOptionChoiceGroup(provider, name);
+      if (payload.default_enabled === true && choice_group !== null) {
+        const holder = choiceGroupDefaultHolder(store.launchOptions, {
+          id: -1,
+          provider,
+          choice_group,
+        });
+        if (holder) {
+          return secondDefaultRejected(choice_group, holder);
+        }
+      }
       const option: LaunchOption = {
         id: store.nextLaunchOptionId++,
         label: trimmedLabel ? trimmedLabel : null,
@@ -973,6 +1022,7 @@ export function createMockApi(): MockApi {
         // startup reconcile writes a shipped row.
         builtin: false,
         dangerous,
+        choice_group,
       };
       store.launchOptions.push(option);
       return HttpResponse.json(option, { status: 201 });
@@ -993,6 +1043,14 @@ export function createMockApi(): MockApi {
         // The same refusal the create path gives; disabling stays allowed, so a
         // row that predates the rule can still be disarmed.
         return dangerousDefaultRejected(option.name);
+      }
+      if (payload.default_enabled === true) {
+        const holder = choiceGroupDefaultHolder(store.launchOptions, option);
+        if (holder && option.choice_group !== null) {
+          // The server never flips a sibling itself: switching a group's
+          // default is clear-then-set, so the reverse order is refused.
+          return secondDefaultRejected(option.choice_group, holder);
+        }
       }
       option.default_enabled = payload.default_enabled === true;
       return HttpResponse.json(option);

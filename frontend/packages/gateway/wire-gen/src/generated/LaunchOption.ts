@@ -10,8 +10,9 @@ import type { AgentProvider } from "./AgentProvider";
  * `default_enabled` marks it to start pre-checked in the session-start picker.
  * `provider` is the provider the option applies to; the session-start picker
  * only offers options matching the new session's provider.
- * `builtin` marks a row Delta ships rather than one the user registered, and
- * `dangerous` a row that disables the agent's own safety mechanism.
+ * `builtin` marks a row Delta ships rather than one the user registered,
+ * `dangerous` a row that disables the agent's own safety mechanism, and
+ * `choice_group` the exclusive group a row belongs to.
  */
 export type LaunchOption = { id: number, label: string | null, name: string, value: string | null, default_enabled: boolean, created_at: string, provider: AgentProvider, 
 /**
@@ -44,4 +45,29 @@ builtin: boolean,
  * and to offer the default control only as the way to clear such a stale
  * flag.
  */
-dangerous: boolean, };
+dangerous: boolean, 
+/**
+ * The exclusive choice group this row belongs to, or `null` for an
+ * independent option.
+ *
+ * Rows sharing one `choice_group` are candidate values of one setting, of
+ * which a session takes at most one — Claude's `--model` rows, for
+ * instance. Today the key is the row's `name` whenever the provider
+ * classifies that name as single-valued (Claude: every flag but a short
+ * list of repeatable ones such as `--add-dir` and `--plugin-dir`; Codex:
+ * every `thread/start` field but `config`), and `null` when the name may
+ * repeat.
+ *
+ * **Derived, never stored**, like `dangerous`: computed per response from
+ * the gateway that owns the provider's vocabulary. A client groups rows by
+ * this field and never by `name` — the field exists so the grouping rule
+ * stays on the server, which can later group differently-named rows
+ * without a client change.
+ *
+ * The server enforces what the grouping implies: a session start selecting
+ * two rows of one group, and turning `default_enabled` on for a row whose
+ * group already has a default, are both `400` `launch_option_rejected`.
+ * Rows stored before that rule may still carry two defaults in one group,
+ * so a client takes the first one in list order.
+ */
+choice_group: string | null, };

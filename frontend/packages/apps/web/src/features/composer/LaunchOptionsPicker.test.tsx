@@ -7,12 +7,20 @@ import {
   expect,
   it,
 } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { createHandlers } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
+import type { LaunchOption } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useComposerStore } from '../../store/composerStore';
 import { LaunchOptionsPicker } from './LaunchOptionsPicker';
@@ -98,7 +106,9 @@ describe('LaunchOptionsPicker', () => {
       ]);
     });
 
-    // Deselecting one leaves the rest, order preserved.
+    // Clearing one leaves the rest, order preserved. `--permission-mode` is
+    // single-valued, but its group holds one row, so it is a plain checkbox
+    // cleared by clicking it again.
     fireEvent.click(permissionMode);
     await waitFor(() => {
       expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([
@@ -203,6 +213,7 @@ describe('LaunchOptionsPicker', () => {
                 provider: 'claude',
                 builtin: false,
                 dangerous: true,
+                choice_group: null,
               },
               {
                 id: 8,
@@ -214,6 +225,7 @@ describe('LaunchOptionsPicker', () => {
                 provider: 'claude',
                 builtin: false,
                 dangerous: false,
+                choice_group: '--model',
               },
             ],
           }),
@@ -260,6 +272,181 @@ describe('LaunchOptionsPicker', () => {
 
       // Unchecking it takes the warning away again.
       fireEvent.click(dangerous);
+      await waitFor(() => {
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      });
+    });
+  });
+  describe('a choice group', () => {
+    /** A Claude launch-option row, with only what a test varies spelled out. */
+    function row(
+      id: number,
+      overrides: Partial<LaunchOption> & Pick<LaunchOption, 'name'>,
+    ): LaunchOption {
+      return {
+        id,
+        label: null,
+        value: null,
+        default_enabled: false,
+        created_at: '2026-01-05T00:00:00Z',
+        provider: 'claude',
+        builtin: false,
+        dangerous: false,
+        choice_group: null,
+        ...overrides,
+      };
+    }
+
+    /**
+     * Two `--model` rows in one group (the shipped one first, then the user's
+     * own), with an independent `--plugin-dir` row between them in list order
+     * — so the group has to gather its second row from further down — and a
+     * dangerous row alone in a group of its own.
+     */
+    function serveAModelGroup(defaults: { opus?: boolean; custom?: boolean } = {}) {
+      server.use(
+        http.get('*/api/launch-options', () =>
+          HttpResponse.json({
+            launch_options: [
+              row(10, {
+                label: 'Opus',
+                name: '--model',
+                value: 'opus',
+                builtin: true,
+                choice_group: '--model',
+                default_enabled: defaults.opus ?? false,
+              }),
+              row(12, { name: '--plugin-dir', value: '/p' }),
+              row(11, {
+                name: '--model',
+                value: 'e',
+                choice_group: '--model',
+                default_enabled: defaults.custom ?? false,
+              }),
+              row(13, {
+                name: '--permission-mode',
+                value: 'bypassPermissions',
+                dangerous: true,
+                choice_group: '--permission-mode',
+              }),
+            ],
+          }),
+        ),
+      );
+    }
+
+    it('renders as a radio group headed by its key with an "Agent default" option', async () => {
+      serveAModelGroup();
+      renderPicker();
+
+      const group = await screen.findByTestId('launch-option-group---model');
+      expect(group).toHaveAttribute('role', 'radiogroup');
+      expect(screen.getByRole('radiogroup', { name: '--model' })).toBe(group);
+      const none = within(group).getByTestId('launch-option-group---model-none');
+      expect(none).toHaveAttribute('type', 'radio');
+      expect(within(group).getByText('Agent default')).toBeInTheDocument();
+      // Nothing is selected, so "Agent default" is the checked choice.
+      expect(none).toBeChecked();
+      // Both `--model` rows are radios inside the group, in list order.
+      const radios = within(group).getAllByRole('radio');
+      expect(radios.map((radio) => radio.dataset.testid)).toEqual([
+        'launch-option-group---model-none',
+        'launch-option-10',
+        'launch-option-11',
+      ]);
+    });
+
+    it('keeps an ungrouped row a checkbox, placed by its list position', async () => {
+      serveAModelGroup();
+      renderPicker();
+      const pluginDir = await screen.findByTestId('launch-option-12');
+      expect(pluginDir).toHaveAttribute('type', 'checkbox');
+      // The group sits where its first row does, before `--plugin-dir`.
+      const group = screen.getByTestId('launch-option-group---model');
+      expect(
+        group.compareDocumentPosition(pluginDir) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it('renders a group holding a single row as a plain checkbox', async () => {
+      serveAModelGroup();
+      renderPicker();
+      // `--permission-mode` is single-valued, but no sibling is registered, so
+      // there is no exclusivity to show: no radio group, no "Agent default".
+      const lone = await screen.findByTestId('launch-option-13');
+      expect(lone).toHaveAttribute('type', 'checkbox');
+      expect(
+        screen.queryByTestId('launch-option-group---permission-mode'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId('launch-option-group---permission-mode-none'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('radiogroup', { name: '--permission-mode' }),
+      ).not.toBeInTheDocument();
+      // The two-row `--model` group is still the only radio group.
+      expect(screen.getAllByRole('radiogroup')).toEqual([
+        screen.getByTestId('launch-option-group---model'),
+      ]);
+    });
+
+    it('replaces a sibling when another row of the group is chosen', async () => {
+      useComposerStore.setState({
+        newSessionLaunchOptionIds: [],
+        newSessionLaunchOptionsSeeded: true,
+      });
+      serveAModelGroup();
+      renderPicker();
+      fireEvent.click(await screen.findByTestId('launch-option-12'));
+      fireEvent.click(screen.getByTestId('launch-option-10'));
+      await waitFor(() => {
+        expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([
+          12, 10,
+        ]);
+      });
+
+      // Choosing the sibling drops the first choice; the rest keeps its order.
+      fireEvent.click(screen.getByTestId('launch-option-11'));
+      await waitFor(() => {
+        expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([
+          12, 11,
+        ]);
+      });
+      expect(screen.getByTestId('launch-option-10')).not.toBeChecked();
+      expect(screen.getByTestId('launch-option-11')).toBeChecked();
+
+      // "Agent default" clears the group and nothing else.
+      fireEvent.click(screen.getByTestId('launch-option-group---model-none'));
+      await waitFor(() => {
+        expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([
+          12,
+        ]);
+      });
+    });
+
+    it('seeds only the first default of a group that carries two', async () => {
+      // Rows stored before the one-default rule can both say `default_enabled`.
+      serveAModelGroup({ opus: true, custom: true });
+      renderPicker();
+      await screen.findByTestId('launch-option-10');
+      await waitFor(() => {
+        expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([
+          10,
+        ]);
+      });
+      expect(screen.getByTestId('launch-option-10')).toBeChecked();
+      expect(screen.getByTestId('launch-option-11')).not.toBeChecked();
+    });
+
+    it('still warns when a dangerous grouped row is chosen', async () => {
+      serveAModelGroup();
+      renderPicker();
+      fireEvent.click(await screen.findByTestId('launch-option-13'));
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('--permission-mode');
+
+      fireEvent.click(screen.getByTestId('launch-option-13'));
       await waitFor(() => {
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();
       });

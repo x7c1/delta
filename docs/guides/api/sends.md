@@ -195,16 +195,19 @@ Response:
   a branch (`semantic_parent_uuid`). Also a `workdir` that does not exist or is
   not a directory, a `worktree` requested without a `workdir` or for a directory
   that is not a git repository, a non-positive `pull_request_number` (pull
-  requests are numbered from 1), and a selected launch option the provider's
-  adapter refuses (body `code: "launch_option_rejected"` — it names a field
-  Delta sets itself, names the same field twice, or two selected Codex `config`
-  rows disagree about one setting inside the object they merge into; the message
-  names the offending key or key paths). A malformed body or a missing required
+  requests are numbered from 1), and a launch-option selection that is refused
+  (body `code: "launch_option_rejected"`): on every provider, two selected rows
+  of one choice group (the same single-valued option, such as two Claude
+  `--model` rows — see
+  [settings.md](settings.md#launch-options)); and on Codex, an option the
+  adapter refuses — it names a field Delta sets itself, or two selected
+  `config` rows disagree about one setting inside the object they merge into.
+  The message names the offending rows, key or key paths. A malformed body or a missing required
   field such as `text` is rejected earlier as one of the framework-level
   `400`/`415`/`422` cases in [README.md](README.md).
 
   The `launch_option_rejected` case is answered **before the session row is
-  written**, even though it is the provider's adapter — not Delta — that decides
+  written**, even when it is the provider's adapter — not Delta — that decides
   it: rendering the selections is a pure function of the request, so the accept
   phase asks the adapter about them without connecting. No session is created
   and torn down again.

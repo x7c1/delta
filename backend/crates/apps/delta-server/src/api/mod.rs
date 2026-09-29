@@ -28,7 +28,8 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 
-use delta_usecase::{AgentProvider, PullRequestLens, SessionId, ThreadId};
+use delta_bootstrap::AppInteractor;
+use delta_usecase::{AgentProvider, LaunchOption, PullRequestLens, SessionId, ThreadId};
 use delta_wire::rest::{
     WireCloneRepositoryRequest, WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
     WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
@@ -547,7 +548,8 @@ pub(crate) async fn workdir_git_branches(
 /// predicate rather than read from storage, so a client can mark the row and
 /// never pre-check it — including a row that predates the rule and still says
 /// `default_enabled: true`, whose default control is the way to clear that stale
-/// flag.
+/// flag. Likewise `choice_group`, the exclusive group a single-valued name puts
+/// its rows in (see [`wire_launch_option`]).
 pub(crate) async fn list_launch_options(
     State(state): State<AppState>,
 ) -> Result<Json<WireLaunchOptionsResponse>, ApiError> {
@@ -556,12 +558,21 @@ pub(crate) async fn list_launch_options(
     Ok(Json(WireLaunchOptionsResponse {
         launch_options: options
             .into_iter()
-            .map(|option| {
-                let dangerous = interactor.is_launch_option_dangerous(&option);
-                WireLaunchOption::new(option, dangerous)
-            })
+            .map(|option| wire_launch_option(interactor, option))
             .collect(),
     }))
+}
+
+/// Render a registered launch option for the wire, with the verdicts only the
+/// provider's vocabulary can give — `dangerous` and `choice_group` — resolved
+/// through the interactor's injected vocabulary.
+///
+/// One function for the list, create and `PATCH` responses so the three cannot
+/// disagree about a row.
+fn wire_launch_option(interactor: &AppInteractor, option: LaunchOption) -> WireLaunchOption {
+    let dangerous = interactor.is_launch_option_dangerous(&option);
+    let choice_group = interactor.launch_option_choice_group(&option);
+    WireLaunchOption::new(option, dangerous, choice_group)
 }
 
 /// `POST /api/launch-options` — register a new custom launch option.
@@ -577,7 +588,9 @@ pub(crate) async fn list_launch_options(
 /// disables the agent's own safety mechanism can be registered, but not with
 /// `default_enabled: true` — that is a `400` `launch_option_rejected` from the
 /// use case (see `create_launch_option` there). The same option undefaulted is
-/// created normally and stays selectable per session.
+/// created normally and stays selectable per session. So is a `default_enabled`
+/// create into a choice group whose default another row already holds: the
+/// group takes one default, and the server never clears the sibling itself.
 pub(crate) async fn create_launch_option(
     State(state): State<AppState>,
     Json(req): Json<WireCreateLaunchOptionRequest>,
@@ -611,10 +624,9 @@ pub(crate) async fn create_launch_option(
     let option = interactor
         .create_launch_option(label, name, value, req.default_enabled, provider)
         .await?;
-    let dangerous = interactor.is_launch_option_dangerous(&option);
     Ok((
         StatusCode::CREATED,
-        Json(WireLaunchOption::new(option, dangerous)),
+        Json(wire_launch_option(interactor, option)),
     ))
 }
 
@@ -634,7 +646,9 @@ pub(crate) async fn create_launch_option(
 /// Turning the flag *on* for an option that disables the agent's own safety
 /// mechanism is a `400` `launch_option_rejected`, the same refusal the create
 /// path gives; turning it off is always allowed, which is how a row registered
-/// before that rule is disarmed.
+/// before that rule is disarmed. Turning it on while a sibling of the row's
+/// choice group holds the default is refused the same way, so switching a
+/// group's default is two requests: clear the holder, then set the new row.
 pub(crate) async fn update_launch_option(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -645,10 +659,7 @@ pub(crate) async fn update_launch_option(
         .set_launch_option_default_enabled(id, req.default_enabled)
         .await?;
     match option {
-        Some(option) => {
-            let dangerous = interactor.is_launch_option_dangerous(&option);
-            Ok(Json(WireLaunchOption::new(option, dangerous)))
-        }
+        Some(option) => Ok(Json(wire_launch_option(interactor, option))),
         None => Err(ApiError::NotFound(format!("no launch option with id {id}"))),
     }
 }

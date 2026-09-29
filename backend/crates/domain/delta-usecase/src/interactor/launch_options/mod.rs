@@ -3,11 +3,12 @@
 //! resolving a selection at session start ([`resolve`]) and reconciling the
 //! options Delta *ships* into the registry at startup.
 //!
-//! List and create are thin pass-throughs to the [`SessionStore`] port — the
-//! registry has no cross-record invariants to enforce. The two exceptions both
-//! come from Delta shipping rows of its own: a delete aimed at one of those is
-//! refused here, and the startup reconcile is the only writer of their content.
-//! Kept together so the surface lives in one place.
+//! List is a thin pass-through to the [`SessionStore`] port. The registry's
+//! rules live here: an option that disarms the agent is never default-enabled,
+//! a choice group (the rows of one single-valued name) holds at most one
+//! default, a delete aimed at a row Delta ships is refused, and the startup
+//! reconcile is the only writer of those shipped rows' content. Kept together
+//! so the surface lives in one place.
 //!
 //! [`SessionStore`]: crate::ports::SessionStore
 
