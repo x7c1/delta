@@ -23,6 +23,8 @@ part. The larger workflows live in their own files:
   `make dev`.
 - **[release.md](../release.md)** — the release flow and its supporting
   automation.
+- **[install.md](../install.md)** — installing the released desktop app as an
+  end user (not needed for development).
 
 ## Supported platforms
 
@@ -159,7 +161,8 @@ Automation; macOS asks the first time). Without that permission the step fails
 or hangs after `Delta.app` has already been written, which is enough to run the
 app. Where the app keeps its data, and how it finds `tmux` and `claude` when
 launched from Finder or a desktop file, is in
-[local-run.md](local-run.md#the-desktop-app).
+[local-run.md](local-run.md#the-desktop-app). Installing and opening a released
+bundle is in [install.md](../install.md).
 
 ### Reading the SQLite schema
 
