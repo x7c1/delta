@@ -117,6 +117,13 @@ pub(crate) struct FakeStoreInner {
     /// `task_id` learned via the `PostToolUse(Agent)` hook.
     pub(crate) subagent_launches: HashMap<(SessionId, String), SubagentLaunch>,
     pub(crate) clone_roots: Vec<CloneRoot>,
+    /// When set, [`SessionStore::cancel_send`] fails with a store error, so a
+    /// test can make the `TurnInput::Close` of a session with an unechoed send
+    /// fail at its row write.
+    pub(crate) fail_cancel_send: bool,
+    /// When set, [`SessionStore::clear_subagent_launch`] fails with a store
+    /// error, so a test can make the process-gone subagent sweep fail.
+    pub(crate) fail_clear_subagent_launch: bool,
 }
 
 #[derive(Default)]
@@ -795,6 +802,9 @@ impl SessionStore for FakeStore {
 
     async fn cancel_send(&self, id: i64) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
+        if g.fail_cancel_send {
+            return Err(Error::Store("injected cancel_send failure".into()));
+        }
         if let Some(s) = g.sends.iter_mut().find(|s| s.id == id) {
             s.status = SendStatus::Cancelled;
         }
@@ -1003,6 +1013,11 @@ impl SessionStore for FakeStore {
 
     async fn clear_subagent_launch(&self, session_id: &SessionId, tool_use_id: &str) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
+        if g.fail_clear_subagent_launch {
+            return Err(Error::Store(
+                "injected clear_subagent_launch failure".into(),
+            ));
+        }
         g.subagent_launches
             .remove(&(session_id.clone(), tool_use_id.to_owned()));
         Ok(())

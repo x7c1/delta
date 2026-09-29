@@ -543,7 +543,10 @@ was permitted, exactly as for a plain `allow`.
   [settings.md — `GET /api/providers`](settings.md#get-apiproviders)): a session
   that has a terminal is pointed at the prompt waiting there, while a
   terminal-less one — where the question survives nowhere the user can reach —
-  is told it can no longer be answered, and offered only Dismiss.
+  is told it can no longer be answered, and offered only Dismiss. A closed
+  session gets neither, whatever its provider: closing it settled the request
+  and took any terminal with it, so the card says the session was closed and
+  offers only Dismiss.
 
 ## Questions
 
