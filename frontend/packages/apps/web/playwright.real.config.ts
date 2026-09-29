@@ -33,6 +33,11 @@ export default defineConfig({
   // A real turn includes model latency; give each spec room without letting a
   // wedged run hang forever.
   timeout: 120_000,
+  // Same expect timeout as the fake lane, for the reasons given in
+  // `playwright.fake.config.ts`: every observable sits at the end of a real
+  // multi-hop loop, and the shared helpers (`e2e-fake/support/app.ts`) rely
+  // on it for their waits.
+  expect: { timeout: 15_000 },
   use: {
     baseURL: `http://localhost:${PORT}`,
     trace: 'on-first-retry',

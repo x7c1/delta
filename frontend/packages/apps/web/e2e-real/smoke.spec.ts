@@ -38,11 +38,9 @@ test('a browser prompt round-trips through the real claude and survives reload',
   // Optimistically pending immediately after Send; the POST is accepted with
   // real ids, so focus switches to the real session right away — before the
   // real spawn registers (SessionStart/UserPromptSubmit hooks bind it later).
+  // `startNewSession` has already waited for the new-session screen to close.
   const pending = page.getByTestId('pending-item');
   await expect(pending).toHaveCount(1);
-  await expect(page.getByTestId('new-session-empty')).toHaveCount(0, {
-    timeout: 60_000,
-  });
 
   // The user's message is ingested from the real transcript, then the real
   // reply lands and the turn completes (Stop drains the pending chip).
