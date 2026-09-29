@@ -1,7 +1,8 @@
 //! Generates the frontend's `@delta/wire-gen` package from the Rust wire
 //! contract.
 //!
-//! Writes into `frontend/packages/gateway/wire-gen/src/generated/`:
+//! Writes into `frontend/packages/gateway/wire-gen/src/generated/`, or into
+//! the directory given as the single optional argument (`export-ts [OUT_DIR]`):
 //!
 //! - `SessionEvent.ts` — the `/ws` discriminated union, exported by ts-rs from
 //!   [`WireSessionEvent`].
@@ -12,11 +13,12 @@
 //! - One file per REST request/response shape (and each wire twin they are
 //!   composed of), exported by ts-rs from the `delta_wire::rest` types.
 //!
-//! Run via `make gen` at the repo root. `make check` regenerates and fails on
-//! a dirty diff, so stale bindings cannot land.
+//! Run via `make gen` at the repo root. `make gen-check` (part of `make check`
+//! and of CI) generates into a temporary directory and fails when it differs
+//! from the files on disk, so stale bindings cannot land.
 
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::PathBuf;
 
 use delta_wire::rest::{
     WireCloneRepositoryRequest, WireCloneRootsResponse, WireCreateCloneRootRequest,
@@ -32,14 +34,18 @@ use delta_wire::rest::{
 use delta_wire::{event_kinds, export_config, WireCommsFrame, WireSessionEvent};
 use ts_rs::TS;
 
-/// Where the generated files live, relative to this crate's manifest.
+/// Where the committed generated files live, relative to this crate's
+/// manifest: the default output directory.
 const OUT_DIR: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../../frontend/packages/gateway/wire-gen/src/generated"
 );
 
 fn main() {
-    let out_dir = Path::new(OUT_DIR);
+    let out_dir = out_dir_from_args();
+    std::fs::create_dir_all(&out_dir)
+        .unwrap_or_else(|err| panic!("create {}: {err}", out_dir.display()));
+    let out_dir = out_dir.as_path();
     let config = export_config().with_out_dir(out_dir);
 
     WireSessionEvent::export_all(&config).expect("export SessionEvent.ts");
@@ -90,6 +96,32 @@ fn main() {
         .unwrap_or_else(|err| panic!("write {}: {err}", event_kinds_path.display()));
 
     println!("generated TypeScript bindings in {}", out_dir.display());
+}
+
+/// The output directory: the one optional argument, or [`OUT_DIR`].
+///
+/// Exits with a usage message on anything else, so a mistyped flag is not
+/// silently taken as a directory name.
+fn out_dir_from_args() -> PathBuf {
+    let mut args = std::env::args_os().skip(1);
+    let out_dir = match args.next() {
+        None => PathBuf::from(OUT_DIR),
+        Some(arg) if arg.to_string_lossy().starts_with('-') => usage(),
+        Some(arg) => PathBuf::from(arg),
+    };
+    if args.next().is_some() {
+        usage();
+    }
+    out_dir
+}
+
+fn usage() -> ! {
+    eprintln!(
+        "usage: export-ts [OUT_DIR]\n\n\
+         Writes the TypeScript wire bindings into OUT_DIR (default: the \
+         committed frontend/packages/gateway/wire-gen/src/generated)."
+    );
+    std::process::exit(2);
 }
 
 /// Renders `event-kinds.ts`: the `EVENT_KINDS` const and the kind union type.

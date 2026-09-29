@@ -13,7 +13,7 @@ import { ARTIFACT_DIR } from './paths';
  * `globalSetup` runs once per `playwright test` invocation, in its own
  * process, which is the scope the wipe wants.
  *
- * The dir also sits inside Playwright's own `outputDir` (`test-results/`),
+ * The dir is also Playwright's own `outputDir` (see playwright.fake.config.ts),
  * which Playwright empties at the start of a run — in its "clear output"
  * task, ordered *before* every `globalSetup` (checked in @playwright/test
  * 1.60). So this hook has the last word, and the `boot-<N>/` directories

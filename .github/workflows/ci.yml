@@ -49,17 +49,13 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       # The TypeScript bindings in frontend/packages/gateway/wire-gen are
-      # generated from the Rust wire contract and committed. Regenerate and
-      # fail on any diff so a wire-contract change cannot land without its
-      # regenerated bindings.
+      # generated from the Rust wire contract and committed. `make gen-check`
+      # generates them into a temp dir and diffs that against the files on
+      # disk; on this clean checkout those are the committed files, so a
+      # wire-contract change cannot land without its regenerated bindings.
       - name: Check generated wire bindings are fresh
-        run: |
-          cargo run --locked -p delta-wire --bin export-ts
-          if [ -n "$(git -C .. status --porcelain -- frontend/packages/gateway/wire-gen)" ]; then
-            git -C .. --no-pager diff -- frontend/packages/gateway/wire-gen
-            echo "error: generated wire bindings are stale — run 'make gen' and commit the result"
-            exit 1
-          fi
+        working-directory: .
+        run: make gen-check
 
       # The vendored `codex app-server` schema is stored key-sorted (`jq -S -j .`)
       # so a re-vendor diff shows the protocol changes rather than the
@@ -191,9 +187,10 @@ jobs:
 
       # These failures appear only in CI and don't reproduce locally, so on a
       # failed run capture every piece of evidence: the Playwright HTML report,
-      # test-results/ (traces, videos, screenshots, and the preserved backend
-      # logs + fake transcripts under e2e-fake/). A single run can boot the
-      # server more than once (a worker reboot after a failed test) and each
+      # test-results/ (the suite's output dir e2e-fake/ under it: traces,
+      # videos, screenshots, and the preserved backend logs + fake
+      # transcripts). A single run can boot the server more than once (a
+      # worker reboot after a failed test) and each
       # boot can span several generations across restarts, so the worker
       # fixture gives every boot its own test-results/e2e-fake/boot-<N>/: one
       # log file per generation (server.log, server.2.log, …), written there
