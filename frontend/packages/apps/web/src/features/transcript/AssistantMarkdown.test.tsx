@@ -1,8 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { AssistantMarkdown } from './AssistantMarkdown';
 
 const PR_URL = 'https://github.com/x7c1/delta/pull/375';
+
+/**
+ * Asserts that no text node and no attribute under `container` carries the
+ * U+FEFF boundary the renderer puts into the source before parsing.
+ */
+function expectNoBoundary(container: HTMLElement) {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    expect(node.nodeValue).not.toContain('\uFEFF');
+  }
+  for (const element of container.querySelectorAll('*')) {
+    for (const attribute of element.attributes) {
+      expect(attribute.value).not.toContain('\uFEFF');
+    }
+  }
+}
 
 describe('AssistantMarkdown', () => {
   it('keeps CJK punctuation out of an autolinked URL', () => {
@@ -103,6 +119,102 @@ describe('AssistantMarkdown', () => {
     expect(container.querySelector('pre code')).toHaveTextContent(
       `${PR_URL}）。`,
     );
+  });
+
+  describe('an autolink wrapped in emphasis and followed by prose', () => {
+    const BOLD_PR_SENTENCE =
+      'PR を作りました: **https://github.com/x7c1/delta/pull/229**（検査は通過済み、CI は実行中です）';
+
+    it('closes the strong and keeps the delimiters out of the href', () => {
+      const { container } = render(
+        <AssistantMarkdown text={BOLD_PR_SENTENCE} />,
+      );
+      const strong = container.querySelector('strong');
+      const link = within(strong!).getByRole('link');
+      expect(link).toHaveAttribute(
+        'href',
+        'https://github.com/x7c1/delta/pull/229',
+      );
+      expect(link.textContent).toBe('https://github.com/x7c1/delta/pull/229');
+      expect(strong!.nextSibling?.textContent).toBe(
+        '（検査は通過済み、CI は実行中です）',
+      );
+      expect(container.textContent).not.toContain('**');
+      expectNoBoundary(container);
+    });
+
+    it.each([
+      [
+        'a generic URL in bold',
+        '**https://example.com/a**。',
+        'strong',
+        'https://example.com/a',
+        '。',
+      ],
+      [
+        'a pull-request URL in emphasis',
+        `_${PR_URL}_（補足）`,
+        'em',
+        PR_URL,
+        '（補足）',
+      ],
+      [
+        'a pull-request URL in strikethrough',
+        `~~${PR_URL}~~（補足）`,
+        'del',
+        PR_URL,
+        '（補足）',
+      ],
+      [
+        'a www pull-request URL in bold',
+        '**www.github.com/x7c1/delta/pull/229**（補足）',
+        'strong',
+        'http://www.github.com/x7c1/delta/pull/229',
+        '（補足）',
+      ],
+    ])('closes around %s', (_shape, text, tag, href, tail) => {
+      const { container } = render(<AssistantMarkdown text={text} />);
+      const wrapper = container.querySelector(tag);
+      expect(wrapper).not.toBeNull();
+      const link = within(wrapper as HTMLElement).getByRole('link');
+      expect(link).toHaveAttribute('href', href);
+      expect(wrapper!.nextSibling?.textContent).toBe(tail);
+      expect(container.textContent).not.toMatch(/[*_~]/);
+      expectNoBoundary(container);
+    });
+  });
+
+  it('keeps an explicit destination that contains a cut point whole', () => {
+    const destination = 'https://ja.wikipedia.org/wiki/東京。';
+    const { container } = render(
+      <AssistantMarkdown text={`[wiki](${destination})`} />,
+    );
+    const link = screen.getByRole('link');
+    expect(link).toHaveAttribute('href', encodeURI(destination));
+    expect(link.getAttribute('href')).not.toContain('%EF%BB%BF');
+    expectNoBoundary(container);
+  });
+
+  it('renders code containing a cut point as written', () => {
+    const code = 'https://github.com/x7c1/delta/pull/1（補足）';
+    const { container } = render(
+      <AssistantMarkdown
+        text={`run \`${code}\` now\n\n\`\`\`\n${code}\n\`\`\`\n`}
+      />,
+    );
+    const [inline, block] = container.querySelectorAll('code');
+    expect(inline!.textContent).toBe(code);
+    expect(block!.textContent).toBe(`${code}\n`);
+    expectNoBoundary(container);
+  });
+
+  it('keeps an ASCII asterisk in the middle of a URL', () => {
+    const url = 'https://web.archive.org/web/*/example.com';
+    const { container } = render(<AssistantMarkdown text={`${url} です`} />);
+    const link = screen.getByRole('link');
+    expect(link).toHaveAttribute('href', url);
+    expect(container.textContent).toBe(`${url} です`);
+    expectNoBoundary(container);
   });
 
   // Relative and `#fragment` links are deliberately not exempt.
