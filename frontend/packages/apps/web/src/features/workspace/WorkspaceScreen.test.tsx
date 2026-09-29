@@ -1836,7 +1836,10 @@ describe('WorkspaceScreen session list failures', () => {
       activeThreadId: null,
       preNewSessionFocus: null,
       settingsOpen: false,
-      terminalOpen: true,
+      // The matchMedia stub reports the small layout, where a session's
+      // terminal is closed unless saved open — so save it open.
+      terminalOpenBySession: { [SESSION_ID]: true },
+      terminalOpenWithoutSession: false,
       commsOpen: false,
     });
     useLiveStore.setState({ spawns: [], unread: {}, notices: {} });
