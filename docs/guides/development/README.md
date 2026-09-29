@@ -152,9 +152,14 @@ cargo install tauri-cli --version '^2' --locked
 ```
 
 The bundles land under `backend/target/release/bundle/` (`macos/Delta.app` and
-a `.dmg` on macOS; `.deb`, `.rpm` and an AppImage on Linux). Where the app keeps
-its data, and how it finds `tmux` and `claude` when launched from Finder or a
-desktop file, is in [local-run.md](local-run.md#the-desktop-app).
+a `.dmg` on macOS; `.deb`, `.rpm` and an AppImage on Linux). On macOS the `.dmg`
+step lays out the image's Finder window through AppleScript, so it needs your
+terminal to be allowed to control Finder (System Settings → Privacy & Security →
+Automation; macOS asks the first time). Without that permission the step fails
+or hangs after `Delta.app` has already been written, which is enough to run the
+app. Where the app keeps its data, and how it finds `tmux` and `claude` when
+launched from Finder or a desktop file, is in
+[local-run.md](local-run.md#the-desktop-app).
 
 ### Reading the SQLite schema
 
