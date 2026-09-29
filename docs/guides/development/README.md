@@ -74,10 +74,27 @@ Quality gate — `make build`, `make test`, and `make lint` each cover both
 parts and stay fast, for the inner loop. `make check` is the pre-PR gate: it
 runs the whole thing for both parts at once (build, test, lint, the frontend
 typecheck, the generated-bindings freshness check, the vendored Codex schema's
-stored form, the canary gate's and the re-vendor script's own stubbed tests)
-**plus both Playwright suites**, so passing it means CI will pass. It needs
-tmux, because `make e2e-fake` drives the real backend through one, and `jq`,
-which is what the vendored schema's stored form is defined in terms of.
+stored form, the canary gate's, the re-vendor script's and the freshness
+check's own stubbed tests) **plus both Playwright suites**, so passing it means
+CI will pass. It needs tmux, because `make e2e-fake` drives the real backend
+through one, and `jq`, which is what the vendored schema's stored form is
+defined in terms of.
+
+`make check` is a dependency graph, not a script: each step is a target that
+depends only on what it needs (the backend tests, clippy and the freshness
+check on the backend build; the frontend typecheck, tests, lint and mock e2e
+on the frontend build; the fake-mode e2e on both builds; the script checks on
+nothing). Run it with `-j` to let independent steps overlap — the wall clock
+then approaches CI's longest job instead of the sum of all steps:
+
+```bash
+make -j4 check      # parallel; add -O to keep each step's output together
+make check          # serial, in the same dependency order
+```
+
+The graph is spelled out above the `check` target in the `Makefile`. The two
+Playwright suites run side by side safely: each has its own ports and its own
+output directory under `packages/apps/web/test-results/`.
 
 Run the server (from `backend/`):
 
@@ -171,8 +188,11 @@ backend's wire contract (the `delta-wire` crate): the REST request/response
 shapes, the `SessionEvent` union, and the `EVENT_KINDS` const. Never edit the
 files under `src/generated/` by hand —
 change the Rust types and run `make gen` to regenerate, then commit the result.
-`make check` (and CI) regenerates and fails on any diff, so stale bindings
-cannot land.
+`make gen-check` (part of `make check`, and run by CI) generates the bindings
+into a temporary directory and fails when they differ from the files on disk,
+so stale bindings cannot land. It writes nothing and ignores git, so it passes
+as soon as `make gen` has run — before the result is committed; CI's clean
+checkout is what makes sure it is committed.
 
 ### Run the UI against mocks (no backend needed)
 

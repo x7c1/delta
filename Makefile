@@ -49,14 +49,15 @@ reset:
 gen:
 	cd backend && cargo run -p delta-wire --bin export-ts
 
-## gen-check: fail when the committed @delta/wire-gen bindings are stale (regenerate + diff)
+## gen-check: fail when the @delta/wire-gen bindings on disk differ from what the Rust contract generates now (generates into a temp dir and diffs; writes nothing, ignores git; part of `make check` and of CI's backend job)
 .PHONY: gen-check
-gen-check: gen
-	@if [ -n "$$(git status --porcelain -- frontend/packages/gateway/wire-gen)" ]; then \
-		git --no-pager diff -- frontend/packages/gateway/wire-gen; \
-		echo "error: generated wire bindings are stale — run 'make gen' and commit the result"; \
-		exit 1; \
-	fi
+gen-check:
+	scripts/gen-check.sh
+
+## gen-check-test: exercise gen-check against a stub generator and a throwaway git repo (needs no cargo; part of `make check`)
+.PHONY: gen-check-test
+gen-check-test:
+	bash scripts/tests/gen-check.test.sh
 
 # --- Vendored codex app-server schema -----------------------------------------
 
@@ -95,7 +96,7 @@ lint:
 	cd backend && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint + both Playwright suites (needs tmux) — plus the canary gate's and the re-vendor script's own stubbed tests, which CI does not run
+## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint + both Playwright suites (needs tmux) — plus the canary gate's, the re-vendor script's and gen-check's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
 # The point of this target is that passing it means CI will pass, so it has to
 # stay a superset of what the workflow runs — including BOTH Playwright suites.
 # `e2e` is the mock-backed one and `e2e-fake` drives the real backend through
@@ -103,15 +104,66 @@ lint:
 # leaving either out lets a suite fail in CI that a green local gate claimed to
 # cover. For a quick inner-loop check, reach for `build` / `test` / `lint`
 # instead — those stay fast on purpose.
-.PHONY: check
-check:
-	cd backend && cargo fmt --all -- --check && cargo build && cargo test && cargo clippy --all-targets -- -D warnings
+#
+# The steps are the `check-*` targets below, wired by what each one needs, so
+# `make -j check` runs the backend column, the frontend column and the
+# standalone script checks side by side:
+#
+#   check-backend-fmt → check-backend-build → { check-backend-test, check-backend-clippy, check-gen }
+#   check-frontend-build → { check-frontend-typecheck, check-frontend-test, check-frontend-lint, check-e2e }
+#   { check-backend-build, check-frontend-build } → check-e2e-fake
+#   vendor-codex-schema-check, vendor-codex-schema-test, e2e-real-gate-test, gen-check-test (no prerequisites)
+#
+# Without -j, make walks the same graph left to right, which is the serial
+# order the gate always had. The cargo steps share backend/target and take
+# cargo's own lock on it, so they queue behind each other rather than collide;
+# the pnpm steps share nothing cargo writes. The two Playwright suites run on
+# their own ports (e2e: 5199; e2e-fake: 5198 + backend 7899, per-run tmux
+# socket and temp DB) and write separate output dirs (test-results/e2e/ and
+# test-results/e2e-fake/). The standalone targets (`make e2e`, `make e2e-fake`,
+# `make gen-check`, …) keep working on their own: the check-* wrappers add the
+# ordering, not the behaviour.
+CHECK_STEPS := \
+	check-backend-test check-backend-clippy check-gen \
+	vendor-codex-schema-check vendor-codex-schema-test e2e-real-gate-test gen-check-test \
+	check-frontend-typecheck check-frontend-test check-frontend-lint \
+	check-e2e check-e2e-fake
+
+.PHONY: check $(CHECK_STEPS) check-backend-fmt check-backend-build check-frontend-build
+check: $(CHECK_STEPS)
+
+check-backend-fmt:
+	cd backend && cargo fmt --all -- --check
+
+check-backend-build: check-backend-fmt
+	cd backend && cargo build
+
+check-backend-test: check-backend-build
+	cd backend && cargo test
+
+check-backend-clippy: check-backend-build
+	cd backend && cargo clippy --all-targets -- -D warnings
+
+# `gen-check` runs export-ts through `cargo run`, which reuses this build.
+check-gen: check-backend-build
 	$(MAKE) gen-check
-	$(MAKE) vendor-codex-schema-check
-	$(MAKE) vendor-codex-schema-test
-	$(MAKE) e2e-real-gate-test
-	cd frontend && pnpm -r build && pnpm -r typecheck && pnpm -r test && pnpm -r lint
+
+check-frontend-build:
+	cd frontend && pnpm -r build
+
+check-frontend-typecheck: check-frontend-build
+	cd frontend && pnpm -r typecheck
+
+check-frontend-test: check-frontend-build
+	cd frontend && pnpm -r test
+
+check-frontend-lint: check-frontend-build
+	cd frontend && pnpm -r lint
+
+check-e2e: check-frontend-build
 	$(MAKE) e2e
+
+check-e2e-fake: check-backend-build check-frontend-build
 	$(MAKE) e2e-fake
 
 ## e2e: run the headless Playwright suite (one-time: `pnpm --filter @delta/web exec playwright install --with-deps chromium`)
