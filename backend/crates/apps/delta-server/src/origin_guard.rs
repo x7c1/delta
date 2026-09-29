@@ -28,9 +28,10 @@
 //! Pinning exact origins (e.g. `http://localhost:5173`) is brittle: the app is
 //! served by Vite in dev, the `make e2e` / `make e2e-fake` suites boot the
 //! backend and browser on dedicated non-default ports (`DELTA_PORT` /
-//! `E2E_PORT`), and there is no production static-serving path in this repo. The
-//! loopback-host rule blocks the real threat — a remote web origin — without
-//! pinning a port, so it holds across dev and the e2e suites alike.
+//! `E2E_PORT`), and a build with the `embed-web` feature serves the app from the
+//! server's own origin on whatever `DELTA_PORT` names. The loopback-host rule
+//! blocks the real threat — a remote web origin — without pinning a port, so it
+//! holds across dev, the e2e suites and the embedded build alike.
 
 use axum::extract::Request;
 use axum::http::{header, StatusCode};

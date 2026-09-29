@@ -42,6 +42,20 @@ down:
 reset:
 	scripts/dev.sh --reset
 
+# --- Serve the built frontend from delta-server --------------------------------
+
+## web-dist: build the web SPA (and the workspace libraries it needs) into frontend/packages/apps/web/dist for the embedded server
+# Mock mode and a foreign API base are dev-only knobs: unset them so an exported
+# value in the caller's shell cannot leak into the build the server embeds.
+.PHONY: web-dist
+web-dist:
+	cd frontend && env -u VITE_API_MOCK -u VITE_API_BASE_URL pnpm --filter "@delta/web..." build
+
+## server-embedded: release-build delta-server with the built SPA compiled in (`embed-web`); serves the app at http://127.0.0.1:7878/
+.PHONY: server-embedded
+server-embedded: web-dist
+	cd backend && cargo build -p delta-server --features embed-web --release
+
 # --- Generated code -----------------------------------------------------------
 
 ## gen: regenerate the TypeScript wire bindings (@delta/wire-gen) from the Rust wire contract
@@ -96,7 +110,7 @@ lint:
 	cd backend && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint + both Playwright suites (needs tmux) — plus the canary gate's, the re-vendor script's and gen-check's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
+## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint + the embedded-server build (`embed-web`) + both Playwright suites (needs tmux) — plus the canary gate's, the re-vendor script's and gen-check's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
 # The point of this target is that passing it means CI will pass, so it has to
 # stay a superset of what the workflow runs — including BOTH Playwright suites.
 # `e2e` is the mock-backed one and `e2e-fake` drives the real backend through
@@ -111,7 +125,7 @@ lint:
 #
 #   check-backend-fmt → check-backend-build → { check-backend-test, check-backend-clippy, check-gen }
 #   check-frontend-build → { check-frontend-typecheck, check-frontend-test, check-frontend-lint, check-e2e }
-#   { check-backend-build, check-frontend-build } → check-e2e-fake
+#   { check-backend-build, check-frontend-build } → { check-e2e-fake, check-embedded }
 #   vendor-codex-schema-check, vendor-codex-schema-test, e2e-real-gate-test, gen-check-test (no prerequisites)
 #
 # Without -j, make walks the same graph left to right, which is the serial
@@ -127,7 +141,7 @@ CHECK_STEPS := \
 	check-backend-test check-backend-clippy check-gen \
 	vendor-codex-schema-check vendor-codex-schema-test e2e-real-gate-test gen-check-test \
 	check-frontend-typecheck check-frontend-test check-frontend-lint \
-	check-e2e check-e2e-fake
+	check-e2e check-e2e-fake check-embedded
 
 .PHONY: check $(CHECK_STEPS) check-backend-fmt check-backend-build check-frontend-build
 check: $(CHECK_STEPS)
@@ -165,6 +179,12 @@ check-e2e: check-frontend-build
 
 check-e2e-fake: check-backend-build check-frontend-build
 	$(MAKE) e2e-fake
+
+# Builds delta-server with `embed-web` against the `dist/` check-frontend-build
+# just produced, so the compile-time include and the static routes are proven
+# against a real build on every gate. Debug is enough for that.
+check-embedded: check-backend-build check-frontend-build
+	cd backend && cargo build -p delta-server --features embed-web
 
 ## e2e: run the headless Playwright suite (one-time: `pnpm --filter @delta/web exec playwright install --with-deps chromium`)
 # Pin a dedicated mock-server port so the suite never collides with a dev server

@@ -77,6 +77,28 @@ Type a message in the browser. It is dispatched into the tmux pane via
 the browser. When a tool needs permission, answer it in the embedded terminal or
 in the TUI (`tmux -L delta attach -t delta-1`).
 
+## Serving the built frontend
+
+`make dev` serves the UI from Vite. To check the UI the way a packaged build
+delivers it — the built SPA served by `delta-server` itself, no Vite running —
+build the server with the frontend compiled in:
+
+```bash
+make server-embedded   # builds the SPA (make web-dist), then delta-server with --features embed-web
+make down              # the binary takes the same port 7878 as make dev's server
+DELTA_PORT=7878 DELTA_DB_PATH=backend/delta.db backend/target/release/delta-server
+```
+
+Then open <http://127.0.0.1:7878/>. The server hands out the page with the
+per-run token injected, so `DELTA_AUTH_TOKEN` is optional (a bare run mints
+one). Unlike `make dev`, nothing sets the other `DELTA_*` variables for you, and
+the server's defaults are relative to its working directory: `DELTA_DB_PATH`
+defaults to `delta.db` there, so from the repository root pass
+`backend/delta.db` (the database `make dev` uses) to see the same sessions.
+What is served, and how the page gets the token, is in
+[the API guide](../api/README.md#the-built-frontend-embed-web). A plain
+`cargo build` never needs `dist/`: only the `embed-web` feature compiles it in.
+
 ## Shut down
 
 ```bash

@@ -10,10 +10,12 @@ export function apiBaseUrl(): string {
 
 /**
  * The per-run bearer token the server requires on every API call and live
- * socket, read from the `<meta name="delta-auth-token">` tag Vite injects from
- * `DELTA_AUTH_TOKEN` (see `vite.config.ts`). Empty in mock mode — where the tag
- * is injected empty or absent and no real backend is reached — so callers treat
- * an empty token as "attach nothing".
+ * socket, read from the `<meta name="delta-auth-token">` tag injected by Vite
+ * from `DELTA_AUTH_TOKEN` in development (see `vite.config.ts`), and by
+ * delta-server itself for the built page (`embed-web`, see
+ * backend/crates/apps/delta-server/src/app/static_web/index_page.rs). Empty in
+ * mock mode — where the tag is injected empty or absent and no real backend is
+ * reached — so callers treat an empty token as "attach nothing".
  */
 export function authToken(): string {
   if (typeof document === 'undefined') {

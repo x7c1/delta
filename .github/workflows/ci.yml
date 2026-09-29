@@ -178,6 +178,14 @@ jobs:
         run: pnpm -r build
         working-directory: frontend
 
+      # The one job with both toolchains: the build above also produced the web
+      # app's dist/, which delta-server's `embed-web` feature compiles in. This
+      # proves the include and the static routes build against a real bundle
+      # (`make check` runs the same step as check-embedded).
+      - name: Build the embedded server
+        run: cargo build --locked -p delta-server --features embed-web
+        working-directory: backend
+
       - name: Install Playwright browser
         run: pnpm --filter @delta/web exec playwright install --with-deps chromium
         working-directory: frontend

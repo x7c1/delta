@@ -55,6 +55,34 @@ walks the real table against these files, so a new route cannot be declared
 without a section describing it. What the table leaves out — query parameters,
 status codes and error bodies — is documented here only.
 
+## The built frontend (`embed-web`)
+
+A `delta-server` built with the `embed-web` cargo feature (`make
+server-embedded`) also serves the web app from its own origin, so the page's
+REST calls and socket connects are same-origin, exactly as through Vite's proxy
+in development. These paths are not endpoints and are not in `ENDPOINTS`: the
+static surface is the router's fallback, so it only answers requests no
+endpoint matched, and it never answers under `/api`, `/ws`, `/pty`, `/comms`,
+`/hooks` or `/health` — an unknown path there keeps its `401`/`404`.
+
+- `GET /` and `GET /index.html` — the page, `Cache-Control: no-cache`, with a
+  `Content-Security-Policy` response header.
+- `GET /<file>` for any file of the build — typed by extension; the
+  content-hashed `assets/*` files are `Cache-Control: public, max-age=31536000,
+  immutable`, anything else `no-cache`. MSW's `mockServiceWorker.js` is not
+  served.
+- Any other `GET` whose `Accept` admits `text/html` — the page (the SPA
+  fallback, so deep links and reloads work). Without `text/html` it gets the
+  API's ordinary `401`/`404`.
+
+The page is not behind the bearer-token guard, since it is what delivers the
+token; it is behind the Origin/Host guard. At boot the server injects the
+per-run token into the page as `<meta name="delta-auth-token" content="…">`,
+the same tag Vite injects in development and the one the frontend reads, so
+the token is in neither a URL nor the built assets (the Vite plugin that
+injects it is dev-server only). The API base needs nothing: the build leaves
+`VITE_API_BASE_URL` unset, so the frontend calls same-origin paths.
+
 ## Conventions
 
 - All timestamps are ISO-8601 strings.
