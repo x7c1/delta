@@ -36,8 +36,14 @@ import { expect, type Page } from '@playwright/test';
  *
  * Two entry states exist. On a cold, empty database the app lands directly
  * in the new-session state; with existing sessions, "New" (re)starts the
- * flow. The app's settled state is detected by which signal renders first:
- * an existing session node, or the cold-start new-session placeholder.
+ * flow. The helper first waits for the app to settle (see
+ * {@link waitForSettledApp}) and clicks "New session" only when the
+ * new-session screen is not already showing.
+ *
+ * It returns only once the send has left the new-session screen: the
+ * workspace focuses the new session as soon as the send is accepted, so the
+ * caller's next step (including another `startNewSession`) starts from that
+ * session instead of racing the screen's close.
  */
 export async function startNewSession(
   page: Page,
@@ -73,9 +79,7 @@ async function startSessionOn(
   workdir?: string,
 ): Promise<void> {
   const newSessionEmpty = page.getByTestId('new-session-empty');
-  await expect(
-    page.getByTestId('session-node').first().or(newSessionEmpty),
-  ).toBeVisible();
+  await waitForSettledApp(page);
   if (!(await newSessionEmpty.isVisible())) {
     await page.getByRole('button', { name: 'New session', exact: true }).click();
   }
@@ -105,6 +109,25 @@ async function startSessionOn(
 
   await page.getByRole('textbox').fill(prompt);
   await page.getByRole('button', { name: 'Send' }).click();
+  // The accepted send moves focus to the new session, closing the
+  // new-session screen; wait for that so the caller starts from it.
+  await expect(newSessionEmpty).toBeHidden();
+}
+
+/**
+ * Wait for the app's settled state after a load: the navigator lists at least
+ * one session, or the new-session screen is showing (the cold-start landing on
+ * an empty database). Both can hold at once — for example after a reload onto
+ * the new-session screen while sessions exist — so the union is narrowed with
+ * `.first()` to keep Playwright's strict mode from rejecting two matches.
+ */
+export async function waitForSettledApp(page: Page): Promise<void> {
+  await expect(
+    page
+      .getByTestId('session-node')
+      .or(page.getByTestId('new-session-empty'))
+      .first(),
+  ).toBeVisible();
 }
 
 /**
