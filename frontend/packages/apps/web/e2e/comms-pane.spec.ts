@@ -148,17 +148,30 @@ test('the comms log leaks no scrollable overflow past its own scroll box', async
   await scrollUntilVisible(page, codexRow);
   await codexRow.click();
 
-  // Baseline first: at this tiny viewport the shell already carries a few px
-  // of ordinary min-height overflow that has nothing to do with the comms
-  // pane, so the assertion below is a delta, not an absolute zero.
+  // Baseline first: at this tiny viewport the shell already carries some
+  // ordinary min-height overflow that has nothing to do with the comms pane,
+  // so the assertion below is a delta, not an absolute zero. That overflow
+  // depends on what the transcript column is showing — swapping its
+  // "Loading transcript…" line for the settled empty state grows it by a
+  // whole row — so the baseline is read only once the Codex session's
+  // (message-less) transcript has finished loading.
   const shellOverflow = () =>
     page
       .getByTestId('workspace-shell')
       .evaluate((shell) => shell.scrollHeight - shell.clientHeight);
+  await expect(
+    page.getByText('No messages yet. Send the first message below.'),
+  ).toBeVisible();
   const baseline = await shellOverflow();
 
+  // The after-measurement likewise waits for the whole scripted exchange to be
+  // in the DOM — its last frame included, though it sits below the fold — so
+  // every row's direction spans exist before the shell is read again.
   await page.getByRole('button', { name: 'Comms' }).click();
   await expect(page.getByTestId('comms-frame').first()).toBeVisible();
+  await expect(
+    page.getByTestId('comms-frame-method').filter({ hasText: 'turn/completed' }),
+  ).toBeAttached();
 
   // The pane itself must be the thing that scrolls…
   const paneOverflow = await page
