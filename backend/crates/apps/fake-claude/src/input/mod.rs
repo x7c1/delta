@@ -22,6 +22,12 @@
 //! paired `ESC [ 201 ~` end marker arrives — mirroring real Claude's TUI,
 //! which consumes the markers and stores the inner bytes literally.
 //!
+//! The buffer remembers which bytes were typed and which arrived inside which
+//! paste, and a submitted prompt carries that split (a [`Submission`]): recent
+//! Claude Code builds wrap a long paste in a `<pasted_content>` tag before
+//! submitting it, and a scenario can opt into mirroring that (see
+//! [`crate::pasted_content`]).
+//!
 //! The terminal must be in raw mode for this to work: in canonical mode the
 //! kernel line-buffers stdin and a lone Escape would never be delivered.
 
@@ -29,11 +35,20 @@ use std::io::Read;
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
 
+mod line_buffer;
+use line_buffer::LineBuffer;
+
+mod prompt_part;
+pub use prompt_part::PromptPart;
+
+mod submission;
+pub use submission::Submission;
+
 /// One user-level input event decoded from the raw byte stream.
 #[derive(Debug, PartialEq, Eq)]
 pub enum InputEvent {
     /// A line of text was submitted (Enter on a non-empty buffer).
-    Prompt(String),
+    Prompt(Submission),
     /// Escape was pressed.
     Interrupt,
 }
@@ -153,7 +168,7 @@ enum Mode {
 /// — no timing, no threads — stay easy to read.
 #[cfg(test)]
 fn decode_stream(mut reader: impl Read, events: &Sender<InputEvent>) {
-    let mut buffer: Vec<u8> = Vec::new();
+    let mut buffer = LineBuffer::default();
     let mut mode = Mode::Normal;
     let mut byte = [0u8; 1];
     while let Ok(1) = reader.read(&mut byte) {
@@ -191,7 +206,7 @@ fn decode_with_timeout(
     events: &Sender<InputEvent>,
     escape_timeout: Duration,
 ) {
-    let mut buffer: Vec<u8> = Vec::new();
+    let mut buffer = LineBuffer::default();
     let mut mode = Mode::Normal;
     loop {
         let waiting_for_csi = matches!(mode, Mode::EscSeen | Mode::PastingEscSeen);
@@ -221,7 +236,7 @@ fn decode_with_timeout(
                     // The ESC was a literal byte in the pasted payload with
                     // no follow-up CSI; flush it back into the buffer and
                     // keep collecting paste content until `ESC [ 201 ~`.
-                    buffer.push(0x1b);
+                    buffer.push_pasted(0x1b);
                     mode = Mode::Pasting;
                 }
                 // Unreachable: `waiting_for_csi` is only true in the two
@@ -252,7 +267,7 @@ fn decode_with_timeout(
 /// resolves: e.g. `ESC` followed by `\r` on a non-empty buffer emits both an
 /// `Interrupt` (the ESC stood alone) and a `Prompt` (the `\r` submits the
 /// already-typed buffer).
-fn step(mode: &mut Mode, buffer: &mut Vec<u8>, byte: u8, produced: &mut Vec<InputEvent>) {
+fn step(mode: &mut Mode, buffer: &mut LineBuffer, byte: u8, produced: &mut Vec<InputEvent>) {
     match mode {
         Mode::Normal => match byte {
             0x15 => {
@@ -263,9 +278,7 @@ fn step(mode: &mut Mode, buffer: &mut Vec<u8>, byte: u8, produced: &mut Vec<Inpu
             }
             0x0d => {
                 if !buffer.is_empty() {
-                    let text = String::from_utf8_lossy(buffer).into_owned();
-                    buffer.clear();
-                    produced.push(InputEvent::Prompt(text));
+                    produced.push(InputEvent::Prompt(buffer.take()));
                 }
             }
             0x1b => {
@@ -275,7 +288,7 @@ fn step(mode: &mut Mode, buffer: &mut Vec<u8>, byte: u8, produced: &mut Vec<Inpu
                 *mode = Mode::EscSeen;
             }
             other => {
-                buffer.push(other);
+                buffer.push_typed(other);
             }
         },
         Mode::EscSeen => {
@@ -297,6 +310,7 @@ fn step(mode: &mut Mode, buffer: &mut Vec<u8>, byte: u8, produced: &mut Vec<Inpu
             if byte == b'~' {
                 let entering_paste = params.as_slice() == b"200";
                 *mode = if entering_paste {
+                    buffer.start_paste();
                     Mode::Pasting
                 } else {
                     Mode::Normal
@@ -310,7 +324,7 @@ fn step(mode: &mut Mode, buffer: &mut Vec<u8>, byte: u8, produced: &mut Vec<Inpu
                 *mode = Mode::PastingEscSeen;
             }
             other => {
-                buffer.push(other);
+                buffer.push_pasted(other);
             }
         },
         Mode::PastingEscSeen => {
@@ -322,7 +336,7 @@ fn step(mode: &mut Mode, buffer: &mut Vec<u8>, byte: u8, produced: &mut Vec<Inpu
                 // into the buffer, then re-process the current byte under
                 // paste mode so its semantics (another ESC, an LF, …) are
                 // preserved.
-                buffer.push(0x1b);
+                buffer.push_pasted(0x1b);
                 *mode = Mode::Pasting;
                 step(mode, buffer, byte, produced);
             }
@@ -338,10 +352,12 @@ fn step(mode: &mut Mode, buffer: &mut Vec<u8>, byte: u8, produced: &mut Vec<Inpu
                     // CSI inside a paste as literal content (paste mode
                     // doesn't re-enter on a nested `200~`), so flush the
                     // collected bytes back into the buffer verbatim.
-                    buffer.push(0x1b);
-                    buffer.push(b'[');
-                    buffer.extend_from_slice(params);
-                    buffer.push(b'~');
+                    buffer.push_pasted(0x1b);
+                    buffer.push_pasted(b'[');
+                    for &param in params.iter() {
+                        buffer.push_pasted(param);
+                    }
+                    buffer.push_pasted(b'~');
                     *mode = Mode::Pasting;
                 }
             } else {
@@ -355,18 +371,94 @@ fn step(mode: &mut Mode, buffer: &mut Vec<u8>, byte: u8, produced: &mut Vec<Inpu
 mod tests {
     use super::*;
 
-    fn decode(bytes: &[u8]) -> Vec<InputEvent> {
+    /// An [`InputEvent`] with a prompt reduced to its text, for the tests
+    /// about what is submitted rather than how it was split.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Decoded {
+        Prompt(String),
+        Interrupt,
+    }
+
+    impl From<InputEvent> for Decoded {
+        fn from(event: InputEvent) -> Self {
+            match event {
+                InputEvent::Prompt(submission) => Self::Prompt(submission.text()),
+                InputEvent::Interrupt => Self::Interrupt,
+            }
+        }
+    }
+
+    fn decode_events(bytes: &[u8]) -> Vec<InputEvent> {
         let (tx, rx) = channel();
         decode_stream(bytes, &tx);
         drop(tx);
         rx.into_iter().collect()
     }
 
+    fn decode(bytes: &[u8]) -> Vec<Decoded> {
+        decode_events(bytes)
+            .into_iter()
+            .map(Decoded::from)
+            .collect()
+    }
+
+    fn typed(text: &str) -> PromptPart {
+        PromptPart {
+            text: text.to_owned(),
+            pasted: false,
+        }
+    }
+
+    fn pasted(text: &str) -> PromptPart {
+        PromptPart {
+            text: text.to_owned(),
+            pasted: true,
+        }
+    }
+
+    #[test]
+    fn a_submission_marks_which_runs_were_pasted() {
+        assert_eq!(
+            decode_events(b"look \x1b[200~pasted\x1b[201~ here\r"),
+            vec![InputEvent::Prompt(Submission {
+                parts: vec![typed("look "), pasted("pasted"), typed(" here")],
+            })]
+        );
+    }
+
+    #[test]
+    fn back_to_back_pastes_stay_separate_parts() {
+        assert_eq!(
+            decode_events(b"\x1b[200~one\x1b[201~\x1b[200~two\x1b[201~\r"),
+            vec![InputEvent::Prompt(Submission {
+                parts: vec![pasted("one"), pasted("two")],
+            })]
+        );
+    }
+
+    #[test]
+    fn a_typed_line_is_one_typed_part() {
+        assert_eq!(
+            decode_events(b"hello\r"),
+            vec![InputEvent::Prompt(Submission::typed("hello"))]
+        );
+    }
+
+    #[test]
+    fn clearing_the_buffer_forgets_an_earlier_paste() {
+        // The tmux clear sequence wipes a leftover paste; only what follows
+        // is submitted, with its own origin.
+        assert_eq!(
+            decode_events(b"\x1b[200~stale\x1b[201~\x15fresh\r"),
+            vec![InputEvent::Prompt(Submission::typed("fresh"))]
+        );
+    }
+
     #[test]
     fn a_typed_line_submits_on_enter() {
         assert_eq!(
             decode(b"hello\r"),
-            vec![InputEvent::Prompt("hello".to_owned())]
+            vec![Decoded::Prompt("hello".to_owned())]
         );
     }
 
@@ -379,25 +471,25 @@ mod tests {
         bytes.extend(b"next message\r");
         assert_eq!(
             decode(&bytes),
-            vec![InputEvent::Prompt("next message".to_owned())]
+            vec![Decoded::Prompt("next message".to_owned())]
         );
     }
 
     #[test]
     fn escape_is_an_interrupt() {
-        assert_eq!(decode(b"\x1b"), vec![InputEvent::Interrupt]);
+        assert_eq!(decode(b"\x1b"), vec![Decoded::Interrupt]);
     }
 
     #[test]
     fn enter_on_an_empty_buffer_is_ignored() {
-        assert_eq!(decode(b"\r\r"), Vec::<InputEvent>::new());
+        assert_eq!(decode(b"\r\r"), Vec::<Decoded>::new());
     }
 
     #[test]
     fn embedded_newlines_stay_in_the_message() {
         assert_eq!(
             decode(b"line one\nline two\r"),
-            vec![InputEvent::Prompt("line one\nline two".to_owned())]
+            vec![Decoded::Prompt("line one\nline two".to_owned())]
         );
     }
 
@@ -407,7 +499,7 @@ mod tests {
         // only the inner bytes reach the prompt event.
         assert_eq!(
             decode(b"\x1b[200~hello\x1b[201~\r"),
-            vec![InputEvent::Prompt("hello".to_owned())]
+            vec![Decoded::Prompt("hello".to_owned())]
         );
     }
 
@@ -419,7 +511,7 @@ mod tests {
         // would still mangle the bytes. This is the LF half of the fix.
         assert_eq!(
             decode(b"\x1b[200~line one\nline two\x1b[201~\r"),
-            vec![InputEvent::Prompt("line one\nline two".to_owned())]
+            vec![Decoded::Prompt("line one\nline two".to_owned())]
         );
     }
 
@@ -430,7 +522,7 @@ mod tests {
         // until after the paste end marker arrives.
         assert_eq!(
             decode(b"\x1b[200~keep\x15keep\rkeep\x1b[201~\r"),
-            vec![InputEvent::Prompt("keep\x15keep\rkeep".to_owned())]
+            vec![Decoded::Prompt("keep\x15keep\rkeep".to_owned())]
         );
     }
 
@@ -441,7 +533,7 @@ mod tests {
         // are stored verbatim, then the outer paste closes on `201~`.
         assert_eq!(
             decode(b"\x1b[200~outer\x1b[200~still outer\x1b[201~\r"),
-            vec![InputEvent::Prompt("outer\x1b[200~still outer".to_owned())]
+            vec![Decoded::Prompt("outer\x1b[200~still outer".to_owned())]
         );
     }
 
@@ -457,7 +549,7 @@ mod tests {
         bytes.extend(b"\r");
         assert_eq!(
             decode(&bytes),
-            vec![InputEvent::Prompt("line one\nline two".to_owned())]
+            vec![Decoded::Prompt("line one\nline two".to_owned())]
         );
     }
 
@@ -468,7 +560,7 @@ mod tests {
         // (followed by a non-`[` byte) is flushed back into the buffer.
         assert_eq!(
             decode(b"\x1b[200~a\x1bz\x1b[201~\r"),
-            vec![InputEvent::Prompt("a\x1bz".to_owned())]
+            vec![Decoded::Prompt("a\x1bz".to_owned())]
         );
     }
 
@@ -499,7 +591,7 @@ mod tests {
         let event = events
             .recv_timeout(TEST_ESCAPE_TIMEOUT * 4)
             .expect("decoder should emit Interrupt after the escape-time timeout");
-        assert_eq!(event, InputEvent::Interrupt);
+        assert_eq!(Decoded::from(event), Decoded::Interrupt);
     }
 
     #[test]
@@ -516,7 +608,7 @@ mod tests {
         let event = events
             .recv_timeout(TEST_ESCAPE_TIMEOUT * 4)
             .expect("decoder should still emit the Prompt event");
-        assert_eq!(event, InputEvent::Prompt("hi".to_owned()));
+        assert_eq!(Decoded::from(event), Decoded::Prompt("hi".to_owned()));
         // No further events: the BPM markers were consumed and no
         // spurious Interrupt was emitted along the way.
         assert!(events.recv_timeout(TEST_ESCAPE_TIMEOUT * 2).is_err());
@@ -541,6 +633,6 @@ mod tests {
         let event = events
             .recv_timeout(TEST_ESCAPE_TIMEOUT * 4)
             .expect("decoder should emit the Prompt with the literal ESC kept");
-        assert_eq!(event, InputEvent::Prompt("a\x1bz".to_owned()));
+        assert_eq!(Decoded::from(event), Decoded::Prompt("a\x1bz".to_owned()));
     }
 }
