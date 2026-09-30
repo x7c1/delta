@@ -68,27 +68,8 @@ mod tests {
     #[test]
     fn a_real_shell_prints_its_path() {
         let vars = read_login_shell_env(&OsString::from("/bin/sh")).expect("sh answers");
-        if !vars
+        assert!(vars
             .iter()
-            .any(|(name, value)| name == "PATH" && !value.is_empty())
-        {
-            // Name the variables the shell printed (never their values) so a
-            // host whose login profile changes the output can be diagnosed.
-            let raw = Command::new("/bin/sh")
-                .args(login_shell_args())
-                .stdin(Stdio::null())
-                .output()
-                .expect("sh runs");
-            let stdout = String::from_utf8_lossy(&raw.stdout);
-            let names: Vec<&str> = stdout
-                .lines()
-                .map(|line| line.split_once('=').map_or("<no =>", |(name, _)| name))
-                .collect();
-            panic!(
-                "no PATH among {vars:?}; markers in output: {}; lines: {names:?}; stderr: {}",
-                stdout.matches(MARKER).count(),
-                String::from_utf8_lossy(&raw.stderr)
-            );
-        }
+            .any(|(name, value)| name == "PATH" && !value.is_empty()));
     }
 }

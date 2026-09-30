@@ -7,10 +7,14 @@ use super::MARKER;
 /// A line that is not `NAME=value` — a continuation of a multi-line value of
 /// some other variable — is skipped too; none of the imported variables holds
 /// a newline.
+///
+/// The environment is read up to the *last* marker: a shell that exports `_`
+/// sets it to the previous command's last argument, the opening marker, so
+/// `env` itself can print `_=<marker>` before the variables that matter.
 pub fn parse_printed_env(stdout: &str) -> Option<Vec<(String, String)>> {
     let start = stdout.find(MARKER)? + MARKER.len();
     let rest = &stdout[start..];
-    let end = rest.find(MARKER)?;
+    let end = rest.rfind(MARKER)?;
     let vars = rest[..end]
         .lines()
         .filter_map(|line| line.split_once('='))
@@ -50,6 +54,16 @@ mod tests {
                 ("LC_CTYPE", "UTF-8"),
                 ("LC_ALL", "en_US.UTF-8"),
             ]))
+        );
+    }
+
+    #[test]
+    fn a_marker_printed_inside_the_environment_does_not_end_it() {
+        // `_` holds the opening marker when the shell exports it.
+        let stdout = format!("{MARKER}\n_={MARKER}\nPATH=/a:/b\nLANG=C.UTF-8\n{MARKER}");
+        assert_eq!(
+            parse_printed_env(&stdout),
+            Some(vars(&[("PATH", "/a:/b"), ("LANG", "C.UTF-8")]))
         );
     }
 
