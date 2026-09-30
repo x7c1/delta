@@ -4,6 +4,7 @@ import type {
   CloneRoot,
   GitBranchesResponse,
   GitRepoResponse,
+  LaunchOption,
   PromptTemplate,
   PromptTemplatesResponse,
   SendResponse,
@@ -952,5 +953,30 @@ describe('prompt-template mock CRUD', () => {
       { label: '   ', text: 'text' },
     );
     expect(response.status).toBe(400);
+  });
+});
+
+/**
+ * The launch-option mock derives `choice_group` the way the real server does,
+ * so a repeatable Claude flag registered twice stays two independent
+ * checkboxes rather than collapsing into a radio group.
+ */
+describe('launch-option mock choice groups', () => {
+  it('leaves two --allowedTools rows outside any choice group', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+
+    const created: LaunchOption[] = [];
+    for (const value of ['Read', 'Bash(git:*)']) {
+      const response = await runPost(
+        handlers,
+        '/api/launch-options',
+        'http://localhost/api/launch-options',
+        { provider: 'claude', name: '--allowedTools', value },
+      );
+      expect(response.status).toBe(201);
+      created.push((await response.json()) as LaunchOption);
+    }
+
+    expect(created.map((o) => o.choice_group)).toEqual([null, null]);
   });
 });
