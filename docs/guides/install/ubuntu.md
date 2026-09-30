@@ -1,10 +1,9 @@
 # Install on Ubuntu
 
 The Linux bundle is a `.deb` for Ubuntu and other Debian-based distributions
-(x86_64). What the app needs on the host, where it keeps its data and how
-updates behave are in the [install guide](README.md). Other distributions are
-not covered by a bundle; build from source with `make app` (see
-[the development guide](../development/README.md)).
+(x86_64). What the app needs on the host and where it keeps its data are in
+the [install guide](README.md). For other distributions, build from source
+with `make app` (see [the development guide](../development/README.md)).
 
 ## Download and install
 
@@ -42,9 +41,9 @@ from that.
 
   The file's location can differ by distribution; look under
   `/usr/share/glvnd/egl_vendor.d/` for the Mesa entry. The app does not set
-  this variable for you, so to make it permanent put it in a wrapper script,
-  or in the `Exec=` line of a desktop file through `env`, since `Exec=` does
-  not accept a bare `VAR=value` prefix:
+  this variable for you. To make it permanent, put it in a wrapper script or
+  in the `Exec=` line of a desktop file through `env` (`Exec=` does not
+  accept a bare `VAR=value` prefix):
 
   ```ini
   Exec=env __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json delta-app

@@ -9,13 +9,10 @@ distributions (x86_64, as a `.deb`). The app does not bundle `tmux` or the
 agent CLIs, and the macOS build is unsigned, so the first launch on a Mac
 needs a one-time Gatekeeper workaround.
 
-Pick your platform:
-
 - **[macOS](macos.md)** — the `.dmg`, and getting past Gatekeeper
 - **[Ubuntu](ubuntu.md)** — the `.deb`, and the WebKitGTK notes
 
-The rest of this page is common to both: what the host needs, where the app
-keeps its data, and how updates behave. To run Delta from source instead, see
+To run Delta from source instead, see
 [the development guide](../development/README.md).
 
 ## What the app needs on the host
@@ -23,8 +20,7 @@ keeps its data, and how updates behave. To run Delta from source instead, see
 The app contains the Delta server and UI, but not the tools it drives:
 
 - **`tmux`.** Agent sessions run inside tmux. Without it the app shows an
-  error dialog at startup and exits. Each platform page says how to install
-  it.
+  error dialog at startup and exits.
 - **An agent CLI.** An authenticated Claude Code (`claude`) and/or Codex
   (`codex`). Log in once from a terminal; Delta reuses that login and never
   runs the sign-in flow itself.
@@ -32,8 +28,7 @@ The app contains the Delta server and UI, but not the tools it drives:
 An app launched from Finder or a desktop file does not inherit a terminal's
 environment, so at launch the app asks your login shell for its `PATH` and
 uses that to find `tmux`, `claude` and `codex`. If a command works in a new
-terminal window, the app finds it too. The details are in
-[local-run.md](../development/local-run.md#the-desktop-app).
+terminal window, the app finds it too.
 
 ## Where the app keeps its data
 
@@ -66,8 +61,7 @@ are picked up again on the next launch.
 ## Updating
 
 Download the bundle from the new Release and install it over the old one the
-same way as the first time (each platform page has the step). Your data
-directory is left as is.
+same way as the first time. Your data directory is left as is.
 
 On the first launch of the new version, the database is migrated forward
 automatically, with a snapshot taken first when a step is destructive. Going

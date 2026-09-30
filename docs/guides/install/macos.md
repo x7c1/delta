@@ -1,8 +1,7 @@
 # Install on macOS
 
-The macOS bundle runs on Apple silicon (M1 and later); Intel Macs are not
-supported. What the app needs on the host, where it keeps its data and how
-updates behave are in the [install guide](README.md).
+The macOS bundle runs on Apple silicon (M1 and later). What the app needs on
+the host and where it keeps its data are in the [install guide](README.md).
 
 ## Download and install
 
@@ -24,12 +23,11 @@ following gets past the block; you only need it once per downloaded copy.
 **Allow it in System Settings.** After the first refusal, dismiss the dialog
 (**Done**), go to **System Settings → Privacy & Security**, find the message
 that Delta was blocked near the bottom and click **Open Anyway**, then open
-the app again and confirm **Open Anyway** with your password. This is the
-path on macOS 15 (Sequoia) and later, where right-click (or Control-click) →
-**Open** no longer gets past the block; on macOS 14 and earlier, right-click
-`Delta.app` in `Applications`, choose **Open** and confirm **Open** in the
-dialog. When macOS says the app is damaged, no Open Anyway button appears; use
-the next workaround.
+the app again and confirm **Open Anyway** with your password. On macOS 14 and
+earlier the shortcut still works: right-click `Delta.app` in `Applications`,
+choose **Open** and confirm **Open** in the dialog. On macOS 15 (Sequoia) and
+later that no longer gets past the block. When macOS says the app is damaged,
+no Open Anyway button appears; use the next workaround.
 
 **Remove the quarantine flag.** macOS marks downloaded files with a quarantine
 attribute, which is what triggers the check. Clearing it from the installed
