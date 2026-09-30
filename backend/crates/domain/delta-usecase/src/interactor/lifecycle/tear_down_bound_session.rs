@@ -99,11 +99,12 @@ where
     /// rows step 4 denied will never produce their events again, so there is
     /// nothing a caller could undo and stopping would only lose the
     /// notifications that clear the browser's dialogs. Their only failure is a
-    /// store error on a row write (an orphaned send's settle, a subagent launch
-    /// row), which is logged at `warn` with the step that failed while the
-    /// routine carries on and returns the events it has. The turn machine
-    /// itself is closed before either step touches the store, so the session
-    /// still ends idle.
+    /// store error on a row write: an orphaned send's settle in step 5, logged
+    /// at `warn` with the step that failed, or a subagent launch row in step 6,
+    /// which the sweep itself logs and steps past (it still emits that entry's
+    /// `SubagentFinished`). Either way the routine carries on and returns the
+    /// events it has. The turn machine itself is closed before either step
+    /// touches the store, so the session still ends idle.
     ///
     /// The returned events are in that order — the permission resolutions, then
     /// the subagent sweep's — and every caller announces the session's own close
@@ -167,18 +168,7 @@ where
                  still closes and its settled permission requests are announced"
             );
         }
-        match self.sweep_running_subagents_on_process_gone().await {
-            Ok(swept) => events.extend(swept),
-            Err(err) => tracing::warn!(
-                session_id = %self.id,
-                step = "subagent_sweep",
-                error = %err,
-                "sweeping the background subagents of a session being torn down \
-                 failed; a launch row may be left behind, but the teardown carries on \
-                 so the session still closes and its settled permission requests are \
-                 announced"
-            ),
-        }
+        events.extend(self.sweep_running_subagents_on_process_gone().await);
         Ok((closed_pane, events))
     }
 }
