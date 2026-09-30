@@ -611,18 +611,26 @@ function ClonePanel({
       ) : (
         <label className="block space-y-1">
           <span className="block text-caption text-fg-subtle">Clone root</span>
-          <select
-            value={selectedRoot}
-            onChange={(event) => setPickedRoot(event.target.value)}
-            data-testid="pr-tab-clone-root-select"
-            className="w-full rounded border border-border-default bg-surface px-2 py-1 font-mono text-code text-fg"
-          >
-            {clone.roots.map((root) => (
-              <option key={root} value={root}>
-                {root}
-              </option>
-            ))}
-          </select>
+          {/* `appearance-none` because WebKit otherwise keeps the native
+              menulist rendering and paints the value in the platform
+              theme's text colour instead of `text-fg`; the chevron below
+              replaces the native indicator, and `pr-7` keeps the value
+              clear of it. */}
+          <span className="relative block">
+            <select
+              value={selectedRoot}
+              onChange={(event) => setPickedRoot(event.target.value)}
+              data-testid="pr-tab-clone-root-select"
+              className="w-full appearance-none rounded border border-border-default bg-surface py-1 pl-2 pr-7 font-mono text-code text-fg"
+            >
+              {clone.roots.map((root) => (
+                <option key={root} value={root}>
+                  {root}
+                </option>
+              ))}
+            </select>
+            <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-muted" />
+          </span>
         </label>
       )}
 
@@ -657,6 +665,23 @@ function ClonePanel({
         </p>
       )}
     </div>
+  );
+}
+
+function ChevronDownIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
   );
 }
 

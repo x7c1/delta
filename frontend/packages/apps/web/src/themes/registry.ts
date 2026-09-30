@@ -7,7 +7,9 @@
  *      every semantic color CSS variable the theme contract specifies.
  *      Theme-fixed tokens (`terminal-*`) must keep their existing values,
  *      while `highlight-wash` / `highlight-wash-peak` should be tuned per
- *      theme; see the contract at the top of `src/index.css`.
+ *      theme; see the contract at the top of `src/index.css`. The block also
+ *      declares `color-scheme` (`dark` exactly when the entry's `isDark` is
+ *      true, otherwise `light`) so native controls follow the theme.
  *   2. Add a {@link ThemeMeta} entry to {@link THEMES} below.
  *   3. The Appearance picker (see `AppearanceSection` in
  *      `src/features/settings/SettingsView.tsx`) enumerates `THEMES`, so the

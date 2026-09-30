@@ -177,6 +177,10 @@
    * themes resolve to a dark enough value to preserve contrast under the
    * overlay regardless of the page's resting color. */
   --delta-color-scrim: 15 23 42;
+  /* Native-control colour scheme (select popups, checkboxes, scrollbars).
+   * WebKit paints these from the declared scheme, not from the tokens, so
+   * each theme block declares the scheme its palette belongs to. */
+  color-scheme: light;
 }
 
 /*
@@ -190,8 +194,12 @@
  * styled element follows whichever block matches the current attribute.
  *
  * To add a new theme:
- *   1. Add a `:root[data-theme="<id>"]` block below defining all 19 tokens.
- *   2. Add a matching entry to THEMES in src/themes/registry.ts.
+ *   1. Add a `:root[data-theme="<id>"]` block below defining all 19 tokens
+ *      and a `color-scheme` (`light` or `dark`) matching its palette, so
+ *      native controls (select popups, checkboxes, scrollbars) follow it.
+ *   2. Add a matching entry to THEMES in src/themes/registry.ts, with
+ *      `isDark` set to true exactly when the block declares
+ *      `color-scheme: dark`.
  * No other code change is required — Tailwind utilities, the runtime readers
  * in src/theme.ts, and the useTheme hook all key off the same names.
  */
@@ -205,6 +213,7 @@
  * now-neutral chrome.
  */
 :root[data-theme='dark'] {
+  color-scheme: dark;
   --delta-color-surface: 29 29 32;
   --delta-color-surface-elevated: 45 45 48;
   --delta-color-surface-elevated-hover: 63 63 70;
@@ -245,6 +254,7 @@
 }
 
 :root[data-theme='light'] {
+  color-scheme: light;
   --delta-color-surface: 255 255 255;
   --delta-color-surface-elevated: 248 250 252;
   --delta-color-surface-elevated-hover: 241 245 249;
@@ -293,6 +303,7 @@
  * utilities rely on (`rgb(var(--…) / <alpha-value>)`).
  */
 :root[data-theme='sepia'] {
+  color-scheme: light;
   --delta-color-surface: 243 233 211;
   --delta-color-surface-elevated: 234 221 190;
   --delta-color-surface-elevated-hover: 216 200 164;
