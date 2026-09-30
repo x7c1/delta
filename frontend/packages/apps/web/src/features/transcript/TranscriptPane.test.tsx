@@ -89,6 +89,7 @@ describe('TranscriptPane', () => {
       localSends: {},
       spawns: [],
       notices: {},
+      resolvedRequests: {},
       streamingMessages: {},
       runningSubagents: {},
     });
