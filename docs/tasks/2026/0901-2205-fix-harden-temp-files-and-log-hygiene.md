@@ -90,7 +90,7 @@ conversation excerpt** (`frame_locator_context.rs:20-29` /
 conversation text lands in the server log. Replace the content field with a
 non-content signal — e.g. `injected = additional_context.is_some()` and/or
 `additional_context_len` — keeping the log line itself (it is a useful
-control-plane milestone). No test asserts on this log (verified); nothing
+session lifecycle marker). No test asserts on this log (verified); nothing
 else in `delta-server/src` logs prompt/transcript/quote text, so this one
 site completes the fix.
 
