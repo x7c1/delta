@@ -21,6 +21,13 @@
 //! `<...>` flags and the ones documented as repeatable), like the danger
 //! spellings: when the CLI grows a repeatable flag, it is added here.
 //!
+//! The frontend's mock server keeps a copy of the list,
+//! `CLAUDE_REPEATABLE_FLAGS` in
+//! `frontend/packages/testing/api-mocks/src/launchOptionChoiceGroup.ts`, so rows
+//! registered through the mock group as they would here. A change to this list
+//! must be made there too; the api-mocks test suite reads this file and fails
+//! until the two lists match.
+//!
 //! [`LaunchOptionVocabulary`]: delta_usecase::LaunchOptionVocabulary
 
 use delta_usecase::LaunchOptionCardinality;
