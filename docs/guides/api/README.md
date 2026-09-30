@@ -72,8 +72,9 @@ endpoint matched, and it never answers under `/api`, `/ws`, `/pty`, `/comms`,
   immutable`, anything else `no-cache`. MSW's `mockServiceWorker.js` is not
   served.
 - Any other `GET` whose `Accept` admits `text/html` — the page (the SPA
-  fallback, so deep links and reloads work). Without `text/html` it gets the
-  API's ordinary `401`/`404`.
+  fallback, so deep links and reloads work). Without `text/html` it gets a
+  plain `404`, with or without a bearer token, rather than the bearer guard's
+  `401`.
 
 The page is not behind the bearer-token guard, since it is what delivers the
 token; it is behind the Origin/Host guard. At boot the server injects the

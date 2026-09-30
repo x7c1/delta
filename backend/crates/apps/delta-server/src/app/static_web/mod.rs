@@ -20,11 +20,16 @@
 //! - The SPA fallback — any other `GET` that accepts HTML, outside the reserved
 //!   prefixes ([`request_scope::RESERVED_PREFIXES`]), gets the page, so a
 //!   reload on a deep link lands back on that screen.
+//! - A miss — any other `GET`/`HEAD` outside the reserved prefixes, matching
+//!   no file and not accepting HTML, such as a browser's automatic
+//!   `/favicon.ico` — answers `404` here rather than reaching the bearer
+//!   guard. Such a path belongs to the static surface, so a token-less
+//!   browser request for it is a plain miss, not an unauthenticated API call.
 //!
-//! Everything else — non-`GET`/`HEAD` methods, any path under a reserved
-//! prefix, and unknown paths that do not accept HTML — is handed to the API
-//! router's own fallback, so it answers exactly as it does without this module
-//! (`401` without a bearer token, `404` with one).
+//! Everything else — non-`GET`/`HEAD` methods and any path under a reserved
+//! prefix — is handed to the API router's own fallback, so it answers exactly
+//! as it does without this module (`401` without a bearer token, `404` with
+//! one).
 //!
 //! ## Why a fallback, and why outside the bearer guard
 //!
@@ -54,7 +59,7 @@ use std::sync::Arc;
 
 use axum::body::{Body, Bytes};
 use axum::extract::Request;
-use axum::http::{header, HeaderValue, Method};
+use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
 use include_dir::Dir;
@@ -154,7 +159,10 @@ impl StaticWeb {
                 Bytes::from_static(file.contents()),
             ));
         }
-        accepts_html(request.headers()).then(|| self.index())
+        if accepts_html(request.headers()) {
+            return Some(self.index());
+        }
+        Some(StatusCode::NOT_FOUND.into_response())
     }
 
     fn index(&self) -> Response {
