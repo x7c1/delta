@@ -1,6 +1,10 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { WsEventSource, type SessionEventSource } from '@delta/api-client';
+import {
+  invalidateAll,
+  WsEventSource,
+  type SessionEventSource,
+} from '@delta/api-client';
 import { isMockMode, wsUrl } from '../config';
 import { useLiveStore } from '../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
@@ -63,8 +67,9 @@ export function useSessionEvents(): void {
             return;
           }
           if (hasConnected) {
-            // Reconnected after a gap: heal the missed window.
-            void queryClient.invalidateQueries();
+            // Reconnected after a gap: heal the missed window. See
+            // `invalidateAll` for why this is not a bare `invalidateQueries`.
+            invalidateAll(queryClient);
             useLiveStore.getState().resetTurnEphemera();
           }
           hasConnected = true;

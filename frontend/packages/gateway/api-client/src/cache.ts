@@ -70,6 +70,20 @@ function invalidateDiscardingInFlight(
 }
 
 /**
+ * Mark every cached query stale so its active observers refetch. Used to
+ * resynchronise after the live channel reconnects, when any resource may have
+ * changed during the gap.
+ *
+ * Goes through {@link invalidateDiscardingInFlight} (the empty key matches every
+ * query) rather than a bare `invalidateQueries()`: a query whose first fetch is
+ * still in flight at reconnect would otherwise keep that fetch's pre-reconnect
+ * answer as fresh data.
+ */
+export function invalidateAll(queryClient: QueryClient): void {
+  invalidateDiscardingInFlight(queryClient, []);
+}
+
+/**
  * Append a message to a thread's cached transcript, de-duplicating by uuid and
  * keeping the list ordered by `seq`. Used to apply incremental transcript
  * growth that arrives via the live channel. No-op if the thread is not cached.
