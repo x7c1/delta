@@ -10,7 +10,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "dmg",
+      "deb"
+    ],
     "category": "DeveloperTool",
     "icon": [
       "icons/32x32.png",

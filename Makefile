@@ -63,7 +63,7 @@ server-embedded: web-dist
 app-dev: web-dist
 	cd backend && cargo run -p delta-app
 
-## app: build the SPA, then bundle the desktop shell under backend/target/release/bundle/ (macOS: Delta.app and a .dmg; Linux: .deb, .rpm and an AppImage) (one-time: `cargo install tauri-cli --version '^2' --locked`)
+## app: build the SPA, then bundle the desktop shell under backend/target/release/bundle/ (macOS: Delta.app and a .dmg; Linux: a .deb) (one-time: `cargo install tauri-cli --version '^2' --locked`)
 .PHONY: app
 app: web-dist
 	cd backend/crates/apps/delta-app && cargo tauri build

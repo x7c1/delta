@@ -122,12 +122,11 @@ Every Release carries unsigned bundles of the desktop shell
 | `Delta_<version>_aarch64.dmg` | macOS, Apple silicon |
 | `Delta_<version>_aarch64.app.tar.gz` | macOS, Apple silicon (the `.app` the `.dmg` holds, as a tarball) |
 | `Delta_<version>_amd64.deb` | Linux (Debian/Ubuntu), x86_64 |
-| `Delta_<version>_amd64.AppImage` | Linux, x86_64 |
 
 The version in each file name is the workspace version Tauri reads from the
 shell crate, so it matches the tag by construction. The bundles are neither
 signed nor notarized; what that means for someone installing them is in
-[install.md](install.md).
+[the install guide](install/README.md).
 
 - **Order.** The `bundles` job of the `Release` workflow runs only after the
   `release` job has created the tag and the Release, and uploads to that
