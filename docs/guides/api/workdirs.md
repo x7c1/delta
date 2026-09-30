@@ -21,13 +21,16 @@ launched a session in.
 ### `GET /api/workdir/list`
 
 Browse one directory for the picker (read-only). Lists the immediate
-subdirectories of `path` — directories only, dot-directories hidden, sorted by
-name — along with the canonical path and its parent so the picker can step up.
+subdirectories of `path` — directories only, sorted by name, dot-directories
+hidden unless `hidden=true` — along with the canonical path and its parent so
+the picker can step up.
 
 Query parameters:
 
 - `path` (optional) — the absolute path to list. Omitted or empty defaults to
   the user's home directory.
+- `hidden` (optional) — `true` also lists dot-directories (the picker's "Show
+  hidden" toggle). Omitted means `false`.
 
 Response:
 

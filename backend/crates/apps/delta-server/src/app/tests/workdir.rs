@@ -37,6 +37,50 @@ async fn workdir_list_browses_a_real_directory() {
     assert!(body["parent"].is_string(), "a non-root dir has a parent");
 }
 
+/// `?hidden=true` reaches the workspace: omitted, dot-directories stay hidden;
+/// set, they are listed alongside the visible ones.
+#[tokio::test]
+async fn workdir_list_includes_hidden_dirs_only_with_the_hidden_param() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join(".hidden")).unwrap();
+    std::fs::create_dir(dir.path().join("visible")).unwrap();
+    let path = dir.path().to_str().unwrap();
+
+    let list_names = |uri: String| async move {
+        let response = router(test_state().await)
+            .oneshot(
+                Request::builder()
+                    .header("host", "127.0.0.1")
+                    .header("authorization", super::bearer())
+                    .uri(&uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        body["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["name"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+
+    // `include_hidden` defaults to false when the parameter is omitted.
+    let default = list_names(format!("/api/workdir/list?path={path}")).await;
+    assert_eq!(default, vec!["visible"], "hidden excluded by default");
+
+    let include_hidden = list_names(format!("/api/workdir/list?path={path}&hidden=true")).await;
+    assert_eq!(
+        include_hidden,
+        vec![".hidden", "visible"],
+        "hidden=true lists dot-directories too"
+    );
+}
+
 #[tokio::test]
 async fn workdir_list_rejects_a_missing_path_with_400() {
     let response = router(test_state().await)

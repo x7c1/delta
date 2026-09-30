@@ -28,7 +28,10 @@ impl FsWorkspace {
         Ok(canonical)
     }
 
-    pub(super) async fn list(&self, path: &str) -> Result<DirListing, Error> {
+    /// List the immediate subdirectories of `path`, sorted by name
+    /// (case-insensitive). Files are never listed; dot-directories are listed
+    /// only when `include_hidden` is set.
+    pub(super) async fn list(&self, path: &str, include_hidden: bool) -> Result<DirListing, Error> {
         let dir = self.resolve_dir(path).await?;
 
         let mut read = tokio::fs::read_dir(&dir)
@@ -42,8 +45,9 @@ impl FsWorkspace {
             .map_err(|err| map_dir_error(path, err, "could not read a directory entry"))?
         {
             let name = entry.file_name().to_string_lossy().into_owned();
-            // Skip dot-directories by default; the picker hides them.
-            if name.starts_with('.') {
+            // Skip dot-directories unless the caller opted into them; the
+            // picker hides them by default.
+            if !include_hidden && name.starts_with('.') {
                 continue;
             }
             // Only directories are browseable targets. `file_type` avoids a
@@ -167,7 +171,7 @@ mod tests {
         tokio::fs::write(root.join("file.txt"), "x").await.unwrap();
 
         let ws = FsWorkspace::new();
-        let listing = ws.list_dirs(root.to_str().unwrap()).await.unwrap();
+        let listing = ws.list_dirs(root.to_str().unwrap(), false).await.unwrap();
 
         let names: Vec<_> = listing.entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(
@@ -190,12 +194,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_dirs_includes_dot_directories_only_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // A dot-directory, a normal directory, and a regular file (also dotted,
+        // so it would sort in if files leaked through).
+        tokio::fs::create_dir(root.join(".hidden")).await.unwrap();
+        tokio::fs::create_dir(root.join("visible")).await.unwrap();
+        tokio::fs::write(root.join(".file"), "x").await.unwrap();
+        let ws = FsWorkspace::new();
+        let names = |listing: DirListing| -> Vec<String> {
+            listing.entries.into_iter().map(|e| e.name).collect()
+        };
+
+        let include_hidden = false;
+        let default = ws
+            .list_dirs(root.to_str().unwrap(), include_hidden)
+            .await
+            .unwrap();
+        assert_eq!(names(default), vec!["visible"], "dot-directories hidden");
+
+        let include_hidden = true;
+        let with_hidden = ws
+            .list_dirs(root.to_str().unwrap(), include_hidden)
+            .await
+            .unwrap();
+        assert_eq!(
+            names(with_hidden),
+            vec![".hidden", "visible"],
+            "dot-directories listed and sorted; files still excluded"
+        );
+    }
+
+    #[tokio::test]
     async fn list_dirs_rejects_a_missing_path() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("nope");
         let ws = FsWorkspace::new();
 
-        let err = ws.list_dirs(missing.to_str().unwrap()).await.unwrap_err();
+        let err = ws
+            .list_dirs(missing.to_str().unwrap(), false)
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, delta_usecase::Error::InvalidWorkdir(_)),
             "a missing path is an InvalidWorkdir, got {err:?}"
@@ -205,7 +245,7 @@ mod tests {
     #[tokio::test]
     async fn list_dirs_reports_root_with_no_parent() {
         let ws = FsWorkspace::new();
-        let listing = ws.list_dirs("/").await.unwrap();
+        let listing = ws.list_dirs("/", false).await.unwrap();
         assert_eq!(listing.path, "/");
         assert!(
             listing.parent.is_none(),

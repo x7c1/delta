@@ -88,9 +88,17 @@ export function WorkdirPickerBody({
   // track the concrete path so the ".." entry and descends address real
   // directories.
   const [browsePath, setBrowsePath] = useState<string | null>(null);
+  // Whether Browse also lists dot-directories. Off each time the picker
+  // opens; flipping it re-lists the current directory in place.
+  const [showHidden, setShowHidden] = useState(false);
 
   const recentQuery = useRecentWorkdirsQuery(client, active);
-  const listQuery = useWorkdirListQuery(client, browsePath, active);
+  const listQuery = useWorkdirListQuery(
+    client,
+    browsePath,
+    active,
+    showHidden,
+  );
 
   // The home directory, used only to abbreviate displayed paths to `~`.
   const home = useHomeDirQuery(client, active).data?.path ?? null;
@@ -124,11 +132,13 @@ export function WorkdirPickerBody({
     setCandidate(path);
   };
 
-  // Reset the browse position whenever the picker goes inactive, so a
-  // re-mount starts fresh rather than carrying an in-flight pick.
+  // Reset the browse position and the hidden toggle whenever the picker goes
+  // inactive, so a re-mount starts fresh rather than carrying an in-flight
+  // pick.
   useEffect(() => {
     if (!active) {
       setBrowsePath(null);
+      setShowHidden(false);
       // Deliberate: a re-activation is a fresh picking session and must be
       // free to pre-select again.
       userPickedRef.current = false;
@@ -203,9 +213,19 @@ export function WorkdirPickerBody({
       )}
 
       <section className="space-y-1" data-testid="workdir-browse">
-        <h3 className="text-caption font-semibold uppercase tracking-wide text-fg-muted">
-          Browse
-        </h3>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-caption font-semibold uppercase tracking-wide text-fg-muted">
+            Browse
+          </h3>
+          <label className="flex cursor-pointer items-center gap-1.5 text-caption text-fg-muted">
+            <input
+              type="checkbox"
+              checked={showHidden}
+              onChange={(event) => setShowHidden(event.target.checked)}
+            />
+            Show hidden
+          </label>
+        </div>
 
         {listQuery.isLoading && <Spinner label="Loading directory…" />}
 

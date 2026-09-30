@@ -911,7 +911,8 @@ export const MOCK_VERSION = 'v0.0.0-mock';
 const MOCK_WORKDIR_TREE: Record<string, string[]> = {
   '/': ['home'],
   '/home': ['dev'],
-  [MOCK_WORKDIR_HOME]: ['projects', 'scratch'],
+  [MOCK_WORKDIR_HOME]: ['.config', 'projects', 'scratch'],
+  '/home/dev/.config': [],
   '/home/dev/projects': ['delta', 'website'],
   '/home/dev/projects/delta': ['backend', 'frontend'],
   '/home/dev/projects/delta/backend': [],
@@ -932,9 +933,13 @@ function workdirParent(path: string): string | null {
 /**
  * One level of the mock browse for `path`, or `null` when `path` is not a known
  * directory (mapped to a 400 by the handler). Entries are name-sorted, dirs
- * only, mirroring the real server.
+ * only, and dot-directories are dropped unless `includeHidden` is set,
+ * mirroring the real server.
  */
-export function workdirListing(path: string): {
+export function workdirListing(
+  path: string,
+  includeHidden = false,
+): {
   path: string;
   parent: string | null;
   entries: { name: string; path: string }[];
@@ -943,7 +948,8 @@ export function workdirListing(path: string): {
   if (!names) {
     return null;
   }
-  const entries = [...names]
+  const entries = names
+    .filter((name) => includeHidden || !name.startsWith('.'))
     .sort((a, b) => a.localeCompare(b))
     .map((name) => ({
       name,

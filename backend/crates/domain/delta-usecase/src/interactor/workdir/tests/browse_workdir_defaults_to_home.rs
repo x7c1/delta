@@ -8,7 +8,7 @@ async fn browse_workdir_defaults_to_home() {
     // Pin HOME for a deterministic default.
     std::env::set_var("HOME", "/home/tester");
 
-    let listing = ix.browse_workdir(None).await.unwrap();
+    let listing = ix.browse_workdir(None, false).await.unwrap();
     assert_eq!(
         listing.path,
         FakeWorkspace::canonical("/home/tester"),
@@ -16,6 +16,6 @@ async fn browse_workdir_defaults_to_home() {
     );
 
     // An explicit path is used verbatim (then canonicalized by the port).
-    let explicit = ix.browse_workdir(Some("/srv")).await.unwrap();
+    let explicit = ix.browse_workdir(Some("/srv"), false).await.unwrap();
     assert_eq!(explicit.path, FakeWorkspace::canonical("/srv"));
 }
