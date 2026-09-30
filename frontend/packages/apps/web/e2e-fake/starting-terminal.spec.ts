@@ -1,5 +1,5 @@
 import { test, expect } from './support/fixtures';
-import { startNewSession } from './support/app';
+import { shownTerminal, startNewSession } from './support/app';
 
 /**
  * The embedded terminal is reachable while a session is still starting.
@@ -48,14 +48,17 @@ test('the terminal attaches to a session that is still starting, and stays attac
   const starting = page.getByRole('status', { name: 'Starting', exact: true });
   await expect(starting).toHaveCount(1, { timeout: 5_000 });
 
+  // The terminal is already open — a new session's is, on this (large) layout,
+  // so the person whose launch stopped on a prompt sees it without a click.
   // The attach is observable: once the bridge's `tmux attach` client connects,
   // tmux redraws the pane into the browser terminal, and the fake's banner ends
   // with an identifying line that sits on the cursor row — in view however small
   // the fitted viewport is.
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
-  const xtermInput = page.locator('.xterm-helper-textarea');
+  const xtermInput = shownTerminal(page).locator('.xterm-helper-textarea');
   await expect(xtermInput).toBeAttached();
-  await expect(page.locator('.xterm-rows')).toContainText('fake-claude session');
+  await expect(shownTerminal(page).locator('.xterm-rows')).toContainText(
+    'fake-claude session',
+  );
 
   // All of that happened while the session was still starting — the point of
   // the spec — and it was never described as closed, which is what the pane
@@ -68,10 +71,9 @@ test('the terminal attaches to a session that is still starting, and stays attac
   // surviving the bind is what makes "no detach, no reattach" an assertion that
   // can fail — a rebuilt terminal redraws the same banner, so the text below
   // cannot tell the two apart.
-  await page
-    .locator('.xterm')
-    .first()
-    .evaluate((el) => el.setAttribute('data-attached-before-bind', ''));
+  await shownTerminal(page).evaluate((el) =>
+    el.setAttribute('data-attached-before-bind', ''),
+  );
 
   // The hook lands: the same card flips to Open, and the terminal that was
   // attached before the bind is still the one on screen — no detach, no
@@ -82,7 +84,9 @@ test('the terminal attaches to a session that is still starting, and stays attac
     page.getByRole('status', { name: 'Open', exact: true }),
   ).toHaveCount(1, { timeout: 20_000 });
   await expect(page.locator('.xterm[data-attached-before-bind]')).toHaveCount(1);
-  await expect(page.locator('.xterm-rows')).toContainText('fake-claude session');
+  await expect(shownTerminal(page).locator('.xterm-rows')).toContainText(
+    'fake-claude session',
+  );
   await expect(page.getByText('This session is closed.')).toHaveCount(0);
 });
 
@@ -97,7 +101,7 @@ test('a reload mid-launch still reaches the starting session’s pane', async ({
   await expect(
     page.getByRole('status', { name: 'Starting', exact: true }),
   ).toHaveCount(1, { timeout: 5_000 });
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  // Its terminal opened with it; nothing to click.
 
   // The reload throws away everything this browser was told live — including
   // the one-shot announcement that the launch's pane came up, which is never
@@ -112,7 +116,9 @@ test('a reload mid-launch still reaches the starting session’s pane', async ({
 
   // Attached again, to a session that is still starting — not the note that
   // there is nothing to show, and never the closed-session wording.
-  await expect(page.locator('.xterm-rows')).toContainText('fake-claude session');
+  await expect(shownTerminal(page).locator('.xterm-rows')).toContainText(
+    'fake-claude session',
+  );
   await expect(page.getByText(/still starting up/i)).toHaveCount(0);
   await expect(page.getByText('This session is closed.')).toHaveCount(0);
 
@@ -121,5 +127,7 @@ test('a reload mid-launch still reaches the starting session’s pane', async ({
   await expect(
     page.getByRole('status', { name: 'Open', exact: true }),
   ).toHaveCount(1, { timeout: 20_000 });
-  await expect(page.locator('.xterm-rows')).toContainText('fake-claude session');
+  await expect(shownTerminal(page).locator('.xterm-rows')).toContainText(
+    'fake-claude session',
+  );
 });

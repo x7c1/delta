@@ -1,5 +1,9 @@
 import { test, expect, type Page } from './support/fixtures';
-import { sendMessage, startNewSession } from './support/app';
+import {
+  sendMessage,
+  shownTerminal,
+  startNewSession,
+} from './support/app';
 import {
   dropLiveSocket,
   interceptLiveSocket,
@@ -177,10 +181,12 @@ test('a queued send keeps its chip and the running state is re-seeded across a r
   // send dispatches as an ordinary prompt, and its turn completes. Driving the
   // end explicitly — rather than waiting out a scripted delay — keeps the whole
   // spec free of wall-clock races.
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
-  const xtermInput = page.locator('.xterm-helper-textarea');
+  // A new session's terminal is open by default on this (large) layout.
+  const xtermInput = shownTerminal(page).locator('.xterm-helper-textarea');
   await expect(xtermInput).toBeAttached();
-  await expect(page.locator('.xterm-rows')).toContainText('fake-claude session');
+  await expect(shownTerminal(page).locator('.xterm-rows')).toContainText(
+    'fake-claude session',
+  );
 
   // Land Escape in the fake's stdin; retried until its observable effect (the
   // queued chip leaving — the send was promoted and dispatched) lands.

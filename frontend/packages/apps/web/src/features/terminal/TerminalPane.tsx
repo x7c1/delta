@@ -52,15 +52,25 @@ export interface TerminalPaneProps {
    * from its capability profile (`GET /api/providers`) — never from the provider
    * id. A terminal-less provider (Codex's headless app-server) must NEVER open a
    * `/pty` bridge, so this gates the attach as authoritatively as
-   * {@link TerminalPaneProps.paneState}: the enclosing pane is already withheld
+   * {@link TerminalPaneProps.paneState}: the enclosing pane is already hidden
    * for such a provider, and this keeps the connect itself capability-driven
-   * even if the pane is ever mounted.
+   * even if the pane is ever shown.
    */
   hasTerminal: boolean;
+  /**
+   * Whether the pane is off screen: the focused session's terminal is closed,
+   * or its provider has none. The enclosing column stays mounted while hidden
+   * so the entries of the *other* bound sessions outlive a focus switch through
+   * such a session (see the show/hide effect); a hidden pane attaches nothing
+   * and holds no entry for the focused session itself.
+   */
+  hidden?: boolean;
 }
 
 /** A live xterm instance bound to one session's `/pty` pane, kept alive while
- * the terminal is open even when another session is focused. */
+ * another session is focused — if its session is bound (see
+ * {@link PaneEntry.bound}) — until that session's own terminal is closed or
+ * the pane unmounts. */
 interface PaneEntry {
   el: HTMLDivElement;
   term: Terminal;
@@ -71,6 +81,13 @@ interface PaneEntry {
   /** Set once the bridge socket closes (session closed or server gone) so a
    * later refocus rebuilds the entry instead of reusing a dead socket. */
   closed: boolean;
+  /**
+   * Whether the session was bound (`open`) the last time it was focused, as
+   * opposed to `starting`. Only a bound session's entry outlives its focus; a
+   * starting one is torn down the moment another session is focused (see the
+   * show/hide effect).
+   */
+  bound: boolean;
 }
 
 /**
@@ -88,13 +105,16 @@ interface PaneEntry {
  * a client detaches, which Claude renders as a stray blank line, so re-attaching
  * on every session switch made those blank lines pile up. Holding one persistent
  * attach per open session, exactly as a normal `tmux attach` would, keeps the
- * input clean. The one exception is a session that gets **closed**: its entry is
- * disposed so a later resume rebuilds against the fresh pane (see the effect).
+ * input clean. Two exceptions: a session that gets **closed** has its entry
+ * disposed so a later resume rebuilds against the fresh pane, and a session
+ * that is still **starting** keeps its entry only while it is focused (see the
+ * effect for both).
  */
 export function TerminalPane({
   sessionId,
   paneState,
   hasTerminal,
+  hidden = false,
 }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const entriesRef = useRef<Map<SessionId, PaneEntry>>(new Map());
@@ -108,12 +128,42 @@ export function TerminalPane({
   // bridge resolves.
   const hasLivePane = paneState === 'open' || paneState === 'starting';
   const canAttach =
-    !isMockMode() && hasLivePane && hasTerminal && sessionId !== null;
+    !isMockMode() &&
+    !hidden &&
+    hasLivePane &&
+    hasTerminal &&
+    sessionId !== null;
 
-  // Show the focused session's pane, keeping the others attached but hidden.
+  // Show the focused session's pane, keeping the other bound ones attached but
+  // hidden — including while the whole pane is hidden because the focused
+  // session's terminal is closed.
   useEffect(() => {
     const entries = entriesRef.current;
     const parent = containerRef.current;
+
+    // A pane that is still starting is held only while it is on screen. The
+    // server's launch watchdog never reaps a pane with a bridge attached, on the
+    // premise that an attach is a person watching — the person who may be the
+    // only way past a prompt the launch stopped on. An entry kept hidden for a
+    // starting session would make every launch this browser ever looked at
+    // "watched" whether anyone is looking or not, and a hung launch would never
+    // reach its failed screen. So the moment another session (or none) takes
+    // focus, the starting entry is torn down: the bridge detaches and the bind
+    // deadline runs again from there. Focusing it again builds a fresh entry,
+    // which is safe for an unbound pane — the server skips its pre-attach input
+    // wipe there, so re-attaching types nothing into whatever dialog the pane
+    // is showing. And the stray-blank-line reason for keeping bound entries
+    // weighs less here: the focus-out report a detach delivers reaches the
+    // launch's own screen, not an agent's input box, and if the session binds
+    // before it is viewed again, that next attach is to a bound pane and runs
+    // the wipe that clears such a line.
+    for (const [id, entry] of entries) {
+      if (id !== sessionId && !entry.bound) {
+        disposeEntry(entry);
+        entries.delete(id);
+      }
+    }
+
     if (!canAttach || sessionId === null || !parent) {
       // The focused session is known but has no live pane — it was closed, or
       // its launch failed. Drop its live entry now so a later resume (a Send or
@@ -123,6 +173,12 @@ export function TerminalPane({
       // and the terminal stays blank until a manual reload. Other early-return
       // reasons (mock mode, a New session with no pane, the container not yet
       // mounted) keep their entries hidden.
+      //
+      // A hidden pane drops the focused session's entry too: its terminal was
+      // just closed (the `»` control, or the fallback's Close), so nothing is
+      // left to show it, and reopening re-attaches exactly as a first view
+      // does. A focus switch never lands here with an entry for the focused
+      // session, so the other sessions' bound entries are what survive it.
       //
       // A session that is merely `preparing` is neither dropped nor hidden. Its
       // ordinary form has no entry to drop (there was no pane to build one
@@ -136,7 +192,7 @@ export function TerminalPane({
       // into the freshly-bound pane on the way back, and dropping whatever they
       // were mid-way through typing.
       const paneIsGone = paneState === 'closed' || paneState === 'failed';
-      if (sessionId !== null && paneIsGone && !isMockMode()) {
+      if (sessionId !== null && (hidden || paneIsGone) && !isMockMode()) {
         const closedEntry = entries.get(sessionId);
         if (closedEntry) {
           disposeEntry(closedEntry);
@@ -162,15 +218,22 @@ export function TerminalPane({
       entry = createEntry(sessionId, parent);
       entries.set(sessionId, entry);
     }
+    // Re-read on every view so an entry built while starting is kept once its
+    // session binds (the bind itself never rebuilds it: see the branch above).
+    entry.bound = paneState === 'open';
 
     for (const [id, current] of entries) {
       current.el.style.display = id === sessionId ? 'block' : 'none';
     }
+    // Also the re-fit on show: while the pane is hidden its container has no
+    // box, so the entry cannot be measured (the fit addon skips a fit whose
+    // dimensions come out as NaN rather than shrinking the terminal), and
+    // `hidden` flipping back re-runs this effect once the column is laid out.
     entry.fit.fit();
     // `paneState` rather than `hasLivePane` alone: the branch above tells the
     // three pane-less states apart (only `closed` and `failed` tear an entry
     // down), so a move between two of them has to re-run it.
-  }, [canAttach, paneState, sessionId]);
+  }, [canAttach, hidden, paneState, sessionId]);
 
   // When the active theme changes, repaint every live xterm: each Terminal
   // reads its background once at construction (see `createEntry`), so a
@@ -193,7 +256,13 @@ export function TerminalPane({
     }
   }, [resolvedTheme]);
 
-  // Detach everything only when the terminal itself closes (this unmounts).
+  // Detach everything only when the pane itself unmounts (the workspace goes
+  // away).
+  // Focusing a session whose terminal is closed only HIDES the pane (see
+  // `hidden`), so the other bound sessions keep their bridges through the
+  // switch: tearing them down there would rebuild xterm on the way back (a
+  // blank until tmux repaints) and run the server's pre-attach input wipe,
+  // erasing whatever the user had typed straight into the pane.
   //
   // The teardown is deferred to a macrotask so React StrictMode's dev-only
   // mount → unmount → mount does not destroy the just-built terminals: the
@@ -223,10 +292,11 @@ export function TerminalPane({
 
   // Message shown instead of the live terminal when no pane can be shown. Each
   // state says what is actually true of it: a session that is starting is told
-  // to wait, not told to resume something that was never closed.
+  // to wait, not told to resume something that was never closed — including one
+  // focused in the beat before its row arrives, which has no id here yet.
   const unavailableNote = isMockMode()
     ? 'The terminal attaches to the live PTY bridge. It is unavailable in mock mode (no backend). Run against the Delta server to use it for answering permission prompts in the TUI.'
-    : sessionId === null
+    : sessionId === null && paneState !== 'preparing'
       ? 'No session is attached yet. Start a session, then its terminal appears here.'
       : NOTE_BY_PANE_STATE[paneState];
 
@@ -331,6 +401,8 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
     observer: undefined as unknown as ResizeObserver,
     rafId: 0,
     closed: false,
+    // The show/hide effect sets it from the session's state right after this.
+    bound: false,
   };
   term.onData((data) => entry.connection.send(data));
   // Push every fit-driven size change to the server so tmux and the pane

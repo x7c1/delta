@@ -1,5 +1,9 @@
 import { test, expect } from './support/fixtures';
-import { startNewSession } from './support/app';
+import {
+  composerInput,
+  shownTerminal,
+  startNewSession,
+} from './support/app';
 
 /**
  * A mid-turn branch send defers, dispatches when the turn ends, and its
@@ -47,7 +51,7 @@ test('a mid-turn branch send is queued, then dispatched with its quote on turn e
   // thread and the pane drills into it; the server defers the send itself —
   // the chip shows the explicit queued state, and the branch transcript stays
   // empty (nothing was typed into the pane, so no user line ever matched).
-  await page.getByRole('textbox').fill('follow up on that passage');
+  await composerInput(page).fill('follow up on that passage');
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(page.getByText('queued — sends when idle')).toBeVisible();
   await expect(messages).toHaveCount(0);
@@ -56,10 +60,12 @@ test('a mid-turn branch send is queued, then dispatched with its quote on turn e
   // interrupt marker, exactly like the real `claude`; no Stop fires). The
   // attach is asserted first so a bridge failure surfaces here, not as an
   // opaque Escape-retry timeout below.
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
-  const xtermInput = page.locator('.xterm-helper-textarea');
+  // A new session's terminal is open by default on this (large) layout.
+  const xtermInput = shownTerminal(page).locator('.xterm-helper-textarea');
   await expect(xtermInput).toBeAttached();
-  await expect(page.locator('.xterm-rows')).toContainText('fake-claude session');
+  await expect(shownTerminal(page).locator('.xterm-rows')).toContainText(
+    'fake-claude session',
+  );
 
   // Land Escape in the fake's stdin; retried until its observable effect (the
   // queued chip leaving — the send was promoted and typed) lands.

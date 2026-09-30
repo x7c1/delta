@@ -585,9 +585,19 @@ TUI asks. Two states resolve a pane, so both can be attached to:
   somebody answers it, so the attach is the only way out. While a bridge is
   attached, the launch watchdog leaves that pane alone rather than reaping it at
   its deadline — it is not a pane nobody can reach. That only *defers* the
-  deadline: once the last bridge on the pane has gone, the next sweep gives the
-  launch up as it would have, so a client must not treat an attach as
-  cancelling the watchdog.
+  deadline: the last bridge detaching restarts the clock, and a whole deadline
+  after that the watchdog gives the launch up as it would have, so a client
+  must not treat an attach as cancelling the watchdog.
+
+  The watchdog takes an attach to mean a person is watching, so a client must
+  not hold a bridge on a starting pane nobody is looking at. The web client
+  holds one only while that session is focused with its terminal open (which a
+  new session's terminal is by default on the large-screen layout), and drops
+  it as soon as another session takes focus or that terminal is closed. An open
+  session's bridge is different: the client keeps it attached in the
+  background, also while the focused session's terminal is closed, because a
+  detach would leave a stray line in the agent's input. It drops that bridge
+  only when the session's own terminal is closed or the session closes.
 
   Delta types nothing into such a pane on the user's behalf: the input wipe that
   precedes an attach to a bound pane (which clears the stray line a previous

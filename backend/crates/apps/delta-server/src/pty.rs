@@ -162,6 +162,16 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
     // into a dead client.
     cmd.env("TERM", "xterm-256color");
     let mut child = pair.slave.spawn_command(cmd)?;
+    // Close this process's copy of the slave now that the child holds its own.
+    // The read thread below only returns once the master reports the pane gone
+    // (EOF or EIO), and on Linux that happens when the LAST slave descriptor
+    // closes: killing the attach client (the pty's session leader) does not
+    // hang the slave up there, unlike macOS, which revokes it. Kept open, the
+    // slave would park the read thread forever after teardown kills the child,
+    // so the join below would never return, the bridge would never finish, and
+    // its `AttachGuard` would never give the attach back — the launch watchdog
+    // would then treat the pane as watched for good and never reap it.
+    drop(pair.slave);
 
     // The blocking PTY reader/writer halves run on dedicated threads; bytes are
     // shuttled to/from the async socket via channels. The master itself is moved
