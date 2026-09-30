@@ -5,6 +5,7 @@ import { NotificationSnackbar } from './features/notifications/NotificationSnack
 import { WorkspaceScreen } from './features/workspace/WorkspaceScreen';
 import { ThemeProvider } from './hooks/themeContext';
 import { VisualEffectsProvider } from './hooks/visualEffectsContext';
+import { isMacosShell } from './shell';
 
 export function createQueryClient(): QueryClient {
   return new QueryClient({
@@ -40,6 +41,22 @@ function AppCrash() {
   );
 }
 
+/**
+ * The strip the macOS shell's transparent title bar sits over. It only
+ * reserves the space, showing the root's background under the native bar; the
+ * shell handles the clicks there. Its height is `--shell-top-inset`, which the
+ * shell sets.
+ */
+function ShellTitleBarStrip() {
+  return (
+    <div
+      aria-hidden="true"
+      data-testid="shell-title-bar"
+      className="pointer-events-none h-[var(--shell-top-inset)] shrink-0"
+    />
+  );
+}
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -57,8 +74,11 @@ export function App() {
                 recoverable notice instead of a blank page. Region-level boundaries
                 (e.g. the terminal) handle their own failures before reaching here. */}
             <ErrorBoundary label="app" fallback={() => <AppCrash />}>
-              <div className="h-full bg-surface-elevated text-fg">
-                <WorkspaceScreen />
+              <div className="flex h-full flex-col bg-surface-elevated text-fg">
+                {isMacosShell() && <ShellTitleBarStrip />}
+                <div className="min-h-0 flex-1">
+                  <WorkspaceScreen />
+                </div>
                 {/* App-wide snackbar, for failures and for outcomes the user
                     asked for alike. Rendered as a fixed overlay
                     outside the workspace layout so a bottom-anchored
