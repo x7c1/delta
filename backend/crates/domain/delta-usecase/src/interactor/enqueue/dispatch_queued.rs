@@ -120,7 +120,7 @@ where
         };
 
         self.store.promote_queued_send(send.id).await?;
-        self.apply_turn_input(TurnInput::Dispatch { send_id: send.id })
+        self.apply_turn_input(TurnInput::dispatch(send.id, &send.text))
             .await?;
         if let Err(err) = self.tmux.send_line(&pane, &send.text).await {
             // The DispatchFailed transition cancels the orphaned row, so the

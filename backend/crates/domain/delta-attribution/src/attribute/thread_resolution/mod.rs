@@ -42,11 +42,17 @@ pub(super) fn resolve_line_thread(
         // The bare command-name line of a local-command group (e.g.
         // `/review-pr`). Delta dispatched it as a send and the turn machine
         // is `AwaitingEcho`, but a local command fires no `UserPromptSubmit`
-        // echo and no `Stop` — so left alone the send wedges the queue
-        // forever. This line is therefore the outstanding slash command's
-        // outcome: consume the send (`SendMatched`) and end the degenerate
-        // turn (`LocalCommandTurnEnded`, which the caller feeds into the turn
-        // machine as that send's own resolution).
+        // echo and no `Stop` — so left alone the send holds the queue until
+        // the slash-command echo deadline. This line is therefore the
+        // outstanding slash command's outcome: consume the send
+        // (`SendMatched`) and end the degenerate turn (`LocalCommandTurnEnded`,
+        // which the caller feeds into the turn machine as that send's own
+        // resolution).
+        //
+        // Claude Code wrote this caveat / command-name / stdout group only up
+        // to 2.1.285; from 2.1.286 a local command records nothing and the
+        // deadline alone ends its turn. This branch keeps transcripts from
+        // older versions (and resumed sessions) resolving the old way.
         //
         // The recorded command NAME does not decide that. Claude Code may
         // write the line in its fully-qualified `/<namespace>:<command>` form
@@ -163,8 +169,8 @@ pub(super) fn resolve_line_thread(
 }
 
 /// Consume the head outstanding send against a command line — the
-/// local-command name line or the unknown-command notice — and end the
-/// degenerate turn it stood for.
+/// local-command name line (written by Claude Code up to 2.1.285) or the
+/// unknown-command notice — and end the degenerate turn it stood for.
 ///
 /// The correlation is POSITIONAL but guarded by KIND: the head send is
 /// consumed when it is itself a slash command

@@ -47,7 +47,7 @@ impl WireTurn {
                 send_id: None,
                 thread_id: None,
             },
-            TurnState::AwaitingEcho { send_id } => WireTurn {
+            TurnState::AwaitingEcho { send_id, .. } => WireTurn {
                 state: WireTurnPhase::AwaitingEcho,
                 send_id: Some(send_id),
                 thread_id: in_progress_thread,
@@ -244,7 +244,10 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(WireTurn::from_state(
-                TurnState::AwaitingEcho { send_id: 7 },
+                TurnState::AwaitingEcho {
+                    send_id: 7,
+                    slash_command: false,
+                },
                 Some(3),
             ))
             .unwrap(),

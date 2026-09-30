@@ -108,7 +108,7 @@ where
                 session_id = %self.id,
                 "send held until resume readiness (SessionStart=resume); keystroke held"
             );
-            self.apply_turn_input(TurnInput::Dispatch { send_id: send.id })
+            self.apply_turn_input(TurnInput::dispatch(send.id, text))
                 .await?;
             return Ok((send, events));
         }
@@ -118,7 +118,7 @@ where
         // milliseconds of the keystrokes landing) always finds the dispatch
         // recorded, and a following send defers behind it instead of
         // dispatching mid-turn.
-        self.apply_turn_input(TurnInput::Dispatch { send_id: send.id })
+        self.apply_turn_input(TurnInput::dispatch(send.id, text))
             .await?;
 
         // If the keystrokes never reach the pane, the row we just wrote would

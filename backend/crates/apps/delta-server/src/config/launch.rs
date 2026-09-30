@@ -22,6 +22,9 @@
 ///   send waits for its `UserPromptSubmit` echo before the watchdog gives up
 ///   on it, so the retry-then-park path for swallowed keystrokes can be
 ///   exercised in seconds instead of minutes.
+/// - `DELTA_SLASH_COMMAND_ECHO_DEADLINE_MS` shrinks (or stretches) the much
+///   shorter wait after which a silent slash-command send is taken to be a
+///   local command that ran, so a test can free the session in milliseconds.
 pub(super) fn launch_from_vars(
     text: &dyn Fn(&str) -> Option<String>,
 ) -> delta_usecase::LaunchConfig {
@@ -46,6 +49,9 @@ pub(super) fn launch_from_vars(
     }
     if let Some(deadline) = millis("DELTA_ECHO_DEADLINE_MS") {
         launch.echo_deadline = deadline;
+    }
+    if let Some(deadline) = millis("DELTA_SLASH_COMMAND_ECHO_DEADLINE_MS") {
+        launch.slash_command_echo_deadline = deadline;
     }
     launch
 }

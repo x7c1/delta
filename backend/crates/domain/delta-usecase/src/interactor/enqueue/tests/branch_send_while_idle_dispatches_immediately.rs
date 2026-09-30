@@ -32,7 +32,10 @@ async fn branch_send_while_idle_dispatches_immediately() {
     );
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        crate::turn::TurnState::AwaitingEcho { send_id: send.id },
+        crate::turn::TurnState::AwaitingEcho {
+            send_id: send.id,
+            slash_command: false,
+        },
         "the dispatched send is the one outstanding echo"
     );
 }

@@ -32,7 +32,10 @@ async fn cancelling_a_dispatched_send_injects_escape_and_returns_to_idle() {
     assert_eq!(send.status, SendStatus::Dispatched);
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: send.id }
+        TurnState::AwaitingEcho {
+            send_id: send.id,
+            slash_command: false,
+        }
     );
 
     // The user presses Escape in the TUI (no signal arrives) and clicks
@@ -99,7 +102,10 @@ async fn cancelling_a_dispatched_send_promotes_the_next_queued_send() {
     );
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: second.id },
+        TurnState::AwaitingEcho {
+            send_id: second.id,
+            slash_command: false,
+        },
     );
 }
 
@@ -195,7 +201,10 @@ async fn ownerless_cancel_leaves_an_unrelated_outstanding_dispatch_alone() {
     let (owned, _) = ix.enqueue_send(to(main), "owned", None).await.unwrap();
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: owned.id }
+        TurnState::AwaitingEcho {
+            send_id: owned.id,
+            slash_command: false,
+        }
     );
     // ...and a zombie `dispatched` row exists beside it (an invariant
     // violation, seeded store-side).
@@ -222,7 +231,10 @@ async fn ownerless_cancel_leaves_an_unrelated_outstanding_dispatch_alone() {
     );
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: owned.id },
+        TurnState::AwaitingEcho {
+            send_id: owned.id,
+            slash_command: false,
+        },
         "the turn machine still awaits the owned send's echo"
     );
 }

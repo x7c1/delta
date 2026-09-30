@@ -153,6 +153,7 @@ where
         match self.state.turn() {
             TurnState::AwaitingEcho {
                 send_id: outstanding,
+                ..
             } if outstanding == send_id => {}
             TurnState::InFlight {
                 send_id: Some(in_flight),

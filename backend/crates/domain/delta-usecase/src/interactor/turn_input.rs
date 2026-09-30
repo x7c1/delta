@@ -162,14 +162,19 @@ where
                 // row settles as *delivered* with no uuid: cancelling would
                 // report a delivered message as failed, and leaving it
                 // `dispatched` would shadow the next dispatch's correlation.
+                //
+                // The echo deadline of a slash-command send lands here too: a
+                // local command that ran leaves no hook and no transcript line
+                // (Claude Code 2.1.286+), so the silence is its delivery and
+                // its degenerate turn ends at the deadline.
                 let settled = self.store.settle_send_delivered(send_id).await?;
                 if settled {
                     tracing::info!(
                         session_id = %id,
                         send_id,
-                        "turn ended with its send unattributed: no transcript user line was \
-                         ingested for it before the turn ended, so the send settles as \
-                         delivered without a matched uuid"
+                        "turn ended with its send unattributed: no transcript line claimed it \
+                         before the turn ended (or the slash command left no trace), so the \
+                         send settles as delivered without a matched uuid"
                     );
                     self.state.forget_requeues(send_id);
                 }

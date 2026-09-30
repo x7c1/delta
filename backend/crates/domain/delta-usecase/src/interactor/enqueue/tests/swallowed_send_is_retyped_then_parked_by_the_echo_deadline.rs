@@ -54,7 +54,10 @@ async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
     assert_eq!(send.status, SendStatus::Dispatched);
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: send.id },
+        TurnState::AwaitingEcho {
+            send_id: send.id,
+            slash_command: false,
+        },
     );
 
     // A second message composed while the first is outstanding waits its turn
@@ -117,7 +120,10 @@ async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
     );
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: send.id },
+        TurnState::AwaitingEcho {
+            send_id: send.id,
+            slash_command: false,
+        },
     );
     assert_eq!(
         ix.store().send(behind.id).await.unwrap().unwrap().status,
@@ -187,7 +193,10 @@ async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
     );
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: behind.id },
+        TurnState::AwaitingEcho {
+            send_id: behind.id,
+            slash_command: false,
+        },
     );
     assert_eq!(
         ix.tmux_fake().keyed.lock().unwrap().len(),
@@ -222,7 +231,10 @@ async fn a_retyped_send_still_matches_its_echo_and_self_heals() {
         .unwrap();
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: send.id },
+        TurnState::AwaitingEcho {
+            send_id: send.id,
+            slash_command: false,
+        },
         "the retry is outstanding",
     );
 
@@ -352,7 +364,10 @@ async fn a_held_resume_prompt_is_not_swept_by_the_echo_deadline() {
     );
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: send.id },
+        TurnState::AwaitingEcho {
+            send_id: send.id,
+            slash_command: false,
+        },
     );
 
     // A sweep long past the deadline leaves the held prompt exactly as it is:
@@ -369,6 +384,9 @@ async fn a_held_resume_prompt_is_not_swept_by_the_echo_deadline() {
     assert!(ix.tmux_fake().keyed.lock().unwrap().is_empty());
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: send.id },
+        TurnState::AwaitingEcho {
+            send_id: send.id,
+            slash_command: false,
+        },
     );
 }

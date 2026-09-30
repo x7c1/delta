@@ -19,9 +19,8 @@ The scripted lanes these canaries keep honest are documented in
 
 The fake-claude lane ([e2e.md](e2e.md)) is a *recording* of claude's implicit
 contract — the hook events and payload fields, the JSONL transcript shapes,
-the interrupt marker, queued prompts, `isMeta` flagging, the
-permission-decision envelope. The real-claude canary suite checks that
-recording against reality:
+the interrupt marker, queued prompts, the permission-decision envelope. The
+real-claude canary suite checks that recording against reality:
 
 ```bash
 make e2e-real-claude
@@ -73,22 +72,38 @@ The two-layer sync rule:
    contract, and `make check && make e2e && make e2e-fake` to confirm the
    re-enactment still proves the loop.
 
-Drift already pinned by the suite and synced (the queued-prompt format): a
-prompt typed while a turn is in flight is no longer written as a
-`queued_command` attachment line — current claude records a uuid-less
-`{"type":"queue-operation","operation":"enqueue",…}` line at submit time and
-replays the prompt as a plain `type:"user"` line (`promptSource: "queued"`,
-firing its own `UserPromptSubmit`) when it dequeues. Both layers follow the
-new shape: fake-claude re-enacts it with its `enqueue_prompt`/`dequeue_prompt`
-steps, and the parser deliberately skips the uuid-less bookkeeping line while
-the replayed user line flows the normal attribution path (pinned by the
-`queue_operation_dequeue*` corpus cases in `delta-attribution`). The parser's
-`queued_command` special case is kept as **legacy-format compatibility**:
-transcripts recorded by older claude versions are still resumed and viewed,
-so that path must not be cleaned up. Delta's own dispatch is unaffected
-either way — it holds browser-composed sends in its own queue and only types
-them into an idle pane, so claude-side queueing happens only for prompts
-typed directly into the TUI.
+Drift already pinned by the suite and synced:
+
+- **The queued-prompt format.** A prompt typed while a turn is in flight is
+  no longer written as a `queued_command` attachment line — current claude
+  records a uuid-less
+  `{"type":"queue-operation","operation":"enqueue",…}` line at submit time and
+  replays the prompt as a plain `type:"user"` line (`promptSource: "queued"`,
+  firing its own `UserPromptSubmit`) when it dequeues. Both layers follow the
+  new shape: fake-claude re-enacts it with its `enqueue_prompt`/`dequeue_prompt`
+  steps, and the parser deliberately skips the uuid-less bookkeeping line while
+  the replayed user line flows the normal attribution path (pinned by the
+  `queue_operation_dequeue*` corpus cases in `delta-attribution`). The parser's
+  `queued_command` special case is kept as **legacy-format compatibility**:
+  transcripts recorded by older claude versions are still resumed and viewed,
+  so that path must not be cleaned up. Delta's own dispatch is unaffected
+  either way — it holds browser-composed sends in its own queue and only types
+  them into an idle pane, so claude-side queueing happens only for prompts
+  typed directly into the TUI.
+- **The local-command group.** Up to claude 2.1.285 a local slash command
+  (`/cost`, `/model`, `/exit`, …) was recorded as a three-line group sharing one
+  `promptId` — a `<local-command-caveat>` user line flagged `isMeta`, the bare
+  command-name line and a `<local-command-stdout>` line — and Delta ended the
+  command's turn by consuming its send against the command-name line. From
+  2.1.286 claude records **nothing** for a local command (a session that only
+  ran `/cost` and `/exit` writes no transcript file at all), while still firing
+  no `UserPromptSubmit` and no `Stop` for it; `SessionEnd` still fires on
+  `/exit`. The canary now pins that absence after `/exit`. Delta frees such a
+  turn on a short slash-command echo deadline instead (10 s by default,
+  `DELTA_SLASH_COMMAND_ECHO_DEADLINE_MS`), settling the send as delivered rather
+  than re-typing it; fake-claude re-enacts the silence with its `local_command`
+  step. The transcript-driven path is kept as **legacy-format compatibility**
+  for transcripts recorded by older versions.
 
 Two environment facts the suite handles for you (relevant when running any
 real-claude loop by hand):

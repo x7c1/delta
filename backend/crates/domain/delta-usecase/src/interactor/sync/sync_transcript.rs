@@ -184,13 +184,17 @@ where
                     // A dispatched send was consumed by a client-side slash
                     // command, not by a model turn: either a KNOWN local command
                     // (e.g. `/review-pr`) or an UNKNOWN command Claude rejected
-                    // with an "Unknown command: …" notice. Both are handled
-                    // entirely client-side: they fire no `UserPromptSubmit` echo
-                    // and no `Stop` hook, so without this the turn machine stays
-                    // in `AwaitingEcho` forever and every later send defers to
-                    // `queued` and never dispatches. The `SendMatched` effect
-                    // emitted alongside this one already consumed the send (it
-                    // left `dispatched`), so the machine is told exactly that:
+                    // with an "Unknown command: …" notice (the known-command
+                    // line is what Claude Code wrote up to 2.1.285; later
+                    // versions write nothing for a local command, and the
+                    // slash-command echo deadline ends its turn instead).
+                    // Both are handled entirely client-side: they fire no
+                    // `UserPromptSubmit` echo and no `Stop` hook, so without
+                    // this the turn machine stays in `AwaitingEcho` until the
+                    // deadline and every later send waits in `queued` behind
+                    // it. The `SendMatched` effect emitted alongside this one
+                    // already consumed the send (it left `dispatched`), so the
+                    // machine is told exactly that:
                     // `TurnInput::CommandResolved` names the resolved send, and
                     // `(AwaitingEcho { n }, CommandResolved { n })` returns to
                     // `Idle` with nothing orphaned. Reuse `TurnInterrupted` as

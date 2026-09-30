@@ -28,7 +28,15 @@
 //! state Delta has never seen — is caught by the same net, because the signal
 //! is the silence.
 //!
+//! A **slash-command** send reads the same silence the other way. Claude Code
+//! runs a local command (`/cost`, `/model`, …) with no hook and, from 2.1.286
+//! on, no transcript line, so the silence is the command having run: after the
+//! much shorter [`LaunchConfig::slash_command_echo_deadline`] the send settles
+//! as delivered and the queue moves on, with no `Escape`, no re-type and no
+//! park.
+//!
 //! [`LaunchConfig::echo_deadline`]: crate::launch_config::LaunchConfig::echo_deadline
+//! [`LaunchConfig::slash_command_echo_deadline`]: crate::launch_config::LaunchConfig::slash_command_echo_deadline
 
 use std::time::Instant;
 
@@ -37,7 +45,7 @@ use crate::interactor::question_keys::cancel_keys;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::turn_input::RequeueOutcome;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::turn::TurnInput;
+use crate::turn::{TurnInput, TurnState};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -59,7 +67,9 @@ where
     ///
     /// 1. [`TurnInput::EchoDeadline`] returns the machine to
     ///    [`TurnState::Idle`] and orphans the send as a requeue, which the
-    ///    budget turns into either a retry or a park.
+    ///    budget turns into either a retry or a park — or, for a slash-command
+    ///    send, settles it as delivered (a local command that ran), so steps 2
+    ///    and 3 only promote whatever was queued behind it.
     /// 2. On a retry, a single `Escape` is injected into the pane before the
     ///    re-type — the same primitive the dispatched-send cancel uses. The
     ///    deadline means *something* is holding the keystrokes; `Escape`
@@ -83,30 +93,67 @@ where
     /// caller to broadcast.
     ///
     /// [`SessionRuntime::expired_echo_deadline`]: crate::interactor::session_actor::runtime::SessionRuntime::expired_echo_deadline
-    /// [`TurnState::AwaitingEcho`]: crate::turn::TurnState::AwaitingEcho
-    /// [`TurnState::Idle`]: crate::turn::TurnState::Idle
     pub(in crate::interactor) async fn sweep_echo_deadline(
         &mut self,
         now: Instant,
     ) -> Result<Option<SessionEvent>> {
-        let Some(send_id) = self
-            .state
-            .expired_echo_deadline(now, self.launch.echo_deadline)
-        else {
+        let Some(send_id) = self.state.expired_echo_deadline(
+            now,
+            self.launch.echo_deadline,
+            self.launch.slash_command_echo_deadline,
+        ) else {
             return Ok(None);
         };
-        tracing::warn!(
-            session_id = %self.id,
-            send_id,
-            deadline_ms = self.launch.echo_deadline.as_millis(),
-            "dispatched send produced no echo and no other signal before its deadline; \
-             its keystrokes were swallowed (a TUI dialog, or an Escape in the pane), so \
-             the turn is released and the send retried once before being parked"
+        let slash_command = matches!(
+            self.state.turn(),
+            TurnState::AwaitingEcho {
+                slash_command: true,
+                ..
+            }
         );
+        if slash_command {
+            tracing::info!(
+                session_id = %self.id,
+                send_id,
+                deadline_ms = self.launch.slash_command_echo_deadline.as_millis(),
+                "dispatched slash command produced no echo before its deadline; \
+                 treating it as a local command that ran, so the send is settled as \
+                 delivered and the turn released without a re-type"
+            );
+        } else {
+            tracing::warn!(
+                session_id = %self.id,
+                send_id,
+                deadline_ms = self.launch.echo_deadline.as_millis(),
+                "dispatched send produced no echo and no other signal before its deadline; \
+                 its keystrokes were swallowed (a TUI dialog, or an Escape in the pane), so \
+                 the turn is released and the send retried once before being parked"
+            );
+        }
 
-        let (_, requeued) = self
+        // Read before the settle below moves the row out of `dispatched`: the
+        // thread the command's turn ran on, for the turn-end notice.
+        let command_thread = if slash_command {
+            self.store.send(send_id).await?.map(|send| send.thread_id)
+        } else {
+            None
+        };
+
+        let (next, requeued) = self
             .apply_turn_input_reporting(TurnInput::EchoDeadline { send_id })
             .await?;
+
+        if slash_command && next == TurnState::Idle {
+            // The command's degenerate turn ended with no `Stop`, exactly as
+            // it does when an older transcript's command line resolves it
+            // (`TurnInput::CommandResolved`), so the browser is told the same
+            // way: `TurnInterrupted` clears its "In progress" state and
+            // refetches the open sends, which no longer hold the command.
+            self.emit_async_event(SessionEvent::TurnInterrupted {
+                session_id: self.id.clone(),
+                thread_id: command_thread,
+            });
+        }
 
         if requeued == Some(RequeueOutcome::Requeued) {
             // Clear whatever is holding the pane before the flush re-types the

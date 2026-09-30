@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use crate::interactor::session_actor::runtime::{
-    ECHO_DEADLINE, PENDING_SPAWN_DEADLINE, RESUME_READY_DEADLINE,
+    ECHO_DEADLINE, PENDING_SPAWN_DEADLINE, RESUME_READY_DEADLINE, SLASH_COMMAND_ECHO_DEADLINE,
 };
 
 /// The command Delta launches in each tmux session by default.
@@ -74,6 +74,10 @@ pub struct LaunchConfig {
     /// How long a dispatched send may wait for its echo before the watchdog
     /// gives up on it. Defaults to [`ECHO_DEADLINE`]; see that constant.
     pub echo_deadline: Duration,
+    /// How long a dispatched slash-command send may wait for its echo before
+    /// the watchdog settles it as a local command that ran. Defaults to
+    /// [`SLASH_COMMAND_ECHO_DEADLINE`]; see that constant.
+    pub slash_command_echo_deadline: Duration,
 }
 
 impl Default for LaunchConfig {
@@ -85,6 +89,7 @@ impl Default for LaunchConfig {
             resume_ready_deadline: RESUME_READY_DEADLINE,
             permission_decision_deadline: PERMISSION_DECISION_DEADLINE,
             echo_deadline: ECHO_DEADLINE,
+            slash_command_echo_deadline: SLASH_COMMAND_ECHO_DEADLINE,
         }
     }
 }
@@ -105,5 +110,9 @@ mod tests {
             PERMISSION_DECISION_DEADLINE
         );
         assert_eq!(config.echo_deadline, ECHO_DEADLINE);
+        assert_eq!(
+            config.slash_command_echo_deadline,
+            SLASH_COMMAND_ECHO_DEADLINE
+        );
     }
 }

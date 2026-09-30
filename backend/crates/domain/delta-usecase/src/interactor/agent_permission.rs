@@ -545,7 +545,10 @@ mod tests {
         // abandoned its requests; Delta only drops the mirror.
         let mut state = SessionRuntime::default();
         let session = SessionId::from("sess-1");
-        state.apply_turn(TurnInput::Dispatch { send_id: 1 });
+        state.apply_turn(TurnInput::Dispatch {
+            send_id: 1,
+            slash_command: false,
+        });
         state.apply_turn(TurnInput::PromptSubmitted { send_id: Some(1) });
         for id in 1..=3 {
             reduce_permission_event(

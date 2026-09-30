@@ -515,10 +515,10 @@ impl Engine {
             Step::Hang => loop {
                 std::thread::park();
             },
-            Step::SwallowPrompt => {
-                // Consume the prompt off stdin without firing
-                // `UserPromptSubmit` or writing anything (see variant doc).
-                let _swallowed = self.next_prompt()?;
+            Step::SwallowPrompt | Step::LocalCommand => {
+                // Consume the prompt off stdin without firing any hook or
+                // writing anything (see the variant docs).
+                let _consumed = self.next_prompt()?;
                 Ok(())
             }
             Step::CompactGroup => self.transcript.compact_group(),

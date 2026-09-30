@@ -6,10 +6,13 @@ use crate::ports::SessionEvent;
 /// A slash/local command (e.g. `/review-pr`) is handled by Claude entirely
 /// client-side: it fires NO `UserPromptSubmit` echo and NO `Stop` hook, yet
 /// Delta dispatches it as a send and moves the turn machine to `AwaitingEcho`.
-/// Claude records the command as a group of `type: "user"` lines sharing one
-/// `promptId` — a `<local-command-caveat>` it flags `isMeta`, the bare
-/// command-name line, then the command's `<local-command-stdout>` — only the
-/// caveat being `isMeta`.
+/// Claude Code up to 2.1.285 recorded the command as a group of `type: "user"`
+/// lines sharing one `promptId` — a `<local-command-caveat>` it flags
+/// `isMeta`, the bare command-name line, then the command's
+/// `<local-command-stdout>` — only the caveat being `isMeta`. (From 2.1.286 it
+/// records nothing for a local command, and the slash-command echo deadline
+/// ends the turn instead; this test pins the path transcripts from older
+/// versions and resumed sessions still take.)
 ///
 /// Without a transcript-driven fallback this produced two bugs: (1) the
 /// command-name and stdout lines rendered as USER bubbles in the conversation

@@ -35,7 +35,10 @@ async fn dispatch_ready_resumes_send_failure_cancels_head_and_clears_turn() {
         .unwrap();
     ix.apply_turn_input(
         &session_id,
-        crate::turn::TurnInput::Dispatch { send_id: held.id },
+        crate::turn::TurnInput::Dispatch {
+            send_id: held.id,
+            slash_command: false,
+        },
     )
     .await
     .unwrap();

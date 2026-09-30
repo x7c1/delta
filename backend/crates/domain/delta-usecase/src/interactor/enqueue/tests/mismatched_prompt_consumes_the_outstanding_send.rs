@@ -30,7 +30,10 @@ async fn mismatched_prompt_consumes_the_outstanding_send() {
     assert_eq!(send.status, SendStatus::Dispatched);
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: send.id },
+        TurnState::AwaitingEcho {
+            send_id: send.id,
+            slash_command: true,
+        },
     );
 
     // Claude Code records something else entirely for it.

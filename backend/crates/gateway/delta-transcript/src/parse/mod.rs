@@ -132,11 +132,14 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
     // field docstring on [`RawLine`] for why it must classify away from `User`.
     let is_compact_summary = raw.is_compact_summary == Some(true);
 
-    // The current Claude Code shape records a slash/local command's captured
+    // Claude Code up to 2.1.285 recorded a slash/local command's captured
     // output as a `type: "system"` / `subtype: "local_command"` line whose
     // payload is a TOP-LEVEL `content` string (no embedded `message`, no
-    // `promptId`). The legacy shape recorded it as a `type: "user"` line with
-    // the payload in `message.content`. Detect the current shape by subtype.
+    // `promptId`); still earlier versions recorded it as a `type: "user"`
+    // line with the payload in `message.content`. Detect the subtype shape
+    // here. (From 2.1.286 a local command such as `/cost` writes no line at
+    // all; the subtype still appears for other command output, e.g. a forked
+    // skill launch.)
     let is_local_command_subtype = raw.line_type.as_deref() == Some("system")
         && raw.subtype.as_deref() == Some("local_command");
 
@@ -175,16 +178,16 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
             None
         });
 
-    // A slash/local command (e.g. `/review-pr`) records its captured output
-    // WITHOUT `isMeta` — only the leading caveat line of the group is flagged.
-    // So fold to `Role::Meta` when either the current-shape subtype matches or
-    // the content's leading token is a `<local-command-stdout>` /
-    // `<local-command-stderr>` marker (the legacy shape), matching the caveat
-    // instead of rendering it as a human user turn. (The bare command-name line
-    // of the same group carries no marker; it is folded by the attribution
-    // layer, which groups it by the caveat's `promptId`.) Detected here, at
-    // line-classification time, so the fold is robust even in a sync window that
-    // did not include the caveat line.
+    // A slash/local command (e.g. `/review-pr`) recorded its captured output
+    // WITHOUT `isMeta` up to Claude Code 2.1.285 — only the leading caveat
+    // line of the group is flagged. So fold to `Role::Meta` when either the
+    // `local_command` subtype matches or the content's leading token is a
+    // `<local-command-stdout>` / `<local-command-stderr>` marker (the legacy
+    // shape), matching the caveat instead of rendering it as a human user
+    // turn. (The bare command-name line of the same group carries no marker;
+    // it is folded by the attribution layer, which groups it by the caveat's
+    // `promptId`.) Detected here, at line-classification time, so the fold is
+    // robust even in a sync window that did not include the caveat line.
     let effective_leading_text = match &effective_content {
         Some(RawContent::Text(text)) => Some(text.as_str()),
         Some(RawContent::Blocks(_)) | None => None,

@@ -34,7 +34,10 @@ async fn session_end_for_resuming_session_reports_failed() {
     // exactly as `enqueue_into_open` records it.
     ix.apply_turn_input(
         &session_id,
-        crate::turn::TurnInput::Dispatch { send_id: held.id },
+        crate::turn::TurnInput::Dispatch {
+            send_id: held.id,
+            slash_command: false,
+        },
     )
     .await
     .unwrap();

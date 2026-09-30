@@ -54,6 +54,7 @@
 //! | `delay { ms }` | Sleep. Only for delays the scenario itself is about (e.g. holding a turn open); synchronization belongs to the `await_*` steps. |
 //! | `hang` | Block forever (a launch or turn that never progresses). |
 //! | `swallow_prompt` | Consume one prompt from the pane input without firing `UserPromptSubmit` and without writing the transcript — models Claude Code's TUI eating a keystroke, whether into the auto-`/compact` routine or into an interactive dialog it put up on its own. The dispatched send stays `Dispatched` behind a missing echo until something re-types it. Repeat the step to swallow a re-type too. |
+//! | `local_command` | Consume one prompt from the pane input without firing any hook and without writing the transcript — models a local slash command such as `/cost` on Claude Code 2.1.286 and later, which the TUI runs itself and records nothing for. The same bytes as `swallow_prompt`; named for what Delta should conclude (the command ran), not for a lost keystroke. |
 //! | `compact_group` | Write the four-line `/compact` group (caveat + bare command-name + summary + stdout) sharing one `promptId`. The four lines are written ATOMICALLY — one append, one shared `timestamp` — exactly as Claude Code writes a local-command group, so a tail poll can never observe the group half-written. The summary line is the `isCompactSummary:true` record that drives `Effect::AutoCompactFinished` on the server. |
 //!
 //! How the file is found, in priority order:
@@ -168,6 +169,18 @@ pub enum Step {
     /// Two consecutive steps swallow the watchdog's re-type as well, which is
     /// how a scenario drives the send all the way to being parked.
     SwallowPrompt,
+    /// Consume one prompt from the pane input without firing any hook and
+    /// without writing anything to the transcript: a local slash command
+    /// (`/cost`, `/model`, …) as Claude Code 2.1.286 and later runs it. The
+    /// TUI answers the command itself and records nothing — no
+    /// `UserPromptSubmit`, no `Stop`, and none of the caveat / command-name /
+    /// stdout group earlier versions wrote.
+    ///
+    /// Observably identical to [`Step::SwallowPrompt`]; the separate name
+    /// says which story the scenario tells, because Delta must read the two
+    /// silences oppositely — a swallowed prompt is re-typed, a local command
+    /// that ran must not be.
+    LocalCommand,
     /// Write the four-line group Claude Code produces for an auto- or
     /// manually-triggered `/compact` (a caveat / command-name / summary /
     /// stdout sequence sharing one `promptId`). The group lands atomically —
@@ -275,6 +288,7 @@ mod tests {
                     { "type": "delay", "ms": 10 },
                     { "type": "hang" },
                     { "type": "swallow_prompt" },
+                    { "type": "local_command" },
                     { "type": "compact_group" }
                 ]
             }"#,
@@ -286,7 +300,7 @@ mod tests {
         );
         assert!(scenario.looped);
         assert!(scenario.wrap_pastes);
-        assert_eq!(scenario.steps.len(), 18);
+        assert_eq!(scenario.steps.len(), 19);
         assert_eq!(scenario.steps[0], Step::AwaitPrompt);
         assert_eq!(
             scenario.steps[1],
@@ -322,7 +336,8 @@ mod tests {
             }
         );
         assert_eq!(scenario.steps[16], Step::SwallowPrompt);
-        assert_eq!(scenario.steps[17], Step::CompactGroup);
+        assert_eq!(scenario.steps[17], Step::LocalCommand);
+        assert_eq!(scenario.steps[18], Step::CompactGroup);
     }
 
     #[test]

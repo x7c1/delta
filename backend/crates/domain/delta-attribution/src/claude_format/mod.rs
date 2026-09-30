@@ -32,10 +32,12 @@ const INTERRUPT_MARKER_PREFIX: &str = "[Request interrupted by user";
 /// human typing into the pane, so it must not be reported as external input.
 const TASK_NOTIFICATION_PREFIX: &str = "<task-notification>";
 
-/// Prefix of the caveat line Claude Code writes as the first member of a
-/// slash/local-command group (e.g. when the user runs `/review-pr`). Claude
-/// records the group as several `type: "user"` lines that all share one
-/// `promptId`: this caveat (flagged `isMeta`), then the bare command-name line
+/// Prefix of the caveat line Claude Code wrote, up to 2.1.285, as the first
+/// member of a slash/local-command group (e.g. when the user runs
+/// `/review-pr`); 2.1.286 and later record nothing for a local command, and
+/// this recognition stays for transcripts written earlier. Claude recorded
+/// the group as several `type: "user"` lines that all share one `promptId`:
+/// this caveat (flagged `isMeta`), then the bare command-name line
 /// (e.g. `/review-pr`), then the command's `<local-command-stdout>` /
 /// `<local-command-stderr>` output. Only the caveat carries `isMeta`, so the
 /// other members would otherwise render as human user turns. Recognizing the
@@ -102,14 +104,16 @@ fn bare_command_name(token: &str) -> &str {
 /// whitespace-delimited token starts with `/`.
 ///
 /// This is the guard the fold's two command branches consume a send by. A
-/// slash-command send produces no `UserPromptSubmit` echo and no `Stop`:
-/// Claude Code handles it client-side and records either a local-command
-/// group or an unknown-command notice, so one of those lines is the ONLY
-/// signal Delta gets that the send was consumed, whatever command NAME it
-/// ended up recording. A PLAIN-prompt send does echo, so a command line
-/// showing up while one is outstanding means something else was submitted
-/// into the pane, and consuming the send would silently drop the user's
-/// message.
+/// slash-command send handled client-side produces no `UserPromptSubmit` echo
+/// and no `Stop`: Claude Code records either a local-command group (up to
+/// 2.1.285) or an unknown-command notice, so one of those lines is the only
+/// transcript signal Delta gets that the send was consumed, whatever command
+/// NAME it ended up recording. (From 2.1.286 a local command records nothing,
+/// and the turn machine uses this same predicate to give such a send a short
+/// echo deadline that settles it as delivered.) A PLAIN-prompt send does
+/// echo, so a command line showing up while one is outstanding means
+/// something else was submitted into the pane, and consuming the send would
+/// silently drop the user's message.
 pub fn is_slash_command_send(text: &str) -> bool {
     text.split_whitespace()
         .next()

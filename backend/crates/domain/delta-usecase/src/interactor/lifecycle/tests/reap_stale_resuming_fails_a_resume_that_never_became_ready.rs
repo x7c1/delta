@@ -37,7 +37,10 @@ async fn reap_stale_resuming_fails_a_resume_that_never_became_ready() {
     // exactly as `enqueue_into_open` records it.
     ix.apply_turn_input(
         &session_id,
-        crate::turn::TurnInput::Dispatch { send_id: held.id },
+        crate::turn::TurnInput::Dispatch {
+            send_id: held.id,
+            slash_command: false,
+        },
     )
     .await
     .unwrap();

@@ -153,6 +153,12 @@ pub enum SessionEvent {
     /// clears the running indicator on the exact thread that was interrupted.
     /// `None` only when no thread is resolvable (a degenerate signal for a
     /// session with no in-flight turn); a real interrupt always carries it.
+    ///
+    /// It also ends the degenerate turn of a slash command Claude Code ran
+    /// client-side, which fires no `Stop` either: when the transcript records
+    /// the command's own line (Claude Code up to 2.1.285), and when a
+    /// slash-command send's echo deadline passes in silence (2.1.286+, which
+    /// records nothing for a local command).
     TurnInterrupted {
         session_id: SessionId,
         thread_id: Option<ThreadId>,
