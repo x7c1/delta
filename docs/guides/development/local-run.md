@@ -125,6 +125,16 @@ sessions.
   `/bin/sh`) for it and uses that to find `tmux`, `claude` and `codex`. If the
   shell does not answer within a few seconds, the app keeps the `PATH` it was
   started with and logs a warning.
+- **Title bar (macOS).** The title bar is transparent and shows no title: the
+  page paints the strip under the traffic lights in the active theme's
+  background and lays itself out below it. Before the page's scripts run, the
+  app marks `<html data-shell="tauri-macos">` and sets `--shell-top-inset` on
+  `<html>` to the bar's height (28 px); the page renders the strip when it sees
+  the attribute and sizes it from the variable. A transparent native view over
+  the strip drags the window and handles double-click, so clicks there do not
+  reach the page. In full screen, where macOS hides the bar, the app sets the
+  variable to 0 and lets those clicks through, so the page fills the screen.
+  The browser and the Linux app set neither and show no strip.
 - **Startup errors.** The two failures you have to act on — a database the
   binary refuses to open, and a missing `tmux` — are shown in a dialog, and the
   app exits after it is dismissed.

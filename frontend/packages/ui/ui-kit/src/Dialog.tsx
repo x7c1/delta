@@ -86,9 +86,12 @@ export function Dialog({
 
   const titleId = 'dialog-title';
 
+  // The backdrop starts below `--shell-top-inset` (defined by the app; 0 when
+  // unset), the strip a native shell's transparent title bar sits over, so the
+  // scrim never covers the window's own controls.
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/40 p-4"
+      className="fixed inset-x-0 bottom-0 top-[var(--shell-top-inset,0px)] z-50 flex items-center justify-center bg-scrim/40 p-4"
       data-testid="dialog-backdrop"
       onClick={dismissable ? onClose : undefined}
     >

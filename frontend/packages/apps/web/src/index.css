@@ -334,6 +334,15 @@
   --delta-highlight-wash-peak: 0.25;
 }
 
+/*
+ * Height of the native title bar laid over the page. The macOS desktop shell
+ * sets it on `<html>` (see src/shell.ts); the page only defaults it to 0.
+ * The app root reserves a strip of this height and dialogs start below it.
+ */
+:root {
+  --shell-top-inset: 0px;
+}
+
 html,
 body,
 #root {

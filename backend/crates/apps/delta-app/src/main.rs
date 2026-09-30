@@ -28,6 +28,8 @@
 
 mod app_data;
 mod login_path;
+#[cfg(target_os = "macos")]
+mod macos_title_bar;
 
 use tauri::{App, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
@@ -112,10 +114,15 @@ fn start_server(app: &App, runtime: &Runtime) -> anyhow::Result<u16> {
 
 fn open_window(app: &App, port: u16) -> anyhow::Result<()> {
     let url = format!("http://127.0.0.1:{port}/").parse()?;
-    WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::External(url))
+    let builder = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::External(url))
         .title(WINDOW_TITLE)
-        .inner_size(1280.0, 800.0)
-        .build()?;
+        .inner_size(1280.0, 800.0);
+    #[cfg(target_os = "macos")]
+    let builder = macos_title_bar::style(builder);
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+    let window = builder.build()?;
+    #[cfg(target_os = "macos")]
+    macos_title_bar::install_drag_strip(&window)?;
     Ok(())
 }
 
