@@ -134,6 +134,22 @@ impl Drop for AttachGuard {
     }
 }
 
+/// The `tmux` arguments that attach to `pane` in read-write mode, on Delta's
+/// dedicated tmux server (`-L <socket>`) — the same server the sessions are
+/// created on.
+fn attach_args<'a>(tmux_socket: &'a str, pane: &'a str) -> [&'a str; 6] {
+    [
+        // The client's terminal is always xterm.js, which speaks UTF-8; without
+        // `-u` a client started with no UTF-8 locale prints `_` for wide chars.
+        "-u",
+        "-L",
+        tmux_socket,
+        "attach-session",
+        "-t",
+        pane,
+    ]
+}
+
 async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyhow::Result<()> {
     let pty_system = portable_pty::native_pty_system();
     let pair = pty_system.openpty(PtySize {
@@ -143,15 +159,8 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
         pixel_height: 0,
     })?;
 
-    // Attach to the existing tmux session/pane in read-write mode, on Delta's
-    // dedicated tmux server (`-L <socket>`) — the same server the sessions are
-    // created on.
     let mut cmd = CommandBuilder::new("tmux");
-    cmd.arg("-L");
-    cmd.arg(tmux_socket);
-    cmd.arg("attach-session");
-    cmd.arg("-t");
-    cmd.arg(&pane);
+    cmd.args(attach_args(tmux_socket, &pane));
     // Pin the attach client's TERM instead of inheriting the server's. The
     // terminal on the other side of this PTY is always the browser's xterm.js
     // (an xterm-compatible emulator), so xterm-256color describes it correctly
@@ -309,6 +318,16 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The attach client declares a UTF-8 terminal and targets the pane on
+    /// Delta's socket.
+    #[test]
+    fn attach_declares_utf8_on_the_delta_socket() {
+        assert_eq!(
+            attach_args("delta", "%3"),
+            ["-u", "-L", "delta", "attach-session", "-t", "%3"]
+        );
+    }
 
     /// A well-formed resize control message deserializes into the `Resize`
     /// variant carrying the requested dimensions.
