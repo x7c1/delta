@@ -1,0 +1,156 @@
+name: Bundle
+
+# Builds the unsigned desktop bundles of the Tauri shell
+# (backend/crates/apps/delta-app). Called by the Release workflow with a
+# release_id, it attaches them to that Release; on pull requests and manual
+# runs it uploads them as workflow artifacts. See docs/guides/release.md
+# ("Desktop bundles").
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The ref (tag) to build.
+        type: string
+        required: true
+      release_id:
+        description: The id of an existing GitHub Release to attach the bundles to.
+        type: string
+        default: ''
+  pull_request:
+    branches: [main, 'feat/**']
+    paths:
+      - backend/crates/apps/delta-app/**
+      # A tauri bump lands in the lockfile only, and the workspace manifest
+      # carries the version the bundle file names use.
+      - backend/Cargo.toml
+      - backend/Cargo.lock
+      - .github/workflows/bundle.yml
+      - Makefile
+      - frontend/**
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The ref (branch, tag or SHA) to build.
+        type: string
+        required: true
+
+jobs:
+  bundle:
+    name: bundle (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+
+    # Uploading to a Release needs write access. A called workflow cannot hold
+    # more than its caller grants, and a pull_request token from a fork stays
+    # read-only regardless.
+    permissions:
+      contents: write
+
+    strategy:
+      # One broken platform must not hide whether the others still bundle.
+      fail-fast: false
+      matrix:
+        include:
+          # Apple silicon only: Intel Macs are not supported.
+          - name: macos-aarch64
+            runner: macos-14
+            target: aarch64-apple-darwin
+            bundles: dmg
+          - name: linux-x86_64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
+
+    steps:
+      # The pull_request run builds the event's merge ref; the other two build
+      # the ref they were given.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # The system libraries the shell (Tauri v2: WebKitGTK 4.1, GTK 3, the
+      # app-indicator and SVG libraries) links against — the list ci.yml
+      # installs for its shell build.
+      - name: Install system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev patchelf
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Keyed per target: the release profile and the target directory differ
+      # from ci.yml's debug builds, so sharing its cache would only evict it.
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/target
+          key: ${{ runner.os }}-bundle-${{ matrix.target }}-${{ hashFiles('backend/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bundle-${{ matrix.target }}-
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: frontend
+
+      # tauri.conf.json has no build section: the shell embeds the web app's
+      # dist/ through delta-server's `embed-web` feature, so the SPA has to be
+      # built before `tauri build` compiles it in (as `make app` does).
+      - name: Build the web app
+        run: make web-dist
+
+      # With no releaseId the action only builds. It is never given tagName or
+      # releaseName, so it can neither create a Release nor a tag: the Release
+      # workflow owns both.
+      - name: Build the bundles
+        id: tauri
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: backend/crates/apps/delta-app
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          releaseId: ${{ inputs.release_id }}
+          uploadUpdaterJson: false
+
+      # artifactPaths is a JSON array; upload-artifact takes one path per line.
+      - name: List the bundle paths
+        if: ${{ !inputs.release_id }}
+        id: paths
+        env:
+          ARTIFACT_PATHS: ${{ steps.tauri.outputs.artifactPaths }}
+        run: |
+          delimiter="PATHS_$(openssl rand -hex 16)"
+          {
+            echo "list<<${delimiter}"
+            jq -r '.[]' <<< "$ARTIFACT_PATHS"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload the bundles
+        if: ${{ !inputs.release_id }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: delta-${{ matrix.name }}
+          path: ${{ steps.paths.outputs.list }}
+          if-no-files-found: error

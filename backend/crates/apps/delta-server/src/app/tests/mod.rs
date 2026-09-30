@@ -15,6 +15,7 @@ mod prompt_templates;
 mod providers;
 mod pull_requests;
 mod sessions;
+mod static_web;
 mod status_line;
 mod workdir;
 

@@ -1,11 +1,12 @@
 //! A CSRF-style guard that rejects requests arriving from a foreign web origin.
 //!
-//! Delta binds loopback only (`main.rs`), but loopback binding is not a defense
-//! on its own: the port is predictable (`DELTA_PORT`, default 7878), and
-//! WebSockets are exempt from the browser's same-origin policy and CORS, so any
-//! web page the user happens to visit can open `ws://127.0.0.1:7878/pty?…` and
-//! get a live read/write PTY into the agent pane. This guard, applied to every
-//! route, closes that hole by inspecting two request headers:
+//! Delta binds loopback only (`serve::bind_loopback`), but loopback binding is
+//! not a defense on its own: the port is predictable (`DELTA_PORT`, default
+//! 7878), and WebSockets are exempt from the browser's same-origin policy and
+//! CORS, so any web page the user happens to visit can open
+//! `ws://127.0.0.1:7878/pty?…` and get a live read/write PTY into the agent
+//! pane. This guard, applied to every route, closes that hole by inspecting two
+//! request headers:
 //!
 //! 1. **`Origin`** — if present, its host must be a loopback host. A browser
 //!    sends `Origin` on cross-site requests (and on all WebSocket upgrades), and
@@ -28,9 +29,10 @@
 //! Pinning exact origins (e.g. `http://localhost:5173`) is brittle: the app is
 //! served by Vite in dev, the `make e2e` / `make e2e-fake` suites boot the
 //! backend and browser on dedicated non-default ports (`DELTA_PORT` /
-//! `E2E_PORT`), and there is no production static-serving path in this repo. The
-//! loopback-host rule blocks the real threat — a remote web origin — without
-//! pinning a port, so it holds across dev and the e2e suites alike.
+//! `E2E_PORT`), and a build with the `embed-web` feature serves the app from the
+//! server's own origin on whatever `DELTA_PORT` names. The loopback-host rule
+//! blocks the real threat — a remote web origin — without pinning a port, so it
+//! holds across dev, the e2e suites and the embedded build alike.
 
 use axum::extract::Request;
 use axum::http::{header, StatusCode};

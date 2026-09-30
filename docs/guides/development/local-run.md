@@ -77,6 +77,60 @@ Type a message in the browser. It is dispatched into the tmux pane via
 the browser. When a tool needs permission, answer it in the embedded terminal or
 in the TUI (`tmux -L delta attach -t delta-1`).
 
+## Serving the built frontend
+
+`make dev` serves the UI from Vite. To check the UI the way a packaged build
+delivers it — the built SPA served by `delta-server` itself, no Vite running —
+build the server with the frontend compiled in:
+
+```bash
+make server-embedded   # builds the SPA (make web-dist), then delta-server with --features embed-web
+make down              # the binary takes the same port 7878 as make dev's server
+DELTA_PORT=7878 DELTA_DB_PATH=backend/delta.db backend/target/release/delta-server
+```
+
+Then open <http://127.0.0.1:7878/>. The server hands out the page with the
+per-run token injected, so `DELTA_AUTH_TOKEN` is optional (a bare run mints
+one). Unlike `make dev`, nothing sets the other `DELTA_*` variables for you, and
+the server's defaults are relative to its working directory: `DELTA_DB_PATH`
+defaults to `delta.db` there, so from the repository root pass
+`backend/delta.db` (the database `make dev` uses) to see the same sessions.
+What is served, and how the page gets the token, is in
+[the API guide](../api/README.md#the-built-frontend-embed-web). A plain
+`cargo build` never needs `dist/`: only the `embed-web` feature compiles it in.
+
+## The desktop app
+
+`make app-dev` (from source) or the bundle `make app` produces runs the same
+server inside a desktop window instead — see
+[the development guide](README.md#desktop-shell-delta-app) for the targets. It
+does not touch `make dev`, which keeps serving the UI from Vite on its own ports,
+database and working directories; the two can run side by side. They do share
+Delta's tmux server (`tmux -L delta`) unless `DELTA_TMUX_SOCKET` sets another
+socket for one of them, so `make down` and `make reset` also end the app's
+sessions.
+
+- **Data.** The database and the per-spawn working directories live in the app
+  data directory, created on first run: `delta.db` and `sessions/` under
+  `~/Library/Application Support/io.github.x7c1.delta/` on macOS and
+  `~/.local/share/io.github.x7c1.delta/` on Linux. So the app starts with its own
+  session list, not the one `make dev` shows from `backend/delta.db`. An explicit
+  `DELTA_DB_PATH` / `DELTA_SESSION_WORKDIR` still wins, and the worktree base
+  (`$HOME/.delta/worktrees`) and the transcript root (where Claude Code writes)
+  keep their usual defaults.
+- **Port.** The server takes a free loopback port on every launch, so it never
+  collides with a `make dev` server on 7878; `DELTA_PORT` pins one.
+- **`PATH`.** An app launched from Finder or a desktop file does not inherit
+  your shell's `PATH`, so at startup the app asks your login shell (`$SHELL`, or
+  `/bin/sh`) for it and uses that to find `tmux`, `claude` and `codex`. If the
+  shell does not answer within a few seconds, the app keeps the `PATH` it was
+  started with and logs a warning.
+- **Startup errors.** The two failures you have to act on — a database the
+  binary refuses to open, and a missing `tmux` — are shown in a dialog, and the
+  app exits after it is dismissed.
+- **Quitting.** Closing the window stops the server. The tmux server keeps
+  running, so open sessions survive and are resumed on the next launch.
+
 ## Shut down
 
 ```bash

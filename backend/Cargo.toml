@@ -1,6 +1,18 @@
 [workspace]
 resolver = "2"
 members = ["crates/*/*"]
+# Everything except the desktop shell (`crates/apps/delta-app`), so a plain
+# `cargo build` / `cargo test` / `cargo clippy` never pulls in Tauri and its
+# system webview libraries. Build the shell by naming it: `cargo build -p
+# delta-app` (or `make app-dev` / `make app`).
+default-members = [
+    "crates/apps/delta-server",
+    "crates/apps/fake-claude",
+    "crates/apps/fake-codex",
+    "crates/domain/*",
+    "crates/gateway/*",
+    "crates/libs/*",
+]
 
 [workspace.package]
 version = "0.4.0"
@@ -38,6 +50,9 @@ chrono = "0.4"
 libc = "0.2"
 axum = { version = "0.8", features = ["ws"] }
 futures-util = "0.3"
+# Compiles a directory tree into the binary (delta-server embeds the built web
+# frontend with it under its `embed-web` feature).
+include_dir = "0.7"
 portable-pty = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

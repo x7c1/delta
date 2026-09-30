@@ -23,6 +23,8 @@ part. The larger workflows live in their own files:
   `make dev`.
 - **[release.md](../release.md)** — the release flow and its supporting
   automation.
+- **[install.md](../install.md)** — installing the released desktop app as an
+  end user (not needed for development).
 
 ## Supported platforms
 
@@ -37,6 +39,7 @@ by both — see "Portability conventions" below.
 |----------|---------------|
 | Linux | `tmux`, `lsof`, `jq`, GNU `make`, `bash` — install via the system package manager (e.g. `apt install tmux lsof jq make`). |
 | macOS | `tmux` and `jq` via Homebrew (`brew install tmux jq`). `lsof`, `make` (GNU make 3.81), `awk`, `bash` 3.2, `date`, and `pkill` ship with the system. Installing the Xcode Command Line Tools (`xcode-select --install`) is the standard way to get `make`. |
+| Linux, desktop shell only | The system libraries Tauri v2 links against, needed only to build `delta-app` (`make app-dev`, `make app`, and `make check`'s `check-app-build`): on Debian/Ubuntu `apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf build-essential file`. macOS needs nothing beyond the Xcode Command Line Tools. |
 
 In addition, both platforms need the Rust toolchain (`cargo`) and pnpm (via
 `corepack enable`), plus the agent CLIs you plan to drive: an authenticated
@@ -125,6 +128,41 @@ session without a name collision. Open/closed is in-memory only: after a restart
 every persisted conversation is "closed" until it is resumed. Authentication is
 assumed — the server relies on a cached Claude Code token (or
 `CLAUDE_CODE_OAUTH_TOKEN`) and never runs interactive OAuth.
+
+### Desktop shell (`delta-app`)
+
+`backend/crates/apps/delta-app` is a Tauri v2 shell that runs `delta-server`
+inside its own process on a free loopback port and opens one window on it,
+serving the built SPA (`embed-web`). It is a launcher only: the page talks to
+the server over plain HTTP exactly as a browser does, with no Tauri IPC.
+
+The crate is left out of the workspace's `default-members`, so `cargo build`,
+`cargo test` and `cargo clippy` in `backend/` (and `make build` / `make test` /
+`make lint`) never build it or need the Linux libraries above. Name it to build
+it (`cargo build -p delta-app`); `make check` does so in `check-app-build`, and
+CI does in the job that builds the embedded server.
+
+```bash
+make app-dev   # build the SPA (make web-dist), then cargo run -p delta-app
+make app       # build the SPA, then bundle with cargo tauri build
+```
+
+`make app` needs the Tauri CLI, installed once:
+
+```bash
+cargo install tauri-cli --version '^2' --locked
+```
+
+The bundles land under `backend/target/release/bundle/` (`macos/Delta.app` and
+a `.dmg` on macOS; `.deb`, `.rpm` and an AppImage on Linux). On macOS the `.dmg`
+step lays out the image's Finder window through AppleScript, so it needs your
+terminal to be allowed to control Finder (System Settings → Privacy & Security →
+Automation; macOS asks the first time). Without that permission the step fails
+or hangs after `Delta.app` has already been written, which is enough to run the
+app. Where the app keeps its data, and how it finds `tmux` and `claude` when
+launched from Finder or a desktop file, is in
+[local-run.md](local-run.md#the-desktop-app). Installing and opening a released
+bundle is in [install.md](../install.md).
 
 ### Reading the SQLite schema
 
