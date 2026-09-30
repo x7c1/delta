@@ -122,8 +122,9 @@ pub(crate) struct FakeStoreInner {
     /// fail at its row write.
     pub(crate) fail_cancel_send: bool,
     /// When set, [`SessionStore::clear_subagent_launch`] fails with a store
-    /// error, so a test can make the process-gone subagent sweep fail.
-    pub(crate) fail_clear_subagent_launch: bool,
+    /// error for this tool_use id (and succeeds for every other), so a test
+    /// can make the process-gone subagent sweep hit a failing row write.
+    pub(crate) fail_clear_subagent_launch_for: Option<String>,
 }
 
 #[derive(Default)]
@@ -1013,7 +1014,7 @@ impl SessionStore for FakeStore {
 
     async fn clear_subagent_launch(&self, session_id: &SessionId, tool_use_id: &str) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
-        if g.fail_clear_subagent_launch {
+        if g.fail_clear_subagent_launch_for.as_deref() == Some(tool_use_id) {
             return Err(Error::Store(
                 "injected clear_subagent_launch failure".into(),
             ));
