@@ -72,8 +72,14 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
   // stuck on. Gating on a settled fetch makes the stale read a set-only no-op
   // (healing intact) and lets only the fresh `idle` authoritatively clear it.
   // A fresh `in_flight` (a genuinely still-running turn after a reconnect) is
-  // authoritative too, so it re-sets the dropped flag. The permission /
-  // question seeds stay plain set-only (they cannot be resurrected this way).
+  // authoritative too, so it re-sets the dropped flag.
+  //
+  // The permission / question seeds are set-only, and they wait for a settled
+  // fetch too: while a refetch is in flight, the data on hand is an envelope
+  // that may predate a `permission_resolved` that has since cleared the card
+  // (the event itself triggers that refetch), and seeding from it would bring
+  // the card back. This gate alone does not close the race; see
+  // `isResolvedRequest` in the notices slice for the other two guards.
   //
   // `dataUpdatedAt` is a dependency on purpose: when the live state did not
   // change across the reconnect gap (it was `in_flight` before and still is),
@@ -89,19 +95,25 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
     }
   }, [sessionId, serverTurn, sendsUpdatedAt, sendsSettled]);
   useEffect(() => {
-    if (sessionId !== null && serverPermission !== undefined) {
+    if (sendsSettled && sessionId !== null && serverPermission !== undefined) {
       // The envelope reports the queue head plus its depth, so the re-seeded
       // notice carries both the dialog and how many answers are still owed.
       useLiveStore
         .getState()
         .seedPermission(sessionId, serverPermission, serverPermissionCount ?? 0);
     }
-  }, [sessionId, serverPermission, serverPermissionCount, sendsUpdatedAt]);
+  }, [
+    sessionId,
+    serverPermission,
+    serverPermissionCount,
+    sendsUpdatedAt,
+    sendsSettled,
+  ]);
   useEffect(() => {
-    if (sessionId !== null && serverQuestion !== undefined) {
+    if (sendsSettled && sessionId !== null && serverQuestion !== undefined) {
       useLiveStore.getState().seedQuestion(sessionId, serverQuestion);
     }
-  }, [sessionId, serverQuestion, sendsUpdatedAt]);
+  }, [sessionId, serverQuestion, sendsUpdatedAt, sendsSettled]);
   useEffect(() => {
     if (sessionId !== null && serverRunningSubagents !== undefined) {
       useLiveStore

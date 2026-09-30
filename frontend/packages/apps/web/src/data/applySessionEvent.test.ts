@@ -67,6 +67,7 @@ describe('applySessionEvent', () => {
       runningThreads: {},
       runningSubagents: {},
       notices: {},
+      resolvedRequests: {},
       unread: {},
       threadActivity: {},
       streamingMessages: {},
@@ -788,6 +789,40 @@ describe('applySessionEvent', () => {
       queued: [],
       pendingCount: 1,
     });
+  });
+
+  it('refetches the open sends on permission_resolved', () => {
+    // A sends envelope in flight when the resolution lands still reports the
+    // request as pending; the refetch supersedes it — see the
+    // `permission_resolved` case in `applySessionEvent`.
+    const queryClient = new QueryClient();
+    applySessionEvent(
+      {
+        kind: 'question_asked',
+        session_id: FOCUSED,
+        request_id: 4,
+        thread_id: 1,
+        tool_input: '{"questions":[]}',
+      },
+      queryClient,
+      1,
+      FOCUSED,
+    );
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    applySessionEvent(
+      { kind: 'permission_resolved', session_id: FOCUSED, request_id: 4 },
+      queryClient,
+      1,
+      FOCUSED,
+    );
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['session-sends', FOCUSED],
+    });
+    expect(
+      noticeOf(useLiveStore.getState().notices, FOCUSED, 'question'),
+    ).toBeNull();
   });
 
   it('refetches the repository and PR lists on a clone outcome, with no session in the event', () => {

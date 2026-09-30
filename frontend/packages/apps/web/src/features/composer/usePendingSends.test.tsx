@@ -7,7 +7,7 @@ import {
   expect,
   it,
 } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -15,7 +15,11 @@ import { createHandlers, SESSION_ID } from '@delta/api-mocks';
 import { ApiClient, queryKeys } from '@delta/api-client';
 import type { SendsResponse, Turn } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
-import { useLiveStore, type SendingItem } from '../../store/liveStore';
+import {
+  noticeOf,
+  useLiveStore,
+  type SendingItem,
+} from '../../store/liveStore';
 import {
   usePendingSends,
   type PendingEntry,
@@ -144,6 +148,102 @@ describe('usePendingSends active-turn seeding', () => {
         [SESSION_ID]: { 1: true },
       });
     });
+  });
+});
+
+describe('usePendingSends question/permission seeding', () => {
+  beforeEach(() => {
+    reset();
+    useLiveStore.setState({ notices: {}, resolvedRequests: {} });
+  });
+
+  const QUESTION = {
+    request_id: 5,
+    thread_id: 1,
+    tool_input: '{"questions":[]}',
+  };
+  const PERMISSION = { request_id: 6, tool_name: 'Bash', tool_input: '{}' };
+
+  function envelope(pending: boolean): SendsResponse {
+    return {
+      sends: [],
+      turn: { state: 'idle', send_id: null, thread_id: null },
+      permission: pending ? PERMISSION : null,
+      permission_count: pending ? 1 : 0,
+      question: pending ? QUESTION : null,
+      running_subagents: [],
+    };
+  }
+
+  it('keeps a resolved card cleared when a stale envelope lands after the resolve event', async () => {
+    // The first fetch reports the question and the permission as pending; the
+    // second one is assembled while they are still pending but held back until
+    // after their resolution; anything later reflects the resolution.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let requests = 0;
+    server.use(
+      http.get('*/api/sessions/:id/sends', async () => {
+        requests += 1;
+        if (requests === 1) {
+          return HttpResponse.json(envelope(true));
+        }
+        if (requests === 2) {
+          await held;
+          return HttpResponse.json(envelope(true));
+        }
+        return HttpResponse.json(envelope(false));
+      }),
+    );
+    let queryClient!: QueryClient;
+    mount(THREAD_SURFACE, (client) => {
+      queryClient = client;
+    });
+    const notices = () => useLiveStore.getState().notices;
+    await waitFor(() => {
+      expect(noticeOf(notices(), SESSION_ID, 'question')).not.toBeNull();
+      expect(noticeOf(notices(), SESSION_ID, 'permission')).not.toBeNull();
+    });
+
+    // A refetch goes out and the server assembles its body before the cancel.
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.sessionSends(SESSION_ID),
+    });
+    await waitFor(() => {
+      expect(requests).toBe(2);
+    });
+
+    // The live events clear both cards while that response is in flight. They
+    // go to the store alone, so nothing supersedes the in-flight request.
+    act(() => {
+      for (const requestId of [QUESTION.request_id, PERMISSION.request_id]) {
+        useLiveStore.getState().applyEvent({
+          kind: 'permission_resolved',
+          session_id: SESSION_ID,
+          request_id: requestId,
+        });
+      }
+    });
+    expect(noticeOf(notices(), SESSION_ID, 'question')).toBeNull();
+    expect(noticeOf(notices(), SESSION_ID, 'permission')).toBeNull();
+
+    // The stale response resolves and settles: it must not bring either back.
+    release();
+    await waitFor(() => {
+      expect(
+        queryClient.getQueryState(queryKeys.sessionSends(SESSION_ID))
+          ?.fetchStatus,
+      ).toBe('idle');
+    });
+    expect(
+      queryClient.getQueryData<SendsResponse>(
+        queryKeys.sessionSends(SESSION_ID),
+      )?.question,
+    ).toEqual(QUESTION);
+    expect(noticeOf(notices(), SESSION_ID, 'question')).toBeNull();
+    expect(noticeOf(notices(), SESSION_ID, 'permission')).toBeNull();
   });
 });
 

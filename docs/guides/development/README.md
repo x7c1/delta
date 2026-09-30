@@ -153,6 +153,20 @@ make app       # build the SPA, then bundle with cargo tauri build
 cargo install tauri-cli --version '^2' --locked
 ```
 
+On Linux, `make app` links with whatever `cc` is first on `PATH`. If that is
+another toolchain's compiler — for example a Nix `gcc` wrapper — the built
+`delta-app` gets that toolchain's dynamic loader as its interpreter, which does
+not read the system library cache, so the installed `.deb` fails to start with
+`error while loading shared libraries: libpango-1.0.so.0` (while `ldd` still
+looks fine). Point the build at the system compiler in that case:
+
+```bash
+CC=/usr/bin/gcc CXX=/usr/bin/g++ \
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/gcc \
+  make app
+readelf -l backend/target/release/delta-app | grep interpreter   # /lib64/ld-linux-x86-64.so.2
+```
+
 The bundles land under `backend/target/release/bundle/` (`macos/Delta.app` and
 a `.dmg` on macOS; a `.deb` on Linux). On macOS the `.dmg`
 step lays out the image's Finder window through AppleScript, so it needs your
