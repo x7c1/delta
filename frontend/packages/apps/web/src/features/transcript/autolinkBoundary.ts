@@ -28,8 +28,11 @@ import { visit } from 'unist-util-visit';
  * (`https://ja.wikipedia.org/wiki/東京です`) is left alone, and so is a
  * *balanced* full-width pair. Both are indistinguishable from an IRI path such
  * as `https://ja.wikipedia.org/wiki/デルタ（曖昧さ回避）`, where the same
- * characters are part of the address. GitHub pull-request and issue URLs are
- * the exception `trimGitHubIssueUrl` recovers.
+ * characters are part of the address. An *unbalanced* bracket is cut on either
+ * side: a closer with no opener before it, and an opener whose closer is not in
+ * the candidate at all — `…/**（5174 は…）` puts the closer past the next space,
+ * so the opener starts the prose. GitHub pull-request and issue URLs are the
+ * exception `trimGitHubIssueUrl` recovers.
  */
 
 /**
@@ -42,7 +45,8 @@ const TERMINATORS = new Set('。、，．：；！？');
 
 /**
  * Full-width bracket and quote pairs, keyed by the closing character. A closer
- * ends the URL only when it has no matching opener earlier in it, so a URL that
+ * ends the URL only when it has no matching opener earlier in it, and an opener
+ * ends it when no matching closer follows within the candidate, so a URL that
  * genuinely contains a pair — `https://ja.wikipedia.org/wiki/デルタ（曖昧さ回避）`
  * — keeps it.
  */
@@ -58,7 +62,9 @@ const OPENER_BY_CLOSER = new Map([
   ['］', '［'],
 ]);
 
-const OPENERS = new Set(OPENER_BY_CLOSER.values());
+const CLOSER_BY_OPENER = new Map(
+  [...OPENER_BY_CLOSER].map(([closer, opener]) => [opener, closer]),
+);
 
 /**
  * A GitHub pull-request or issue address, up to and including its number:
@@ -121,11 +127,12 @@ export function trimAutolinkPunctuation(url: string): {
   const characters = [...url];
   let offset = 0;
 
-  for (const character of characters) {
+  for (const [index, character] of characters.entries()) {
     if (TERMINATORS.has(character)) {
       break;
     }
     const opener = OPENER_BY_CLOSER.get(character);
+    const closer = CLOSER_BY_OPENER.get(character);
     if (opener !== undefined) {
       const open = openCounts.get(opener) ?? 0;
       if (open === 0) {
@@ -133,7 +140,12 @@ export function trimAutolinkPunctuation(url: string): {
         break;
       }
       openCounts.set(opener, open - 1);
-    } else if (OPENERS.has(character)) {
+    } else if (closer !== undefined) {
+      if (!characters.includes(closer, index + 1)) {
+        // An opener whose closer is not in the candidate opens a bracket in the
+        // prose (the closer comes after the next space), not in the address.
+        break;
+      }
       openCounts.set(character, (openCounts.get(character) ?? 0) + 1);
     }
     offset += character.length;
