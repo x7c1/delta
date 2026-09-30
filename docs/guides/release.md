@@ -120,9 +120,7 @@ Every Release carries unsigned bundles of the desktop shell
 | File | Platform |
 |---|---|
 | `Delta_<version>_aarch64.dmg` | macOS, Apple silicon |
-| `Delta_<version>_x64.dmg` | macOS, Intel |
 | `Delta_<version>_aarch64.app.tar.gz` | macOS, Apple silicon (the `.app` the `.dmg` holds, as a tarball) |
-| `Delta_<version>_x64.app.tar.gz` | macOS, Intel (the `.app` the `.dmg` holds, as a tarball) |
 | `Delta_<version>_amd64.deb` | Linux (Debian/Ubuntu), x86_64 |
 | `Delta_<version>_amd64.AppImage` | Linux, x86_64 |
 
@@ -143,7 +141,7 @@ signed nor notarized; what that means for someone installing them is in
 - **Pull requests.** A pull request that touches the shell or its build
   inputs (the `paths` filter in `bundle.yml`) runs the same builds and uploads
   each platform's bundles as a workflow artifact (`delta-macos-aarch64`,
-  `delta-macos-x86_64`, `delta-linux-x86_64`), so a broken bundle is caught
+  `delta-linux-x86_64`), so a broken bundle is caught
   before a release depends on it and reviewers can download and try it.
 
 ## Workflows involved
@@ -162,7 +160,7 @@ signed nor notarized; what that means for someone installing them is in
   GitHub Release; its `bundles` job then calls `bundle.yml` to attach the
   desktop bundles.
 - `.github/workflows/bundle.yml` — builds the desktop bundles on macOS
-  (Apple silicon and Intel) and Linux; attaches them to a Release when called
+  (Apple silicon only) and Linux; attaches them to a Release when called
   from `release.yml`, and uploads them as workflow artifacts on pull requests
   and manual runs. See [Desktop bundles](#desktop-bundles).
 

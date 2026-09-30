@@ -3,10 +3,10 @@
 ## Overview
 
 How to download, open and run the Delta desktop app from a GitHub Release,
-without building anything. Bundles are published for macOS (Apple silicon and
-Intel) and Linux (x86_64). The app does not bundle `tmux` or the agent
-CLIs. The macOS build is unsigned, so the first launch on a Mac needs a
-one-time Gatekeeper workaround.
+without building anything. Bundles are published for macOS (Apple silicon
+only; Intel Macs are not supported) and Linux (x86_64). The app does not bundle
+`tmux` or the agent CLIs. The macOS build is unsigned, so the first launch on a
+Mac needs a one-time Gatekeeper workaround.
 
 To run Delta from source instead, see
 [the development guide](development/README.md).
@@ -19,7 +19,6 @@ download the file for your machine:
 | Machine | File |
 |---|---|
 | Mac with Apple silicon (M1 and later) | `Delta_<version>_aarch64.dmg` |
-| Mac with an Intel processor | `Delta_<version>_x64.dmg` |
 | Linux, Debian/Ubuntu (x86_64) | `Delta_<version>_amd64.deb` |
 | Linux, other distributions (x86_64) | `Delta_<version>_amd64.AppImage` |
 
