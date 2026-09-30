@@ -10,8 +10,9 @@
 //!
 //! Startup, in order:
 //!
-//! 1. adopt the login shell's `PATH` ([`login_path`]), so `tmux`, `claude` and
-//!    `codex` are found when launched from Finder or a desktop file;
+//! 1. adopt the login shell's `PATH` and locale ([`login_env`]), so `tmux`,
+//!    `claude` and `codex` are found and run in a UTF-8 locale when launched
+//!    from Finder or a desktop file;
 //! 2. build the server configuration the CLI builds, with the database and the
 //!    per-spawn working directories moved into the app data directory
 //!    ([`app_data`]);
@@ -27,7 +28,7 @@
 //! can be resumed.
 
 mod app_data;
-mod login_path;
+mod login_env;
 #[cfg(target_os = "macos")]
 mod macos_title_bar;
 
@@ -43,7 +44,7 @@ const WINDOW_TITLE: &str = "Delta";
 
 fn main() {
     serve::init_tracing();
-    login_path::import_login_shell_path();
+    login_env::import_login_shell_env();
 
     let runtime = match Runtime::new() {
         Ok(runtime) => runtime,

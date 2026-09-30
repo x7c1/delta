@@ -120,11 +120,15 @@ sessions.
   keep their usual defaults.
 - **Port.** The server takes a free loopback port on every launch, so it never
   collides with a `make dev` server on 7878; `DELTA_PORT` pins one.
-- **`PATH`.** An app launched from Finder or a desktop file does not inherit
-  your shell's `PATH`, so at startup the app asks your login shell (`$SHELL`, or
-  `/bin/sh`) for it and uses that to find `tmux`, `claude` and `codex`. If the
-  shell does not answer within a few seconds, the app keeps the `PATH` it was
-  started with and logs a warning.
+- **`PATH` and locale.** An app launched from Finder or a desktop file does not
+  inherit your shell's environment, so at startup the app asks your login shell
+  (`$SHELL`, or `/bin/sh`) for it and adopts its `PATH`, `LANG` and every
+  `LC_*`: the `PATH` finds `tmux`, `claude` and `codex`, and the locale is what
+  the sessions' commands run in. If the shell does not answer within a few
+  seconds, the app keeps the environment it was started with and logs a warning.
+  When neither the login shell nor the app's own environment sets `LC_ALL`,
+  `LC_CTYPE` or `LANG`, the app sets `LANG=en_US.UTF-8`, so every command sees
+  a UTF-8 locale.
 - **Title bar (macOS).** The title bar is transparent and shows no title: the
   page paints the strip under the traffic lights in the active theme's
   background and lays itself out below it. Before the page's scripts run, the
