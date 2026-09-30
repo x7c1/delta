@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { StatusSnapshot } from '@delta/wire-gen';
 import {
   noticeOf,
+  RESOLVED_REQUESTS_KEPT,
   threadIsRunning,
   useLiveStore,
   type LocalSend,
@@ -21,6 +22,7 @@ function reset() {
     spawns: [],
     runningThreads: {},
     notices: {},
+    resolvedRequests: {},
     unread: {},
     threadActivity: {},
     streamingMessages: {},
@@ -1291,6 +1293,66 @@ describe('liveStore.applyEvent notices', () => {
     );
   });
 
+  it('seedPermission refuses a request permission_resolved already resolved', () => {
+    // A sends envelope assembled while the request was still pending can land
+    // AFTER the resolution cleared the card. The card is gone, so the
+    // same-request guard sees nothing to match; the resolved id must hold.
+    requestPermission();
+    resolvePermission('sess-1', 7);
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toBeNull();
+
+    useLiveStore.getState().seedPermission(
+      'sess-1',
+      { request_id: 7, tool_name: 'Bash', tool_input: '{}' },
+      1,
+    );
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toBeNull();
+
+    // A genuinely new request has a new id and still seeds.
+    useLiveStore.getState().seedPermission(
+      'sess-1',
+      { request_id: 8, tool_name: 'Bash', tool_input: '{}' },
+      1,
+    );
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual({
+      ...PERMISSION_NOTICE,
+      requestId: 8,
+    });
+  });
+
+  it('seedPermission refuses a resolved request no card was showing yet', () => {
+    // The resolution can outrun the seed that would have shown the card; the
+    // stale envelope naming it must not show it afterwards either.
+    resolvePermission('sess-1', 7);
+    useLiveStore.getState().seedPermission(
+      'sess-1',
+      { request_id: 7, tool_name: 'Bash', tool_input: '{}' },
+      1,
+    );
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toBeNull();
+  });
+
+  it('remembers resolved requests per session, capped to the most recent', () => {
+    // Another session's resolution of the same id does not block this one.
+    resolvePermission('sess-2', 7);
+    useLiveStore.getState().seedPermission(
+      'sess-1',
+      { request_id: 7, tool_name: 'Bash', tool_input: '{}' },
+      1,
+    );
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual(
+      PERMISSION_NOTICE,
+    );
+
+    for (let id = 100; id < 100 + RESOLVED_REQUESTS_KEPT + 1; id++) {
+      resolvePermission('sess-3', id);
+    }
+    const kept = useLiveStore.getState().resolvedRequests['sess-3'];
+    expect(kept).toHaveLength(RESOLVED_REQUESTS_KEPT);
+    // The oldest id went first.
+    expect(kept?.[0]).toBe(101);
+  });
+
   it('seedPermission never clears, and never un-dismisses the shown request', () => {
     requestPermission();
     useLiveStore.getState().dismissPermission('sess-1');
@@ -1860,6 +1922,36 @@ describe('liveStore.applyEvent question notices', () => {
       tool_input: QUESTION_INPUT,
     });
     expect(noticeOf(notices(), 'sess-1', 'question')).toEqual(QUESTION_NOTICE);
+  });
+
+  it('seedQuestion refuses a question permission_resolved already resolved', () => {
+    // The stale-envelope race: the sends response still carrying the question
+    // resolves after the resolution event cleared the card.
+    askQuestion();
+    useLiveStore.getState().applyEvent({
+      kind: 'permission_resolved',
+      session_id: 'sess-1',
+      request_id: 5,
+    });
+    expect(noticeOf(notices(), 'sess-1', 'question')).toBeNull();
+
+    useLiveStore.getState().seedQuestion('sess-1', {
+      request_id: 5,
+      thread_id: QUESTION_THREAD,
+      tool_input: QUESTION_INPUT,
+    });
+    expect(noticeOf(notices(), 'sess-1', 'question')).toBeNull();
+
+    // A genuinely new question has a new id and still seeds.
+    useLiveStore.getState().seedQuestion('sess-1', {
+      request_id: 6,
+      thread_id: QUESTION_THREAD,
+      tool_input: QUESTION_INPUT,
+    });
+    expect(noticeOf(notices(), 'sess-1', 'question')).toEqual({
+      ...QUESTION_NOTICE,
+      requestId: 6,
+    });
   });
 
   it('seedQuestion never clears, and never un-dismisses the shown question', () => {

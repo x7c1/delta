@@ -70,7 +70,7 @@ export type {
   SessionNotice,
   SessionNoticeKind,
 } from './live/noticesSlice';
-export { noticeOf } from './live/noticesSlice';
+export { noticeOf, RESOLVED_REQUESTS_KEPT } from './live/noticesSlice';
 
 export const useLiveStore = create<LiveState>()((...args) => ({
   ...createConnectionSlice(...args),

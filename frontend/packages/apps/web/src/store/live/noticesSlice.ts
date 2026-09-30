@@ -4,12 +4,24 @@ import type {
   FileChangeDetail,
   PendingPermission,
   PendingQuestion,
+  SessionEvent,
 } from '@delta/wire-gen';
 import type { EventReducer } from './eventReducer';
 import type { SendsSlice } from './sendsSlice';
 
 /** The notices state alone, the only fields this module's reducers touch. */
 type NoticesState = Pick<NoticesSlice, 'notices'>;
+
+/**
+ * How many resolved request ids {@link NoticesSlice.resolvedRequests} keeps
+ * per session. The memory only has to outlast the sends envelopes that were
+ * already in flight when a resolution landed (`permission_resolved`
+ * invalidates the session's sends, so the envelope after it reflects the
+ * resolution), which is a handful of requests at most. The cap only keeps a
+ * long-lived session from growing the list without bound; the oldest ids go
+ * first.
+ */
+export const RESOLVED_REQUESTS_KEPT = 32;
 
 /** One pending permission request, as the notice's queue holds it. */
 export interface QueuedPermissionRequest {
@@ -317,6 +329,56 @@ export function clearNoticesOn(
   );
 }
 
+/**
+ * Whether a live `permission_resolved` has already resolved `requestId` in
+ * `sessionId`, so a sends envelope reporting it as pending is stale.
+ *
+ * The seeds' same-request-id guard alone cannot tell a stale report from a
+ * fresh one once the card is gone. A `GET .../sends` the server assembled
+ * while the request was still pending can resolve AFTER the resolution event
+ * cleared the card: the notice is then null, the report names a request no
+ * card shows, and the seed would bring the card back. Nothing would take it
+ * down again — the next envelope carries `null`, which seeds nothing, and the
+ * turn-end sweep has usually run already. Remembering the resolved ids makes
+ * the resolution stick: a request is resolved once and for all, so an envelope
+ * naming it can only be stale, while a genuinely new request has a new id and
+ * seeds normally.
+ *
+ * Three guards cover this race; keep all three:
+ *
+ * - `applySessionEvent` refetches the sends on `permission_resolved`, so a
+ *   request in flight is superseded and the next envelope reflects the
+ *   resolution.
+ * - `usePendingSends` seeds only from a settled fetch, so the envelope on hand
+ *   while that refetch runs (which may predate the resolution) seeds nothing.
+ * - This check refuses a resolved id whatever the fetch timing, including a
+ *   stale response the refetch did not supersede. The other two only narrow
+ *   the window; this one closes it.
+ */
+function isResolvedRequest(
+  state: Pick<NoticesSlice, 'resolvedRequests'>,
+  sessionId: SessionId,
+  requestId: number,
+): boolean {
+  return (state.resolvedRequests[sessionId] ?? []).includes(requestId);
+}
+
+/** Record `requestId` as resolved in `sessionId`, capped per session. */
+function withResolvedRequest(
+  resolvedRequests: Record<SessionId, number[]>,
+  sessionId: SessionId,
+  requestId: number,
+): Record<SessionId, number[]> {
+  const current = resolvedRequests[sessionId] ?? [];
+  if (current.includes(requestId)) {
+    return resolvedRequests;
+  }
+  return {
+    ...resolvedRequests,
+    [sessionId]: [...current, requestId].slice(-RESOLVED_REQUESTS_KEPT),
+  };
+}
+
 export interface NoticesSlice {
   /**
    * Per-session notices, at most one per {@link SessionNoticeKind} per
@@ -324,6 +386,13 @@ export interface NoticesSlice {
    * {@link NOTICE_LIFECYCLE}.
    */
   notices: Record<SessionId, SessionNotice[]>;
+  /**
+   * Per session, the request ids a live `permission_resolved` has resolved,
+   * oldest first (at most {@link RESOLVED_REQUESTS_KEPT}). Read by
+   * {@link seedPermission} and {@link seedQuestion} so that a sends envelope
+   * assembled before the resolution cannot re-seed the card it just cleared.
+   */
+  resolvedRequests: Record<SessionId, number[]>;
 
   /** Flag a session as resume-impossible, surfacing the inline notice. */
   markResumeUnavailable: (sessionId: SessionId) => void;
@@ -336,9 +405,9 @@ export interface NoticesSlice {
    * Mirrors {@link RunningThreadsSlice.seedActiveTurn}: set-only (`null`
    * clears nothing — clearing is owned by the events and the lifecycle
    * sweeps), and a report of the request the notice already shows leaves the
-   * card alone, so a refetch can neither resurrect a notice an event just
-   * resolved nor un-dismiss one the user closed — only its remaining count
-   * catches up.
+   * card alone, so a refetch cannot un-dismiss a card the user closed — only
+   * its remaining count catches up. A request in {@link resolvedRequests} is
+   * refused outright; see {@link isResolvedRequest} for why.
    */
   seedPermission: (
     sessionId: SessionId,
@@ -348,10 +417,9 @@ export interface NoticesSlice {
   /**
    * Seed a session's question notice from the server's queryable pending
    * question (the `question` field of `GET /api/sessions/{id}/sends`). Mirrors
-   * {@link seedPermission}: set-only (`null` clears nothing), and a report of
-   * the request the card already shows changes nothing, so a refetch can
-   * neither resurrect a card an event just resolved nor un-dismiss one the
-   * user closed.
+   * {@link seedPermission}: set-only (`null` clears nothing), a report of the
+   * request the card already shows changes nothing (so a refetch cannot
+   * un-dismiss a card the user closed), and a resolved request is refused.
    */
   seedQuestion: (
     sessionId: SessionId,
@@ -388,6 +456,7 @@ export const createNoticesSlice: StateCreator<
   NoticesSlice
 > = (set) => ({
   notices: {},
+  resolvedRequests: {},
 
   markResumeUnavailable: (sessionId) =>
     set((state) =>
@@ -412,7 +481,10 @@ export const createNoticesSlice: StateCreator<
 
   seedPermission: (sessionId, permission, pendingCount) =>
     set((state) => {
-      if (permission === null) {
+      if (
+        permission === null ||
+        isResolvedRequest(state, sessionId, permission.request_id)
+      ) {
         return state;
       }
       const current = noticeOf(state.notices, sessionId, 'permission');
@@ -464,7 +536,10 @@ export const createNoticesSlice: StateCreator<
 
   seedQuestion: (sessionId, question) =>
     set((state) => {
-      if (question === null) {
+      if (
+        question === null ||
+        isResolvedRequest(state, sessionId, question.request_id)
+      ) {
         return state;
       }
       const current = noticeOf(state.notices, sessionId, 'question');
@@ -635,11 +710,36 @@ export const reduceQuestionAsked: EventReducer<
 // event also clears a `question` notice with the matching request id: an
 // AskUserQuestion's request row resolves the moment its tool_result (the user's
 // pick) is ingested.
+//
+// Whatever the notice held, the request id is remembered as resolved, so a
+// sends envelope assembled before this event cannot re-seed it (see
+// `isResolvedRequest`). That includes an id no card shows yet: its resolution
+// can outrun the seed that would have shown it.
 export const reducePermissionResolved: EventReducer<
-  NoticesState,
+  NoticesState & Pick<NoticesSlice, 'resolvedRequests'>,
   'permission_resolved'
 > = (state, event) => {
-  const permission = noticeOf(state.notices, event.session_id, 'permission');
+  const resolvedRequests = withResolvedRequest(
+    state.resolvedRequests,
+    event.session_id,
+    event.request_id,
+  );
+  const notices = resolveNotices(state.notices, event);
+  if (
+    notices === state.notices &&
+    resolvedRequests === state.resolvedRequests
+  ) {
+    return state;
+  }
+  return { notices, resolvedRequests };
+};
+
+/** The notices once `event`'s request left; `notices` itself if unchanged. */
+function resolveNotices(
+  notices: Record<SessionId, SessionNotice[]>,
+  event: Extract<SessionEvent, { kind: 'permission_resolved' }>,
+): Record<SessionId, SessionNotice[]> {
+  const permission = noticeOf(notices, event.session_id, 'permission');
   if (permission !== null) {
     if (permission.requestId === event.request_id) {
       const [promoted, ...rest] = permission.queued;
@@ -649,15 +749,13 @@ export const reducePermissionResolved: EventReducer<
       // brings the next request in a moment, and the next envelope refetch
       // restores the true remaining count.
       if (promoted !== undefined) {
-        return {
-          notices: withNotice(state.notices, event.session_id, {
-            kind: 'permission',
-            ...promoted,
-            dismissed: false,
-            queued: rest,
-            pendingCount: permission.pendingCount - 1,
-          }),
-        };
+        return withNotice(notices, event.session_id, {
+          kind: 'permission',
+          ...promoted,
+          dismissed: false,
+          queued: rest,
+          pendingCount: permission.pendingCount - 1,
+        });
       }
     } else if (
       permission.queued.some(
@@ -667,24 +765,22 @@ export const reducePermissionResolved: EventReducer<
       const queued = permission.queued.filter(
         (request) => request.requestId !== event.request_id,
       );
-      return {
-        notices: withNotice(state.notices, event.session_id, {
-          ...permission,
-          queued,
-          pendingCount: permission.pendingCount - 1,
-        }),
-      };
+      return withNotice(notices, event.session_id, {
+        ...permission,
+        queued,
+        pendingCount: permission.pendingCount - 1,
+      });
     }
   }
   const next = removeNotices(
-    state.notices,
+    notices,
     event.session_id,
     (notice) =>
       (notice.kind === 'permission' || notice.kind === 'question') &&
       notice.requestId === event.request_id,
   );
-  return Object.keys(next).length > 0 ? next : state;
-};
+  return next.notices ?? notices;
+}
 
 // Open/closed lifecycle is reflected by the sessions query, and the
 // tracked spawn is cleared by the workspace once it can focus the
