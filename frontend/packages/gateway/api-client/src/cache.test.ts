@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import type { Message, MessagesResponse } from '@delta/wire-gen';
-import { invalidateThreadMessages } from './cache';
+import { invalidateAll, invalidateThreadMessages } from './cache';
 import { queryKeys } from './query-keys';
 
 type Deferred<T> = {
@@ -96,6 +96,43 @@ describe('invalidateThreadMessages', () => {
     // yet" from "gone", so the refetch must not wait for a microtask.
     invalidateThreadMessages(queryClient, threadId);
     expect(observer.getCurrentResult().isFetching).toBe(true);
+
+    unsubscribe();
+    queryClient.clear();
+  });
+});
+
+describe('invalidateAll', () => {
+  it('refetches a query whose first fetch is in flight at reconnect', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
+    });
+    const threadId = 5;
+    const answers: Deferred<MessagesResponse>[] = [];
+    const observer = new QueryObserver<MessagesResponse>(queryClient, {
+      queryKey: queryKeys.messages(threadId),
+      queryFn: () => {
+        const answer = deferred<MessagesResponse>();
+        answers.push(answer);
+        return answer.promise;
+      },
+    });
+    const unsubscribe = observer.subscribe(() => {});
+
+    // The thread was opened while the channel was down; its first fetch is
+    // still in flight when the channel reconnects and resyncs everything.
+    expect(answers).toHaveLength(1);
+    invalidateAll(queryClient);
+    answers[0].resolve({ messages: [] });
+
+    await vi.waitFor(() => expect(answers).toHaveLength(2));
+    const changed = [message('u1', 'user', 1)];
+    answers[1].resolve({ messages: changed });
+
+    await vi.waitFor(() =>
+      expect(observer.getCurrentResult().status).toBe('success'),
+    );
+    expect(observer.getCurrentResult().data).toEqual({ messages: changed });
 
     unsubscribe();
     queryClient.clear();

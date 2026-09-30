@@ -68,6 +68,7 @@ export {
   appendMessage,
   appendSessionSend,
   firstOtherSessionId,
+  invalidateAll,
   invalidateRepositoriesAndPullRequests,
   invalidateSessions,
   invalidateSessionThreads,
