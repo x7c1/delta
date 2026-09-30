@@ -172,6 +172,13 @@ describe('AssistantMarkdown', () => {
         'http://www.github.com/x7c1/delta/pull/229',
         '（補足）',
       ],
+      [
+        'a generic URL in bold with a bracket whose closer is past a space',
+        '**http://localhost:5175/**（5174 は別の Vite が使っていました）',
+        'strong',
+        'http://localhost:5175/',
+        '（5174 は別の Vite が使っていました）',
+      ],
     ])('closes around %s', (_shape, text, tag, href, tail) => {
       const { container } = render(<AssistantMarkdown text={text} />);
       const wrapper = container.querySelector(tag);

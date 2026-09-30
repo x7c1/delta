@@ -59,6 +59,18 @@ describe('trimAutolinkPunctuation', () => {
     });
   });
 
+  it('cuts at an opener whose closer lies beyond the candidate', () => {
+    // `（5174 は…）`: the closer comes after the next space, so GFM's candidate
+    // holds the opener alone. It opens a bracket in the prose, not in the URL.
+    expect(
+      trimAutolinkPunctuation('http://localhost:5175/**（5174'),
+    ).toEqual({ url: 'http://localhost:5175/**', suffix: '（5174' });
+    expect(trimAutolinkPunctuation(`${IRI}「補足`)).toEqual({
+      url: IRI,
+      suffix: '「補足',
+    });
+  });
+
   it('leaves ASCII punctuation alone — trimming it is GFM\'s job', () => {
     // An ASCII paren that survived GFM's own trimming is the author's.
     expect(trimAutolinkPunctuation(`${PR_URL}(a)`)).toEqual({
