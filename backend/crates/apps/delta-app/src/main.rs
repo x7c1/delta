@@ -23,16 +23,21 @@
 //!    window. The two startup failures the user has to act on are shown in a
 //!    message dialog; either way a failed start exits 1.
 //!
+//! Links the page follows never take the window away from Delta; [`links`]
+//! says where they go instead.
+//!
 //! Closing the window ends the process and the server with it. The tmux server
 //! on Delta's socket is left running, so open sessions survive a restart and
 //! can be resumed.
 
 mod app_data;
+mod links;
 mod login_env;
 #[cfg(target_os = "macos")]
 mod macos_title_bar;
 
-use tauri::{App, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::webview::NewWindowResponse;
+use tauri::{App, AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tokio::runtime::Runtime;
 
@@ -117,7 +122,12 @@ fn open_window(app: &App, port: u16) -> anyhow::Result<()> {
     let url = format!("http://127.0.0.1:{port}/").parse()?;
     let builder = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::External(url))
         .title(WINDOW_TITLE)
-        .inner_size(1280.0, 800.0);
+        .inner_size(1280.0, 800.0)
+        .on_navigation(move |url| load_in_window(url, port))
+        .on_new_window(move |url, _features| {
+            open_in_browser(&url, links::classify(&url, port));
+            NewWindowResponse::Deny
+        });
     #[cfg(target_os = "macos")]
     let builder = macos_title_bar::style(builder);
     #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
@@ -125,6 +135,27 @@ fn open_window(app: &App, port: u16) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     macos_title_bar::install_drag_strip(&window)?;
     Ok(())
+}
+
+/// Whether a navigation stays in the window; one that does not is opened in the
+/// default browser or refused.
+fn load_in_window(url: &Url, port: u16) -> bool {
+    let kind = links::classify(url, port);
+    if kind == links::LinkKind::OwnOrigin {
+        return true;
+    }
+    open_in_browser(url, kind);
+    false
+}
+
+/// Open a web link in the default browser; refuse and log anything else.
+fn open_in_browser(url: &Url, kind: links::LinkKind) {
+    match kind {
+        links::LinkKind::OwnOrigin | links::LinkKind::Web => links::open_externally(url),
+        links::LinkKind::NotWeb => {
+            tracing::warn!(url = %url, "refused to open a link that is not a web link");
+        }
+    }
 }
 
 /// Show a user-facing startup error in a message dialog and exit 1 when it is
