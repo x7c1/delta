@@ -126,7 +126,7 @@ Every Release carries unsigned bundles of the desktop shell
 The version in each file name is the workspace version Tauri reads from the
 shell crate, so it matches the tag by construction. The bundles are neither
 signed nor notarized; what that means for someone installing them is in
-[install.md](install.md).
+[the install guide](install/README.md).
 
 - **Order.** The `bundles` job of the `Release` workflow runs only after the
   `release` job has created the tag and the Release, and uploads to that

@@ -31,7 +31,7 @@ for macOS (Apple silicon only), a `.deb` for Linux —
 open it, and start a session from the composer. The app needs `tmux` and an
 authenticated `claude` and/or `codex` on the host. The builds are unsigned, so
 macOS blocks the first launch:
-[docs/guides/install.md](docs/guides/install.md) has the steps past that, the
+[docs/guides/install](docs/guides/install/README.md) has the steps past that, the
 Linux notes, and where the app keeps its data.
 
 To work on Delta itself, run it from source:
