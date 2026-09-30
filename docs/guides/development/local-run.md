@@ -139,6 +139,17 @@ sessions.
   reach the page. In full screen, where macOS hides the bar, the app sets the
   variable to 0 and lets those clicks through, so the page fills the screen.
   The browser and the Linux app set neither and show no strip.
+- **Links.** The window never leaves Delta's own page. A link that would open
+  a new tab — every link in a message, including a footnote marker, and a
+  session's pull-request number in the navigator — opens in a new tab of your
+  default browser (through `open` on macOS, `xdg-open` on Linux); a relative or
+  footnote link therefore shows Delta itself there. Any other `http` or `https`
+  URL the page navigates to opens there too; only a navigation within Delta's
+  own origin stays in the window. Clicking a link with any other scheme
+  (`file:`, `javascript:`, `mailto:`, app schemes) does nothing, so text in a
+  message cannot open local files or other applications; the app logs the
+  refusal to its standard output. On Linux without `xdg-open`, web links do
+  nothing either and the log says the opener could not start.
 - **Startup errors.** The two failures you have to act on — a database the
   binary refuses to open, and a missing `tmux` — are shown in a dialog, and the
   app exits after it is dismissed.
