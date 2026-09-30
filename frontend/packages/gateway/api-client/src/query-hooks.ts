@@ -94,8 +94,9 @@ const SESSION_THREADS_STALE_TIME = 30_000;
  * without a stale window each revisit triggers a background refetch whose new
  * array reference cascades through downstream `useMemo`s. WS-driven
  * invalidation (`invalidateThreadMessages`, triggered by session events) still
- * forces an immediate refresh because `invalidateQueries` overrides
- * `staleTime`, so realtime freshness is preserved.
+ * forces an immediate refresh because invalidation overrides `staleTime`, and
+ * it discards a first fetch still in flight, so realtime freshness is
+ * preserved even when the event races the thread's initial load.
  */
 const MESSAGES_STALE_TIME = 30_000;
 
@@ -210,7 +211,8 @@ export function useThreadsMessagesQueries(
 
 /**
  * One level of the working-directory browse (`GET /api/workdir/list`) for the
- * new-session picker. A `null` path lists the server default (`$HOME`).
+ * new-session picker. A `null` path lists the server default (`$HOME`);
+ * `includeHidden` also lists dot-directories.
  *
  * Gated by `enabled` so nothing is fetched until the picker is actually mounted;
  * a `400`/`403` from an invalid or forbidden directory rejects with an
@@ -221,19 +223,28 @@ export function useWorkdirListQuery(
   client: ApiClient,
   path: string | null,
   enabled: boolean,
+  includeHidden = false,
 ): UseQueryResult<WorkdirListResponse> {
+  const queryKey = queryKeys.workdirList(path, includeHidden);
   return useQuery({
-    queryKey: queryKeys.workdirList(path),
-    queryFn: () => client.getWorkdirList(path ?? undefined),
+    queryKey,
+    queryFn: () => client.getWorkdirList(path ?? undefined, includeHidden),
     enabled,
     retry: false,
+    // Flipping `includeHidden` re-lists the same directory: keep showing the
+    // listing already on screen until the other one arrives, instead of
+    // swapping it for a loading state. A different path still loads fresh, so
+    // a descend never shows the previous directory's rows.
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery?.queryKey[1] === queryKey[1] ? previousData : undefined,
   });
 }
 
 /**
  * The user's home directory (the default `GET /api/workdir/list` target),
  * cached for path-abbreviation. Shares the `workdirList(null)` cache key with
- * the picker's initial browse, so it costs no extra request; `staleTime:
+ * the picker's initial browse (hidden directories off, the picker's default),
+ * so it costs no extra request; `staleTime:
  * Infinity` since $HOME does not change during a session.
  */
 export function useHomeDirQuery(

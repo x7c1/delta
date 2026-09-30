@@ -41,10 +41,11 @@ pub trait Workspace: Send + Sync {
     ///
     /// Returns the canonical `path`, its `parent` (or `None` at a filesystem
     /// root), and the immediate subdirectories sorted by name (case-insensitive),
-    /// excluding files and dot-directories. A missing path, a non-directory, or a
-    /// permission error is an [`crate::Error::InvalidWorkdir`] /
-    /// [`crate::Error::WorkdirPermission`] rather than an opaque I/O failure.
-    async fn list_dirs(&self, path: &str) -> Result<DirListing>;
+    /// excluding files. Dot-directories are excluded too unless `include_hidden`
+    /// is set. A missing path, a non-directory, or a permission error is an
+    /// [`crate::Error::InvalidWorkdir`] / [`crate::Error::WorkdirPermission`]
+    /// rather than an opaque I/O failure.
+    async fn list_dirs(&self, path: &str, include_hidden: bool) -> Result<DirListing>;
 }
 
 #[async_trait]
@@ -59,7 +60,7 @@ impl Workspace for Box<dyn Workspace> {
         (**self).resolve_existing_dir(path).await
     }
 
-    async fn list_dirs(&self, path: &str) -> Result<DirListing> {
-        (**self).list_dirs(path).await
+    async fn list_dirs(&self, path: &str, include_hidden: bool) -> Result<DirListing> {
+        (**self).list_dirs(path, include_hidden).await
     }
 }

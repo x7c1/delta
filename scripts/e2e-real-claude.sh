@@ -102,21 +102,18 @@ RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/delta-e2e-real.XXXXXX")"
 # The session's working directory lives INSIDE the repository (not under
 # /tmp): a host that develops Delta has already trusted this repository, so
 # the real claude never raises a first-run trust prompt for a directory under
-# it. The smoke spec navigates the browser's workdir picker to it one segment
-# at a time, which imposes two constraints the picker cannot work around: the
-# path must be under $HOME, and no segment may start with a dot (the picker
-# hides dot-directories). A linked git worktree typically lives under a
-# dot-directory (e.g. .tmp/worktrees/...), so the workdir is anchored at the
-# MAIN checkout's root — `--git-common-dir` resolves to the main `.git` from
-# any worktree — which shares the main checkout's claude trust.
+# it. The workdir is anchored at the MAIN checkout's root — `--git-common-dir`
+# resolves to the main `.git` from any worktree — so a run from a linked
+# worktree still lands in the directory that carries that trust. The smoke
+# spec navigates the browser's workdir picker to it one segment at a time from
+# $HOME (the picker has no path input), so the path must be under $HOME.
+# Dot-segments are fine: the spec turns on the picker's "Show hidden" toggle
+# to enter them (e.g. a clone under ~/.local/share/...).
 MAIN_REPO_GIT_DIR="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir)"
 WORKDIR="$(dirname "$MAIN_REPO_GIT_DIR")/backend/target/e2e-real/$$"
 case "$WORKDIR" in
   "$HOME"/*) ;;
   *) die "smoke workdir must live under \$HOME for the picker: $WORKDIR" ;;
-esac
-case "${WORKDIR#"$HOME"/}" in
-  .*|*/.*) die "smoke workdir path contains a dot segment the picker cannot enter: $WORKDIR" ;;
 esac
 SERVER_PID=""
 

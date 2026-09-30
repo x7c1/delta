@@ -42,7 +42,11 @@ impl Workspace for FsWorkspace {
         Ok(dir.to_string_lossy().into_owned())
     }
 
-    async fn list_dirs(&self, path: &str) -> std::result::Result<DirListing, delta_usecase::Error> {
-        Ok(self.list(path).await?)
+    async fn list_dirs(
+        &self,
+        path: &str,
+        include_hidden: bool,
+    ) -> std::result::Result<DirListing, delta_usecase::Error> {
+        Ok(self.list(path, include_hidden).await?)
     }
 }

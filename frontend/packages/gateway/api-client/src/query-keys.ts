@@ -23,9 +23,16 @@ export const queryKeys = {
    * One level of the working-directory browse (`GET /api/workdir/list`). A
    * `null` path means "the server default ($HOME)", keyed distinctly from any
    * concrete path so descending into and back out of it stays cache-stable.
+   * `includeHidden` keys the listing with dot-directories separately from the
+   * default one, so flipping the picker's "Show hidden" toggle never serves
+   * the other listing from cache.
    */
-  workdirList: (path: string | null) =>
-    ['workdir-list', path ?? 'default'] as const,
+  workdirList: (path: string | null, includeHidden = false) =>
+    [
+      'workdir-list',
+      path ?? 'default',
+      includeHidden ? 'with-hidden' : 'without-hidden',
+    ] as const,
   /** Recently-used working directories (`GET /api/workdir/recent`). */
   workdirRecent: ['workdir-recent'] as const,
   /** Registered repositories (`GET /api/repositories`) for the Repository tab. */

@@ -375,6 +375,31 @@ describe('ApiClient', () => {
     );
   });
 
+  it('asks for dot-directories only when includeHidden is set', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(
+          jsonResponse({ path: '/home/dev', parent: '/home', entries: [] }),
+        ),
+      );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await client.getWorkdirList('/home/dev', true);
+    await client.getWorkdirList(undefined, true);
+
+    expect(fetchFn).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost/api/workdir/list?path=%2Fhome%2Fdev&hidden=true',
+      undefined,
+    );
+    expect(fetchFn).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost/api/workdir/list?hidden=true',
+      undefined,
+    );
+  });
+
   it('fetches the recently-used working directories', async () => {
     const fetchFn = vi.fn().mockResolvedValue(
       jsonResponse({

@@ -6,6 +6,7 @@ import type { WorkdirEntry } from "./WorkdirEntry";
  *
  * `path` is the canonical directory that was listed, `parent` its canonical
  * parent (`null` at a filesystem root), and `entries` its immediate
- * subdirectories (dirs only, dot-directories hidden, sorted by name).
+ * subdirectories (dirs only, sorted by name; dot-directories are hidden unless
+ * the request passed `?hidden=true`).
  */
 export type WorkdirListResponse = { path: string, parent: string | null, entries: Array<WorkdirEntry>, };
