@@ -130,30 +130,56 @@ async fn falls_back_to_the_page_for_a_deep_link_navigation() {
 }
 
 #[tokio::test]
-async fn does_not_serve_the_page_to_a_non_html_request_for_an_unknown_path() {
-    // Answered as the API router answers any unknown path: 401 with no token,
-    // 404 with one — never the page.
-    for (authorization, expected) in [
-        (None, StatusCode::UNAUTHORIZED),
-        (Some(bearer()), StatusCode::NOT_FOUND),
-    ] {
+async fn answers_404_to_a_non_html_request_for_an_unknown_path() {
+    // A miss outside the reserved prefixes is the static surface's own: `404`
+    // whether or not a token is presented, never the page and never the
+    // bearer guard's `401`.
+    for authorization in [None, Some(bearer())] {
         let mut request = get("/sessions/xyz").header("accept", "application/json");
         if let Some(value) = authorization {
             request = request.header("authorization", value);
         }
         let response = send(mounted().await, request.body(Body::empty()).unwrap()).await;
-        assert_eq!(response.status(), expected);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
+}
+
+#[tokio::test]
+async fn answers_404_to_a_browsers_favicon_request_without_a_token() {
+    // What a browser sends on its own for a page with no `<link rel="icon">`:
+    // no bearer token, and an `Accept` for images only.
+    let response = send(
+        mounted().await,
+        get("/favicon.ico")
+            .header("accept", "image/avif,image/webp,image/*,*/*;q=0.8")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn keeps_a_reserved_prefix_miss_behind_the_bearer_guard() {
+    // The `404` for a miss stops at the reserved prefixes: an unknown path
+    // under one still reaches the API fallback, which refuses it without a
+    // token.
+    let response = send(
+        mounted().await,
+        get("/api/does-not-exist")
+            .header("accept", "application/json")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
 async fn never_serves_the_mock_service_worker() {
     let response = send(
         mounted().await,
-        get("/mockServiceWorker.js")
-            .header("authorization", bearer())
-            .body(Body::empty())
-            .unwrap(),
+        get("/mockServiceWorker.js").body(Body::empty()).unwrap(),
     )
     .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);

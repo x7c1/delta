@@ -444,8 +444,9 @@ export function WorkspaceScreen() {
   // subsequent event re-invalidates that key (the user-line `transcript_updated`
   // already fired), and the messages stay at 0 until the next persisted line
   // 3 s later — at which point everything lands at once. Invalidating on bind
-  // forces an extra refetch right after the mount's initial fetch resolves, so
-  // any DB state that caught up in the interim is picked up immediately.
+  // starts a fresh fetch — discarding the mount's initial one if it is still in
+  // flight (see `invalidateThreadMessages`) — so any DB state that caught up in
+  // the interim is picked up immediately.
   //
   // `focusedSpawning` is a dependency for the same reason, one step earlier in
   // the session's life: the pane is now bound while the session is still

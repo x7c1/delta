@@ -1,4 +1,8 @@
-import type { InfiniteData, QueryClient } from '@tanstack/react-query';
+import type {
+  InfiniteData,
+  QueryClient,
+  QueryKey,
+} from '@tanstack/react-query';
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
   Message,
@@ -12,8 +16,72 @@ import { queryKeys } from './query-keys';
 /**
  * Cache patchers driven by WebSocket events. They mutate the same query cache
  * entries keyed by {@link queryKeys} so live updates stay consistent with the
- * REST-loaded data.
+ * REST-loaded data. Every invalidation here goes through
+ * {@link invalidateDiscardingInFlight} so an event that races a query's first
+ * fetch is not lost.
  */
+
+/**
+ * Mark `queryKey` stale so its active observers refetch, discarding a *first*
+ * fetch that is still in flight for it.
+ *
+ * A plain `invalidateQueries` is not enough for a live event. When the event
+ * lands while the query's first fetch is still in flight, TanStack Query
+ * ignores `cancelRefetch` (it only cancels a running fetch once the query has
+ * data) and hands back the in-flight promise instead of starting a new fetch.
+ * That fetch then succeeds with the pre-event server state and its success
+ * clears `isInvalidated`, so the stale answer is kept as fresh data, and with a
+ * long `staleTime` nothing reads it again. A thread whose transcript was
+ * ingested a few milliseconds after its first `GET` was answered would show no
+ * messages until some later event happened to invalidate it once more.
+ *
+ * Such a query is therefore cancelled — which reverts it to `pending` with no
+ * data — and invalidated again once the cancel settles, so a fresh fetch reads
+ * the post-event state. Every other match is invalidated synchronously, exactly
+ * as `invalidateQueries` would: a query that already has data gets its running
+ * fetch cancelled and a new one started in the same tick, and callers rely on
+ * that (the workspace's focus reconciliation reads `isFetching` right after a
+ * lifecycle event to tell "row not listed yet" from "row gone").
+ *
+ * So do not collapse this into a bare `invalidateQueries` (the event is lost),
+ * nor cancel-then-invalidate every match (the refetch starts a microtask late
+ * and the focus reconciliation misreads `isFetching`).
+ */
+function invalidateDiscardingInFlight(
+  queryClient: QueryClient,
+  queryKey: QueryKey,
+): void {
+  // Collected before invalidating, while the in-flight fetch is still the
+  // first one; `invalidateQueries` below does not change that state.
+  const firstFetchesInFlight = queryClient
+    .getQueryCache()
+    .findAll({ queryKey })
+    .filter(
+      (query) =>
+        query.state.data === undefined && query.state.fetchStatus !== 'idle',
+    );
+  void queryClient.invalidateQueries({ queryKey });
+  for (const query of firstFetchesInFlight) {
+    const filters = { queryKey: query.queryKey, exact: true };
+    void queryClient
+      .cancelQueries(filters)
+      .then(() => queryClient.invalidateQueries(filters));
+  }
+}
+
+/**
+ * Mark every cached query stale so its active observers refetch. Used to
+ * resynchronise after the live channel reconnects, when any resource may have
+ * changed during the gap.
+ *
+ * Goes through {@link invalidateDiscardingInFlight} (the empty key matches every
+ * query) rather than a bare `invalidateQueries()`: a query whose first fetch is
+ * still in flight at reconnect would otherwise keep that fetch's pre-reconnect
+ * answer as fresh data.
+ */
+export function invalidateAll(queryClient: QueryClient): void {
+  invalidateDiscardingInFlight(queryClient, []);
+}
 
 /**
  * Append a message to a thread's cached transcript, de-duplicating by uuid and
@@ -46,7 +114,7 @@ export function appendMessage(
  * resumed, or closed session's open flag and presence stay in sync with the UI.
  */
 export function invalidateSessions(queryClient: QueryClient): void {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+  invalidateDiscardingInFlight(queryClient, queryKeys.sessions);
 }
 
 /**
@@ -88,13 +156,9 @@ export function firstOtherSessionId(
 export function invalidateRepositoriesAndPullRequests(
   queryClient: QueryClient,
 ): void {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
-  void queryClient.invalidateQueries({
-    queryKey: queryKeys.pullRequests('reviewer'),
-  });
-  void queryClient.invalidateQueries({
-    queryKey: queryKeys.pullRequests('author'),
-  });
+  invalidateDiscardingInFlight(queryClient, queryKeys.repositories);
+  invalidateDiscardingInFlight(queryClient, queryKeys.pullRequests('reviewer'));
+  invalidateDiscardingInFlight(queryClient, queryKeys.pullRequests('author'));
 }
 
 /** Mark a single session's thread tree stale so it refetches. */
@@ -102,9 +166,7 @@ export function invalidateSessionThreads(
   queryClient: QueryClient,
   sessionId: SessionId,
 ): void {
-  void queryClient.invalidateQueries({
-    queryKey: queryKeys.sessionThreads(sessionId),
-  });
+  invalidateDiscardingInFlight(queryClient, queryKeys.sessionThreads(sessionId));
 }
 
 /** Mark a single thread's transcript stale so it refetches. */
@@ -112,9 +174,7 @@ export function invalidateThreadMessages(
   queryClient: QueryClient,
   threadId: ThreadId,
 ): void {
-  void queryClient.invalidateQueries({
-    queryKey: queryKeys.messages(threadId),
-  });
+  invalidateDiscardingInFlight(queryClient, queryKeys.messages(threadId));
 }
 
 /** Mark a single session's open-send list stale so it refetches. */
@@ -122,9 +182,7 @@ export function invalidateSessionSends(
   queryClient: QueryClient,
   sessionId: SessionId,
 ): void {
-  void queryClient.invalidateQueries({
-    queryKey: queryKeys.sessionSends(sessionId),
-  });
+  invalidateDiscardingInFlight(queryClient, queryKeys.sessionSends(sessionId));
 }
 
 /**

@@ -22,13 +22,10 @@ import { useComposerStore } from '../../store/composerStore';
  * takes at most one of them: each group renders as a radio group headed by its
  * key, with an explicit first "Agent default" option meaning "none of these" —
  * the agent's own default is a legitimate choice. Picking a row replaces any
- * sibling in the selection. Rows are grouped by `choice_group` and never by
- * `name`, so the grouping rule stays on the server. A group holding a single
- * row renders as a plain checkbox, like an ungrouped row: exclusivity only
- * shows once a second row joins, and a radio with one real option is worse
- * than a checkbox (see `partitionByChoiceGroup`). Every other row is an
- * independent checkbox. Groups and ungrouped rows interleave by the list
- * position of their first row; rows inside a group keep list order.
+ * sibling in the selection. Every other row is an independent checkbox. Which
+ * rows form a group, where it sits in the list, and why a one-row group renders
+ * as a checkbox are `partitionByChoiceGroup`'s rules, shared with the settings
+ * registry.
  *
  * Selection is optional (unlike the mandatory working directory), so this is an
  * inline panel rather than a blocking dialog. It renders nothing until the

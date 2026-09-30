@@ -94,8 +94,9 @@ const SESSION_THREADS_STALE_TIME = 30_000;
  * without a stale window each revisit triggers a background refetch whose new
  * array reference cascades through downstream `useMemo`s. WS-driven
  * invalidation (`invalidateThreadMessages`, triggered by session events) still
- * forces an immediate refresh because `invalidateQueries` overrides
- * `staleTime`, so realtime freshness is preserved.
+ * forces an immediate refresh because invalidation overrides `staleTime`, and
+ * it discards a first fetch still in flight, so realtime freshness is
+ * preserved even when the event races the thread's initial load.
  */
 const MESSAGES_STALE_TIME = 30_000;
 

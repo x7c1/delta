@@ -288,6 +288,7 @@ describe('WorkspaceScreen multi-session', () => {
       spawns: [],
       unread: {},
       notices: {},
+      resolvedRequests: {},
     });
   });
 

@@ -22,7 +22,6 @@
 //! [`SessionRuntime::finish_subagent`]:
 //!     crate::interactor::session_actor::runtime::SessionRuntime::finish_subagent
 
-use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
@@ -51,6 +50,14 @@ where
     ///   launch row, so a later stray notification cannot double-fire and a
     ///   resume cannot resurrect the entry from persisted state.
     ///
+    /// The sweep cannot fail. A store error while clearing one launch row is
+    /// logged at `warn` (with the session and tool_use ids) and the sweep
+    /// carries on: that entry's `SubagentFinished` is still emitted, and so are
+    /// every other entry's. The process is gone either way and the in-memory
+    /// entries are already drained, so stopping would only strand the viewers'
+    /// indicators; the cost of the failure is a leftover launch row, which a
+    /// resume does not turn back into a lit indicator (see below).
+    ///
     /// On the resume point: a resume never rebuilds the in-memory
     /// `running_subagents` set from persisted launch rows. `sync_transcript`
     /// reads only NEW lines past a per-session line cursor, and the line that
@@ -66,7 +73,7 @@ where
     /// keeping it in one place ensures they emit and persist identically.
     pub(in crate::interactor) async fn sweep_running_subagents_on_process_gone(
         &mut self,
-    ) -> Result<Vec<SessionEvent>> {
+    ) -> Vec<SessionEvent> {
         let drained = self.state.drain_running_subagents();
         let mut events = Vec::with_capacity(drained.len());
         for subagent in drained {
@@ -77,14 +84,25 @@ where
                 "clearing a lingering running subagent because the session's process \
                  is gone; its completion notification can no longer arrive"
             );
-            self.store
+            if let Err(err) = self
+                .store
                 .clear_subagent_launch(self.id, &subagent.tool_use_id)
-                .await?;
+                .await
+            {
+                tracing::warn!(
+                    session_id = %self.id,
+                    tool_use_id = %subagent.tool_use_id,
+                    error = %err,
+                    "clearing the launch row of a swept subagent failed; the row is \
+                     left behind, but its SubagentFinished is still emitted so a \
+                     live viewer's indicator clears"
+                );
+            }
             events.push(SessionEvent::SubagentFinished {
                 session_id: self.id.clone(),
                 tool_use_id: subagent.tool_use_id,
             });
         }
-        Ok(events)
+        events
     }
 }

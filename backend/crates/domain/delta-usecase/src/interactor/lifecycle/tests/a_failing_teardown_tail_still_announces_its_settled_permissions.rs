@@ -5,8 +5,8 @@
 //! rows and building the `PermissionResolved` events that clear the browser's
 //! dialogs — and only then closes the turn and sweeps the background subagents.
 //! Both of those write rows. If either write fails, the denied rows can never
-//! produce their events again, so the teardown must log the failing step and
-//! still return the events rather than drop them.
+//! produce their events again, so the teardown must log the failure and still
+//! return the events rather than drop them.
 
 use std::time::Instant;
 
@@ -121,7 +121,7 @@ async fn a_close_whose_turn_close_fails_still_announces_the_settled_dialog() {
 }
 
 #[tokio::test]
-async fn a_close_whose_subagent_sweep_fails_still_announces_the_settled_dialog() {
+async fn a_close_whose_subagent_launch_row_clear_fails_still_announces_the_settled_dialog() {
     let (logs, _guard) = capture_warnings();
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
@@ -149,7 +149,11 @@ async fn a_close_whose_subagent_sweep_fails_still_announces_the_settled_dialog()
     .unwrap();
     ix.on_user_prompt_submit(submit("next")).await.unwrap();
     let request_id = raise_dialog(&ix, &session, SEED_TRANSCRIPT_PATH).await;
-    ix.store().inner.lock().unwrap().fail_clear_subagent_launch = true;
+    ix.store()
+        .inner
+        .lock()
+        .unwrap()
+        .fail_clear_subagent_launch_for = Some("toolu_bg".into());
 
     let events = ix
         .close_session(&session)
@@ -163,6 +167,14 @@ async fn a_close_whose_subagent_sweep_fails_still_announces_the_settled_dialog()
         resolved_ids(&events).contains(&request_id),
         "the dialog the settle denied is still announced: {events:?}"
     );
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            SessionEvent::SubagentFinished { tool_use_id, .. } if tool_use_id == "toolu_bg"
+        )),
+        "the subagent whose launch row could not be cleared is still announced \
+         finished: {events:?}"
+    );
     assert_denied(&ix, request_id);
     assert!(
         ix.bound_pane(&session).await.is_none(),
@@ -172,8 +184,8 @@ async fn a_close_whose_subagent_sweep_fails_still_announces_the_settled_dialog()
     assert!(
         logged.contains("WARN")
             && logged.contains("session_id=sess-1")
-            && logged.contains("step=\"subagent_sweep\""),
-        "the failing step is logged with the session: {logged}"
+            && logged.contains("tool_use_id=toolu_bg"),
+        "the failing row write is logged with the session and subagent: {logged}"
     );
 }
 

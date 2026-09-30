@@ -21,7 +21,7 @@ use delta_usecase::{AgentProvider, LaunchOptionCardinality, LaunchOptionVocabula
 /// options disarm it (`|_| false` is a fine answer for a provider that has none)
 /// rather than silently shipping "nothing here is dangerous".
 ///
-/// [`provider_capabilities`]: crate::provider_capabilities
+/// [`provider_capabilities`]: crate::provider_capabilities()
 pub fn is_launch_option_dangerous(
     provider: AgentProvider,
     name: &str,
@@ -56,7 +56,7 @@ pub fn launch_option_cardinality(provider: AgentProvider, name: &str) -> LaunchO
 /// thing in [`build`], and so each `match` stays in its accessor where a new
 /// provider is forced to face it.
 ///
-/// [`build`]: crate::build
+/// [`build`]: crate::build()
 pub struct GatewayLaunchOptionVocabulary;
 
 impl LaunchOptionVocabulary for GatewayLaunchOptionVocabulary {

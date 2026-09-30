@@ -98,7 +98,7 @@ where
             // completion folded — the same leak the normal-end path sweeps
             // (see `sweep_running_subagents_on_process_gone`). The `Close`
             // above cleared only the foreground entries.
-            events.extend(self.sweep_running_subagents_on_process_gone().await?);
+            events.extend(self.sweep_running_subagents_on_process_gone().await);
             return Ok(events);
         }
 
@@ -121,6 +121,6 @@ where
         // `Close` above already swept the foreground entries; sweep whatever
         // background entries survive so their indicators do not stick forever,
         // returning a `SubagentFinished` per entry for the caller to broadcast.
-        self.sweep_running_subagents_on_process_gone().await
+        Ok(self.sweep_running_subagents_on_process_gone().await)
     }
 }
