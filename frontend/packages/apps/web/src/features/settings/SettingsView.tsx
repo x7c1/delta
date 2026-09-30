@@ -333,12 +333,11 @@ const FALLBACK_LAUNCH_OPTION_STYLE: LaunchOptionStyle = 'cli_flag';
  *
  * Rows the server puts in one choice group (`choice_group`) are listed together
  * under the group key, with one default radio group per group (see
- * {@link LaunchOptionGroup}) once the group holds two or more rows; a group
- * holding a single row is listed like an ungrouped row, with the plain default
- * checkbox, because a radio with one real option is worse than a checkbox (see
- * `partitionByChoiceGroup`). The add form stays as it is: a row registered as
- * `--model` / `E` joins the `--model` group on the next list fetch, because
- * the grouping is the server's verdict.
+ * {@link LaunchOptionGroup}); every other row, a one-row group included, has
+ * the plain default checkbox. The grouping and its rationale are
+ * `partitionByChoiceGroup`'s, shared with the composer picker. The add form
+ * stays as it is: a row registered as `--model` / `E` joins the `--model` group
+ * on the next list fetch.
  *
  * `active` mirrors the dialog's `settingsOpen` AND the category being the
  * visible one, so the query only runs while this section is mounted in the
