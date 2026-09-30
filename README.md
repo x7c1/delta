@@ -27,7 +27,7 @@ Delta is alpha quality.
 
 Download the desktop app for your platform from the
 [latest Release](https://github.com/x7c1/delta/releases/latest) — a `.dmg`
-for macOS (Apple silicon only), a `.deb` or an `.AppImage` for Linux —
+for macOS (Apple silicon only), a `.deb` for Linux —
 open it, and start a session from the composer. The app needs `tmux` and an
 authenticated `claude` and/or `codex` on the host. The builds are unsigned, so
 macOS blocks the first launch:

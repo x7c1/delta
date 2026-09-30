@@ -154,7 +154,7 @@ cargo install tauri-cli --version '^2' --locked
 ```
 
 The bundles land under `backend/target/release/bundle/` (`macos/Delta.app` and
-a `.dmg` on macOS; `.deb`, `.rpm` and an AppImage on Linux). On macOS the `.dmg`
+a `.dmg` on macOS; a `.deb` on Linux). On macOS the `.dmg`
 step lays out the image's Finder window through AppleScript, so it needs your
 terminal to be allowed to control Finder (System Settings → Privacy & Security →
 Automation; macOS asks the first time). Without that permission the step fails

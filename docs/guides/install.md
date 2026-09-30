@@ -4,7 +4,8 @@
 
 How to download, open and run the Delta desktop app from a GitHub Release,
 without building anything. Bundles are published for macOS (Apple silicon
-only; Intel Macs are not supported) and Linux (x86_64). The app does not bundle
+only; Intel Macs are not supported) and Linux (Debian, Ubuntu and derivatives,
+x86_64, as a `.deb`). The app does not bundle
 `tmux` or the agent CLIs. The macOS build is unsigned, so the first launch on a
 Mac needs a one-time Gatekeeper workaround.
 
@@ -19,8 +20,7 @@ download the file for your machine:
 | Machine | File |
 |---|---|
 | Mac with Apple silicon (M1 and later) | `Delta_<version>_aarch64.dmg` |
-| Linux, Debian/Ubuntu (x86_64) | `Delta_<version>_amd64.deb` |
-| Linux, other distributions (x86_64) | `Delta_<version>_amd64.AppImage` |
+| Linux, Debian/Ubuntu and derivatives (x86_64) | `Delta_<version>_amd64.deb` |
 
 ## What the app needs on the host
 
@@ -83,19 +83,8 @@ sudo apt install ./Delta_<version>_amd64.deb
 
 `apt` pulls in the WebKitGTK and GTK libraries the app needs. Delta then
 appears in the application menu, and the `delta-app` command starts it from
-a terminal.
-
-### `.AppImage` (other distributions)
-
-```bash
-chmod +x Delta_<version>_amd64.AppImage
-./Delta_<version>_amd64.AppImage
-```
-
-AppImages need FUSE 2 to mount themselves. If the run fails with an error
-about `libfuse.so.2`, install it (`libfuse2`, or `libfuse2t64` on Ubuntu
-24.04 and later), or run it without mounting via
-`./Delta_<version>_amd64.AppImage --appimage-extract-and-run`.
+a terminal. Other distributions are not covered by a bundle; build from source
+with `make app` (see [the development guide](development/README.md)).
 
 ### Rendering on WebKitGTK
 
@@ -116,8 +105,7 @@ follow from that.
   __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json delta-app
   ```
 
-  For the AppImage, put the same variable in front of the AppImage path. The
-  file's location can differ by distribution; look under
+  The file's location can differ by distribution; look under
   `/usr/share/glvnd/egl_vendor.d/` for the Mesa entry. The app does not set
   this variable for you, so to make it permanent put it in a wrapper script,
   or in the `Exec=` line of a desktop file through `env`, since `Exec=` does
@@ -148,8 +136,8 @@ are picked up again on the next launch.
 ### Removing everything
 
 1. Quit the app, then end its sessions: `tmux -L delta kill-server`.
-2. Remove the app: delete `/Applications/Delta.app` on macOS, run
-   `sudo apt remove delta` for the `.deb`, or delete the `.AppImage` file.
+2. Remove the app: delete `/Applications/Delta.app` on macOS, or run
+   `sudo apt remove delta` on Linux.
 3. Delete the data directory above.
 4. Optionally delete `~/.delta/worktrees/`, where Delta creates git worktrees
    for sessions that asked for one, then run `git worktree prune` in each
@@ -159,8 +147,8 @@ are picked up again on the next launch.
 
 Download the bundle from the new Release and replace the app: drag the new
 `Delta.app` over the old one on macOS (and clear the quarantine flag again),
-install the new `.deb` with the same `apt install` command, or swap the
-`.AppImage` file. Your data directory is left as is.
+or install the new `.deb` with the same `apt install` command. Your data
+directory is left as is.
 
 On the first launch of the new version, the database is migrated forward
 automatically, with a snapshot taken first when a step is destructive. Going
