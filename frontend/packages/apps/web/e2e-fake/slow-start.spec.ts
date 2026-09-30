@@ -1,5 +1,5 @@
 import { test, expect } from './support/fixtures';
-import { startNewSession } from './support/app';
+import { composerInput, startNewSession } from './support/app';
 
 /**
  * A new session is the user's the moment the server accepts its first send —
@@ -34,7 +34,7 @@ test('a slow launch is focused as a starting session, then comes up in place', a
   await expect(startingCard).toHaveCount(1, { timeout: 2_000 });
   // The new-session screen is behind us: this is the spawned session's screen.
   await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
-  const textbox = page.getByRole('textbox');
+  const textbox = composerInput(page);
   await expect(textbox).toHaveAttribute(
     'placeholder',
     'Message sends when the session is ready…',

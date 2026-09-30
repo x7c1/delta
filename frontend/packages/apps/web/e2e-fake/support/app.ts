@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 /**
  * Fake-mode end-to-end support helpers.
@@ -107,7 +107,7 @@ async function startSessionOn(
   // following Send finds the committed dir.
   await expect(page.getByTestId('workdir-chip')).toBeVisible();
 
-  await page.getByRole('textbox').fill(prompt);
+  await composerInput(page).fill(prompt);
   await page.getByRole('button', { name: 'Send' }).click();
   // The accepted send moves focus to the new session, closing the
   // new-session screen; wait for that so the caller starts from it.
@@ -160,8 +160,29 @@ async function navigateBrowseTo(page: Page, absPath: string): Promise<void> {
   }
 }
 
+/**
+ * The terminal on screen. The pane keeps a bound session's xterm attached but
+ * hidden while another session is focused — including a session from an
+ * earlier spec that the cold load focused first — so a bare `.xterm…` locator
+ * can match more than one instance.
+ */
+export function shownTerminal(page: Page): Locator {
+  return page.locator('.xterm').filter({ visible: true });
+}
+
+/**
+ * The composer's input. A bare `getByRole('textbox')` is not enough: a new
+ * session's terminal is open by default on the suite's (large) viewport, and
+ * xterm's own helper textarea ("Terminal input") is a textbox too.
+ */
+export function composerInput(page: Page): Locator {
+  return page
+    .getByRole('textbox')
+    .and(page.locator(':not([aria-label="Terminal input"])'));
+}
+
 /** Send a follow-up message into the focused (already started) session. */
 export async function sendMessage(page: Page, text: string): Promise<void> {
-  await page.getByRole('textbox').fill(text);
+  await composerInput(page).fill(text);
   await page.getByRole('button', { name: 'Send' }).click();
 }

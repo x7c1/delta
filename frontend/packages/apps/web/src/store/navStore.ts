@@ -58,8 +58,8 @@ export interface ThreadJumpTarget {
 
 /**
  * Navigation/layout state: the focused session, the active thread within it, and
- * terminal pane visibility. Focus is purely client-side — the server emits no
- * focus event.
+ * terminal pane visibility (per session). Focus is purely client-side — the
+ * server emits no focus event.
  */
 export interface NavState {
   /** Focused session id, the new-session sentinel, or null before load. */
@@ -87,9 +87,26 @@ export interface NavState {
    * Close button, Esc, or a backdrop click.
    */
   settingsOpen: boolean;
-  /** Whether the terminal pane is shown (persistent pane on large screens, or
-   *  the slide-in overlay on small screens). */
-  terminalOpen: boolean;
+  /**
+   * Whether the terminal pane is shown (persistent pane on large screens, or
+   * the slide-in overlay on small screens), per session: `true` / `false` is a
+   * choice the user made for that session, and a session with no entry falls
+   * back to the layout's default (see {@link isTerminalOpen}).
+   *
+   * Per session rather than one flag so that closing one session's terminal
+   * does not close it for a new session, which should open with its pane in
+   * view: a fresh launch can stop on an interactive prompt (Claude Code's
+   * workspace-trust dialog) that only a human at the pane can answer. Entries
+   * for sessions no longer listed are dropped by
+   * {@link NavState.pruneTerminalOpen}.
+   */
+  terminalOpenBySession: Record<SessionId, boolean>;
+  /**
+   * Whether the terminal pane is shown while no session is focused (the
+   * new-session screen, or before the list loads): there is no session to key
+   * a choice on, so this screen keeps a single flag, closed by default.
+   */
+  terminalOpenWithoutSession: boolean;
   /**
    * Whether the comms-log pane is shown — the right-pane window a session whose
    * provider has no terminal gets instead (see `ProviderCapabilities`).
@@ -172,8 +189,21 @@ export interface NavState {
   openSettings: () => void;
   /** Close the settings overlay, returning to the workspace beneath it. */
   closeSettings: () => void;
+  /** Open or close the terminal for the focused session (see
+   *  {@link terminalOpenBySession}). */
   setTerminalOpen: (open: boolean) => void;
-  toggleTerminal: () => void;
+  /**
+   * Flip the focused session's terminal. Takes the layout because a session
+   * with no saved choice starts from the layout's default (see
+   * {@link isTerminalOpen}), and the flip is from what the user is looking at.
+   */
+  toggleTerminal: (isLargeScreen: boolean) => void;
+  /**
+   * Drop the saved terminal choice of every session not in `sessionIds`, so
+   * the record does not grow forever. Call it only with the complete list —
+   * a partial one would forget the choices of sessions on unloaded pages.
+   */
+  pruneTerminalOpen: (sessionIds: Iterable<SessionId>) => void;
   setCommsOpen: (open: boolean) => void;
   toggleComms: () => void;
   /** Set the terminal pane width, clamped to the allowed range. */
@@ -182,6 +212,81 @@ export interface NavState {
 
 /** localStorage key for the persisted layout state. */
 export const NAV_STORAGE_KEY = 'delta-nav';
+
+/**
+ * Whether the terminal pane is shown for the focused session.
+ *
+ * A session the user has not opened or closed the terminal for yet is **open**
+ * on the large-screen layout, where the terminal is a persistent column beside
+ * the conversation, so a new session comes up with its pane in view — the one
+ * way to see that the launch is waiting on a prompt only a human can answer.
+ * On the small-screen layout the terminal is a slide-in overlay that covers the
+ * conversation, so there the same session starts **closed**.
+ */
+export function isTerminalOpen(
+  state: Pick<
+    NavState,
+    'focusedSessionId' | 'terminalOpenBySession' | 'terminalOpenWithoutSession'
+  >,
+  isLargeScreen: boolean,
+): boolean {
+  const focused = state.focusedSessionId;
+  if (focused === null || focused === NEW_SESSION_FOCUS) {
+    return state.terminalOpenWithoutSession;
+  }
+  return state.terminalOpenBySession[focused] ?? isLargeScreen;
+}
+
+/** The terminal-open write for the focused session: its record entry, or the
+ *  no-session flag when nothing is focused. */
+function terminalOpenChange(
+  state: NavState,
+  open: boolean,
+): Partial<NavState> {
+  const focused = state.focusedSessionId;
+  if (focused === null || focused === NEW_SESSION_FOCUS) {
+    return { terminalOpenWithoutSession: open };
+  }
+  return {
+    terminalOpenBySession: { ...state.terminalOpenBySession, [focused]: open },
+  };
+}
+
+/** The layout fields written to {@link NAV_STORAGE_KEY}. */
+type PersistedNav = Pick<
+  NavState,
+  | 'focusedSessionId'
+  | 'activeThreadId'
+  | 'settingsOpen'
+  | 'terminalOpenBySession'
+  | 'terminalOpenWithoutSession'
+  | 'commsOpen'
+  | 'terminalWidth'
+>;
+
+/** The persisted fields restored exactly as stored. */
+const RESTORED_AS_IS = [
+  'focusedSessionId',
+  'activeThreadId',
+  'settingsOpen',
+  'terminalOpenWithoutSession',
+  'commsOpen',
+  'terminalWidth',
+] as const satisfies readonly (keyof PersistedNav)[];
+
+/** Keep only the well-formed entries of a restored per-session record. */
+function restoreTerminalOpenBySession(raw: unknown): Record<SessionId, boolean> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return {};
+  }
+  const restored: Record<SessionId, boolean> = {};
+  for (const [id, open] of Object.entries(raw)) {
+    if (typeof open === 'boolean') {
+      restored[id] = open;
+    }
+  }
+  return restored;
+}
 
 /**
  * The session-scoped state a real focus change drops: the active thread (the
@@ -200,11 +305,12 @@ function focusChange(sessionId: FocusedSession) {
 
 /**
  * Navigation/layout store. The focused session, active thread, right-pane
- * visibility (terminal and comms log, one flag each), and right-pane width are
- * **persisted to localStorage** so a browser reload restores the same layout
- * instead of snapping back to a closed terminal on `main`. A restored focused
- * session that no longer exists, or an active thread outside the focused
- * session, is reconciled by the workspace (see `WorkspaceScreen`).
+ * visibility (the terminal per session, the comms log as one flag), and
+ * right-pane width are **persisted to localStorage** so a browser reload
+ * restores the same layout instead of snapping back to a closed terminal on
+ * `main`. A restored focused session that no longer exists, or an active
+ * thread outside the focused session, is reconciled by the workspace (see
+ * `WorkspaceScreen`).
  */
 export const useNavStore = create<NavState>()(
   persist(
@@ -214,7 +320,8 @@ export const useNavStore = create<NavState>()(
       activeThreadId: null,
       activeThreadJumpTarget: null,
       settingsOpen: false,
-      terminalOpen: false,
+      terminalOpenBySession: {},
+      terminalOpenWithoutSession: false,
       commsOpen: false,
       terminalWidth: DEFAULT_TERMINAL_WIDTH,
 
@@ -282,9 +389,24 @@ export const useNavStore = create<NavState>()(
         }),
       openSettings: () => set({ settingsOpen: true }),
       closeSettings: () => set({ settingsOpen: false }),
-      setTerminalOpen: (open) => set({ terminalOpen: open }),
-      toggleTerminal: () =>
-        set((state) => ({ terminalOpen: !state.terminalOpen })),
+      setTerminalOpen: (open) =>
+        set((state) => terminalOpenChange(state, open)),
+      toggleTerminal: (isLargeScreen) =>
+        set((state) =>
+          terminalOpenChange(state, !isTerminalOpen(state, isLargeScreen)),
+        ),
+      pruneTerminalOpen: (sessionIds) =>
+        set((state) => {
+          const keep = new Set(sessionIds);
+          const entries = Object.entries(state.terminalOpenBySession);
+          const kept = entries.filter(([id]) => keep.has(id));
+          // Leave the state untouched when nothing is dropped, so a refetch
+          // that lists the same sessions does not re-render every subscriber.
+          if (kept.length === entries.length) {
+            return state;
+          }
+          return { terminalOpenBySession: Object.fromEntries(kept) };
+        }),
       setCommsOpen: (open) => set({ commsOpen: open }),
       toggleComms: () => set((state) => ({ commsOpen: !state.commsOpen })),
       setTerminalWidth: (width) => set({ terminalWidth: clampTerminalWidth(width) }),
@@ -293,14 +415,35 @@ export const useNavStore = create<NavState>()(
       name: NAV_STORAGE_KEY,
       storage: createJSONStorage(() => localStorage),
       // Persist only the layout values, never the action functions.
-      partialize: (state) => ({
+      partialize: (state): PersistedNav => ({
         focusedSessionId: state.focusedSessionId,
         activeThreadId: state.activeThreadId,
         settingsOpen: state.settingsOpen,
-        terminalOpen: state.terminalOpen,
+        terminalOpenBySession: state.terminalOpenBySession,
+        terminalOpenWithoutSession: state.terminalOpenWithoutSession,
         commsOpen: state.commsOpen,
         terminalWidth: state.terminalWidth,
       }),
+      // Restore only the fields this version persists. In particular the
+      // single `terminalOpen` flag an earlier version stored is dropped rather
+      // than migrated: it described no session in particular, and carrying it
+      // over would close the pane of every session nobody has chosen for yet.
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<PersistedNav>;
+        const restored: Partial<PersistedNav> = {};
+        for (const key of RESTORED_AS_IS) {
+          if (key in saved) {
+            Object.assign(restored, { [key]: saved[key] });
+          }
+        }
+        return {
+          ...current,
+          ...restored,
+          terminalOpenBySession: restoreTerminalOpenBySession(
+            saved.terminalOpenBySession,
+          ),
+        };
+      },
       // Re-clamp the restored width in case the viewport shrank since last time.
       onRehydrateStorage: () => (state) => {
         if (state) {

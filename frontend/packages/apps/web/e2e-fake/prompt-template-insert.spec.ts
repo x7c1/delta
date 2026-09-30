@@ -1,5 +1,5 @@
 import { test, expect } from './support/fixtures';
-import { startNewSession } from './support/app';
+import { composerInput, startNewSession } from './support/app';
 import { fetchMessageCount, latestSession } from './support/rest';
 
 /**
@@ -73,7 +73,7 @@ test('a prompt template is inserted into the draft at the caret, and nothing is 
 
   // Type a draft and park the caret in the middle of it, where the template
   // will be spliced in.
-  const textarea = page.getByRole('textbox');
+  const textarea = composerInput(page);
   await textarea.fill('before after');
   await textarea.click();
   await textarea.evaluate((node: HTMLTextAreaElement) => {

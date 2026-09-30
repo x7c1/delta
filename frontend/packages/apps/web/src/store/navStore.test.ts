@@ -4,6 +4,7 @@ import {
   NAV_STORAGE_KEY,
   NEW_SESSION_FOCUS,
   clampTerminalWidth,
+  isTerminalOpen,
   useNavStore,
 } from './navStore';
 
@@ -16,6 +17,8 @@ afterEach(() => {
     activeThreadId: null,
     activeThreadJumpTarget: null,
     settingsOpen: false,
+    terminalOpenBySession: {},
+    terminalOpenWithoutSession: false,
   });
 });
 
@@ -59,7 +62,7 @@ describe('navStore persistence', () => {
     vi.stubGlobal('window', { innerWidth: 2000 });
     useNavStore.getState().setFocusedSession('sess-9');
     useNavStore.getState().setActiveThread(7);
-    useNavStore.getState().setTerminalOpen(true);
+    useNavStore.getState().setTerminalOpen(false);
     useNavStore.getState().setTerminalWidth(500);
 
     const raw = localStorage.getItem(NAV_STORAGE_KEY);
@@ -67,7 +70,8 @@ describe('navStore persistence', () => {
     const persisted = JSON.parse(raw as string).state;
     expect(persisted.focusedSessionId).toBe('sess-9');
     expect(persisted.activeThreadId).toBe(7);
-    expect(persisted.terminalOpen).toBe(true);
+    expect(persisted.terminalOpenBySession).toEqual({ 'sess-9': false });
+    expect(persisted).not.toHaveProperty('terminalOpen');
     expect(persisted.terminalWidth).toBe(500);
   });
 });
@@ -270,5 +274,83 @@ describe('navStore active-thread jump intent', () => {
     expect(raw).not.toBeNull();
     const persisted = JSON.parse(raw as string).state;
     expect(persisted).not.toHaveProperty('activeThreadJumpTarget');
+  });
+});
+
+describe('navStore terminal open state', () => {
+  const open = (isLargeScreen: boolean) =>
+    isTerminalOpen(useNavStore.getState(), isLargeScreen);
+
+  it('opens a session nobody has chosen for on the large layout, and closes it on the small one', () => {
+    useNavStore.getState().setFocusedSession('sess-a');
+    expect(open(true)).toBe(true);
+    expect(open(false)).toBe(false);
+  });
+
+  it('keeps the new-session screen closed by default and on its own flag', () => {
+    useNavStore.getState().startNewSession();
+    expect(open(true)).toBe(false);
+    useNavStore.getState().setTerminalOpen(true);
+    expect(open(true)).toBe(true);
+    expect(useNavStore.getState().terminalOpenBySession).toEqual({});
+  });
+
+  it('toggles the focused session from what the layout shows, leaving another session alone', () => {
+    useNavStore.getState().setFocusedSession('sess-a');
+    useNavStore.getState().toggleTerminal(true);
+    expect(open(true)).toBe(false);
+
+    useNavStore.getState().setFocusedSession('sess-b');
+    expect(open(true)).toBe(true);
+    useNavStore.getState().toggleTerminal(false);
+    expect(open(false)).toBe(true);
+
+    expect(useNavStore.getState().terminalOpenBySession).toEqual({
+      'sess-a': false,
+      'sess-b': true,
+    });
+  });
+
+  it('prunes the choices of sessions a refetched list no longer has', () => {
+    useNavStore.setState({
+      terminalOpenBySession: { 'sess-a': false, 'sess-b': true, 'sess-c': false },
+    });
+    useNavStore.getState().pruneTerminalOpen(['sess-b', 'sess-c', 'sess-d']);
+    expect(useNavStore.getState().terminalOpenBySession).toEqual({
+      'sess-b': true,
+      'sess-c': false,
+    });
+  });
+
+  it('leaves the record untouched when nothing is pruned', () => {
+    const record = { 'sess-a': false };
+    useNavStore.setState({ terminalOpenBySession: record });
+    useNavStore.getState().pruneTerminalOpen(['sess-a', 'sess-b']);
+    expect(useNavStore.getState().terminalOpenBySession).toBe(record);
+  });
+
+  it('rehydrates a stored record and ignores the old single flag', async () => {
+    localStorage.setItem(
+      NAV_STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          focusedSessionId: 'sess-b',
+          terminalOpen: false,
+          terminalOpenBySession: { 'sess-a': false, 'sess-x': 'yes' },
+          terminalWidth: DEFAULT_TERMINAL_WIDTH,
+        },
+        version: 0,
+      }),
+    );
+    await useNavStore.persist.rehydrate();
+
+    const state = useNavStore.getState();
+    expect(state.terminalOpenBySession).toEqual({ 'sess-a': false });
+    expect(state).not.toHaveProperty('terminalOpen');
+    // The old flag closed the terminal for everyone; it is not carried over,
+    // so a session with no choice of its own still opens on the large layout.
+    expect(open(true)).toBe(true);
+    useNavStore.getState().setFocusedSession('sess-a');
+    expect(open(true)).toBe(false);
   });
 });

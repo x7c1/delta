@@ -1,5 +1,5 @@
 import { test, expect } from './support/fixtures';
-import { startNewSession } from './support/app';
+import { shownTerminal, startNewSession } from './support/app';
 
 /**
  * A prompt queued mid-turn dequeues as a plain user turn — through the real
@@ -33,12 +33,14 @@ test('a prompt queued mid-turn dequeues after the interrupt and lands with its r
   await expect(messages).toHaveCount(2);
   await expect(pending).toHaveCount(1);
 
-  // Open the embedded terminal; assert the attach before pressing Escape so
+  // The embedded terminal is open by default for a new session on this (large)
+  // layout; assert the attach before pressing Escape so
   // a bridge failure surfaces here, not as an opaque retry timeout below.
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
-  const xtermInput = page.locator('.xterm-helper-textarea');
+  const xtermInput = shownTerminal(page).locator('.xterm-helper-textarea');
   await expect(xtermInput).toBeAttached();
-  await expect(page.locator('.xterm-rows')).toContainText('fake-claude session');
+  await expect(shownTerminal(page).locator('.xterm-rows')).toContainText(
+    'fake-claude session',
+  );
 
   // Land Escape in the fake's stdin; retried until its observable effect (the
   // chip draining on the ingested interrupt marker) lands. Extra Escapes are

@@ -17,8 +17,8 @@ test('the terminal column width is resizable by dragging the divider', async ({
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/');
 
-  // Open the terminal pane.
-  await page.getByRole('button', { name: 'Terminal' }).click();
+  // The focused session has no saved terminal choice, so on this layout its
+  // terminal pane is already open.
 
   const handle = page.getByRole('separator', { name: 'Resize terminal' });
   await expect(handle).toBeVisible();
