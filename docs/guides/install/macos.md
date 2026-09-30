@@ -12,37 +12,33 @@ the host and where it keeps its data are in the [install guide](README.md).
 
 ## First launch: getting past Gatekeeper
 
-Open `Delta.app`. The first time, macOS refuses: it reports that the app "is
-damaged and can't be opened" or that Apple "could not verify" it.
+Open `Delta.app`. The first time, macOS refuses and reports that the app "is
+damaged and can't be opened". Nothing is wrong with the download: the project
+has no Apple developer account, so the app is neither signed by an identified
+developer nor notarized by Apple, and Gatekeeper, the macOS check for
+downloaded apps, describes that as damage.
 
-This happens because the project has no Apple developer account, so the app
-is neither signed by an identified developer nor notarized by Apple, and
-Gatekeeper, the macOS check for downloaded apps, blocks it. Either of the
-following gets past the block; you only need it once per downloaded copy.
-
-**Allow it in System Settings.** After the first refusal, dismiss the dialog
-(**Done**), go to **System Settings → Privacy & Security**, find the message
-that Delta was blocked near the bottom and click **Open Anyway**, then open
-the app again and confirm **Open Anyway** with your password. On macOS 14 and
-earlier the shortcut still works: right-click `Delta.app` in `Applications`,
-choose **Open** and confirm **Open** in the dialog. On macOS 15 (Sequoia) and
-later that no longer gets past the block. When macOS says the app is damaged,
-no Open Anyway button appears; use the next workaround.
-
-**Remove the quarantine flag.** macOS marks downloaded files with a quarantine
-attribute, which is what triggers the check. Clearing it from the installed
-app lets it open normally. This is the reliable fix when macOS says the app is
-damaged:
+Clear the quarantine flag macOS put on the download; that is what triggers the
+check. You only need this once per downloaded copy:
 
 ```bash
 xattr -d com.apple.quarantine /Applications/Delta.app
 ```
 
 If you put the app somewhere other than `Applications`, pass that path
-instead (for example `~/Applications/Delta.app`).
+instead (for example `~/Applications/Delta.app`). Then open `Delta.app`
+normally.
+
+If macOS instead says that Apple "could not verify" the app, it offers a way
+through System Settings: dismiss the dialog (**Done**), go to **System
+Settings → Privacy & Security**, click **Open Anyway** next to the message
+that Delta was blocked, then open the app again and confirm with your
+password. On macOS 14 and earlier, right-click `Delta.app` in `Applications`
+and choose **Open** instead. The `xattr` command above works in this case
+too.
 
 ## Updating
 
 Drag the new `Delta.app` from the new `.dmg` over the old one, then clear the
-quarantine flag again (or allow it in System Settings again). The
+quarantine flag again. The
 [install guide](README.md#updating) says what happens to your data.
