@@ -133,9 +133,10 @@ export async function waitForSettledApp(page: Page): Promise<void> {
 /**
  * Navigate the picker's Browse section from its root (`$HOME`) down to
  * `absPath`, clicking one directory segment at a time (the picker has no path
- * input and hides dot-directories, so `absPath` must be under `$HOME` with no
- * dot-segments). Entering a directory also makes it the picker's candidate,
- * so the caller only has to confirm afterwards.
+ * input, so `absPath` must be under `$HOME`). The picker hides dot-directories
+ * by default, so when any segment starts with a dot the "Show hidden" toggle
+ * is turned on once, up front. Entering a directory also makes it the
+ * picker's candidate, so the caller only has to confirm afterwards.
  */
 async function navigateBrowseTo(page: Page, absPath: string): Promise<void> {
   const home = process.env.HOME;
@@ -143,8 +144,14 @@ async function navigateBrowseTo(page: Page, absPath: string): Promise<void> {
     throw new Error(`workdir must live under $HOME (${home}): ${absPath}`);
   }
   const browse = page.getByTestId('workdir-browse');
+  const segments = absPath.slice(home.length + 1).split('/');
+  if (segments.some((segment) => segment.startsWith('.'))) {
+    // The toggle keeps its state while browsing, so one check covers every
+    // dot-segment on the way down.
+    await browse.getByRole('checkbox', { name: 'Show hidden' }).check();
+  }
   let current = home;
-  for (const segment of absPath.slice(home.length + 1).split('/')) {
+  for (const segment of segments) {
     current = `${current}/${segment}`;
     // Directory rows render their name with a trailing slash ("name/"), which
     // is part of the button's accessible name.

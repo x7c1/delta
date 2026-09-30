@@ -49,7 +49,11 @@ impl Workspace for FakeWorkspace {
         }
     }
 
-    async fn list_dirs(&self, path: &str) -> Result<crate::ports::DirListing> {
+    async fn list_dirs(
+        &self,
+        path: &str,
+        _include_hidden: bool,
+    ) -> Result<crate::ports::DirListing> {
         // A minimal listing: only used to exercise the browse use case's default
         // and delegation. The path is canonicalized like `resolve_existing_dir`.
         Ok(crate::ports::DirListing {

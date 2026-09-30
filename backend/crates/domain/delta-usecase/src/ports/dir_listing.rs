@@ -25,7 +25,8 @@ pub struct DirListing {
     /// The canonical absolute path of the parent directory, or `None` when
     /// `path` is a filesystem root (there is nowhere further up).
     pub parent: Option<String>,
-    /// The immediate subdirectories, sorted by name (case-insensitive),
-    /// dot-directories excluded.
+    /// The immediate subdirectories, sorted by name (case-insensitive).
+    /// Dot-directories are excluded unless the listing was requested with
+    /// `include_hidden`.
     pub entries: Vec<DirEntry>,
 }

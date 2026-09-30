@@ -25,7 +25,8 @@ impl From<DirEntry> for WireWorkdirEntry {
 ///
 /// `path` is the canonical directory that was listed, `parent` its canonical
 /// parent (`null` at a filesystem root), and `entries` its immediate
-/// subdirectories (dirs only, dot-directories hidden, sorted by name).
+/// subdirectories (dirs only, sorted by name; dot-directories are hidden unless
+/// the request passed `?hidden=true`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(rename = "WorkdirListResponse")]
 pub struct WireWorkdirListResponse {

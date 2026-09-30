@@ -502,15 +502,22 @@ export class ApiClient {
    * `GET /api/workdir/list` — one level of a directory browse for the
    * new-session working-directory picker: the listed `path`, its `parent`
    * (`null` at a filesystem root), and its immediate subdirectories. Omitting
-   * `path` lists `$HOME`. A missing/non-directory path is `400`, a permission
-   * denial `403` — both surface as {@link ApiError}.
+   * `path` lists `$HOME`. Dot-directories are hidden unless `includeHidden`
+   * is set (sent as `hidden=true`). A missing/non-directory path is `400`, a
+   * permission denial `403` — both surface as {@link ApiError}.
    */
-  getWorkdirList(path?: string): Promise<WorkdirListResponse> {
+  getWorkdirList(
+    path?: string,
+    includeHidden = false,
+  ): Promise<WorkdirListResponse> {
     // `request()` has no query-string helper, so build it manually with the
     // same encodeURIComponent style as `getSessions`.
     const query: string[] = [];
     if (path !== undefined) {
       query.push(`path=${encodeURIComponent(path)}`);
+    }
+    if (includeHidden) {
+      query.push('hidden=true');
     }
     const suffix = query.length > 0 ? `?${query.join('&')}` : '';
     return this.request<WorkdirListResponse>(`/api/workdir/list${suffix}`);

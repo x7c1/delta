@@ -165,7 +165,11 @@ impl Workspace for NoopWorkspace {
         Ok(path.to_owned())
     }
 
-    async fn list_dirs(&self, path: &str) -> delta_usecase::Result<delta_usecase::DirListing> {
+    async fn list_dirs(
+        &self,
+        path: &str,
+        _include_hidden: bool,
+    ) -> delta_usecase::Result<delta_usecase::DirListing> {
         Ok(delta_usecase::DirListing {
             path: path.to_owned(),
             parent: None,

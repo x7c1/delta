@@ -101,9 +101,11 @@ real-claude loop by hand):
 - Session workdirs are kept inside this repository (not `/tmp`) so a host that
   has already trusted the repository never sees claude's first-run trust
   prompt mid-suite. The browser smoke additionally anchors its workdir at the
-  *main* checkout's root (resolved via `git rev-parse --git-common-dir`): the
-  workdir picker hides dot-directories, and a linked git worktree typically
-  lives under one, so the picker could never navigate into a worktree path.
+  *main* checkout's root (resolved via `git rev-parse --git-common-dir`), so a
+  run from a linked worktree still lands in the trusted checkout. The picker
+  starts at `$HOME` and has no path input, so that root must live under
+  `$HOME`; dot-segments on the way (e.g. a clone under `~/.local/share/`) are
+  entered by turning on the picker's "Show hidden" toggle.
 
 ## Real-codex canaries (`make e2e-real-codex`)
 

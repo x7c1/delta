@@ -794,7 +794,8 @@ export function createMockApi(): MockApi {
 
     // Browse one level of the (mock) filesystem for the new-session picker.
     // An omitted `path` lists $HOME; an unknown path is a 400 and the special
-    // `/forbidden` path a 403, exercising the inline-error path.
+    // `/forbidden` path a 403, exercising the inline-error path. `hidden=true`
+    // also lists dot-directories, as on the real server.
     http.get('*/api/workdir/list', ({ request }) => {
       const url = new URL(request.url);
       const path = url.searchParams.get('path') ?? MOCK_WORKDIR_HOME;
@@ -804,7 +805,8 @@ export function createMockApi(): MockApi {
           { status: 403 },
         );
       }
-      const listing = workdirListing(path);
+      const includeHidden = url.searchParams.get('hidden') === 'true';
+      const listing = workdirListing(path, includeHidden);
       if (!listing) {
         return HttpResponse.json(
           { error: 'not a directory' },
