@@ -1,9 +1,9 @@
 //! In-memory [`SessionStore`] fake backing the interactor use-case tests.
 //!
 //! The fake's state and shared stamps live here; the store's behaviour is
-//! split by area into sibling modules (sessions, threads, sends, messages,
-//! permissions, subagent launches, launch options, prompt templates, clone
-//! roots), with [`session_store`] wiring them into the trait.
+//! split by area into sibling modules (sessions, session history, threads,
+//! sends, messages, permissions, subagent launches, launch options, prompt
+//! templates, clone roots), with [`session_store`] wiring them into the trait.
 //!
 //! [`SessionStore`]: crate::ports::SessionStore
 
@@ -13,6 +13,7 @@ mod messages;
 mod permissions;
 mod prompt_templates;
 mod sends;
+mod session_history;
 mod session_store;
 mod sessions;
 mod subagents;
