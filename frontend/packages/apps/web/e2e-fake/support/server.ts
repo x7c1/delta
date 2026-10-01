@@ -449,7 +449,7 @@ export async function bootServer(): Promise<ServerHandle> {
         /* nothing to preserve */
       }
       // Kill the whole per-run tmux server: every pane this run spawned dies
-      // with it; other sockets (a developer's `delta`, another run) are
+      // with it; other sockets (the app's or `make dev`'s, another run) are
       // untouched.
       await new Promise<void>((resolve) => {
         const tmux = spawn('tmux', ['-L', tmuxSocket, 'kill-server'], {

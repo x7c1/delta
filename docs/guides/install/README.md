@@ -43,14 +43,14 @@ It holds the database (`delta.db`) and the per-session working directories
 (`sessions/`). Conversation transcripts are not in it: they stay where
 Claude Code and Codex write them.
 
-Sessions run on Delta's own tmux server (socket `delta`, i.e.
-`tmux -L delta`), not inside the app process. Closing the window stops the
+Sessions run on Delta's own tmux server (socket `io.github.x7c1.delta`, i.e.
+`tmux -L io.github.x7c1.delta`), not inside the app process. Closing the window stops the
 Delta server but leaves the tmux server running, so open sessions survive and
 are picked up again on the next launch.
 
 ### Removing everything
 
-1. Quit the app, then end its sessions: `tmux -L delta kill-server`.
+1. Quit the app, then end its sessions: `tmux -L io.github.x7c1.delta kill-server`.
 2. Remove the app: delete `/Applications/Delta.app` on macOS, or run
    `sudo apt remove delta` on Ubuntu.
 3. Delete the data directory above.
