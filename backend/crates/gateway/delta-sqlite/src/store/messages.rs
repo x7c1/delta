@@ -192,6 +192,22 @@ impl SqliteStore {
         Ok(count as usize)
     }
 
+    pub(super) async fn latest_message_uuid(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<MessageUuid>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let uuid: Option<String> = conn
+            .query_row(
+                "SELECT uuid FROM message WHERE session_id = ?1 ORDER BY seq DESC LIMIT 1",
+                params![session_id.as_str()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(Error::from)?;
+        Ok(uuid.map(MessageUuid::from))
+    }
+
     pub(super) async fn transcript_lines_read(
         &self,
         session_id: &SessionId,

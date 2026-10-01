@@ -3,7 +3,7 @@ use tokio::sync::oneshot;
 use crate::agent::{AgentEvent, AgentPermissionRequest};
 use crate::error::Result;
 use crate::interactor::agent_permission::reduce_permission_event;
-use crate::interactor::hooks::ASK_USER_QUESTION;
+use crate::interactor::hooks::{HookTranscript, ASK_USER_QUESTION};
 use crate::interactor::permission_decision::PermissionDecision;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
@@ -65,7 +65,7 @@ where
         // `AskUserQuestion` short-circuit below: a dropped sender resolves
         // the receiver immediately, so the hook answers Claude Code with an
         // empty 200 and the dialog falls through to the TUI as normal.
-        if self.is_foreign_transcript(transcript_path).await? {
+        if self.admit_hook_transcript(transcript_path).await? == HookTranscript::Foreign {
             let (sender, receiver) = oneshot::channel();
             drop(sender);
             return Ok(PermissionWait {

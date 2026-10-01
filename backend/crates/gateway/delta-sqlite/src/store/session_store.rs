@@ -62,6 +62,15 @@ impl SessionStore for SqliteStore {
         self.mark_session_failed(id, reason).await
     }
 
+    async fn relocate_transcript(
+        &self,
+        id: &SessionId,
+        transcript_path: &str,
+        cwd: Option<&str>,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        self.relocate_transcript(id, transcript_path, cwd).await
+    }
+
     async fn list_sessions_page(
         &self,
         cursor: Option<SessionPageCursor>,
@@ -282,6 +291,13 @@ impl SessionStore for SqliteStore {
         session_id: &SessionId,
     ) -> std::result::Result<usize, delta_usecase::Error> {
         self.message_count(session_id).await
+    }
+
+    async fn latest_message_uuid(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<MessageUuid>, delta_usecase::Error> {
+        self.latest_message_uuid(session_id).await
     }
 
     async fn transcript_lines_read(

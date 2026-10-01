@@ -71,4 +71,8 @@ pub(super) struct RawLine {
     /// with (see the `is_queued_replay` guard in `attribute.rs`).
     #[serde(rename = "promptSource")]
     pub prompt_source: Option<String>,
+    /// Present on a `type: "relocated"` line: the working directory Claude Code
+    /// moved the transcript for (the worktree the session entered).
+    #[serde(rename = "relocatedCwd")]
+    pub relocated_cwd: Option<String>,
 }

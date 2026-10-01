@@ -454,3 +454,46 @@ async fn message_fts_indexes_inserts_and_updates() {
     assert!(fts_hits(&store, "quick").await.is_empty());
     assert_eq!(fts_hits(&store, "lazy").await.len(), 1);
 }
+
+/// The latest message is the one furthest down the transcript (highest
+/// `seq`), whatever order the rows were written in.
+#[tokio::test]
+async fn latest_message_uuid_is_the_highest_seq() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+    assert_eq!(store.latest_message_uuid(&session.id).await.unwrap(), None);
+
+    let message = |uuid: &str, seq: i64| Message {
+        uuid: MessageUuid::from(uuid),
+        session_id: session.id.clone(),
+        thread_id: main,
+        role: Role::Assistant,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq,
+        content_text: None,
+        content: Vec::new(),
+        created_at: None,
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
+        provider_item_id: None,
+    };
+    store
+        .upsert_messages(&[message("u-5", 5), message("u-2", 2)])
+        .await
+        .unwrap();
+    assert_eq!(
+        store.latest_message_uuid(&session.id).await.unwrap(),
+        Some(MessageUuid::from("u-5"))
+    );
+    assert_eq!(
+        store
+            .latest_message_uuid(&SessionId::from("other"))
+            .await
+            .unwrap(),
+        None
+    );
+}

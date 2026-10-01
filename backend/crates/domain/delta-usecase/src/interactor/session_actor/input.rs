@@ -192,10 +192,11 @@ pub(in crate::interactor) enum SessionInput {
         tool_name: String,
         tool_input_json: String,
         tool_use_id: String,
-        /// The JSONL the hook is firing against. Compared against the session
-        /// row's `transcript_path` so a hook fired by a nested subagent (whose
-        /// own transcript differs from the parent's) can be short-circuited
-        /// before it leaks runtime state onto the parent.
+        /// The JSONL the hook is firing against. Classified by
+        /// `SessionContext::admit_hook_transcript`: a file under the session's
+        /// `subagents/` directory is a subagent's and is short-circuited, and a
+        /// different `<session id>.jsonl` is the session's own transcript after
+        /// Claude Code moved it, which re-points the session.
         transcript_path: String,
         reply: Reply<Vec<SessionEvent>>,
     },
@@ -215,10 +216,11 @@ pub(in crate::interactor) enum SessionInput {
         /// when the hook carried nothing useful) so the consumer can `from_str`
         /// without first handling an absent shape.
         tool_response_json: String,
-        /// The JSONL the hook is firing against. Compared against the session
-        /// row's `transcript_path` so a hook fired by a nested subagent (whose
-        /// own transcript differs from the parent's) can be short-circuited
-        /// before it touches the parent's running window.
+        /// The JSONL the hook is firing against. Classified by
+        /// `SessionContext::admit_hook_transcript`: a file under the session's
+        /// `subagents/` directory is a subagent's and is short-circuited, and a
+        /// different `<session id>.jsonl` is the session's own transcript after
+        /// Claude Code moved it, which re-points the session.
         transcript_path: String,
         reply: Reply<Vec<SessionEvent>>,
     },
@@ -227,9 +229,11 @@ pub(in crate::interactor) enum SessionInput {
     PermissionRequest {
         tool_name: String,
         tool_input_json: String,
-        /// The JSONL the hook is firing against. Compared against the session
-        /// row's `transcript_path` so a permission dialog raised inside a
-        /// nested subagent does not register a parent-attributed waiter.
+        /// The JSONL the hook is firing against. Classified by
+        /// `SessionContext::admit_hook_transcript`: a file under the session's
+        /// `subagents/` directory is a subagent's and is short-circuited, and a
+        /// different `<session id>.jsonl` is the session's own transcript after
+        /// Claude Code moved it, which re-points the session.
         transcript_path: String,
         reply: Reply<PermissionWait>,
     },

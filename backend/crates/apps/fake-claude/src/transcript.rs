@@ -5,8 +5,11 @@
 //! shapes Claude Code writes (and Delta parses): `type: "user"`/`"assistant"`
 //! lines with a `uuid`/`parentUuid` chain and a `message.content` that is a
 //! bare string or an array of typed blocks, plus the uuid-less
-//! `queue-operation` bookkeeping line for a prompt queued mid-turn and the
-//! `[Request interrupted by user]` marker.
+//! `queue-operation` bookkeeping line for a prompt queued mid-turn, the
+//! `[Request interrupted by user]` marker, and the move Claude Code makes when
+//! the session enters a worktree (see [`TranscriptWriter::relocate`]). Like
+//! Claude Code's, every line carries the session's working directory as a
+//! top-level `cwd`.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -23,6 +26,9 @@ pub const INTERRUPT_MARKER: &str = "[Request interrupted by user]";
 pub struct TranscriptWriter {
     path: PathBuf,
     session_id: String,
+    /// The working directory stamped on every line; changes when the session
+    /// relocates.
+    cwd: String,
     /// Sequence number of the next line, also seeding its uuid. Starts at the
     /// existing line count so a resume continues the numbering.
     next_seq: usize,
@@ -41,7 +47,7 @@ pub struct TranscriptWriter {
 impl TranscriptWriter {
     /// Open (or create) the transcript at `path`, scanning any existing lines
     /// so appended lines continue the resume's uuid chain and numbering.
-    pub fn open(path: &Path, session_id: &str) -> Result<Self, String> {
+    pub fn open(path: &Path, session_id: &str, cwd: &str) -> Result<Self, String> {
         let existing = match std::fs::read_to_string(path) {
             Ok(content) => content,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -58,6 +64,7 @@ impl TranscriptWriter {
         Ok(Self {
             path: path.to_owned(),
             session_id: session_id.to_owned(),
+            cwd: cwd.to_owned(),
             next_seq: lines.len(),
             last_uuid,
             #[cfg(test)]
@@ -271,8 +278,37 @@ impl TranscriptWriter {
         Ok(())
     }
 
+    /// Move the transcript to `new_path` the way Claude Code does when the
+    /// session enters a worktree: the file is moved whole (the old path stops
+    /// existing), then a uuid-less `relocated` line naming the new working
+    /// directory is appended to it. Later lines carry the new `cwd`.
+    pub fn relocate(&mut self, new_path: &Path, cwd: &str) -> Result<(), String> {
+        if let Some(dir) = new_path.parent() {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| format!("create transcript dir {}: {e}", dir.display()))?;
+        }
+        std::fs::rename(&self.path, new_path).map_err(|e| {
+            format!(
+                "move transcript {} to {}: {e}",
+                self.path.display(),
+                new_path.display()
+            )
+        })?;
+        self.path = new_path.to_owned();
+        self.cwd = cwd.to_owned();
+        let line = json!({
+            "type": "relocated",
+            "sessionId": self.session_id,
+            "relocatedCwd": cwd,
+        });
+        self.write_line(&line)?;
+        // Like `queue-operation`, the line occupies a row but joins no chain.
+        self.next_seq += 1;
+        Ok(())
+    }
+
     /// Append one line of `line_type` with the common envelope (uuid chain,
-    /// session id, timestamp) merged over `extra`'s fields.
+    /// session id, cwd, timestamp) merged over `extra`'s fields.
     fn append(&mut self, line_type: &str, extra: Value) -> Result<(), String> {
         self.append_atomic_group(vec![(line_type, extra)])
     }
@@ -311,6 +347,7 @@ impl TranscriptWriter {
                 "parentUuid": parent,
                 "type": line_type,
                 "sessionId": self.session_id,
+                "cwd": self.cwd,
                 "timestamp": &timestamp,
             });
             if let (Value::Object(target), Value::Object(fields)) = (&mut line, extra) {
@@ -411,7 +448,7 @@ mod tests {
     fn chains_uuids_across_lines() {
         let path = temp_path("chain");
         let _ = std::fs::remove_file(&path);
-        let mut writer = TranscriptWriter::open(&path, "sess-1").unwrap();
+        let mut writer = TranscriptWriter::open(&path, "sess-1", "/work").unwrap();
         writer.user_text("hello").unwrap();
         writer
             .assistant_blocks(vec![json!({"type": "text", "text": "hi"})])
@@ -433,10 +470,10 @@ mod tests {
         let path = temp_path("reopen");
         let _ = std::fs::remove_file(&path);
         {
-            let mut writer = TranscriptWriter::open(&path, "sess-2").unwrap();
+            let mut writer = TranscriptWriter::open(&path, "sess-2", "/work").unwrap();
             writer.user_text("first").unwrap();
         }
-        let mut writer = TranscriptWriter::open(&path, "sess-2").unwrap();
+        let mut writer = TranscriptWriter::open(&path, "sess-2", "/work").unwrap();
         writer.user_text("second").unwrap();
 
         let lines = read_lines(&path);
@@ -449,7 +486,7 @@ mod tests {
     fn queue_operation_enqueue_line_is_uuid_less_and_off_the_chain() {
         let path = temp_path("queued");
         let _ = std::fs::remove_file(&path);
-        let mut writer = TranscriptWriter::open(&path, "sess-3").unwrap();
+        let mut writer = TranscriptWriter::open(&path, "sess-3", "/work").unwrap();
         writer.user_text("first").unwrap();
         writer.queue_operation_enqueue("later please").unwrap();
         writer.dequeued_user_text("later please").unwrap();
@@ -473,11 +510,11 @@ mod tests {
         let path = temp_path("reopen-queued");
         let _ = std::fs::remove_file(&path);
         {
-            let mut writer = TranscriptWriter::open(&path, "sess-4").unwrap();
+            let mut writer = TranscriptWriter::open(&path, "sess-4", "/work").unwrap();
             writer.user_text("first").unwrap();
             writer.queue_operation_enqueue("queued").unwrap();
         }
-        let mut writer = TranscriptWriter::open(&path, "sess-4").unwrap();
+        let mut writer = TranscriptWriter::open(&path, "sess-4", "/work").unwrap();
         writer.user_text("second").unwrap();
 
         let lines = read_lines(&path);
@@ -490,7 +527,7 @@ mod tests {
     fn compact_group_lands_as_four_lines_sharing_one_prompt_id_and_timestamp() {
         let path = temp_path("compact-group");
         let _ = std::fs::remove_file(&path);
-        let mut writer = TranscriptWriter::open(&path, "sess-5").unwrap();
+        let mut writer = TranscriptWriter::open(&path, "sess-5", "/work").unwrap();
         writer.user_text("before").unwrap();
         let appends_before = writer.appends;
         writer.compact_group().unwrap();
@@ -547,12 +584,12 @@ mod tests {
         let path = temp_path("compact-group-after");
         let _ = std::fs::remove_file(&path);
         {
-            let mut writer = TranscriptWriter::open(&path, "sess-6").unwrap();
+            let mut writer = TranscriptWriter::open(&path, "sess-6", "/work").unwrap();
             writer.compact_group().unwrap();
             writer.user_text("right after").unwrap();
         }
         // Reopening resumes numbering past the group, too.
-        let mut writer = TranscriptWriter::open(&path, "sess-6").unwrap();
+        let mut writer = TranscriptWriter::open(&path, "sess-6", "/work").unwrap();
         writer.user_text("after reopen").unwrap();
 
         let lines = read_lines(&path);
@@ -568,6 +605,41 @@ mod tests {
         assert_eq!(lines[5]["uuid"], "sess-6-u5");
         assert_eq!(lines[5]["parentUuid"], "sess-6-u4");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn relocate_moves_the_file_whole_and_appends_a_relocated_line() {
+        let old = temp_path("relocate-old");
+        let new = std::env::temp_dir()
+            .join("fake-claude-transcript-tests")
+            .join(format!("relocated-{}", std::process::id()))
+            .join("sess-7.jsonl");
+        let _ = std::fs::remove_file(&old);
+        let _ = std::fs::remove_file(&new);
+        let mut writer = TranscriptWriter::open(&old, "sess-7", "/work").unwrap();
+        writer.user_text("before").unwrap();
+        writer.relocate(&new, "/work/wt").unwrap();
+        writer
+            .assistant_blocks(vec![json!({"type": "text", "text": "after"})])
+            .unwrap();
+
+        assert!(!old.exists(), "the transcript is moved, not copied");
+        let lines = read_lines(&new);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0]["message"]["content"], "before");
+        assert_eq!(lines[0]["cwd"], "/work");
+        assert_eq!(lines[1]["type"], "relocated");
+        assert_eq!(lines[1]["relocatedCwd"], "/work/wt");
+        assert!(
+            lines[1].get("uuid").is_none(),
+            "relocated line is uuid-less"
+        );
+        // The chain continues across the move, and later lines carry the new
+        // working directory.
+        assert_eq!(lines[2]["uuid"], "sess-7-u2");
+        assert_eq!(lines[2]["parentUuid"], "sess-7-u0");
+        assert_eq!(lines[2]["cwd"], "/work/wt");
+        let _ = std::fs::remove_file(&new);
     }
 
     #[test]

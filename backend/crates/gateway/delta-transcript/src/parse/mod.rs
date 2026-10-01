@@ -17,7 +17,9 @@ use raw_line::RawLine;
 /// Most lines yield a [`TranscriptMessage`]; a `system`/`turn_duration` line
 /// yields no message but carries the turn's latency, which the reader correlates
 /// back onto that turn's assistant message (see [`correlate_turn_durations`]).
-/// A blank/no-uuid/duration-less line yields [`ParsedLine::Skip`].
+/// A `relocated` line yields no message but names the working directory the
+/// transcript was moved for. A blank/no-uuid/duration-less line yields
+/// [`ParsedLine::Skip`].
 #[derive(Debug)]
 pub(crate) enum ParsedLine {
     /// A real message line. Boxed because a [`TranscriptMessage`] is far larger
@@ -26,6 +28,10 @@ pub(crate) enum ParsedLine {
     /// A `system`/`turn_duration` line: the turn's response time, to be
     /// correlated onto the turn's assistant message.
     TurnDuration { duration_ms: f64 },
+    /// A `type: "relocated"` line: Claude Code moved the transcript to the
+    /// project directory of `cwd` (on entering a worktree) and appended this
+    /// line to the moved file.
+    Relocated { cwd: String },
     /// A line that produces nothing (blank, no uuid, or no usable payload).
     Skip,
 }
@@ -70,7 +76,7 @@ fn is_unknown_command_notice_marker(text: &str) -> bool {
 pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::Error> {
     Ok(match parse_line_outcome(line)? {
         ParsedLine::Message(msg) => Some(*msg),
-        ParsedLine::TurnDuration { .. } | ParsedLine::Skip => None,
+        ParsedLine::TurnDuration { .. } | ParsedLine::Relocated { .. } | ParsedLine::Skip => None,
     })
 }
 
@@ -93,13 +99,25 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
         });
     }
 
+    // A `relocated` line is uuid-less bookkeeping, not a message, but the
+    // working directory it names is what the session moved to.
+    if raw.line_type.as_deref() == Some("relocated") {
+        return Ok(match raw.relocated_cwd {
+            Some(cwd) => ParsedLine::Relocated { cwd },
+            None => ParsedLine::Skip,
+        });
+    }
+
     // A line without a uuid is not a message we can address; skip it. This
     // deliberately covers `type: "queue-operation"` lines — the uuid-less
     // bookkeeping records current claude writes when a prompt is submitted
     // mid-turn. The queued prompt's real message is the plain `type: "user"`
     // line claude replays at dequeue (which fires its own `UserPromptSubmit`
     // and flows the normal parse/attribution path), so the bookkeeping line
-    // carries nothing Delta needs to surface.
+    // carries nothing Delta needs to surface. The other uuid-less records
+    // Claude Code writes beside a transcript move — `worktree-state` (the
+    // worktree the session is in) and `pr-link` (a pull request it opened) —
+    // are skipped the same way.
     let Some(uuid) = raw.uuid else {
         return Ok(ParsedLine::Skip);
     };
@@ -597,6 +615,31 @@ mod tests {
         let msg = parse_line(line).unwrap().unwrap();
         assert_eq!(msg.role, Role::Other);
         assert!(msg.content.is_empty());
+    }
+
+    #[test]
+    fn relocated_line_is_not_a_message_but_names_its_cwd() {
+        // The line Claude Code appends to a transcript it moved to the project
+        // directory of a worktree the session entered.
+        let line =
+            r#"{"type":"relocated","sessionId":"s1","relocatedCwd":"/work/.claude/worktrees/wt"}"#;
+        assert!(parse_line(line).unwrap().is_none());
+        assert!(matches!(
+            parse_line_outcome(line).unwrap(),
+            ParsedLine::Relocated { cwd } if cwd == "/work/.claude/worktrees/wt"
+        ));
+    }
+
+    #[test]
+    fn worktree_state_and_pr_link_lines_are_skipped() {
+        let worktree_state = r#"{"type":"worktree-state","worktreeSession":{"originalCwd":"/work","worktreePath":"/work/.claude/worktrees/wt","worktreeName":"wt","worktreeBranch":"feature/x","sessionId":"s1","enteredExisting":true},"sessionId":"s1"}"#;
+        let pr_link = r#"{"type":"pr-link","sessionId":"s1","prNumber":7,"prUrl":"https://example.com/o/r/pull/7","prRepository":"o/r","timestamp":"2026-01-01T00:00:00Z"}"#;
+        for line in [worktree_state, pr_link] {
+            assert!(matches!(
+                parse_line_outcome(line).unwrap(),
+                ParsedLine::Skip
+            ));
+        }
     }
 
     #[test]

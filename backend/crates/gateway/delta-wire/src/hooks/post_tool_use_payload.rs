@@ -27,10 +27,12 @@ pub struct PostToolUsePayload {
     #[serde(default)]
     pub tool_response: Value,
     /// The JSONL the hook is firing against. For a nested subagent's tool call
-    /// this is the subagent's own transcript, not the parent session's. The
-    /// interactor compares this against the session row's stored path so a
-    /// hook fired against a nested transcript can be filtered out — its
-    /// `session_id` still names the parent but the tool call belongs to the
-    /// nested subagent's transcript.
+    /// this is the subagent's own transcript (under the parent's
+    /// `<session>/subagents/`), not the parent session's. The interactor
+    /// recognises that location so a hook fired against a nested transcript
+    /// can be filtered out — its `session_id` still names the parent but the
+    /// tool call belongs to the nested subagent's transcript — and follows the
+    /// session's own transcript when this names it at a new path (Claude Code
+    /// moves it when the session enters a worktree).
     pub transcript_path: String,
 }

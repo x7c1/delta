@@ -87,6 +87,13 @@ where
     ) -> Result<(Vec<SessionEvent>, Option<String>)> {
         let mut events = Vec::new();
 
+        // Follow the session's transcript first if Claude Code moved it (the
+        // hook then names the new file), so the sync below reads the right
+        // one. A prompt is never a subagent's, and a session not registered
+        // yet has no path to compare, so the classification itself does not
+        // change what this handler does.
+        self.admit_hook_transcript(&hook.transcript_path).await?;
+
         // Bind a pending Delta spawn for THIS session id, if one is waiting: the
         // spawn's session row was created eagerly (status `spawning`) when the
         // id was minted, so its existence cannot signal "already contacted" —
