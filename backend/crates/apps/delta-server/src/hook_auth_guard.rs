@@ -1,4 +1,4 @@
-//! A per-run hook-secret guard, applied to the `/hooks/*` control plane.
+//! A hook-secret guard, applied to the `/hooks/*` control plane.
 //!
 //! The Claude Code hooks are `curl`ed (or POSTed by native `http` hooks) from
 //! Claude Code, not the browser, so they carry no bearer token and the
@@ -7,7 +7,7 @@
 //! loopback bind and the Origin/Host guard — which matters because a hook
 //! payload names the `transcript_path` Delta then reads from disk and surfaces
 //! to the browser. This guard closes that gap: every hook URL Delta renders
-//! carries a per-run secret as an `?hs=<secret>` query parameter (see
+//! carries a secret as an `?hs=<secret>` query parameter (see
 //! `delta-bootstrap`'s `render_session_settings`), and a request to `/hooks/*`
 //! without the matching secret is refused with `401` before its handler runs.
 //!
@@ -31,7 +31,7 @@ use axum::response::{IntoResponse, Response};
 use crate::auth_guard::constant_time_eq;
 use crate::state::AppState;
 
-/// Rejects a `/hooks/*` request that does not present the per-run hook secret in
+/// Rejects a `/hooks/*` request that does not present the hook secret in
 /// its `hs` query parameter. Every other path is passed straight to `next`.
 pub(crate) async fn guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
     if !request.uri().path().starts_with("/hooks/") {

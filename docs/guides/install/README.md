@@ -39,14 +39,35 @@ The app creates its data directory on first launch:
 | macOS | `~/Library/Application Support/io.github.x7c1.delta/` |
 | Ubuntu | `~/.local/share/io.github.x7c1.delta/` |
 
-It holds the database (`delta.db`) and the per-session working directories
-(`sessions/`). Conversation transcripts are not in it: they stay where
-Claude Code and Codex write them.
+It holds the database (`delta.db`), the per-session working directories
+(`sessions/`), and the hook state file (`delta-hook-state.json`). Conversation
+transcripts are not in it: they stay where Claude Code and Codex write them.
+
+### The hook state file
+
+Each Claude Code session calls back into Delta through hook URLs that carry
+Delta's port and a hook secret, and it keeps calling the URLs it was launched
+with until it exits — also after Delta itself has quit and started again. So
+that those calls still reach Delta and are accepted, the app keeps both in
+`delta-hook-state.json`, next to the database:
+
+- `hook_secret` — minted on the first launch and reused on every launch after.
+- `port` — the port the app took. The next launch tries it first; if another
+  program holds it by then, the app takes a fresh port, records that one, and
+  logs a warning that sessions which survived the restart cannot reach it.
+
+The file is readable by you only (mode `0600`). If it is ever found readable by
+others, the app restricts it to `0600` on startup and logs a warning; delete
+the file as well if you want the old secret gone. Deleting the file rotates the
+secret on the next launch (and forgets the port). Sessions still running from
+before then keep the old values and can no longer report to Delta, so end them
+first (see below).
 
 Sessions run on Delta's own tmux server (socket `io.github.x7c1.delta`, i.e.
 `tmux -L io.github.x7c1.delta`), not inside the app process. Closing the window stops the
 Delta server but leaves the tmux server running, so open sessions survive and
-are picked up again on the next launch.
+are picked up again on the next launch, with their hook URLs still valid (see
+the hook state file above).
 
 ### Removing everything
 

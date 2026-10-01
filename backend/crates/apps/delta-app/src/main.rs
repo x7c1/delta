@@ -16,11 +16,15 @@
 //! 2. build the server configuration the CLI builds, with the database and the
 //!    per-spawn working directories moved into the app data directory
 //!    ([`app_data`]);
-//! 3. bind `127.0.0.1:0` for a free port (an explicit `DELTA_PORT` wins) and
-//!    write it into the configuration before the state is built, since the hook
-//!    URLs rendered into each session's settings carry it;
+//! 3. settle the hook secret and the port against the hook state file beside
+//!    the database: reuse the secret recorded there, and bind the port the
+//!    previous launch recorded, falling back to a free `127.0.0.1:0` port when
+//!    it is taken (an explicit `DELTA_PORT` wins and is not recorded). Both are
+//!    written into the configuration before the state is built, since the hook
+//!    URLs rendered into each session's settings carry them, and keeping them
+//!    stable is what lets a session that survived a restart still reach Delta;
 //! 4. build the state and serve on a tokio runtime the shell owns, then open the
-//!    window. The two startup failures the user has to act on are shown in a
+//!    window. The startup failures the user has to act on are shown in a
 //!    message dialog; either way a failed start exits 1.
 //!
 //! Links the page follows never take the window away from Delta; [`links`]
@@ -101,9 +105,17 @@ fn start_server(app: &App, runtime: &Runtime) -> anyhow::Result<u16> {
         "delta-app data locations"
     );
 
-    let port = config::port_from_env().unwrap_or(0);
-    let listener = runtime.block_on(serve::bind_loopback(port))?;
-    config.port = listener.local_addr()?.port();
+    let mut hook_state = config::adopt_persisted_hook_secret(&mut config)?;
+    let listener = runtime.block_on(serve::bind_app_listener(
+        &mut config,
+        config::port_from_env(),
+        &mut hook_state,
+    ))?;
+    tracing::info!(
+        state_file = %hook_state.path().display(),
+        hook_endpoint_changed = config.hook_endpoint_changed,
+        "delta-app hook endpoint settled"
+    );
 
     delta_server::log_claude_version(&config.launch.claude_bin);
     let state = runtime.block_on(AppState::build(&config))?;

@@ -92,6 +92,7 @@ async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
         hook_secret: HOOK_SECRET.into(),
         transcript_root: transcript_dir.to_string_lossy().into_owned(),
         port,
+        hook_endpoint_changed: false,
         launch: LaunchConfig {
             claude_bin: claude_bin.to_string_lossy().into_owned(),
             ..LaunchConfig::default()

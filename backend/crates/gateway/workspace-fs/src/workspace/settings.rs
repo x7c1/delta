@@ -22,7 +22,7 @@ impl FsWorkspace {
     /// Write the session settings JSON, owner-readable only.
     ///
     /// The settings file lives under the system temp directory at a
-    /// port-predictable path, and it is doubly sensitive: it embeds the per-run
+    /// port-predictable path, and it is doubly sensitive: it embeds the
     /// hook secret in every hook URL, and its `statusLine` / `SessionStart`
     /// entries are commands Claude Code executes. On a machine where the temp
     /// directory is per-user (macOS `$TMPDIR`, mode 0700) that is already
