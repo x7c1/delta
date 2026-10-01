@@ -114,7 +114,7 @@ variables, all with local-friendly defaults:
 | `DELTA_DB_PATH` | `delta.db` | SQLite overlay file |
 | `DELTA_SESSION_WORKDIR` | `.tmp/session` | base directory for per-spawn working directories (`<base>/<token>`) |
 | `DELTA_WORKTREE_BASE` | `$HOME/.delta/worktrees` | base directory for per-session git worktrees (`<base>/delta-<session-id>`), deliberately outside any repo tree so the worktree does not inherit a surrounding `CLAUDE.md`/settings |
-| `DELTA_TMUX_SOCKET` | `delta` | dedicated tmux socket (`tmux -L <socket>`) for Delta's sessions, isolated from your default tmux server |
+| `DELTA_TMUX_SOCKET` | `io.github.x7c1.delta` | dedicated tmux socket (`tmux -L <socket>`) for Delta's sessions, isolated from your default tmux server (`make dev` sets `io.github.x7c1.delta.dev`) |
 
 The server owns the `claude` session lifecycle: it boots fine with no tmux
 session present and spawns nothing on startup or page load. A session is spawned

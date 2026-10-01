@@ -2,8 +2,8 @@
 #
 # stop.sh — tear down Delta's local loop.
 #
-# Stops the `delta-server` process, the frontend dev server, and the `delta`
-# tmux session started by scripts/dev.sh. Equivalent to `scripts/dev.sh --down`.
+# Stops the `delta-server` process, the frontend dev server, and the dev loop's
+# tmux server started by scripts/dev.sh. Equivalent to `scripts/dev.sh --down`.
 
 set -euo pipefail
 

@@ -25,7 +25,7 @@
 # Authentication is assumed: the server relies on a cached Claude Code token (or
 # CLAUDE_CODE_OAUTH_TOKEN) and does not run interactive OAuth. If `claude` is not
 # yet authenticated, run `claude` once on its own (or attach to a spawned pane
-# with `tmux -L delta attach -t delta-1`) to complete login, then reload the browser.
+# with `tmux -L io.github.x7c1.delta.dev attach -t delta-1`) to complete login, then reload the browser.
 #
 # Usage:
 #   scripts/dev.sh [WORKDIR]   # bring the loop up (default WORKDIR: .tmp/session)
@@ -44,10 +44,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKEND_DIR="$REPO_ROOT/backend"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 
-# Delta runs its sessions on a dedicated tmux server (socket `delta`), separate
-# from the user's default tmux server. The server mints a unique session per
-# spawn (`delta-<n>`) on this socket; teardown just kills the whole socket.
-DELTA_TMUX_SOCKET="${DELTA_TMUX_SOCKET:-delta}"
+# Delta runs its sessions on a dedicated tmux server, separate from the user's
+# default tmux server. The dev loop uses its own socket
+# (`io.github.x7c1.delta.dev`), distinct from the desktop app's default
+# (`io.github.x7c1.delta`), so teardown never ends the installed app's sessions.
+# The server mints a unique session per spawn (`delta-<n>`) on this socket;
+# teardown just kills the whole socket. An explicit DELTA_TMUX_SOCKET wins.
+DELTA_TMUX_SOCKET="${DELTA_TMUX_SOCKET:-io.github.x7c1.delta.dev}"
 DELTA_PORT="7878"
 FRONTEND_PORT="5173"
 DEFAULT_WORKDIR="$REPO_ROOT/.tmp/session"

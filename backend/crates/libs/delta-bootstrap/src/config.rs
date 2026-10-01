@@ -8,7 +8,13 @@ use crate::settings::render_session_settings;
 /// the user's default tmux server — no clutter in the user's `tmux ls`, and the
 /// server starts with Delta's own fixed config (via `tmux -f`) instead of the
 /// user's `~/.tmux.conf`, so the embedded pane is identical on every machine.
-pub const DEFAULT_TMUX_SOCKET: &str = "delta";
+///
+/// The name is the app identifier (the same one that names the app data
+/// directory) rather than a bare word, so it cannot collide with another
+/// tool's socket in the user's tmux socket directory. `scripts/dev.sh` uses
+/// `<identifier>.dev` instead, so `make dev` never shares a server with the
+/// desktop app.
+pub const DEFAULT_TMUX_SOCKET: &str = "io.github.x7c1.delta";
 
 /// Runtime configuration for the composition root.
 #[derive(Debug, Clone)]

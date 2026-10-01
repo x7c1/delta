@@ -67,7 +67,7 @@ appear (each spawn is named `delta-<n>`; the first Send of a run spawns
 `delta-1`):
 
 ```bash
-tmux -L delta attach -t delta-1     # detach again with Ctrl-b then d
+tmux -L io.github.x7c1.delta.dev attach -t delta-1     # detach again with Ctrl-b then d
 ```
 
 ## Happy-path check
@@ -75,7 +75,7 @@ tmux -L delta attach -t delta-1     # detach again with Ctrl-b then d
 Type a message in the browser. It is dispatched into the tmux pane via
 `send-keys`; `claude`'s reply is ingested from the transcript and surfaces in
 the browser. When a tool needs permission, answer it in the embedded terminal or
-in the TUI (`tmux -L delta attach -t delta-1`).
+in the TUI (`tmux -L io.github.x7c1.delta.dev attach -t delta-1`).
 
 ## Serving the built frontend
 
@@ -86,7 +86,8 @@ build the server with the frontend compiled in:
 ```bash
 make server-embedded   # builds the SPA (make web-dist), then delta-server with --features embed-web
 make down              # the binary takes the same port 7878 as make dev's server
-DELTA_PORT=7878 DELTA_DB_PATH=backend/delta.db backend/target/release/delta-server
+DELTA_PORT=7878 DELTA_DB_PATH=backend/delta.db DELTA_TMUX_SOCKET=io.github.x7c1.delta.dev \
+  backend/target/release/delta-server
 ```
 
 Then open <http://127.0.0.1:7878/>. The server hands out the page with the
@@ -95,6 +96,9 @@ one). Unlike `make dev`, nothing sets the other `DELTA_*` variables for you, and
 the server's defaults are relative to its working directory: `DELTA_DB_PATH`
 defaults to `delta.db` there, so from the repository root pass
 `backend/delta.db` (the database `make dev` uses) to see the same sessions.
+`DELTA_TMUX_SOCKET` likewise points it at `make dev`'s tmux server; without it
+the server uses the default socket, the one the desktop app runs its sessions
+on, and `make down` would not end the sessions it spawns.
 What is served, and how the page gets the token, is in
 [the API guide](../api/README.md#the-built-frontend-embed-web). A plain
 `cargo build` never needs `dist/`: only the `embed-web` feature compiles it in.
@@ -105,10 +109,12 @@ What is served, and how the page gets the token, is in
 server inside a desktop window instead — see
 [the development guide](README.md#desktop-shell-delta-app) for the targets. It
 does not touch `make dev`, which keeps serving the UI from Vite on its own ports,
-database and working directories; the two can run side by side. They do share
-Delta's tmux server (`tmux -L delta`) unless `DELTA_TMUX_SOCKET` sets another
-socket for one of them, so `make down` and `make reset` also end the app's
-sessions.
+database and working directories; the two can run side by side. They also use
+separate tmux servers: the app uses the default socket
+(`tmux -L io.github.x7c1.delta`) and `make dev` uses
+`tmux -L io.github.x7c1.delta.dev`, so `make down` and `make reset` end only the
+dev sessions and leave the app's sessions running. `DELTA_TMUX_SOCKET` overrides
+either.
 
 - **Data.** The database and the per-spawn working directories live in the app
   data directory, created on first run: `delta.db` and `sessions/` under

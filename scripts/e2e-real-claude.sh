@@ -123,7 +123,7 @@ teardown() {
     wait "$SERVER_PID" 2>/dev/null || true
   fi
   # Kill the whole per-run tmux server: the real claude pane this run spawned
-  # dies with it; other sockets (a developer's `delta`, the fake lane) are
+  # dies with it; other sockets (the app's or `make dev`'s, the fake lane) are
   # untouched.
   tmux -L "$TMUX_SOCKET" kill-server 2>/dev/null || true
   rm -rf "$RUN_DIR" "$WORKDIR"
