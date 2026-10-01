@@ -1,6 +1,10 @@
 import type { SessionsResponse } from '@delta/wire-gen';
 import { test, expect, type Page } from './support/fixtures';
-import { shownTerminal, startNewSession } from './support/app';
+import {
+  revealInNavigator,
+  shownTerminal,
+  startNewSession,
+} from './support/app';
 
 /**
  * A launch that never binds becomes an ordinary session the user can open,
@@ -93,10 +97,9 @@ test('a launch that fails while you are elsewhere turns its row failed, and open
   });
 
   // The deadline passes. The row turns failed in the navigator, and focus does
-  // not move: the user stays on what they were reading.
-  await expect(
-    page.getByRole('status', { name: 'Failed', exact: true }),
-  ).toHaveCount(1, { timeout: 15_000 });
+  // not move: the user stays on what they were reading. (The failed card is
+  // listed after every open one, so the navigator may need scrolling to it.)
+  await revealInNavigator(page, cardWithStatus(page, 'Failed'));
   await expect(page.getByTestId('failed-session-pane')).toHaveCount(0);
   await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
   await expect(page.getByText('first-send hello there').first()).toBeVisible();
@@ -165,9 +168,7 @@ test('the failure lands on the screen you are already on, and Retry starts the s
   // launch is watched and never gives up.
   await expect(page.getByTestId('failed-session-pane')).toHaveCount(0);
   await page.getByRole('button', { name: 'Close terminal' }).click();
-  await expect(
-    page.getByRole('status', { name: 'Failed', exact: true }),
-  ).toHaveCount(1, { timeout: 15_000 });
+  await revealInNavigator(page, cardWithStatus(page, 'Failed'));
   await cardWithStatus(page, 'Failed').getByTestId('session-node').click();
   await page.getByRole('button', { name: 'Remove' }).click();
   await expect(
@@ -267,9 +268,7 @@ test('a launch you watched and then left for another session turns failed at the
       ?.session.id,
   ).toBe(boundId);
   await cardWithStatus(page, 'Open').first().getByTestId('session-node').click();
-  await expect(
-    page.getByRole('status', { name: 'Failed', exact: true }),
-  ).toHaveCount(1, { timeout: 15_000 });
+  await revealInNavigator(page, cardWithStatus(page, 'Failed'));
 
   await cardWithStatus(page, 'Failed').getByTestId('session-node').click();
   await page.getByRole('button', { name: 'Remove' }).click();

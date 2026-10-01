@@ -53,6 +53,9 @@ where
     /// [`SessionStore::next_queued_send`] filters them out until the user
     /// explicitly releases them, so no trigger here can auto-resend a
     /// possibly-stale message or re-type one the pane keeps swallowing.
+    /// Nor is anything typed into a pane whose agent cannot reach this
+    /// server's hooks (see [`Self::ensure_open`]): its queued rows wait until
+    /// the session is closed and the send that resumes it flushes the queue.
     /// Promotes before dispatch so the outstanding
     /// row is in place when the hook fires; on a dispatch failure the
     /// `DispatchFailed` turn input cancels the row so a failed send cannot
@@ -115,7 +118,13 @@ where
             }));
         }
 
-        let Some(pane) = self.state.handle().map(|h| h.pane.clone()) else {
+        // Nothing is typed into a pane whose agent cannot reach the hooks.
+        let Some(pane) = self
+            .state
+            .handle()
+            .filter(|h| !h.hooks_unreachable)
+            .map(|h| h.pane.clone())
+        else {
             return Ok(None);
         };
 

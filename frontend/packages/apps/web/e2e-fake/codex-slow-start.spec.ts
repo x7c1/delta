@@ -1,6 +1,10 @@
 import { test, expect } from './support/fixtures';
 import { scenarioPath } from './support/server';
-import { composerInput, startNewCodexSession } from './support/app';
+import {
+  composerInput,
+  focusedSessionNode,
+  startNewCodexSession,
+} from './support/app';
 
 /**
  * A new **Codex** session is the user's the moment the server accepts its first
@@ -52,6 +56,8 @@ test('a slow Codex launch is focused as a starting session, then comes up in pla
     .locator('li')
     .filter({ has: page.getByRole('status', { name: 'Starting', exact: true }) });
   await expect(startingCard).toHaveCount(1, { timeout: 2_000 });
+  // …and it is the focused one, so the `Open` below is this card's own flip.
+  await expect(startingCard.locator('[aria-current="true"]')).toHaveCount(1);
   // The new-session screen is behind us: this is the spawned session's screen.
   await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
   const textbox = composerInput(page);
@@ -83,9 +89,11 @@ test('a slow Codex launch is focused as a starting session, then comes up in pla
 
   // `thread/start` answers: the very same card flips to Open — no second
   // session, no return to the new-session screen — and the held first prompt is
-  // dispatched, so the scripted reply arrives.
+  // dispatched, so the scripted reply arrives. Scoped to the focused card: the
+  // Claude sessions earlier specs left running were re-adopted by this spec's
+  // restart and read `Open` as well.
   await expect(
-    page.getByRole('status', { name: 'Open', exact: true }),
+    focusedSessionNode(page).getByRole('status', { name: 'Open', exact: true }),
   ).toHaveCount(1, { timeout: 15_000 });
   await expect(
     page.getByRole('status', { name: 'Starting', exact: true }),

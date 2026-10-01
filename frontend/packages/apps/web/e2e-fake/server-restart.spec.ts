@@ -1,6 +1,6 @@
 import { test, expect } from './support/fixtures';
 import { sendMessage, startNewSession } from './support/app';
-import { fetchSends, latestSession } from './support/rest';
+import { fetchSends, latestSession, sessionIsOpen } from './support/rest';
 
 /**
  * Server restart with a `dispatched` send in flight — the full restore/release
@@ -18,18 +18,21 @@ import { fetchSends, latestSession } from './support/rest';
  *
  * Scenario `server-restart`: the fake answers the positional first prompt
  * (`reply` + `stop`) so the session reaches idle, then `swallow_prompt`
- * consumes the follow-up send WITHOUT firing `UserPromptSubmit` (no echo) and
- * `hang`s — leaving the send `dispatched` behind a missing echo, exactly the
- * zombie shape the restart must recover. After the restart the session is
- * reopened through a fresh `claude --resume` pane, which the wrapper routes to
- * the fake's built-in echo loop (a resume carries no positional prompt) — it
- * awaits the released prompt, replies, and stops.
+ * consumes the follow-up send WITHOUT firing `UserPromptSubmit` (no echo) —
+ * leaving the send `dispatched` behind a missing echo, exactly the zombie shape
+ * the restart must recover. The fake's pane lives on Delta's tmux server, so
+ * it outlives the killed server process, and the relaunched server re-adopts
+ * it at boot instead of resuming the conversation in a second pane. The
+ * swallowed prompt left nothing in the transcript, so re-adoption cannot
+ * settle the row as already submitted, and it stays held. The scenario's last
+ * turn (`await_prompt` + `reply` + `stop`) is the surviving pane answering the
+ * released prompt.
  *
  * The spec asserts the whole saga: the row is `dispatched` (over REST) before
  * the kill; after a SIGKILL + relaunch against the same DB/socket the client
- * reconnects, the send surfaces restored (badge + explicit Send/Cancel, and it
- * is NOT auto-resent), and pressing Send releases it through the resumed pane
- * to a completed turn. It leaves the relaunched server healthy so the rest of
+ * reconnects, the session is open again on its surviving pane, the send
+ * surfaces restored (badge + explicit Send/Cancel, and it is NOT auto-resent),
+ * and pressing Send releases it into that pane to a completed turn. It leaves the relaunched server healthy so the rest of
  * the shared serial suite is unaffected.
  */
 test('a dispatched send survives a server restart as a restored row and is released to completion', async ({
@@ -80,10 +83,12 @@ test('a dispatched send survives a server restart as a restored row and is relea
     { timeout: 20_000 },
   );
 
-  // The session reads as closed after the restart — turn state rebuilt `Idle` —
-  // and the boot sweep recovered the orphaned `dispatched` row as a restored
-  // `queued` send: still one open send, now carrying `held_at`.
+  // The session's pane survived the restart and was re-adopted, so it reads as
+  // open again — with turn state rebuilt `Idle` — and the boot sweep recovered
+  // the orphaned `dispatched` row as a restored `queued` send: still one open
+  // send, now carrying `held_at`.
   await expect(async () => {
+    expect(await sessionIsOpen(page, session.id)).toBe(true);
     const sends = await fetchSends(page, session.id);
     expect(sends.turn.state).toBe('idle');
     expect(sends.sends).toHaveLength(1);
@@ -105,10 +110,8 @@ test('a dispatched send survives a server restart as a restored row and is relea
   // No turn is running: the restored row is waiting, not in flight.
   await expect(page.getByTestId('session-running')).toHaveCount(0);
 
-  // Press Send: the release reopens the session through a fresh `claude
-  // --resume` pane (a new pane token — surviving panes are never re-attached),
-  // types the released prompt, and the resumed fake's echo loop answers it. The
-  // pending strip drains and the turn completes.
+  // Press Send: the release types the prompt into the re-adopted pane, and the
+  // surviving fake answers it. The pending strip drains and the turn completes.
   await sendButton.click();
 
   await expect(pending).toHaveCount(0, { timeout: 30_000 });

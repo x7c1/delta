@@ -128,6 +128,7 @@ where
             session,
             open: state.open,
             pane_starting: state.pane_starting,
+            hooks_unreachable: state.hooks_unreachable,
             main_thread_id,
             last_activity_at,
         })

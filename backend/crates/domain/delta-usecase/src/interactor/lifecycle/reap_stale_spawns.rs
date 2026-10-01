@@ -118,7 +118,14 @@ where
                 "reaping a resume that never became ready before its deadline; \
                  killing its pane, cancelling any held prompt, reporting SpawnFailed"
             );
-            self.kill_pane_best_effort(resuming.token.as_str()).await;
+            // The binding was dropped with the stale resume, so the row must
+            // not keep naming a pane that is gone. A pane that could not be
+            // confirmed gone keeps its record: it may still be running, and the
+            // record is what lets the next send's resume backstop adopt it
+            // instead of launching a second agent beside it.
+            if self.kill_pane_best_effort(resuming.token.as_str()).await {
+                self.forget_pane_best_effort().await;
+            }
             // The session's pane is gone: feed `Close` into the turn machine,
             // which cancels the held first prompt's outstanding send (if any)
             // so its row does not shadow correlation when the session is later
@@ -212,24 +219,32 @@ where
     /// never letting a teardown error mask the failure report (the launch is
     /// already removed from the runtime state, so the failure event must still
     /// fire).
-    pub(in crate::interactor) async fn kill_pane_best_effort(&self, token: &str) {
+    ///
+    /// Returns whether the pane is known to be gone: it was killed, or the
+    /// probe found it already absent. `false` means a probe or kill failed and
+    /// the pane may still be running, so a caller must not drop what would
+    /// find it again.
+    pub(in crate::interactor) async fn kill_pane_best_effort(&self, token: &str) -> bool {
         match self.tmux.has_session(token).await {
-            Ok(true) => {
-                if let Err(err) = self.tmux.kill_session(token).await {
+            Ok(true) => match self.tmux.kill_session(token).await {
+                Ok(()) => true,
+                Err(err) => {
                     tracing::warn!(
                         token = %token,
                         error = %err,
                         "failed to kill the failed launch's pane (continuing)"
                     );
+                    false
                 }
-            }
-            Ok(false) => {}
+            },
+            Ok(false) => true,
             Err(err) => {
                 tracing::warn!(
                     token = %token,
                     error = %err,
                     "failed to probe the failed launch's pane (continuing)"
                 );
+                false
             }
         }
     }

@@ -15,8 +15,8 @@ use delta_model::{
     Session, SessionId, Thread, ThreadId,
 };
 use delta_usecase::{
-    CloneRoot, NewSession, RecentWorkdir, RepositoryCloneRow, SessionPageCursor, SessionPageRow,
-    SessionStore, SpawningSession,
+    CloneRoot, NewSession, RecentWorkdir, RememberedPane, RepositoryCloneRow, SessionPageCursor,
+    SessionPageRow, SessionStore, SpawningSession,
 };
 
 use super::SqliteStore;
@@ -91,6 +91,31 @@ impl SessionStore for SqliteStore {
         id: &SessionId,
     ) -> std::result::Result<Option<Session>, delta_usecase::Error> {
         self.session(id).await
+    }
+
+    async fn remember_pane(
+        &self,
+        id: &SessionId,
+        pane: &RememberedPane,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        self.remember_pane(id, pane).await
+    }
+
+    async fn forget_pane(&self, id: &SessionId) -> std::result::Result<(), delta_usecase::Error> {
+        self.forget_pane(id).await
+    }
+
+    async fn remembered_pane(
+        &self,
+        id: &SessionId,
+    ) -> std::result::Result<Option<RememberedPane>, delta_usecase::Error> {
+        self.remembered_pane(id).await
+    }
+
+    async fn remembered_panes(
+        &self,
+    ) -> std::result::Result<Vec<(SessionId, RememberedPane)>, delta_usecase::Error> {
+        self.remembered_panes().await
     }
 
     async fn main_thread_id(
@@ -226,6 +251,14 @@ impl SessionStore for SqliteStore {
 
     async fn release_held_send(&self, id: i64) -> std::result::Result<bool, delta_usecase::Error> {
         self.release_held_send(id).await
+    }
+
+    async fn settle_held_send(
+        &self,
+        id: i64,
+        matched_uuid: &MessageUuid,
+    ) -> std::result::Result<bool, delta_usecase::Error> {
+        self.settle_held_send(id, matched_uuid).await
     }
 
     async fn head_dispatched_send(

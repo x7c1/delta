@@ -12,6 +12,7 @@ use delta_model::{
 
 use crate::error::Result;
 use crate::ports::new_session::NewSession;
+use crate::ports::remembered_pane::RememberedPane;
 use crate::ports::spawning_session::SpawningSession;
 use crate::session_page::SessionPageCursor;
 
@@ -190,6 +191,36 @@ pub trait SessionStore: std::marker::Send + Sync {
 
     /// Look up a session by id, if it exists.
     async fn session(&self, id: &SessionId) -> Result<Option<Session>>;
+
+    /// Record the tmux pane a session is bound to, replacing whatever was
+    /// recorded before. A missing row is a no-op.
+    ///
+    /// Written whenever a pane-backed session is bound — a fresh spawn's first
+    /// hook, a resume, a re-adoption after a restart — so that the row always
+    /// names the pane the session's agent is running in. See
+    /// [`RememberedPane`] for why this is persisted at all.
+    ///
+    /// Also clears the record of any *other* row that names the same tmux
+    /// session, in the same write. Delta reuses `delta-<n>` names across
+    /// restarts (the minter skips only names tmux still knows), so another row
+    /// naming this one can only be remembering a pane that died before the
+    /// name was minted again — a record left stale by a failed clear or a
+    /// probe that could not run. Kept, it would make that row's next send
+    /// adopt this session's pane as its own.
+    async fn remember_pane(&self, id: &SessionId, pane: &RememberedPane) -> Result<()>;
+
+    /// Erase the session's remembered pane: the session was torn down (its
+    /// pane killed, or found gone), so no pane is running for it any more. A
+    /// row with nothing remembered, or a missing row, is a no-op.
+    async fn forget_pane(&self, id: &SessionId) -> Result<()>;
+
+    /// The pane the session's row remembers, or `None` when nothing is
+    /// recorded (closed, never bound, adapter-backed) or the row is missing.
+    async fn remembered_pane(&self, id: &SessionId) -> Result<Option<RememberedPane>>;
+
+    /// Every session whose row remembers a pane, oldest session first: the
+    /// candidates a restarted Delta tries to re-adopt.
+    async fn remembered_panes(&self) -> Result<Vec<(SessionId, RememberedPane)>>;
 
     /// The timestamp of a session's most recent message, or `None` when it has
     /// no timestamped message yet. Read from the denormalized
@@ -426,6 +457,21 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// release the row is an ordinary `queued` send again and dispatches
     /// through the usual idle triggers.
     async fn release_held_send(&self, id: i64) -> Result<bool>;
+
+    /// Settle a **held** send as delivered, attributed to the transcript line
+    /// `matched_uuid` — moving it to `matched` (and clearing its hold marker)
+    /// only while it is still `queued` and held — returning whether a row
+    /// actually transitioned.
+    ///
+    /// The held-row sibling of [`Self::mark_send_matched`]. A row the boot
+    /// restore held ([`Self::restore_all_dispatched`]) was `dispatched` when
+    /// the previous process stopped: its keystrokes may well have reached a
+    /// pane that outlived that process and submitted there. When the pane is
+    /// re-adopted and its transcript catch-up shows the prompt, the message was
+    /// delivered, and leaving the row held would invite the user to type it a
+    /// second time. The guard makes this a no-op for a row that was released,
+    /// cancelled, or already settled in the meantime.
+    async fn settle_held_send(&self, id: i64, matched_uuid: &MessageUuid) -> Result<bool>;
 
     /// The outstanding dispatched send for a session, if any.
     ///
@@ -832,6 +878,22 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self).session(id).await
     }
 
+    async fn remember_pane(&self, id: &SessionId, pane: &RememberedPane) -> Result<()> {
+        (**self).remember_pane(id, pane).await
+    }
+
+    async fn forget_pane(&self, id: &SessionId) -> Result<()> {
+        (**self).forget_pane(id).await
+    }
+
+    async fn remembered_pane(&self, id: &SessionId) -> Result<Option<RememberedPane>> {
+        (**self).remembered_pane(id).await
+    }
+
+    async fn remembered_panes(&self) -> Result<Vec<(SessionId, RememberedPane)>> {
+        (**self).remembered_panes().await
+    }
+
     async fn last_activity_at(&self, session_id: &SessionId) -> Result<Option<String>> {
         (**self).last_activity_at(session_id).await
     }
@@ -964,6 +1026,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn release_held_send(&self, id: i64) -> Result<bool> {
         (**self).release_held_send(id).await
+    }
+
+    async fn settle_held_send(&self, id: i64, matched_uuid: &MessageUuid) -> Result<bool> {
+        (**self).settle_held_send(id, matched_uuid).await
     }
 
     async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>> {

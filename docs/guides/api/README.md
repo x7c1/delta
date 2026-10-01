@@ -130,7 +130,9 @@ injects it is dev-server only). The API base needs nothing: the build leaves
     from — a plain send there is accepted as a `queued` row instead; and a
     removal aimed at a session that has not finished starting),
     `session_open` (a removal aimed at a session that is still open — close it
-    first), `permission_not_pending`, `question_not_pending`,
+    first), `session_hooks_unreachable` (a send into a session re-adopted after
+    a restart whose agent's hooks no longer reach the server — close it and
+    send again), `permission_not_pending`, `question_not_pending`,
     `send_not_cancellable`, `send_not_releasable`, `clone_root_duplicate`,
     `clone_dest_exists` (the one path a clone could land on is already taken —
     there is no fallback naming), or `launch_option_builtin` (a delete aimed at

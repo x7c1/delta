@@ -193,6 +193,15 @@ export interface TranscriptPaneProps {
    * unlike the terminal flag, is `false`).
    */
   providerHasAllowForSession?: boolean;
+  /**
+   * True when the focused session is open on a pane Delta re-adopted after a
+   * restart whose agent can no longer deliver hooks to this server — the
+   * session row's `hooks_unreachable`. Its transcript and terminal still work,
+   * but prompt echoes, turn ends and permission dialogs never arrive, so the
+   * pane says how to get it back: use the terminal, or Close it and send again,
+   * which resumes it with fresh settings.
+   */
+  hooksUnreachable?: boolean;
 }
 
 /**
@@ -214,6 +223,7 @@ export function TranscriptPane({
   paneToggleButton = null,
   providerHasTerminal,
   providerHasAllowForSession,
+  hooksUnreachable = false,
 }: TranscriptPaneProps) {
   const client = useApiClient();
   const queryClient = useQueryClient();
@@ -901,7 +911,15 @@ export function TranscriptPane({
   const composerMode: ComposerMode | undefined = newSession
     ? { kind: 'new-session' }
     : activeThread && !resumeUnavailable
-      ? { kind: 'thread', activeThread, readOnly, spawning }
+      ? {
+          kind: 'thread',
+          activeThread,
+          readOnly,
+          spawning,
+          // Only an open session has hooks to lose; a closed one resumes on
+          // send, which is exactly the way back the notice offers.
+          hooksUnreachable: hooksUnreachable && !readOnly,
+        }
       : undefined;
 
   // The floating layer over the scrolling transcript (see Panel's `overlay`):
@@ -1010,6 +1028,9 @@ export function TranscriptPane({
     // "starting" placeholder is what says so; the closed notice would be a
     // second, wrong explanation.
     const showClosedNotice = readOnly && !newSession && !spawning;
+    // Only an open session has hooks to lose: once it is closed, the closed
+    // notice (and the resume a send performs) is the whole story.
+    const showHooksUnreachable = hooksUnreachable && !readOnly && !newSession;
     // Whether the upper (notices) card has anything to show. Each of these
     // conditions matches exactly one child it gates — `showClosedNotice` the
     // closed notice, `showExternalInput` the external-input notice, and a non-empty
@@ -1018,6 +1039,7 @@ export function TranscriptPane({
     // box when none of them are present.
     const hasNotices =
       showClosedNotice ||
+      showHooksUnreachable ||
       (showExternalInput && activeThread !== null) ||
       (showSendParked && activeThread !== null) ||
       pendingEntries.length > 0;
@@ -1042,6 +1064,23 @@ export function TranscriptPane({
                 <Badge tone="neutral">closed</Badge>
                 <span>
                   This session is closed. Sending a message resumes it.
+                </span>
+              </div>
+            )}
+
+            {showHooksUnreachable && (
+              <div
+                className="flex items-center gap-2 rounded border border-danger/30 bg-danger/10 px-2 py-1 text-caption text-danger"
+                data-testid="hooks-unreachable-notice"
+                role="alert"
+              >
+                <Badge className="shrink-0" tone="warning">
+                  lost contact
+                </Badge>
+                <span>
+                  Delta lost contact with this session. Use the terminal, or
+                  choose Close in the session&apos;s menu and send again to
+                  resume.
                 </span>
               </div>
             )}

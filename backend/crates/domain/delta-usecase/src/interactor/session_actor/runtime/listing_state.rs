@@ -21,6 +21,11 @@ pub struct SessionListingState {
     /// [`SessionRuntime::has_live_pane`], which is also true while the launch
     /// is still preparing and no pane exists yet.
     pub pane_starting: bool,
+    /// Whether the session is open on a re-adopted pane whose agent can no
+    /// longer deliver hooks to this server (see
+    /// [`super::OpenHandle::hooks_unreachable`]). `false` whenever the
+    /// session is not open on a pane.
+    pub hooks_unreachable: bool,
 }
 
 impl SessionRuntime {
@@ -29,6 +34,7 @@ impl SessionRuntime {
         SessionListingState {
             open: self.is_open(),
             pane_starting: self.attachable_pane().is_some_and(|pane| !pane.bound),
+            hooks_unreachable: self.handle().is_some_and(|handle| handle.hooks_unreachable),
         }
     }
 }

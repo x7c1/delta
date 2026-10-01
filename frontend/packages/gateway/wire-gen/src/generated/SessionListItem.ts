@@ -19,7 +19,18 @@ open: boolean,
  * and never saw `spawn_pane_ready`) can offer the terminal. Mutually
  * exclusive with `open`.
  */
-pane_starting: boolean, main_thread_id: number, 
+pane_starting: boolean, 
+/**
+ * Whether the session is open on a pane Delta re-adopted after a restart
+ * but whose agent can no longer deliver hooks to this server, because the
+ * hook endpoint (port or secret) changed between the two runs. Its
+ * transcript and terminal still work; prompt echoes, turn ends and
+ * permission dialogs do not arrive. The browser shows a notice telling the
+ * user to use the terminal, or to close the session and send again (which
+ * resumes it with fresh settings). Always `false` for a session that is
+ * not open.
+ */
+hooks_unreachable: boolean, main_thread_id: number, 
 /**
  * Timestamp of the session's most recent message (ISO-8601 UTC), or `null`
  * when the session has no messages yet.

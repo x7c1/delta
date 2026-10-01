@@ -125,8 +125,10 @@ Delta-minted token (`delta-<n>`), running `claude` in its own working directory
 (`<base>/<token>`) with Claude Code hooks pointed back at this server. Naming the
 tmux session after a Delta-owned token (never Claude's `session_id`) is what lets
 a closed conversation be resumed (`claude --resume <id>`) under a fresh tmux
-session without a name collision. Open/closed is in-memory only: after a restart
-every persisted conversation is "closed" until it is resumed. Authentication is
+session without a name collision. Open/closed is in-memory, except that a
+session's row remembers the tmux pane it is bound to: after a restart the server
+re-adopts each remembered pane still running before it serves anything, and every
+other persisted conversation is "closed" until it is resumed. Authentication is
 assumed — the server relies on a cached Claude Code token (or
 `CLAUDE_CODE_OAUTH_TOKEN`) and never runs interactive OAuth.
 
@@ -135,7 +137,10 @@ assumed — the server relies on a cached Claude Code token (or
 `backend/crates/apps/delta-app` is a Tauri v2 shell that runs `delta-server`
 inside its own process on a free loopback port and opens one window on it,
 serving the built SPA (`embed-web`). It is a launcher only: the page talks to
-the server over plain HTTP exactly as a browser does, with no Tauri IPC.
+the server over plain HTTP exactly as a browser does, with no Tauri IPC. It is
+single-instance (`tauri-plugin-single-instance`): a second launch focuses the
+running window and exits, so it cannot start a rival server on the same
+database and tmux socket, nor take over the hook port the running copy holds.
 
 The crate is left out of the workspace's `default-members`, so `cargo build`,
 `cargo test` and `cargo clippy` in `backend/` (and `make build` / `make test` /

@@ -17,7 +17,10 @@ where
     W: Workspace,
     G: GitWorktree,
 {
-    /// Resume a closed but known session under a fresh tmux session.
+    /// Resume a closed but known session under a fresh tmux session — or, when
+    /// the row remembers a pane that is still running (it survived a restart of
+    /// Delta), adopt that pane instead, so a conversation is never driven by
+    /// two `claude` processes at once (see the `adopt_pane` module).
     ///
     /// The conversational `session_id` is known up front, so this mints a fresh
     /// token, re-writes the settings file (at Delta's own path, not the session
@@ -85,6 +88,16 @@ where
             return Ok(());
         }
 
+        // Never-double-launch backstop: the row may remember a pane whose
+        // agent is still running — it survived a restart of Delta and boot did
+        // not (or could not) re-adopt it. Resuming would start a second
+        // `claude` on the same conversation next to it, so that pane is
+        // adopted instead. Checked before the resume gate: a live agent needs
+        // no transcript to be reached.
+        if self.adopt_remembered_pane_if_alive(&session).await? {
+            return Ok(());
+        }
+
         // Resume gate: `claude --resume <id>` replays from the local JSONL
         // transcript, so a missing transcript makes resume impossible. tmux
         // would still report a clean spawn (it only checks `new-session`'s
@@ -135,10 +148,9 @@ where
             .create_session(token.as_str(), &workdir, &command)
             .await?;
         let pane = pane_for(token.as_str());
-        self.state.bind(OpenHandle {
-            token: token.clone(),
-            pane: pane.clone(),
-        });
+        self.state
+            .bind(OpenHandle::launched(token.clone(), pane.clone()));
+        self.remember_bound_pane().await;
         // Record the resume as not-yet-ready: the pane is bound, but the
         // first prompt is held until `SessionStart(source=resume)` confirms
         // the cold TUI can accept input. `enqueue_into_open` parks the

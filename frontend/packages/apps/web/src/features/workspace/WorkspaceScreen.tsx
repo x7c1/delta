@@ -498,6 +498,9 @@ export function WorkspaceScreen() {
   // browser that reloaded mid-launch (or a second tab opened after the pane
   // came up) offers the terminal just the same.
   const focusedPaneStarting = focusedItem?.pane_starting ?? false;
+  // The focused session is open on a pane re-adopted after a restart whose
+  // agent's hooks no longer reach this server (see `TranscriptPane`).
+  const focusedHooksUnreachable = focusedItem?.hooks_unreachable ?? false;
   // The same session in the beat before its row reaches the loaded pages: it
   // was focused off the tracked spawn alone, so there is nothing to render yet
   // — but it is arriving, not gone.
@@ -706,6 +709,7 @@ export function WorkspaceScreen() {
             providerHasAllowForSession={
               focusedCapabilities?.has_allow_for_session
             }
+            hooksUnreachable={focusedHooksUnreachable}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-secondary text-fg-subtle">

@@ -41,6 +41,7 @@ mod workdir;
 pub use hooks::PermissionWait;
 pub use open_cwd::{ExternalHandler, ExternalHandlerId, VSCODE_HANDLER_ID};
 pub use permission_decision::PermissionDecision;
+pub use routing::ReadoptionSummary;
 pub use session_actor::runtime::{
     AttachablePane, PendingPermission, PendingQuestion, RunningSubagent, SessionLiveState,
 };

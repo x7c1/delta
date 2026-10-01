@@ -309,6 +309,9 @@ export function createMockApi(): MockApi {
         // launched-but-unbound window; a scenario that wants one sets the flag
         // on its store entry.
         pane_starting: entry.paneStarting ?? false,
+        // The mock never restarts, so no session is ever a re-adopted pane
+        // whose hooks stopped arriving.
+        hooks_unreachable: false,
         main_thread_id: entry.mainThreadId,
         last_activity_at: lastActivityAt(entry.threads.map((t) => t.id)),
       }));

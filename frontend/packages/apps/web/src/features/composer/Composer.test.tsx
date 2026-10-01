@@ -166,6 +166,68 @@ describe('Composer', () => {
     expect(useLiveStore.getState().sending).toHaveLength(0);
   });
 
+  it('refuses to send into a session that lost contact with its hooks', async () => {
+    // A session re-adopted after a restart whose agent's hooks no longer reach
+    // the server: typing into its pane would make the server interrupt the
+    // running turn and submit the prompt twice, so the server refuses the
+    // send. The composer does not even try — it points at the lost-contact
+    // notice above and keeps the draft for after a Close.
+    let posted = 0;
+    server.use(
+      http.post('http://localhost/api/sends', () => {
+        posted += 1;
+        return HttpResponse.json(
+          { error: 'unreachable', code: 'session_hooks_unreachable' },
+          { status: 409 },
+        );
+      }),
+    );
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer
+            mode={{
+              kind: 'thread',
+              activeThread: mainThread,
+              readOnly: false,
+              spawning: false,
+              hooksUnreachable: true,
+            }}
+          />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    expect(textarea).toHaveAttribute(
+      'placeholder',
+      'Delta lost contact with this session — see the notice above…',
+    );
+    fireEvent.change(textarea, { target: { value: 'keep going' } });
+    const send = screen.getByRole('button', { name: 'Send' });
+    expect(send).toBeDisabled();
+    expect(send).toHaveAttribute(
+      'title',
+      'Delta lost contact with this session — see the notice above',
+    );
+
+    // Neither the button nor the keyboard shortcut sends.
+    fireEvent.click(send);
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(posted).toBe(0);
+    expect(useLiveStore.getState().sending).toHaveLength(0);
+    expect(useComposerStore.getState().drafts[MAIN_THREAD_ID]).toBe(
+      'keep going',
+    );
+  });
+
   it('enqueues an optimistic send on a closed (read-only) resume', async () => {
     render(
       <QueryClientProvider

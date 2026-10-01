@@ -43,6 +43,16 @@ impl PaneToken {
         Self(format!("adapter-{}", session_id.as_str()))
     }
 
+    /// The token of a tmux session a session row remembered from an earlier
+    /// binding — possibly one minted by a previous Delta process, whose pane
+    /// survived it. Not minted, because the name already exists in tmux: the
+    /// whole point is to address *that* session again. The minter never hands
+    /// such a name out a second time while the session is alive, because
+    /// minting skips every name tmux still knows.
+    pub(crate) fn adopted(name: String) -> Self {
+        Self(name)
+    }
+
     /// Construct a token from a raw session name, for tests that seed the
     /// registry directly (the watchdog tests push a pending spawn whose token a
     /// production minter would otherwise own).

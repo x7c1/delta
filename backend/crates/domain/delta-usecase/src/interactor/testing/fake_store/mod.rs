@@ -12,6 +12,7 @@ mod launch_options;
 mod messages;
 mod permissions;
 mod prompt_templates;
+mod remembered_panes;
 mod sends;
 mod session_history;
 mod session_store;
@@ -27,7 +28,7 @@ use delta_model::{
     LaunchOption, Message, PermissionRequest, PromptTemplate, Send, Session, SessionId, Thread,
 };
 
-use crate::ports::CloneRoot;
+use crate::ports::{CloneRoot, RememberedPane};
 
 /// The creation timestamp every fake-created row carries. Fixed so assertions
 /// can name it; the real store stamps the wall clock.
@@ -65,6 +66,9 @@ pub(crate) struct FakeStoreInner {
     /// `task_id` learned via the `PostToolUse(Agent)` hook.
     pub(crate) subagent_launches: HashMap<(SessionId, String), SubagentLaunch>,
     pub(crate) clone_roots: Vec<CloneRoot>,
+    /// The tmux pane each session row remembers, mirroring the SQL
+    /// `session.tmux_session` / `tmux_pane` / `hooks_unreachable` columns.
+    pub(crate) remembered_panes: HashMap<SessionId, RememberedPane>,
     /// When set, [`SessionStore::cancel_send`](crate::ports::SessionStore::cancel_send) fails with a store error, so a
     /// test can make the `TurnInput::Close` of a session with an unechoed send
     /// fail at its row write.

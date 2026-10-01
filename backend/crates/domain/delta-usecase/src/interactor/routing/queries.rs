@@ -78,6 +78,7 @@ where
             SessionListingState {
                 open: false,
                 pane_starting: false,
+                hooks_unreachable: false,
             },
         )
         .await

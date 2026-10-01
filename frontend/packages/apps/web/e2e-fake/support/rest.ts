@@ -58,3 +58,16 @@ export async function fetchMessageCount(
   const body = (await response.json()) as MessagesResponse;
   return body.messages.length;
 }
+
+/** Whether `GET /api/sessions` lists the session as open. */
+export async function sessionIsOpen(
+  page: Page,
+  sessionId: string,
+): Promise<boolean> {
+  const response = await page.request.get('/api/sessions');
+  expect(response.ok()).toBe(true);
+  const body = (await response.json()) as SessionsResponse;
+  const item = body.sessions.find((entry) => entry.session.id === sessionId);
+  expect(item, `session ${sessionId} is listed`).toBeDefined();
+  return item?.open ?? false;
+}

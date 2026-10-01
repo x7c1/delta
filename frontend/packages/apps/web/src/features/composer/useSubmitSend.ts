@@ -31,7 +31,10 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
  * 4. on failure, keep the chip as a recoverable `failed` row — except a
  *    `resume_unavailable` rejection, where the turn can never start (the
  *    transcript is gone): the chip is dropped outright and the session is
- *    flagged so the inline notice shows instead.
+ *    flagged so the inline notice shows instead. A `session_hooks_unreachable`
+ *    rejection keeps its failed chip (the text is not lost) and refetches the
+ *    session list: the composer only sends there from a stale view, and the
+ *    fresh row carries the flag that shows the lost-contact notice.
  *
  * Resolves with the accepted send; rejects with the original error after the
  * bookkeeping above, so callers only add their own post-success steps.
@@ -150,6 +153,16 @@ export function useSubmitSend(): (args: {
           removeSending(id);
           markResumeUnavailable(target.sessionId);
         } else {
+          if (
+            error instanceof ApiError &&
+            error.code === 'session_hooks_unreachable'
+          ) {
+            // The list this composer rendered from did not know yet — the
+            // send itself may have been what adopted the pane. The refetch
+            // brings the flag, which disables Send and shows the notice
+            // saying what to do instead.
+            invalidateSessions(queryClient);
+          }
           // A refused launch option is the one send failure whose message says
           // something the chip's own copy cannot: it names the field, or the
           // config key path, the selection got wrong. Carry it onto the chip so

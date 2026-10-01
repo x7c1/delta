@@ -30,6 +30,11 @@ where
     /// that window is refused ([`Error::SessionSpawning`]): it needs a message
     /// to branch from, and a session that has not bound has none.
     ///
+    /// A pane-backed session open on a re-adopted pane whose agent can no
+    /// longer reach this server's hooks is refused
+    /// ([`Error::SessionHooksUnreachable`], raised by [`Self::ensure_open`])
+    /// with nothing typed and no row written.
+    ///
     /// A branch send (`branch_from: Some`) requires an existing session —
     /// there must be a message to branch from — which the thread target
     /// inherently provides.

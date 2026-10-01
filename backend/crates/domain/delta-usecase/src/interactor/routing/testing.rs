@@ -226,10 +226,10 @@ where
     pub(crate) async fn bind_open_session(&self, token: &str, session_id: &SessionId) {
         let token = token.to_owned();
         self.with_runtime(session_id, move |state| {
-            state.bind(OpenHandle {
-                token: PaneToken::from_raw(&token),
-                pane: pane_for(&token),
-            });
+            state.bind(OpenHandle::launched(
+                PaneToken::from_raw(&token),
+                pane_for(&token),
+            ));
         })
         .await;
     }
@@ -285,10 +285,10 @@ where
     ) {
         let token = token.to_owned();
         self.with_runtime(session_id, move |state| {
-            state.bind(OpenHandle {
-                token: PaneToken::from_raw(&token),
-                pane: pane_for(&token),
-            });
+            state.bind(OpenHandle::launched(
+                PaneToken::from_raw(&token),
+                pane_for(&token),
+            ));
             state.start_resuming(ResumingSession {
                 token: PaneToken::from_raw(&token),
                 pane: pane_for(&token),

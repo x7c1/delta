@@ -241,6 +241,26 @@ impl SqliteStore {
         Ok(affected > 0)
     }
 
+    /// Settle a still-`queued`, still-held send as matched to `matched_uuid`,
+    /// clearing its hold marker. The status and marker guard keeps a row that
+    /// was released, cancelled or already settled untouched — see the port
+    /// docs for when a held row turns out to have been delivered.
+    pub(super) async fn settle_held_send(
+        &self,
+        id: i64,
+        matched_uuid: &MessageUuid,
+    ) -> std::result::Result<bool, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let affected = conn
+            .execute(
+                "UPDATE send SET status = 'matched', matched_uuid = ?2, held_at = NULL
+                 WHERE id = ?1 AND status = 'queued' AND held_at IS NOT NULL",
+                params![id, matched_uuid.as_str()],
+            )
+            .map_err(Error::from)?;
+        Ok(affected > 0)
+    }
+
     pub(super) async fn head_dispatched_send(
         &self,
         session_id: &SessionId,

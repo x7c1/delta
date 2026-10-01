@@ -158,6 +158,26 @@ impl FakeStore {
         }
     }
 
+    pub(super) async fn settle_held_send(
+        &self,
+        id: i64,
+        matched_uuid: &MessageUuid,
+    ) -> Result<bool> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(s) = g
+            .sends
+            .iter_mut()
+            .find(|s| s.id == id && s.status == SendStatus::Queued && s.held_at.is_some())
+        {
+            s.status = SendStatus::Matched;
+            s.matched_uuid = Some(matched_uuid.clone());
+            s.held_at = None;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     pub(super) async fn head_dispatched_send(
         &self,
         session_id: &SessionId,

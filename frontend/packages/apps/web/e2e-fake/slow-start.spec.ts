@@ -1,5 +1,5 @@
 import { test, expect } from './support/fixtures';
-import { composerInput, startNewSession } from './support/app';
+import { composerInput, focusedSessionNode, startNewSession } from './support/app';
 
 /**
  * A new session is the user's the moment the server accepts its first send —
@@ -32,6 +32,8 @@ test('a slow launch is focused as a starting session, then comes up in place', a
     .locator('li')
     .filter({ has: page.getByRole('status', { name: 'Starting', exact: true }) });
   await expect(startingCard).toHaveCount(1, { timeout: 2_000 });
+  // …and it is the focused one, so the `Open` below is this card's own flip.
+  await expect(startingCard.locator('[aria-current="true"]')).toHaveCount(1);
   // The new-session screen is behind us: this is the spawned session's screen.
   await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
   const textbox = composerInput(page);
@@ -67,9 +69,11 @@ test('a slow launch is focused as a starting session, then comes up in place', a
   await expect(textbox).toHaveValue('');
 
   // The hook lands: the very same card flips to Open — no second session, no
-  // return to the new-session screen — and the scripted reply arrives.
+  // return to the new-session screen — and the scripted reply arrives. Scoped
+  // to the focused card: after an earlier spec's server restart, the Claude
+  // sessions earlier specs left running were re-adopted and read `Open` too.
   await expect(
-    page.getByRole('status', { name: 'Open', exact: true }),
+    focusedSessionNode(page).getByRole('status', { name: 'Open', exact: true }),
   ).toHaveCount(1, { timeout: 15_000 });
   await expect(page.getByRole('status', { name: 'Starting', exact: true })).toHaveCount(0);
   // The opening turn ends, which is what flushes the queue: the follow-up is

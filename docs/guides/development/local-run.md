@@ -62,8 +62,10 @@ shows it (empty on a fresh database); opening the browser does not spawn
 anything. From the composer, the first Send (or a New action) spawns a fresh
 `claude` session. Existing sessions show as open or closed: a closed session is
 view-only — you can read its history with no process running — and the first
-Send to it resumes it (`claude --resume`). After a server restart every prior
-session shows as closed until it is resumed via Send.
+Send to it resumes it (`claude --resume`). After a server restart, a session
+whose `claude` is still running in its tmux pane is re-adopted and shows as open
+on that same pane; every other prior session shows as closed until it is
+resumed via Send.
 
 ## First run / answering prompts
 

@@ -80,6 +80,15 @@ export interface ApiClientOptions {
  * another tab reopened. Kept apart from `session_spawning` because the two ask
  * the user for different things: close it first, versus wait for it to come up.
  *
+ * `session_hooks_unreachable` means a send (or a held send's release) named a
+ * session open on a pane re-adopted after a restart whose agent can no longer
+ * deliver hooks to the server (the session row's `hooks_unreachable`). Nothing
+ * was typed: without the prompt's echo the server would interrupt the running
+ * turn and type the prompt twice. The composer refuses such a session itself,
+ * so callers meet this from a stale view; they refetch the session list so the
+ * lost-contact notice shows, and point the user at it (use the terminal, or
+ * Close the session and send again).
+ *
  * `permission_not_pending` means a permission decision can no longer take
  * effect: the request was already decided, or its hook wait timed out and the
  * interactive TUI prompt owns it now. Callers branch on this to swap the
@@ -141,6 +150,7 @@ export type ApiErrorCode =
   | 'resume_unavailable'
   | 'session_spawning'
   | 'session_open'
+  | 'session_hooks_unreachable'
   | 'permission_not_pending'
   | 'permission_decision_unsupported'
   | 'question_not_pending'

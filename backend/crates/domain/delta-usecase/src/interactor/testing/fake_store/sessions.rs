@@ -188,6 +188,7 @@ impl FakeStore {
         g.permissions.retain(|p| &p.session_id != id);
         g.transcript_lines_read.remove(id);
         g.subagent_launches.retain(|(sid, _), _| sid != id);
+        g.remembered_panes.remove(id);
         Ok(())
     }
 

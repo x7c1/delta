@@ -86,7 +86,9 @@ impl AppState {
     ///
     /// Async because the composition root's boot-time send reconcile (the
     /// sweep returning restart-orphaned `dispatched` rows to `queued`) runs
-    /// against the freshly-opened store before the state is handed out.
+    /// against the freshly-opened store before the state is handed out, and
+    /// so does the re-adoption of the sessions whose panes survived the
+    /// restart ([`Self::readopt_surviving_sessions`]).
     pub async fn build(config: &Config) -> anyhow::Result<Self> {
         // The comms log is created here, before the composition root wires the
         // adapters, because it is the one gateway BOTH sides need: the adapters
@@ -95,13 +97,52 @@ impl AppState {
         let comms_log = Arc::new(CommsLogHub::new());
         let interactor =
             delta_bootstrap::build(config, Arc::clone(&comms_log) as Arc<dyn CommsLogSink>).await?;
-        Ok(Self::from_interactor(
+        let state = Self::from_interactor(
             interactor,
             &config.tmux_socket,
             &config.auth_token,
             &config.hook_secret,
         )
-        .with_comms_log(comms_log))
+        .with_comms_log(comms_log);
+        state
+            .readopt_surviving_sessions(config.hook_endpoint_changed)
+            .await;
+        Ok(state)
+    }
+
+    /// Re-adopt the Claude Code sessions whose tmux panes survived the restart,
+    /// before the server accepts its first request.
+    ///
+    /// Run here rather than in the composition root because it starts session
+    /// actors, and the interactor's async event seam must be wired (by
+    /// [`Self::from_interactor`]) before any actor exists. Running it before the
+    /// listener is served is what keeps a send from racing it; the use case's
+    /// resume backstop covers one that does anyway.
+    ///
+    /// A failure here is logged, not returned: the sessions it could not look
+    /// at stay closed with their record kept, and that backstop still adopts
+    /// each one before a send could resume it into a second process. Refusing
+    /// to start over it would cost the user every session instead of a few.
+    async fn readopt_surviving_sessions(&self, hook_endpoint_changed: bool) {
+        match self
+            .interactor
+            .readopt_surviving_sessions(hook_endpoint_changed)
+            .await
+        {
+            Ok(summary) => tracing::info!(
+                adopted = summary.adopted,
+                hooks_unreachable = summary.hooks_unreachable,
+                gone = summary.gone,
+                unprobed = summary.unprobed,
+                failed = summary.failed,
+                "re-adopted the sessions that survived the restart"
+            ),
+            Err(err) => tracing::error!(
+                error = %err,
+                "could not list the sessions that may have survived the restart; \
+                 they stay closed until a send re-adopts or resumes each one"
+            ),
+        }
     }
 
     /// Build the shared state from an already-wired Interactor.

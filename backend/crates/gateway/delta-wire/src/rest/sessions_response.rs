@@ -22,6 +22,15 @@ pub struct WireSessionListItem {
     /// and never saw `spawn_pane_ready`) can offer the terminal. Mutually
     /// exclusive with `open`.
     pub pane_starting: bool,
+    /// Whether the session is open on a pane Delta re-adopted after a restart
+    /// but whose agent can no longer deliver hooks to this server, because the
+    /// hook endpoint (port or secret) changed between the two runs. Its
+    /// transcript and terminal still work; prompt echoes, turn ends and
+    /// permission dialogs do not arrive. The browser shows a notice telling the
+    /// user to use the terminal, or to close the session and send again (which
+    /// resumes it with fresh settings). Always `false` for a session that is
+    /// not open.
+    pub hooks_unreachable: bool,
     pub main_thread_id: i64,
     /// Timestamp of the session's most recent message (ISO-8601 UTC), or `null`
     /// when the session has no messages yet.
@@ -34,6 +43,7 @@ impl From<SessionListing> for WireSessionListItem {
             session: listing.session.into(),
             open: listing.open,
             pane_starting: listing.pane_starting,
+            hooks_unreachable: listing.hooks_unreachable,
             main_thread_id: listing.main_thread_id.0,
             last_activity_at: listing.last_activity_at,
         }
@@ -81,6 +91,7 @@ mod tests {
             },
             open: true,
             pane_starting: false,
+            hooks_unreachable: false,
             main_thread_id: ThreadId(1),
             last_activity_at: None,
         };
@@ -110,6 +121,7 @@ mod tests {
                     },
                     "open": true,
                     "pane_starting": false,
+                    "hooks_unreachable": false,
                     "main_thread_id": 1,
                     "last_activity_at": null,
                 }],

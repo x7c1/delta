@@ -20,6 +20,7 @@ delta-server = { workspace = true, features = ["embed-web"] }
 anyhow = { workspace = true }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
 tokio = { workspace = true }
 tracing = { workspace = true }
 
