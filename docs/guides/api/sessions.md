@@ -158,7 +158,8 @@ session is a no-op.
 
 - **204 No Content** — the session is now open.
 - **404** — no session with that id.
-- **409** — the session's transcript is gone, so it cannot be resumed (body
+- **409** — the session's transcript is gone and was not found in
+  another project directory, so it cannot be resumed (body
   `code: "resume_unavailable"`); it is left closed and no pane is spawned.
 - **500** — for a Claude session, rewriting the session settings file, seeding
   git trust, or starting the tmux session failed; for a Codex session, the

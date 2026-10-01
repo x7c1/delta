@@ -27,6 +27,22 @@ pub trait Transcript: Send + Sync {
     /// has been removed, so the resume path uses this to refuse upfront rather
     /// than spawning a doomed session.
     async fn exists(&self, path: &str) -> Result<bool>;
+
+    /// Find the transcript Claude Code keeps for `session_id` anywhere under
+    /// the transcript `root`: a `<session id>.jsonl` directly inside one of
+    /// its project directories (`<root>/<project dir>/<session id>.jsonl`).
+    ///
+    /// This is how a session whose transcript was moved while Delta was not
+    /// following it is found again: the move keeps the file name and only
+    /// changes the project directory. Subagents' transcripts, which live
+    /// deeper (`<project dir>/<session id>/subagents/`), are never returned.
+    /// When several project directories hold the file, the one written most
+    /// recently wins and the choice is logged. `None` when no project
+    /// directory holds it (or `root` itself does not exist). An error only
+    /// when `root` cannot be listed, since "not found" would then be a guess;
+    /// a candidate that cannot be inspected is logged and skipped instead.
+    async fn find_session_transcript(&self, root: &str, session_id: &str)
+        -> Result<Option<String>>;
 }
 
 #[async_trait]
@@ -37,5 +53,13 @@ impl Transcript for Box<dyn Transcript> {
 
     async fn exists(&self, path: &str) -> Result<bool> {
         (**self).exists(path).await
+    }
+
+    async fn find_session_transcript(
+        &self,
+        root: &str,
+        session_id: &str,
+    ) -> Result<Option<String>> {
+        (**self).find_session_transcript(root, session_id).await
     }
 }
