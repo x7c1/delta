@@ -665,6 +665,69 @@ describe('PendingQueue server sends', () => {
     expect(screen.getByText('contested')).toBeInTheDocument();
   });
 
+  it('explains a release refused for lost contact and refetches the session list', async () => {
+    // The server refuses the release (409 session_hooks_unreachable): the
+    // session's agent can no longer reach this server. The message points at
+    // the session menu's Close and the lost-contact notice, which only a fresh
+    // session list carries — so the list is invalidated alongside it.
+    server.use(
+      http.get('*/api/sessions/:id/sends', () =>
+        HttpResponse.json({
+          sends: [
+            serverSend({
+              id: 8,
+              text: 'unreachable',
+              status: 'queued',
+              held_at: '2026-01-02T00:00:00Z',
+            }),
+          ],
+          turn: { state: 'idle', send_id: null, thread_id: null },
+          permission: null,
+          question: null,
+          running_subagents: [],
+        }),
+      ),
+      http.post('*/api/sends/:id/release', () =>
+        HttpResponse.json(
+          {
+            error: 'the session cannot deliver hooks to this server',
+            code: 'session_hooks_unreachable',
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    let queryClient!: QueryClient;
+    renderStrip({ kind: 'thread', sessionId: SESSION_ID, threadId: 1 }, (qc) => {
+      queryClient = qc;
+      // A loaded session list, as the navigator holds it.
+      qc.setQueryData(queryKeys.sessions, {
+        pages: [{ sessions: [], next_cursor: null }],
+        pageParams: [null],
+      });
+    });
+
+    await screen.findByText('unreachable');
+    expect(queryClient.getQueryState(queryKeys.sessions)?.isInvalidated).toBe(
+      false,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    });
+    const [notice] = useNotificationStore.getState().notifications;
+    expect(notice.title).toBe('Could not send the message');
+    expect(notice.detail).toMatch(/lost contact with this session/);
+    expect(notice.detail).toMatch(/choose Close in the session's menu/);
+    expect(queryClient.getQueryState(queryKeys.sessions)?.isInvalidated).toBe(
+      true,
+    );
+    // The row stays held: it can be sent once the session has been closed.
+    expect(screen.getByText('unreachable')).toBeInTheDocument();
+  });
+
   it('shows only the active thread’s sends', () => {
     renderStrip(
       { kind: 'thread', sessionId: SESSION_ID, threadId: 1 },
