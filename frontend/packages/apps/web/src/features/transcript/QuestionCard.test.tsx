@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { ApiError } from '@delta/api-client';
 import type { QuestionNotice } from '../../store/liveStore';
 import { QuestionCard } from './QuestionCard';
 
@@ -339,5 +340,59 @@ describe('QuestionCard', () => {
     expect(submit.disabled).toBe(false);
     fireEvent.click(submit);
     expect(onAnswer).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('QuestionCard on a question that is no longer pending', () => {
+  const NOT_PENDING = new ApiError(409, 'not pending', 'question_not_pending');
+
+  function renderConflicting(sessionClosed: boolean, failWith: unknown) {
+    const onNotPending = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <QuestionCard
+        notice={notice(SINGLE)}
+        onAnswer={() => Promise.reject(failWith as Error)}
+        onCancel={cancelOk}
+        onOpenTerminal={noop}
+        onDismiss={onDismiss}
+        sessionClosed={sessionClosed}
+        onNotPending={onNotPending}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('question-option-0-0'));
+    return { onNotPending, onDismiss };
+  }
+
+  it('asks the host to recheck the session and keeps the terminal fallback while it is open', async () => {
+    const { onNotPending } = renderConflicting(false, NOT_PENDING);
+
+    expect(await screen.findByTestId('question-error')).toBeTruthy();
+    expect(onNotPending).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Open terminal')).toBeTruthy();
+    expect(screen.queryByTestId('question-session-closed')).toBeNull();
+  });
+
+  it('says the session was closed, with only Dismiss, once it is', async () => {
+    const { onDismiss } = renderConflicting(true, NOT_PENDING);
+
+    expect(await screen.findByTestId('question-session-closed')).toBeTruthy();
+    // Announced, so it overrides the "answer in the terminal" alert.
+    expect(screen.getByRole('alert').dataset.testid).toBe(
+      'question-session-closed',
+    );
+    expect(screen.queryByTestId('question-error')).toBeNull();
+    expect(screen.queryByText('Open terminal')).toBeNull();
+    expect(screen.queryByTestId('question-cancel')).toBeNull();
+    fireEvent.click(screen.getByText('Dismiss'));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats any other failure as retryable, closed session or not', async () => {
+    const { onNotPending } = renderConflicting(true, new Error('boom'));
+
+    expect(await screen.findByTestId('question-error')).toBeTruthy();
+    expect(onNotPending).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('question-session-closed')).toBeNull();
   });
 });

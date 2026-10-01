@@ -10,7 +10,11 @@ import {
 } from 'react';
 import { threadAncestry, type ThreadId } from '@delta/model';
 import type { Message, Thread } from '@delta/wire-gen';
-import { useThreadMessagesQuery } from '@delta/api-client';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  invalidateSessions,
+  useThreadMessagesQuery,
+} from '@delta/api-client';
 import { Badge, Breadcrumb, Button, Chip, Panel } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
@@ -212,6 +216,16 @@ export function TranscriptPane({
   providerHasAllowForSession,
 }: TranscriptPaneProps) {
   const client = useApiClient();
+  const queryClient = useQueryClient();
+  // A `409 …_not_pending` from a permission or question card is the first sign
+  // this tab's idea of the session may be stale: a live socket gone silently
+  // half-open never delivers `session_closed`. `readOnly` comes from the session
+  // list, so refetch it; once it says closed, the cards show their closed-session
+  // copy instead of pointing at a terminal that no longer exists.
+  const refetchSessions = useCallback(
+    () => invalidateSessions(queryClient),
+    [queryClient],
+  );
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
   const cancelNewSession = useNavStore((state) => state.cancelNewSession);
@@ -914,6 +928,7 @@ export function TranscriptPane({
       // `readOnly` alone also covers a session that is still starting, which
       // was never closed; see `spawning`.
       sessionClosed={readOnly && !spawning}
+      onNotPending={refetchSessions}
       onOpenTerminal={() => setTerminalOpen(true)}
       onDismiss={() => dismissPermission(activeThread.session_id)}
     />
@@ -961,6 +976,8 @@ export function TranscriptPane({
         // arrives via the resolution path (the `is_error` tool_result).
         client.cancelQuestion(activeThread.session_id, question.requestId)
       }
+      sessionClosed={readOnly && !spawning}
+      onNotPending={refetchSessions}
       onOpenTerminal={() => setTerminalOpen(true)}
       onDismiss={() => dismissQuestion(activeThread.session_id)}
     />

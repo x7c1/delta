@@ -311,6 +311,35 @@ describe('navStore terminal open state', () => {
     });
   });
 
+  it('carries an open new-session terminal over to the spawned session on the small layout', () => {
+    useNavStore.getState().startNewSession();
+    useNavStore.getState().setTerminalOpen(true);
+    useNavStore.getState().carryNewSessionTerminalOver('sess-new');
+    useNavStore.getState().reconcileFocusedSession('sess-new');
+    expect(open(false)).toBe(true);
+  });
+
+  it('leaves a session spawned with the new-session terminal closed on the default', () => {
+    useNavStore.getState().startNewSession();
+    useNavStore.getState().carryNewSessionTerminalOver('sess-new');
+    useNavStore.getState().reconcileFocusedSession('sess-new');
+    expect(open(false)).toBe(false);
+    // Nothing was recorded, so the large layout keeps its open default too.
+    expect(open(true)).toBe(true);
+    expect(useNavStore.getState().terminalOpenBySession).toEqual({});
+  });
+
+  it('does not overwrite a choice already recorded for the spawned session', () => {
+    useNavStore.setState({
+      terminalOpenWithoutSession: true,
+      terminalOpenBySession: { 'sess-new': false },
+    });
+    useNavStore.getState().carryNewSessionTerminalOver('sess-new');
+    expect(useNavStore.getState().terminalOpenBySession).toEqual({
+      'sess-new': false,
+    });
+  });
+
   it('prunes the choices of sessions a refetched list no longer has', () => {
     useNavStore.setState({
       terminalOpenBySession: { 'sess-a': false, 'sess-b': true, 'sess-c': false },

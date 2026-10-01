@@ -84,6 +84,7 @@ function renderCard({
     );
   const onOpenTerminal = vi.fn();
   const onDismiss = vi.fn();
+  const onNotPending = vi.fn();
   render(
     <ApiProvider client={client}>
       <PermissionNoticeCard
@@ -91,12 +92,13 @@ function renderCard({
         providerHasTerminal={providerHasTerminal}
         providerHasAllowForSession={providerHasAllowForSession}
         sessionClosed={sessionClosed}
+        onNotPending={onNotPending}
         onOpenTerminal={onOpenTerminal}
         onDismiss={onDismiss}
       />
     </ApiProvider>,
   );
-  return { decide, onOpenTerminal, onDismiss };
+  return { decide, onOpenTerminal, onDismiss, onNotPending };
 }
 
 describe('PermissionNoticeCard conflict fallback', () => {
@@ -217,12 +219,26 @@ describe('PermissionNoticeCard conflict fallback', () => {
     ).toBeInTheDocument();
   });
 
+  it('asks the host to recheck the session on a conflict', async () => {
+    // The tab may have missed the session's close (a silently half-open
+    // socket), so the 409 asks the host to refetch what `sessionClosed` is
+    // derived from.
+    const { onNotPending } = renderCard({
+      providerHasTerminal: true,
+      failWith: NOT_PENDING,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+
+    await waitFor(() => expect(onNotPending).toHaveBeenCalledTimes(1));
+  });
+
   it('leaves the buttons usable for a retry after a non-conflict failure', async () => {
     // Any other failure (here the 500 a dead agent wire produces) is transient
     // as far as the card knows: no guidance, buttons re-enabled, retry posts
     // again. This holds for a terminal-less provider too.
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { decide } = renderCard({
+    const { decide, onNotPending } = renderCard({
       providerHasTerminal: false,
       failWith: new ApiError(500, 'broken pipe'),
     });
@@ -237,6 +253,8 @@ describe('PermissionNoticeCard conflict fallback', () => {
 
     fireEvent.click(allow);
     await waitFor(() => expect(decide).toHaveBeenCalledTimes(2));
+    // Nothing suggests the session changed, so no recheck is asked for.
+    expect(onNotPending).not.toHaveBeenCalled();
   });
 });
 
