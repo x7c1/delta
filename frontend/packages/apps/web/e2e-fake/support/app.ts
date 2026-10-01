@@ -205,39 +205,3 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
 export function focusedSessionNode(page: Page): Locator {
   return page.locator('[data-testid="session-node"][aria-current="true"]');
 }
-
-/**
- * Scroll the navigator until `card` (a locator for one session card) is
- * mounted, and wait for it.
- *
- * The navigator is windowed: only the rows near its scroll position exist in
- * the DOM. It is also open-first, and the suite shares one server, so every
- * Claude session an earlier spec left running (re-adopted across restarts) is
- * listed above a closed or failed card — which can sit outside the window
- * until the list is scrolled, as it would for a user with that many sessions
- * open. The list is stepped by half a viewport, wrapping to the top at the
- * end, until the card mounts.
- */
-export async function revealInNavigator(
-  page: Page,
-  card: Locator,
-  timeout = 15_000,
-): Promise<void> {
-  await expect(async () => {
-    if ((await card.count()) === 0) {
-      await page.getByTestId('sessions-list').evaluate((list) => {
-        let scroller = list.parentElement;
-        while (scroller && scroller.scrollHeight <= scroller.clientHeight) {
-          scroller = scroller.parentElement;
-        }
-        if (!scroller) {
-          return;
-        }
-        const atEnd =
-          scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1;
-        scroller.scrollTop = atEnd ? 0 : scroller.scrollTop + scroller.clientHeight / 2;
-      });
-    }
-    await expect(card).toHaveCount(1, { timeout: 500 });
-  }).toPass({ timeout });
-}
