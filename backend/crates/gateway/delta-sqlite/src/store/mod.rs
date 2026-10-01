@@ -13,6 +13,7 @@ mod messages;
 mod permissions;
 mod prompt_templates;
 mod sends;
+mod session_history;
 mod session_store;
 mod sessions;
 mod subagents;

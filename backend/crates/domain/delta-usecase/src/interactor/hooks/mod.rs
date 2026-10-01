@@ -2,6 +2,7 @@
 //! `PreToolUse`, `PermissionRequest`, `SessionStart`, and `SessionEnd`.
 
 mod bind_pending_spawn;
+mod follow_relocated_transcript;
 mod hook_transcript;
 mod match_uuid_for_prompt;
 mod on_message_display;
