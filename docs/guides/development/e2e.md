@@ -92,8 +92,9 @@ shared configuration with a bare `restart()` in an `afterEach`. A restart
 keeps the fake Claude panes earlier specs left running, and the relaunched
 server re-adopts them, so they stay listed as open: scope a status assertion to
 the spec's own card (`focusedSessionNode`) rather than counting across the
-navigator, and scroll a closed or failed card into the windowed list
-(`revealInNavigator`) before looking for it. Because a hard
+navigator. They also fill the windowed list ahead of any closed card, which
+may then be unmounted until scrolled to; a failed launch the page itself
+started is the exception, since the navigator pins it to the top. Because a hard
 kill (SIGKILL, Ctrl-C) can skip teardown, the fixture also **sweeps at
 startup**: it kills any leftover `delta-e2e-fake-*` tmux server and removes any
 `delta-e2e-fake.*` temp dir from a crashed run, so leaks are bounded to one

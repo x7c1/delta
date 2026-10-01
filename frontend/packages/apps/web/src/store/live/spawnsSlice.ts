@@ -73,7 +73,12 @@ export interface SpawnItem extends NewSessionLaunch {
 }
 
 export interface SpawnsSlice {
-  /** Tracked new-session spawns, oldest first, keyed by real session id. */
+  /**
+   * Tracked new-session spawns, oldest first, keyed by real session id. The
+   * navigator pins each tracked spawn's card to the top of its list, so a
+   * launch stays in view until it binds, or — failed — until it is retried or
+   * removed (see `launchesFirst`).
+   */
   spawns: SpawnItem[];
 
   /**

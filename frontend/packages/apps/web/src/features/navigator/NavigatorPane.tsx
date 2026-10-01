@@ -17,6 +17,7 @@ import { useLiveStore } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
+import { launchesFirst } from './launchesFirst';
 import { footerRateLimitGroups } from './footerRateLimitGroups';
 import {
   computeBudgetLinePercentage,
@@ -51,7 +52,8 @@ export interface NavigatorPaneProps {
   /**
    * The loaded sessions so far, in the server's open-first order: every live
    * session, then the closed ones, each group most-recently-active first.
-   * Rendered as received — the pane never re-sorts.
+   * Rendered in that order, except that the launches this window is still
+   * tracking are pinned above it (see {@link launchesFirst}).
    */
   sessions: SessionListItem[];
   /** Whether more session pages remain to be fetched. */
@@ -330,6 +332,19 @@ export function NavigatorPane({
   const versionQuery = useVersionQuery(client);
   const version = versionQuery.data?.version ?? null;
 
+  // The launches this window started and still tracks, newest first, lead the
+  // list — so a launch that fails stays in view instead of sinking below every
+  // open session (see `launchesFirst`). The registry is oldest first.
+  const spawns = useLiveStore((state) => state.spawns);
+  const rows = useMemo(
+    () =>
+      launchesFirst(
+        sessions,
+        spawns.map((spawn) => spawn.sessionId).reverse(),
+      ),
+    [sessions, spawns],
+  );
+
   // The Panel body is the scroll container; the virtualizer reads its scroll
   // position and viewport height to decide which rows to render.
   const scrollBodyRef = useRef<HTMLDivElement>(null);
@@ -342,18 +357,19 @@ export function NavigatorPane({
   // `getItemKey` keys the measurement cache by session id, not by index. The
   // list is open-first and recency-ordered within each group, so sending a
   // message bumps that session to the top of its group, and opening or closing
-  // one carries it across the groups — either way the rows below reindex. With
+  // one carries it across the groups (as does a launch being pinned to the top
+  // or released) — either way the rows below reindex. With
   // the default index key, each row would inherit the cached height of whichever
   // session previously sat at its index — a tall threaded card's height landing
   // on a short collapsed one, leaving gaps (and vice versa, overlaps). Keying by
   // id makes a measured height travel with its session across reorders, so the
   // spacers stay correct.
   const virtualizer = useVirtualizer({
-    count: sessions.length,
+    count: rows.length,
     getScrollElement: () => scrollBodyRef.current,
     estimateSize: () => ESTIMATED_SESSION_NODE_HEIGHT,
     overscan: SESSION_OVERSCAN,
-    getItemKey: (index) => sessions[index].session.id,
+    getItemKey: (index) => rows[index].session.id,
   });
 
   const virtualItems = virtualizer.getVirtualItems();
@@ -368,7 +384,7 @@ export function NavigatorPane({
       return;
     }
     if (
-      lastItem.index >= sessions.length - 1 &&
+      lastItem.index >= rows.length - 1 &&
       hasMoreSessions &&
       !isLoadingMoreSessions
     ) {
@@ -376,7 +392,7 @@ export function NavigatorPane({
     }
   }, [
     virtualItems,
-    sessions.length,
+    rows.length,
     hasMoreSessions,
     isLoadingMoreSessions,
     onLoadMoreSessions,
@@ -631,7 +647,7 @@ export function NavigatorPane({
         style={{ height: virtualizer.getTotalSize() }}
       >
         {virtualItems.map((virtualRow) => {
-          const item = sessions[virtualRow.index];
+          const item = rows[virtualRow.index];
           // Props are kept memo-friendly (stable/primitive): `rowRef` is the
           // virtualizer's stable `measureElement`, `start` is the raw offset the
           // row turns into its own memoized style, and focus/close/permission

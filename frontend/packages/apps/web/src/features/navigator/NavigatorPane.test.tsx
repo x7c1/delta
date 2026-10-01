@@ -144,6 +144,103 @@ describe('NavigatorPane per-session running indicator', () => {
   });
 });
 
+describe('NavigatorPane launched-session placement', () => {
+  // More open sessions than the windowed list renders in jsdom's 600px
+  // viewport (plus overscan), so a card listed after all of them is unmounted.
+  const OPEN_COUNT = 40;
+  const openIds = Array.from(
+    { length: OPEN_COUNT },
+    (_, index) => `open-${String(index).padStart(2, '0')}`,
+  );
+  const FAILED_ID = 'failed-launch';
+  const failedItem: SessionListItem = {
+    ...makeItem(FAILED_ID, 999),
+    open: false,
+  };
+  failedItem.session = { ...failedItem.session, status: 'failed' };
+  // The server's open-first order: every open session, then the failed one.
+  const serverOrder = [
+    ...openIds.map((id, index) => makeItem(id, index + 100)),
+    failedItem,
+  ];
+
+  function failedSpawn(sessionId: string) {
+    return {
+      sessionId,
+      threadId: 999,
+      text: 'first message',
+      firstSendId: 1,
+      workdir: null,
+      launchOptionIds: [],
+      provider: 'claude' as const,
+      worktree: null,
+      pullRequestNumber: null,
+      status: 'failed' as const,
+    };
+  }
+
+  /** The session ids of the mounted cards, top to bottom, matched by repo name. */
+  function renderedIds(): string[] {
+    return screen
+      .getAllByRole('listitem')
+      .map(
+        (row) =>
+          [...openIds, FAILED_ID].find((id) =>
+            row.textContent?.includes(`dev/${id}`),
+          ) ?? '?',
+      );
+  }
+
+  beforeEach(() => {
+    useLiveStore.setState({
+      connection: 'open',
+      notices: {},
+      runningThreads: {},
+      unread: {},
+      spawns: [],
+    });
+    useNavStore.setState({ focusedSessionId: null, activeThreadId: null });
+    useComposerStore.setState({ newSessionWorkdir: null });
+  });
+
+  it('leaves a failed card it did not launch below the open sessions, out of the window', () => {
+    renderPane(serverOrder);
+
+    const ids = renderedIds();
+    expect(ids.length).toBeLessThan(serverOrder.length);
+    expect(ids).toEqual(openIds.slice(0, ids.length));
+    expect(
+      screen.queryByRole('status', { name: 'Failed', exact: true }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('pins the failed card of its own launch to the top, keeping the open-first order of the rest', () => {
+    useLiveStore.setState({ spawns: [failedSpawn(FAILED_ID)] });
+
+    renderPane(serverOrder);
+
+    const rows = screen.getAllByRole('listitem');
+    expect(
+      within(rows[0]).getByRole('status', { name: 'Failed', exact: true }),
+    ).toBeInTheDocument();
+    const ids = renderedIds();
+    expect(ids[0]).toBe(FAILED_ID);
+    expect(ids.slice(1)).toEqual(openIds.slice(0, ids.length - 1));
+  });
+
+  it('returns the card to the server order once the launch is no longer tracked', () => {
+    useLiveStore.setState({ spawns: [failedSpawn(FAILED_ID)] });
+    renderPane(serverOrder);
+    expect(renderedIds()[0]).toBe(FAILED_ID);
+
+    // Retry or Remove clears the tracked spawn.
+    act(() => useLiveStore.getState().clearSpawn(FAILED_ID));
+
+    expect(renderedIds()).not.toContain(FAILED_ID);
+    expect(renderedIds()[0]).toBe(openIds[0]);
+  });
+});
+
 describe('NavigatorPane rate-limit meters', () => {
   // jsdom performs no layout, so `clientWidth` defaults to 0. The rate-limit
   // row now measures its meter track width to translate the budget-line marker
