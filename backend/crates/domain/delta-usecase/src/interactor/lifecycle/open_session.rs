@@ -1,5 +1,7 @@
 use std::time::Instant;
 
+use delta_model::Session;
+
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::{OpenHandle, ResumingSession};
@@ -91,14 +93,13 @@ where
         // Refuse here — before minting a token, writing settings, or spawning
         // — so no pane is created and no optimistic send is enqueued.
         // A session still `spawning` has no transcript path at all (the
-        // first hook never bound it), so it is equally unresumable.
-        let resumable = match session.transcript_path.as_deref() {
-            Some(path) => self.transcript.exists(path).await?,
-            None => false,
-        };
-        if !resumable {
+        // first hook never bound it), so it is equally unresumable. A
+        // transcript Claude Code moved while Delta was not following it is
+        // found and followed first (see `resumable_session`), so the resume
+        // runs from the session's re-pointed row.
+        let Some(session) = self.resumable_session(session).await? else {
             return Err(Error::ResumeUnavailable(id.as_str().to_owned()));
-        }
+        };
 
         let token = self.mint_free_token().await?;
         let workdir = session.cwd.clone();
@@ -168,5 +169,51 @@ where
         // same actor, so it is already ordered against the hooks.
         self.sync_transcript(&session).await?;
         Ok(())
+    }
+
+    /// The session row to resume from, or `None` when its transcript is gone
+    /// and `claude --resume` would have nothing to replay.
+    ///
+    /// A stored transcript that is still on disk is the common case. One that
+    /// is missing may have been moved by Claude Code while Delta was not
+    /// following the session — it entered a worktree while closed, or while
+    /// Delta was down — so no hook ever reported the new path. The move keeps
+    /// the file name and only changes the project directory, so the session's
+    /// `<session id>.jsonl` is looked up under the transcript root and, when
+    /// found, followed exactly as a hook-reported move is
+    /// ([`Self::follow_relocated_transcript`]): same confinement, cursor rule,
+    /// and working directory from its `relocated` line. The re-read row then
+    /// carries that working directory, which is where `claude --resume` must
+    /// run for Claude Code to find the transcript. Without a configured
+    /// transcript root there is nowhere confined to look, so the resume is
+    /// refused as before.
+    async fn resumable_session(&mut self, session: Session) -> Result<Option<Session>> {
+        let Some(stored) = session.transcript_path.as_deref() else {
+            return Ok(None);
+        };
+        if self.transcript.exists(stored).await? {
+            return Ok(Some(session));
+        }
+        let Some(root) = self.transcript_root.clone() else {
+            return Ok(None);
+        };
+        let Some(found) = self
+            .transcript
+            .find_session_transcript(&root, self.id.as_str())
+            .await?
+        else {
+            return Ok(None);
+        };
+        if !self.follow_relocated_transcript(stored, &found).await? {
+            return Ok(None);
+        }
+        tracing::info!(
+            session_id = %self.id,
+            from = %stored,
+            to = %found,
+            "resuming a session whose transcript moved while Delta was not \
+             following it; re-pointed it at the moved file"
+        );
+        self.store.session(self.id).await
     }
 }

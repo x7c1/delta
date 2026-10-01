@@ -131,7 +131,8 @@ where
     ///   [`Self::follow_relocated_transcript`]) and the hook is
     ///   [`HookTranscript::Own`]. This is also what heals a live session that
     ///   was stuck on a moved-away path before Delta followed moves: its next
-    ///   hook re-points it. A closed one receives no hook, so it stays stuck.
+    ///   hook re-points it. A closed one receives no hook; resuming it finds
+    ///   the moved file instead (see `open_session`).
     /// - Anything else is a shape Delta does not know, so it keeps following
     ///   the stored path and treats the hook as [`HookTranscript::Foreign`].
     pub(in crate::interactor) async fn admit_hook_transcript(
@@ -161,27 +162,38 @@ where
             );
             return Ok(HookTranscript::Foreign);
         }
-        self.follow_relocated_transcript(&stored, hook_transcript_path)
-            .await
+        let followed = self
+            .follow_relocated_transcript(&stored, hook_transcript_path)
+            .await?;
+        Ok(if followed {
+            HookTranscript::Own
+        } else {
+            HookTranscript::Foreign
+        })
     }
 
     /// Re-point the session at the transcript Claude Code moved it to.
     ///
     /// The new path is confined exactly as a registering hook's is
     /// ([`validate_transcript_path`]); a path Delta refuses is never stored,
-    /// the session keeps its old path, and the hook is
-    /// [`HookTranscript::Foreign`]. Otherwise the line cursor is reconciled
+    /// the session keeps its old path, and this returns `false`. Otherwise the
+    /// line cursor is reconciled
     /// against the new file (see [`resume_line`]), and the session row takes
     /// the new path plus the working directory the file's `relocated` line
     /// names, so a later `claude --resume` runs where Claude Code now files the
     /// transcript. Every reader of the transcript — the hook syncs, the
     /// background tail, close and resume — reads the path from the row, so they
-    /// all follow the new file from here on.
-    async fn follow_relocated_transcript(
+    /// all follow the new file from here on, and this returns `true`.
+    ///
+    /// Two callers find the moved file: a hook reporting its path
+    /// ([`Self::admit_hook_transcript`]), and a resume whose stored transcript
+    /// is gone and which looks the session's file up under the transcript root
+    /// (see `open_session`).
+    pub(in crate::interactor) async fn follow_relocated_transcript(
         &mut self,
         stored: &str,
         relocated: &str,
-    ) -> Result<HookTranscript> {
+    ) -> Result<bool> {
         if let Some(root) = &self.transcript_root {
             if let Err(err) = validate_transcript_path(root, relocated) {
                 tracing::warn!(
@@ -191,7 +203,7 @@ where
                     error = %err,
                     "refusing to follow a relocated transcript; keeping the stored one"
                 );
-                return Ok(HookTranscript::Foreign);
+                return Ok(false);
             }
         }
 
@@ -228,7 +240,7 @@ where
             cwd = relocated_cwd.unwrap_or("(unchanged)"),
             "Claude Code relocated the session's transcript; following it"
         );
-        Ok(HookTranscript::Own)
+        Ok(true)
     }
 }
 

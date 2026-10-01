@@ -1,6 +1,7 @@
 //! In-memory [`Transcript`] fake modelled as a list of file lines per path.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -82,6 +83,30 @@ impl Transcript for FakeTranscript {
 
     async fn exists(&self, path: &str) -> Result<bool> {
         Ok(!self.missing.lock().unwrap().iter().any(|p| p == path))
+    }
+
+    /// Any present `<root>/<project dir>/<session id>.jsonl` the fake holds.
+    /// Recency is not modelled: of several, the greatest path wins, which
+    /// keeps the choice deterministic. (The real adapter's choice between
+    /// several is covered by its own tests.)
+    async fn find_session_transcript(
+        &self,
+        root: &str,
+        session_id: &str,
+    ) -> Result<Option<String>> {
+        let file_name = format!("{session_id}.jsonl");
+        let missing = self.missing.lock().unwrap().clone();
+        let by_path = self.by_path.lock().unwrap();
+        Ok(by_path
+            .keys()
+            .filter(|path| !missing.contains(path))
+            .filter(|path| {
+                let path = Path::new(path.as_str());
+                path.file_name() == Some(std::ffi::OsStr::new(&file_name))
+                    && path.parent().and_then(Path::parent) == Some(Path::new(root))
+            })
+            .max()
+            .cloned())
     }
 }
 

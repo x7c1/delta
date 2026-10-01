@@ -1,5 +1,7 @@
 //! [`JsonlTranscript`]: the concrete [`Transcript`] gateway.
 
+mod find_session_transcript;
+
 use async_trait::async_trait;
 use tokio::fs;
 
@@ -124,6 +126,16 @@ impl Transcript for JsonlTranscript {
         fs::try_exists(path)
             .await
             .map_err(|e| Error::from(e).into())
+    }
+
+    async fn find_session_transcript(
+        &self,
+        root: &str,
+        session_id: &str,
+    ) -> std::result::Result<Option<String>, delta_usecase::Error> {
+        find_session_transcript::find_session_transcript(root, session_id)
+            .await
+            .map_err(Into::into)
     }
 }
 
