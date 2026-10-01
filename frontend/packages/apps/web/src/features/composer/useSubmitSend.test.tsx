@@ -16,7 +16,11 @@ import { ApiClient } from '@delta/api-client';
 import type { SendResponse } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
-import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
+import {
+  NEW_SESSION_FOCUS,
+  isTerminalOpen,
+  useNavStore,
+} from '../../store/navStore';
 import { newSessionSendBody } from './newSessionRequest';
 import { useSubmitSend } from './useSubmitSend';
 
@@ -208,5 +212,52 @@ describe('useSubmitSend spawn focus hand-over', () => {
     expect(useLiveStore.getState().spawns).toEqual([
       expect.objectContaining({ focusHandedOver: false }),
     ]);
+  });
+});
+
+describe('useSubmitSend new-session terminal carry-over', () => {
+  beforeEach(() => {
+    useLiveStore.setState({ sending: [], localSends: {}, spawns: [] });
+    useNavStore.setState({
+      focusedSessionId: NEW_SESSION_FOCUS,
+      activeThreadId: null,
+      preNewSessionFocus: null,
+      terminalOpenBySession: {},
+      terminalOpenWithoutSession: false,
+    });
+  });
+
+  /** Send from wherever the test put focus, then follow the spawn there. */
+  async function sendAndFocusSpawn(): Promise<boolean> {
+    const open = gateSends();
+    const { submit } = mountSubmit();
+    open();
+    await act(async () => {
+      await submit();
+    });
+    useNavStore.getState().reconcileFocusedSession(SPAWNED_SESSION_ID);
+    // The small layout: where a session with no entry reads as closed.
+    return isTerminalOpen(useNavStore.getState(), false);
+  }
+
+  it('starts the spawned session with its terminal open when it was open on the new-session screen', async () => {
+    useNavStore.setState({ terminalOpenWithoutSession: true });
+    expect(await sendAndFocusSpawn()).toBe(true);
+  });
+
+  it('starts the spawned session with its terminal closed when it was closed on the new-session screen', async () => {
+    expect(await sendAndFocusSpawn()).toBe(false);
+    expect(useNavStore.getState().terminalOpenBySession).toEqual({});
+  });
+
+  it('carries nothing when the response lands with the user elsewhere', async () => {
+    // Not a send the user is waiting beside: a Retry from a failed session's
+    // row, or a send they walked away from. The new-session screen's flag says
+    // nothing about it.
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      terminalOpenWithoutSession: true,
+    });
+    expect(await sendAndFocusSpawn()).toBe(false);
   });
 });

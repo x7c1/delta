@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button } from '@delta/ui-kit';
+import { ApiError } from '@delta/api-client';
 import type { QuestionNotice as Notice } from '../../store/liveStore';
 
 /**
@@ -107,6 +108,24 @@ export interface QuestionCardProps {
   onOpenTerminal: () => void;
   /** Dismiss the card without answering (the TUI prompt stays up). */
   onDismiss: () => void;
+  /**
+   * Whether the session is closed. A closed session's pane is gone, so a `409
+   * question_not_pending` there must not send the user to the terminal. Resolved
+   * by the pane that hosts the card; `false` when omitted.
+   */
+  sessionClosed?: boolean;
+  /**
+   * Called when an answer or cancel comes back `409 question_not_pending`. The
+   * host refreshes whatever {@link sessionClosed} is derived from: a tab whose
+   * live connection went silently half-open never heard the session close, and
+   * the 409 is the first sign its idea of the session may be stale.
+   */
+  onNotPending?: () => void;
+}
+
+/** Whether a rejected answer/cancel POST is the server's "no longer pending". */
+function isNotPending(err: unknown): boolean {
+  return err instanceof ApiError && err.code === 'question_not_pending';
 }
 
 /**
@@ -141,6 +160,12 @@ export interface QuestionCardProps {
  * genuinely different things. A failed cancel POST shares the answer's failure
  * UX (inline error, terminal emphasized, controls re-enabled).
  *
+ * A `409 question_not_pending` on a closed session is the one failure the
+ * terminal cannot fix: the pane went with the session. The card then says the
+ * session was closed and offers only Dismiss. The 409 also asks the host to
+ * refetch the session (see {@link QuestionCardProps.onNotPending}), so a tab that
+ * missed the close learns of it and switches to that copy.
+ *
  * It renders inline at the conversation tail (not in a floating overlay), so the
  * choices sit in the flow right after the assistant's live-streamed preamble.
  * It grows with its content (no height cap or internal scroll) so every option
@@ -152,6 +177,8 @@ export function QuestionCard({
   onCancel,
   onOpenTerminal,
   onDismiss,
+  sessionClosed = false,
+  onNotPending,
 }: QuestionCardProps) {
   const questions = parseQuestions(notice.toolInput);
   const answerable = questions.length > 0;
@@ -174,6 +201,24 @@ export function QuestionCard({
     null,
   );
   const failed = failedAction !== null;
+  // Whether the failure was the server's `question_not_pending` (as opposed to
+  // a malformed selection or a network error, which a retry can fix).
+  const [notPending, setNotPending] = useState(false);
+  // The question cannot be answered anywhere: the server says it is no longer
+  // pending and the session it belonged to is closed.
+  const closed = failed && notPending && sessionClosed;
+
+  // Record a rejected POST: re-enable the controls (so nothing is left dead),
+  // surface the failure, and on a 409 ask the host to re-check the session.
+  const fail = (action: 'answer' | 'cancel', err: unknown) => {
+    setSubmitted(false);
+    setFailedAction(action);
+    const gone = isNotPending(err);
+    setNotPending(gone);
+    if (gone) {
+      onNotPending?.();
+    }
+  };
 
   const submit = (sets: Set<number>[]) => {
     if (submitted) {
@@ -181,12 +226,9 @@ export function QuestionCard({
     }
     setSubmitted(true);
     setFailedAction(null);
-    onAnswer(sets.map((set) => [...set].sort((a, b) => a - b))).catch(() => {
-      // Re-enable the controls and surface the failure so the Submit is never
-      // left dead; the terminal fallback is emphasized below.
-      setSubmitted(false);
-      setFailedAction('answer');
-    });
+    onAnswer(sets.map((set) => [...set].sort((a, b) => a - b))).catch(
+      (err: unknown) => fail('answer', err),
+    );
   };
 
   const cancel = () => {
@@ -198,10 +240,7 @@ export function QuestionCard({
     // the shared inline error, exactly like a failed answer.
     setSubmitted(true);
     setFailedAction(null);
-    onCancel().catch(() => {
-      setSubmitted(false);
-      setFailedAction('cancel');
-    });
+    onCancel().catch((err: unknown) => fail('cancel', err));
   };
 
   const toggleMulti = (qi: number, oi: number) => {
@@ -264,7 +303,7 @@ export function QuestionCard({
                     <li key={oi} className="flex items-start gap-2">
                       <button
                         type="button"
-                        disabled={submitted}
+                        disabled={submitted || closed}
                         aria-pressed={selected}
                         data-testid={`question-option-${qi}-${oi}`}
                         onClick={() =>
@@ -328,7 +367,19 @@ export function QuestionCard({
         </ul>
       )}
 
-      {failed && (
+      {/* An alert like the error it replaces: the refetch that reveals the
+          close lands after "answer in the terminal" was announced, and a
+          screen-reader user must hear that this no longer applies. */}
+      {closed && (
+        <p
+          className="text-fg-muted"
+          role="alert"
+          data-testid="question-session-closed"
+        >
+          This question can no longer be answered — the session was closed.
+        </p>
+      )}
+      {failed && !closed && (
         <p className="text-danger" role="alert" data-testid="question-error">
           {failedAction === 'cancel'
             ? "Couldn't cancel the question — cancel it in the terminal, or try again."
@@ -336,47 +387,55 @@ export function QuestionCard({
         </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        {/* A Submit is shown whenever a click alone is not the answer: a
-            multi-question call, or any multi-select question. A lone
-            single-select question answers on the option click, so it needs no
-            Submit. */}
-        {answerable && (multiQuestion || questions.some((q) => q.multiSelect)) && (
+      {closed ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          {/* A Submit is shown whenever a click alone is not the answer: a
+              multi-question call, or any multi-select question. A lone
+              single-select question answers on the option click, so it needs no
+              Submit. */}
+          {answerable && (multiQuestion || questions.some((q) => q.multiSelect)) && (
+            <Button
+              size="sm"
+              disabled={submitted || !allAnswered}
+              data-testid="question-submit"
+              onClick={() => submit(selections)}
+            >
+              Submit
+            </Button>
+          )}
+          {/* The terminal stays available as a fallback if injection misfires;
+              a failed POST emphasizes it (solid, not ghost) as the way forward. */}
           <Button
             size="sm"
-            disabled={submitted || !allAnswered}
-            data-testid="question-submit"
-            onClick={() => submit(selections)}
+            variant={failed ? 'primary' : 'ghost'}
+            onClick={onOpenTerminal}
           >
-            Submit
+            Open terminal
           </Button>
-        )}
-        {/* The terminal stays available as a fallback if injection misfires;
-            a failed POST emphasizes it (solid, not ghost) as the way forward. */}
-        <Button
-          size="sm"
-          variant={failed ? 'primary' : 'ghost'}
-          onClick={onOpenTerminal}
-        >
-          Open terminal
-        </Button>
-        {/* Cancel does the terminal's Esc: it cancels the question in the TUI
-            itself (a single Escape cancels the whole call), unlike Dismiss which
-            only hides this card and leaves the TUI prompt open. Disabled while a
-            submit/cancel is in flight so the two cannot race. */}
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={submitted}
-          data-testid="question-cancel"
-          onClick={cancel}
-        >
-          Cancel
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onDismiss}>
-          Dismiss
-        </Button>
-      </div>
+          {/* Cancel does the terminal's Esc: it cancels the question in the TUI
+              itself (a single Escape cancels the whole call), unlike Dismiss which
+              only hides this card and leaves the TUI prompt open. Disabled while a
+              submit/cancel is in flight so the two cannot race. */}
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={submitted}
+            data-testid="question-cancel"
+            onClick={cancel}
+          >
+            Cancel
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -95,7 +95,10 @@ export interface ApiClientOptions {
  *
  * `question_not_pending` means an `AskUserQuestion` can no longer be answered
  * from the UI (already answered, its turn ended, or no live pane). Callers
- * branch on this to keep the answer-in-the-terminal fallback.
+ * branch on this to keep the answer-in-the-terminal fallback, unless the
+ * session is closed: then the card says so and offers only Dismiss. The 409
+ * also makes the browser refetch the session list, so a tab that missed the
+ * close learns of it.
  *
  * `send_not_cancellable` means a send can no longer be cancelled: it never
  * existed, is already terminal (matched a transcript line, or already

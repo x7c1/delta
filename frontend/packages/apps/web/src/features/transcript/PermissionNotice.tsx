@@ -188,6 +188,15 @@ export interface PermissionNoticeCardProps {
    * which already knows the focused session's state; `false` when omitted.
    */
   sessionClosed?: boolean;
+  /**
+   * Called when a decision comes back `409 permission_not_pending`. The host
+   * refreshes whatever {@link sessionClosed} is derived from: a tab whose live
+   * connection went silently half-open never heard `session_closed`, so its
+   * idea that the session is open may be stale, and the 409 is the first sign.
+   * Once the refetch says the session is closed, the card shows the
+   * closed-session copy instead of pointing at a terminal that no longer exists.
+   */
+  onNotPending?: () => void;
   /** Open the embedded terminal (the fallback's "answer there" affordance). */
   onOpenTerminal: () => void;
   /** Dismiss the notice without deciding. */
@@ -273,8 +282,10 @@ const HAS_ALLOW_FOR_SESSION_WHEN_UNKNOWN = false;
  * the tab notices removes it too: the resync drops the permission notice and
  * re-seeds it from the server, which has nothing pending for a closed session.
  * So this branch is what a tab sees when it missed that `permission_resolved`
- * without noticing the gap, yet has since learned the session closed from a
- * session-list refetch.
+ * without noticing the gap — typically a live socket gone silently half-open.
+ * The 409 itself triggers the session-list refetch that reveals the close (see
+ * {@link PermissionNoticeCardProps.onNotPending}); until it lands the card shows
+ * the open-session guidance, and switches once the refetched session is closed.
  *
  * When the request would change files and the provider said which, the card
  * shows those paths and their change kinds instead of a truncated blob of
@@ -307,6 +318,7 @@ export function PermissionNoticeCard({
   providerHasTerminal,
   providerHasAllowForSession,
   sessionClosed = false,
+  onNotPending,
   onOpenTerminal,
   onDismiss,
 }: PermissionNoticeCardProps) {
@@ -338,6 +350,7 @@ export function PermissionNoticeCard({
       setPosting(false);
       if (err instanceof ApiError && err.code === 'permission_not_pending') {
         setFallback(true);
+        onNotPending?.();
         return;
       }
       if (

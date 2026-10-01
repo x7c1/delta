@@ -204,6 +204,20 @@ export interface NavState {
    * a partial one would forget the choices of sessions on unloaded pages.
    */
   pruneTerminalOpen: (sessionIds: Iterable<SessionId>) => void;
+  /**
+   * Carry the new-session screen's terminal choice over to the session a send
+   * from that screen just spawned: when {@link terminalOpenWithoutSession} is
+   * open, the spawned session starts with its terminal open too.
+   *
+   * Only an OPEN flag is carried. A session with no entry already reads as
+   * closed on the small layout, and on the large one closed would override the
+   * open default a fresh launch needs (its pane may be waiting on a prompt only
+   * a human can answer). Without this, on the small layout the overlay the
+   * user opened before sending would vanish the moment focus moves to the new
+   * session, which has no entry and so falls back to closed. A choice already
+   * recorded for the session is left alone.
+   */
+  carryNewSessionTerminalOver: (sessionId: SessionId) => void;
   setCommsOpen: (open: boolean) => void;
   toggleComms: () => void;
   /** Set the terminal pane width, clamped to the allowed range. */
@@ -407,6 +421,18 @@ export const useNavStore = create<NavState>()(
           }
           return { terminalOpenBySession: Object.fromEntries(kept) };
         }),
+      carryNewSessionTerminalOver: (sessionId) =>
+        set((state) =>
+          state.terminalOpenWithoutSession &&
+          state.terminalOpenBySession[sessionId] === undefined
+            ? {
+                terminalOpenBySession: {
+                  ...state.terminalOpenBySession,
+                  [sessionId]: true,
+                },
+              }
+            : state,
+        ),
       setCommsOpen: (open) => set({ commsOpen: open }),
       toggleComms: () => set((state) => ({ commsOpen: !state.commsOpen })),
       setTerminalWidth: (width) => set({ terminalWidth: clampTerminalWidth(width) }),
