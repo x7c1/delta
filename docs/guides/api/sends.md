@@ -429,22 +429,28 @@ writes **nothing** to the transcript, so silence is the only signal left. A
 slash-command send therefore has its own, much shorter echo deadline —
 **10 seconds**, overridable with `DELTA_SLASH_COMMAND_ECHO_DEADLINE_MS` — and
 reaching it means the command ran: the row settles as `matched` (no uuid), the
-turn goes `idle`, and the next queued send dispatches. There is no `Escape`, no
-re-type (which would run the command twice) and no park. A slash command that
-is really a prompt (a skill or a custom command) echoes `UserPromptSubmit`
-within seconds, well inside that window, and runs as an ordinary turn; if its
-echo ever arrived after the deadline, the session would track it as a prompt
-typed into the pane, so the browser would show the user's own command in an
+turn goes `idle`, a single `Escape` goes into the pane, and only then does the
+next queued send dispatch. There is no re-type (which would run the command
+twice) and no park. A slash command that is really a prompt (a skill or a
+custom command) echoes `UserPromptSubmit` within seconds, well inside that
+window, and runs as an ordinary turn with no `Escape`; if its echo ever
+arrived after the deadline, the session would track it as a prompt typed into
+the pane, so the browser would show the user's own command in an
 `external_input` notice. Whether a local command's turn ends by its transcript
 line or by this deadline, the browser learns of it from `turn_interrupted`
 ([live-channels.md](live-channels.md)), because no `Stop` fires to produce a
 `turn_completed`.
 
-The deadline cannot tell a command that finished from one that still holds the
-TUI, such as a built-in that opens a dialog or a `/compact` that is still
-summarising. Such a session is released while the TUI is busy. If the TUI
-swallows the keystrokes of the next send dispatched into it, that send recovers
-through the retry-then-park path above, like any other swallowed send.
+The `Escape` is there because the deadline cannot tell a command that finished
+from one that still holds the TUI. Some local commands do not print and exit:
+`/cost` opens the usage panel and `/model` the model picker, and either dialog
+would swallow the next send's keystrokes — the picker would even take its Enter
+as a model selection. One `Escape` dismisses such a dialog before the next send
+is typed, and is harmless on an idle prompt. If pressing it fails, the failure is
+logged and the session is released anyway. A TUI that is busy in a way `Escape`
+does not clear (a `/compact` that is still summarising) can still swallow the
+next send's keystrokes; that send recovers through the retry-then-park path
+above, like any other swallowed send.
 
 ## Permissions
 

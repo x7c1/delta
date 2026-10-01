@@ -101,9 +101,13 @@ Drift already pinned by the suite and synced:
   `/exit`. The canary now pins that absence after `/exit`. Delta frees such a
   turn on a short slash-command echo deadline instead (10 s by default,
   `DELTA_SLASH_COMMAND_ECHO_DEADLINE_MS`), settling the send as delivered rather
-  than re-typing it; fake-claude re-enacts the silence with its `local_command`
-  step. The transcript-driven path is kept as **legacy-format compatibility**
-  for transcripts recorded by older versions.
+  than re-typing it. Some local commands also leave a dialog open in 2.1.286
+  (`/cost` the usage panel, `/model` the model picker) that would swallow the
+  next keystrokes, so the settle presses `Escape` in the pane before the next
+  queued send is typed. fake-claude re-enacts the silence with its
+  `local_command` step, and the dialog with that step's `opens_dialog`. The
+  transcript-driven path is kept as **legacy-format compatibility** for
+  transcripts recorded by older versions.
 
 Two environment facts the suite handles for you (relevant when running any
 real-claude loop by hand):

@@ -98,6 +98,11 @@ async fn local_command_unsticks_turn_and_folds_to_meta() {
     );
     assert_eq!(second.as_deref(), Some("now actually review it"));
     assert!(
+        ix.tmux_fake().keyed.lock().unwrap().is_empty(),
+        "a command resolved by its transcript line gets no Escape: only the \
+         echo-deadline settle presses one"
+    );
+    assert!(
         ix.store()
             .next_queued_send(&session)
             .await

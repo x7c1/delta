@@ -11,14 +11,20 @@ import { fetchSends, latestSession } from "./support/rest";
  * versions wrote a caveat / command-name / stdout group Delta resolved the
  * send against). Silence is the only signal, so a slash-command send has a
  * short echo deadline of its own, and reaching it means the command ran: the
- * send settles as delivered with no `Escape` and no re-type — re-typing would
- * run the command a second time.
+ * send settles as delivered with no re-type — re-typing would run the command
+ * a second time. `/cost` also leaves a dialog (the usage panel) open, which
+ * would swallow the next keystrokes, so the settle presses `Escape` in the pane
+ * before the queued follow-up is typed.
  *
  * Scenario `local-command`: the fake answers the positional first prompt
- * (`reply` + `stop`), then `local_command` consumes the `/cost` keystrokes and
- * fires nothing. The next `await_prompt` answers whatever is typed next; if the
- * command were typed again it would take that step, and the follow-up would be
- * left stuck in the pending strip.
+ * (`reply` + `stop`), then `local_command` (with `opens_dialog`) consumes the
+ * `/cost` keystrokes, fires nothing, and drops everything typed until an
+ * Escape dismisses its dialog. The next `await_prompt` answers whatever is
+ * typed after that; if the command were typed again it would take that step,
+ * and the follow-up would be left stuck in the pending strip. Without the
+ * settle's `Escape` the dialog would eat the follow-up, which would only
+ * arrive through the suite's 60 s echo-deadline re-type — far past this spec's
+ * waits.
  *
  * The slash-command deadline is server-wide, so this spec runs its own server
  * generation with a short one and restores the suite's value afterwards (see
@@ -66,9 +72,12 @@ test("a local slash command frees the session and the queued follow-up dispatche
     pending.filter({ hasText: "follow-up after the command" }),
   ).toHaveCount(1, { timeout: 15_000 });
 
-  // The deadline settles the command and dispatches the follow-up, which the
-  // fake answers — proof the command was not typed a second time, since a
-  // re-typed `/cost` would have taken the fake's only remaining prompt.
+  // The deadline settles the command, dismisses its dialog and dispatches the
+  // follow-up, which the fake answers — proof the command was not typed a
+  // second time, since a re-typed `/cost` would have taken the fake's only
+  // remaining prompt, and proof the dialog did not swallow the follow-up,
+  // since its recovery through the suite's echo deadline (60 s) is far
+  // outside this wait.
   await expect(page.getByText("follow-up answered")).toBeVisible({
     timeout: 20_000,
   });
