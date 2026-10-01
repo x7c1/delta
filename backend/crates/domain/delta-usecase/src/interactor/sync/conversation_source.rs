@@ -83,6 +83,23 @@ where
         let from = self.store.transcript_lines_read(&session.id).await?;
         let read = self.transcript.read_from(transcript_path, from).await?;
 
+        // A file shorter than the cursor is not one this cursor was counted
+        // against: Claude Code only appends to a transcript, and the one way
+        // it shrinks is a move (the old path then reads as empty until the
+        // session is re-pointed at the new file, which reconciles the cursor
+        // itself). Leave the cursor alone rather than pulling it back, which
+        // would re-read lines already ingested once the file is back.
+        if read.total_lines < from {
+            tracing::debug!(
+                session_id = %session.id,
+                transcript_path,
+                cursor = from,
+                total_lines = read.total_lines,
+                "transcript is shorter than the line cursor (moved away?); keeping the cursor"
+            );
+            return Ok((Vec::new(), Vec::new()));
+        }
+
         // Always advance the cursor to the file's true line count, even when no
         // new messages parsed, so skipped trailing lines are not re-read next
         // time.

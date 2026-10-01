@@ -272,6 +272,24 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub(super) async fn relocate_transcript(
+        &self,
+        id: &SessionId,
+        transcript_path: &str,
+        cwd: Option<&str>,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // Unlike the `register_session` upsert, which fills the path in only
+        // while the row is `spawning`, this applies in every status: Claude
+        // Code moves a live session's transcript when it enters a worktree.
+        conn.execute(
+            "UPDATE session SET transcript_path = ?2, cwd = COALESCE(?3, cwd) WHERE id = ?1",
+            params![id.as_str(), transcript_path, cwd],
+        )
+        .map_err(Error::from)?;
+        Ok(())
+    }
+
     pub(super) async fn list_sessions_page(
         &self,
         cursor: Option<SessionPageCursor>,

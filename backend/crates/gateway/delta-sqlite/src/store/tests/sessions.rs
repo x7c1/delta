@@ -786,3 +786,44 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
     assert_eq!(mirror.repo_root, "/repo-a");
     assert_eq!(mirror.last_branch.as_deref(), Some("main"));
 }
+
+/// Claude Code moves a live session's transcript when it enters a worktree.
+/// Re-registering cannot follow that (the upsert only fills the path while the
+/// row is `spawning`), so `relocate_transcript` writes the new path — and the
+/// new working directory — for an `active` row.
+#[tokio::test]
+async fn relocate_transcript_repoints_an_active_session() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, _) = store.register_session(new_session()).await.unwrap();
+    assert_eq!(session.status, SessionStatus::Active);
+
+    store
+        .relocate_transcript(&session.id, "/tmp/wt/sess-1.jsonl", Some("/work/wt"))
+        .await
+        .unwrap();
+    let moved = store.session(&session.id).await.unwrap().unwrap();
+    assert_eq!(
+        moved.transcript_path.as_deref(),
+        Some("/tmp/wt/sess-1.jsonl")
+    );
+    assert_eq!(moved.cwd, "/work/wt");
+    assert_eq!(moved.status, SessionStatus::Active);
+
+    // Without a cwd only the path moves.
+    store
+        .relocate_transcript(&session.id, "/tmp/wt2/sess-1.jsonl", None)
+        .await
+        .unwrap();
+    let moved = store.session(&session.id).await.unwrap().unwrap();
+    assert_eq!(
+        moved.transcript_path.as_deref(),
+        Some("/tmp/wt2/sess-1.jsonl")
+    );
+    assert_eq!(moved.cwd, "/work/wt");
+
+    // An unknown id is a no-op, not an error.
+    store
+        .relocate_transcript(&SessionId::from("nope"), "/tmp/x.jsonl", None)
+        .await
+        .unwrap();
+}

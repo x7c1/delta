@@ -21,4 +21,9 @@ pub struct TranscriptRead {
     pub messages: Vec<TranscriptMessage>,
     /// The total number of lines in the file (the next read's start index).
     pub total_lines: usize,
+    /// The working directory named by the last `relocated` line in the read
+    /// range, if any. Claude Code appends such a line when it moves the
+    /// transcript to the project directory of a new working directory (on
+    /// entering a worktree); it is never a message, so it surfaces here instead.
+    pub relocated_cwd: Option<String>,
 }

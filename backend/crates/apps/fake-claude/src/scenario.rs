@@ -55,6 +55,7 @@
 //! | `hang` | Block forever (a launch or turn that never progresses). |
 //! | `swallow_prompt` | Consume one prompt from the pane input without firing `UserPromptSubmit` and without writing the transcript — models Claude Code's TUI eating a keystroke, whether into the auto-`/compact` routine or into an interactive dialog it put up on its own. The dispatched send stays `Dispatched` behind a missing echo until something re-types it. Repeat the step to swallow a re-type too. |
 //! | `local_command` | Consume one prompt from the pane input without firing any hook and without writing the transcript — models a local slash command such as `/cost` on Claude Code 2.1.286 and later, which the TUI runs itself and records nothing for. The same bytes as `swallow_prompt`; named for what Delta should conclude (the command ran), not for a lost keystroke. With `opens_dialog: true` the command then leaves a dialog up, as `/cost` (the usage panel) and `/model` (the model picker) do: every prompt typed into the pane is dropped until an Escape dismisses it, and the step ends on that Escape. |
+//! | `relocate { dir }` | Do what Claude Code does when the session enters a worktree (`EnterWorktree`): create `<cwd>/<dir>` as the new working directory, MOVE the transcript to `<transcript dir>/<dir>/<session id>.jsonl` (the old path stops existing), and append a uuid-less `{"type":"relocated","relocatedCwd":…}` line to it. Every later hook reports the new `transcript_path` (and `cwd`), and every later line carries the new `cwd`. Pair it with a `tool_use` for `EnterWorktree` before and a `post_tool_use` after to reproduce the real hook order: the `PreToolUse` still names the old path, the `PostToolUse` is the first to name the new one. A resume after a relocate is not modelled. |
 //! | `compact_group` | Write the four-line `/compact` group (caveat + bare command-name + summary + stdout) sharing one `promptId`. The four lines are written ATOMICALLY — one append, one shared `timestamp` — exactly as Claude Code writes a local-command group, so a tail poll can never observe the group half-written. The summary line is the `isCompactSummary:true` record that drives `Effect::AutoCompactFinished` on the server. |
 //!
 //! How the file is found, in priority order:
@@ -197,6 +198,13 @@ pub enum Step {
     /// summary line is the `isCompactSummary:true` record that drives the
     /// `Effect::AutoCompactFinished` re-dispatch.
     CompactGroup,
+    /// Move the transcript to a new project directory, the way Claude Code
+    /// does when the session enters a worktree (see the module docs).
+    Relocate {
+        /// The worktree's name: both the new working directory under the
+        /// current one and the project directory the transcript moves to.
+        dir: String,
+    },
 }
 
 /// The status a `task_output` step reports when the scenario does not say:
@@ -299,7 +307,8 @@ mod tests {
                     { "type": "swallow_prompt" },
                     { "type": "local_command" },
                     { "type": "local_command", "opens_dialog": true },
-                    { "type": "compact_group" }
+                    { "type": "compact_group" },
+                    { "type": "relocate", "dir": "wt" }
                 ]
             }"#,
         )
@@ -310,7 +319,7 @@ mod tests {
         );
         assert!(scenario.looped);
         assert!(scenario.wrap_pastes);
-        assert_eq!(scenario.steps.len(), 20);
+        assert_eq!(scenario.steps.len(), 21);
         assert_eq!(scenario.steps[0], Step::AwaitPrompt);
         assert_eq!(
             scenario.steps[1],
@@ -357,6 +366,12 @@ mod tests {
             Step::LocalCommand { opens_dialog: true }
         );
         assert_eq!(scenario.steps[19], Step::CompactGroup);
+        assert_eq!(
+            scenario.steps[20],
+            Step::Relocate {
+                dir: "wt".to_owned()
+            }
+        );
     }
 
     #[test]

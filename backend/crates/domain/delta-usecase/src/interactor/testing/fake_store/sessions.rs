@@ -208,6 +208,22 @@ impl FakeStore {
         Ok(())
     }
 
+    pub(super) async fn relocate_transcript(
+        &self,
+        id: &SessionId,
+        transcript_path: &str,
+        cwd: Option<&str>,
+    ) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(session) = g.sessions.iter_mut().find(|s| &s.id == id) {
+            session.transcript_path = Some(transcript_path.to_owned());
+            if let Some(cwd) = cwd {
+                session.cwd = cwd.to_owned();
+            }
+        }
+        Ok(())
+    }
+
     pub(super) async fn list_sessions_page(
         &self,
         cursor: Option<SessionPageCursor>,

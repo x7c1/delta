@@ -53,6 +53,15 @@ impl SessionStore for FakeStore {
         self.mark_session_failed(id, reason).await
     }
 
+    async fn relocate_transcript(
+        &self,
+        id: &SessionId,
+        transcript_path: &str,
+        cwd: Option<&str>,
+    ) -> Result<()> {
+        self.relocate_transcript(id, transcript_path, cwd).await
+    }
+
     async fn list_sessions_page(
         &self,
         cursor: Option<SessionPageCursor>,
@@ -221,6 +230,10 @@ impl SessionStore for FakeStore {
 
     async fn message_count(&self, session_id: &SessionId) -> Result<usize> {
         self.message_count(session_id).await
+    }
+
+    async fn latest_message_uuid(&self, session_id: &SessionId) -> Result<Option<MessageUuid>> {
+        self.latest_message_uuid(session_id).await
     }
 
     async fn transcript_lines_read(&self, session_id: &SessionId) -> Result<usize> {

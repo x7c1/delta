@@ -1,0 +1,14 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "tool_use", "name": "EnterWorktree", "input": { "name": "relocated-wt" } },
+    { "type": "relocate", "dir": "relocated-wt" },
+    { "type": "post_tool_use" },
+    { "type": "tool_result" },
+    { "type": "reply", "text": "Working in the worktree now." },
+    { "type": "stop" },
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "Still following the moved transcript." },
+    { "type": "stop" }
+  ]
+}

@@ -25,9 +25,12 @@ Two payload fields recur and mean the same thing throughout:
 - `transcript_path` is the JSONL the hook is firing against. For work happening
   inside a nested subagent this is the *subagent's* transcript, not the parent
   session's, even though `session_id` still names the parent — Claude Code
-  dispatches every hook under the parent's id. Delta compares the path against
-  the session row's stored one to filter out hooks that belong to a conversation
-  it does not track.
+  dispatches every hook under the parent's id. A path inside the session's
+  `subagents/` directory is a subagent's transcript, and its tool-call
+  bookkeeping is ignored. A path that differs from the stored one but is still
+  named `<session id>.jsonl` means Claude Code moved the session's transcript
+  (on entering a worktree); Delta re-points the session at the new file and
+  keeps its line cursor.
 
 ## Session lifecycle
 

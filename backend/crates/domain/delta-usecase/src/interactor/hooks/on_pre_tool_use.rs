@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::interactor::hooks::{is_subagent_tool, ASK_USER_QUESTION};
+use crate::interactor::hooks::{is_subagent_tool, HookTranscript, ASK_USER_QUESTION};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::PendingQuestion;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
@@ -72,8 +72,9 @@ where
         // instead (see attribute_lines / sync_transcript). This guard still
         // serves to keep stray permission-request rows off the parent when a
         // nested call IS reliably tagged with its own transcript path (the
-        // older payload shape).
-        if self.is_foreign_transcript(transcript_path).await? {
+        // older payload shape). It is also where a session whose transcript
+        // Claude Code moved is re-pointed at the new file.
+        if self.admit_hook_transcript(transcript_path).await? == HookTranscript::Foreign {
             return Ok(vec![]);
         }
 

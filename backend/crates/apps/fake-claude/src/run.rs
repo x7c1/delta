@@ -1,7 +1,7 @@
 //! The engine: wire the launch surfaces together and execute the scenario.
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
@@ -70,9 +70,9 @@ pub fn run() -> Result<(), String> {
 
     let mut engine = Engine {
         session_id: session_id.clone(),
-        cwd,
+        cwd: cwd.clone(),
         transcript_path: transcript_path.to_string_lossy().into_owned(),
-        transcript: TranscriptWriter::open(&transcript_path, &session_id)?,
+        transcript: TranscriptWriter::open(&transcript_path, &session_id, &cwd)?,
         endpoints,
         events,
         pending_prompt: args.prompt,
@@ -533,6 +533,7 @@ impl Engine {
                 Ok(())
             }
             Step::CompactGroup => self.transcript.compact_group(),
+            Step::Relocate { dir } => self.relocate(dir),
         }
     }
 
@@ -568,6 +569,30 @@ impl Engine {
         } else {
             self.transcript.user_text(prompt)
         }
+    }
+
+    /// Enter a worktree the way Claude Code does: a new working directory, and
+    /// the transcript moved to that directory's project directory (beside the
+    /// current one, under the same transcript root). Later hooks report both.
+    fn relocate(&mut self, dir: &str) -> Result<(), String> {
+        let cwd = Path::new(&self.cwd).join(dir);
+        std::fs::create_dir_all(&cwd)
+            .map_err(|e| format!("create worktree dir {}: {e}", cwd.display()))?;
+        let cwd = cwd.to_string_lossy().into_owned();
+        let old_path = PathBuf::from(&self.transcript_path);
+        let root = old_path
+            .parent()
+            .ok_or("transcript path has no parent directory")?;
+        let new_path = root.join(dir).join(format!("{}.jsonl", self.session_id));
+        self.transcript.relocate(&new_path, &cwd)?;
+        eprintln!(
+            "fake-claude: relocated transcript {} -> {}",
+            old_path.display(),
+            new_path.display()
+        );
+        self.transcript_path = new_path.to_string_lossy().into_owned();
+        self.cwd = cwd;
+        Ok(())
     }
 
     /// The next submitted prompt: the launch's positional prompt first, then

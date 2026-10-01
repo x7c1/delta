@@ -11,10 +11,11 @@ use crate::ports::{Transcript, TranscriptMessage, TranscriptRead};
 /// An in-memory transcript modelled as a list of file lines, keyed by path so
 /// several sessions (each with its own transcript path) can be driven at once.
 ///
-/// Each entry is one transcript line: `Some(msg)` is a parsed message,
-/// `None` is a line that produces no message (blank / no-uuid / unparsable)
-/// but still occupies a line and advances the cursor — exactly how the real
-/// reader treats Claude Code's `file-history-snapshot` lines.
+/// Each entry is one transcript line (see [`FakeLine`]): a parsed message, a
+/// line that produces no message but still occupies a line and advances the
+/// cursor — exactly how the real reader treats Claude Code's
+/// `file-history-snapshot` lines — or the `relocated` line Claude Code appends
+/// when it moves the transcript.
 ///
 /// The default path matches the single-session [`submit`] helper, so the
 /// single-session tests can keep pushing lines without naming a path.
@@ -22,9 +23,21 @@ use crate::ports::{Transcript, TranscriptMessage, TranscriptRead};
 /// [`submit`]: super::submit
 pub(crate) const DEFAULT_TRANSCRIPT_PATH: &str = "/tmp/t.jsonl";
 
+/// One line of a [`FakeTranscript`] file.
+#[derive(Clone)]
+enum FakeLine {
+    /// A line that parses into a message.
+    Message(Box<TranscriptMessage>),
+    /// A line that produces no message (blank / no-uuid / unparsable).
+    Skipped,
+    /// A `relocated` line naming the working directory the transcript was
+    /// moved for.
+    Relocated(String),
+}
+
 #[derive(Default)]
 pub(crate) struct FakeTranscript {
-    by_path: Mutex<HashMap<String, Vec<Option<TranscriptMessage>>>>,
+    by_path: Mutex<HashMap<String, Vec<FakeLine>>>,
     /// Paths the fake reports as absent from `exists`, modelling a transcript
     /// file that has been removed. By default every path is considered present,
     /// so the resume gate does not perturb the existing open/resume tests; a
@@ -47,20 +60,23 @@ impl Transcript for FakeTranscript {
         }
         let by_path = self.by_path.lock().unwrap();
         let lines = by_path.get(path).cloned().unwrap_or_default();
-        let messages = lines
-            .iter()
-            .enumerate()
-            .skip(from_line)
-            .filter_map(|(idx, line)| {
-                line.clone().map(|mut msg| {
+        let mut messages = Vec::new();
+        let mut relocated_cwd = None;
+        for (idx, line) in lines.iter().enumerate().skip(from_line) {
+            match line {
+                FakeLine::Message(msg) => {
+                    let mut msg = (**msg).clone();
                     msg.seq = idx as i64;
-                    msg
-                })
-            })
-            .collect();
+                    messages.push(msg);
+                }
+                FakeLine::Skipped => {}
+                FakeLine::Relocated(cwd) => relocated_cwd = Some(cwd.clone()),
+            }
+        }
         Ok(TranscriptRead {
             messages,
             total_lines: lines.len(),
+            relocated_cwd,
         })
     }
 
@@ -82,7 +98,19 @@ impl FakeTranscript {
             .unwrap()
             .entry(path.to_owned())
             .or_default()
-            .push(Some(line));
+            .push(FakeLine::Message(Box::new(line)));
+    }
+
+    /// Move the transcript at `from` to `to` whole, then append a `relocated`
+    /// line naming `cwd` — what Claude Code does when the session enters a
+    /// worktree. `from` reports absent afterwards, like the moved-away file.
+    pub(crate) fn relocate(&self, from: &str, to: &str, cwd: &str) {
+        let mut by_path = self.by_path.lock().unwrap();
+        let mut lines = by_path.remove(from).unwrap_or_default();
+        lines.push(FakeLine::Relocated(cwd.to_owned()));
+        by_path.insert(to.to_owned(), lines);
+        drop(by_path);
+        self.mark_missing(from);
     }
 
     /// Mark a transcript path as absent, so [`Transcript::exists`] reports
@@ -110,6 +138,6 @@ impl FakeTranscript {
             .unwrap()
             .entry(DEFAULT_TRANSCRIPT_PATH.to_owned())
             .or_default()
-            .push(None);
+            .push(FakeLine::Skipped);
     }
 }

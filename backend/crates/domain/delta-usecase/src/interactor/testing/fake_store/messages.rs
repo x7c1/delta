@@ -1,6 +1,6 @@
 //! Transcript messages and the per-session transcript read cursor.
 
-use delta_model::{Message, SessionId, ThreadId};
+use delta_model::{Message, MessageUuid, SessionId, ThreadId};
 
 use crate::error::Result;
 
@@ -34,6 +34,18 @@ impl FakeStore {
             .iter()
             .filter(|m| &m.session_id == session_id)
             .count())
+    }
+
+    pub(super) async fn latest_message_uuid(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<MessageUuid>> {
+        let g = self.inner.lock().unwrap();
+        Ok(g.messages
+            .iter()
+            .filter(|m| &m.session_id == session_id)
+            .max_by_key(|m| m.seq)
+            .map(|m| m.uuid.clone()))
     }
 
     pub(super) async fn transcript_lines_read(&self, session_id: &SessionId) -> Result<usize> {

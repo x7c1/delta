@@ -131,6 +131,24 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// [`SessionStatus::Failed`](delta_model::SessionStatus::Failed).
     async fn mark_session_failed(&self, id: &SessionId, reason: Option<&str>) -> Result<()>;
 
+    /// Point a session at the transcript Claude Code moved it to, in any
+    /// status.
+    ///
+    /// Claude Code moves a session's JSONL to the project directory of its new
+    /// working directory when the session enters a worktree, and reports the
+    /// new path in every later hook. [`Self::register_session`] only fills the
+    /// path in while the row is `spawning`, so this is the write that follows
+    /// such a move. `cwd`, when `Some`, replaces the session's working
+    /// directory too (the move's `relocated` line names it), so a later
+    /// `claude --resume` runs where Claude Code now files the transcript; `None`
+    /// leaves it as it was. A missing row is a no-op.
+    async fn relocate_transcript(
+        &self,
+        id: &SessionId,
+        transcript_path: &str,
+        cwd: Option<&str>,
+    ) -> Result<()>;
+
     /// One page of sessions in the store's recency stream, resuming strictly
     /// after `cursor` (or from the top when `None`).
     ///
@@ -538,6 +556,11 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// The number of messages already stored for a session.
     async fn message_count(&self, session_id: &SessionId) -> Result<usize>;
 
+    /// The uuid of the session's message with the highest `seq` — for a Claude
+    /// session, the transcript line ingested furthest down the file — or `None`
+    /// when nothing has been ingested yet.
+    async fn latest_message_uuid(&self, session_id: &SessionId) -> Result<Option<MessageUuid>>;
+
     /// The number of transcript lines already consumed for a session: the
     /// line-based ingestion cursor. The next read starts at this index, so each
     /// transcript line is processed exactly once regardless of how many of them
@@ -784,6 +807,15 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self).mark_session_failed(id, reason).await
     }
 
+    async fn relocate_transcript(
+        &self,
+        id: &SessionId,
+        transcript_path: &str,
+        cwd: Option<&str>,
+    ) -> Result<()> {
+        (**self).relocate_transcript(id, transcript_path, cwd).await
+    }
+
     async fn list_sessions_page(
         &self,
         cursor: Option<SessionPageCursor>,
@@ -968,6 +1000,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn message_count(&self, session_id: &SessionId) -> Result<usize> {
         (**self).message_count(session_id).await
+    }
+
+    async fn latest_message_uuid(&self, session_id: &SessionId) -> Result<Option<MessageUuid>> {
+        (**self).latest_message_uuid(session_id).await
     }
 
     async fn transcript_lines_read(&self, session_id: &SessionId) -> Result<usize> {

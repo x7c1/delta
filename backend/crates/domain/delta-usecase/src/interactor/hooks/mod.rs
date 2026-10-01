@@ -2,7 +2,7 @@
 //! `PreToolUse`, `PermissionRequest`, `SessionStart`, and `SessionEnd`.
 
 mod bind_pending_spawn;
-mod hook_transcript_guard;
+mod hook_transcript;
 mod match_uuid_for_prompt;
 mod on_message_display;
 mod on_permission_request;
@@ -45,6 +45,8 @@ pub(in crate::interactor) fn is_subagent_tool(tool_name: &str) -> bool {
 }
 
 pub use on_permission_request::PermissionWait;
+
+pub(in crate::interactor) use hook_transcript::HookTranscript;
 
 pub(in crate::interactor::hooks) use match_uuid_for_prompt::match_uuid_for_prompt;
 pub(in crate::interactor::hooks) use validate_transcript_path::validate_transcript_path;

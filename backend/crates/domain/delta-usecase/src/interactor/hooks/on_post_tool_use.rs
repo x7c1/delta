@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::interactor::hooks::is_subagent_tool;
+use crate::interactor::hooks::{is_subagent_tool, HookTranscript};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
@@ -81,8 +81,10 @@ where
         // own JSONL. Ignore it so a nested completion cannot clear (or
         // upgrade) a parent-tracked running entry that happens to share the
         // same `tool_use_id` by accident, and so the symmetric `PreToolUse`
-        // no-op (above) is not contradicted later.
-        if self.is_foreign_transcript(transcript_path).await? {
+        // no-op (above) is not contradicted later. A hook naming the session's
+        // own transcript at a new path (Claude Code moved it) re-points the
+        // session and is handled as usual.
+        if self.admit_hook_transcript(transcript_path).await? == HookTranscript::Foreign {
             return Ok(vec![]);
         }
 

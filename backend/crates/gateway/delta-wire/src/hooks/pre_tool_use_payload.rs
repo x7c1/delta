@@ -17,10 +17,12 @@ pub struct PreToolUsePayload {
     /// The JSONL the hook is firing against. For a nested subagent's tool call
     /// this is the subagent's own transcript (e.g.
     /// `<parent-session>/subagents/agent-<id>.jsonl`), not the parent session's
-    /// `<parent-session>.jsonl`. The interactor compares this against the
-    /// session row's stored path so a hook fired against a nested transcript
-    /// can be filtered out — its `session_id` still names the parent (Claude
-    /// Code dispatches hooks under the parent's id) but the runtime work
-    /// belongs to a different conversation Delta does not track.
+    /// `<parent-session>.jsonl`. The interactor recognises that `subagents/`
+    /// location so a hook fired against a nested transcript can be filtered
+    /// out — its `session_id` still names the parent (Claude Code dispatches
+    /// hooks under the parent's id) but the runtime work belongs to a
+    /// different conversation Delta does not track. When this names the
+    /// session's own `<session>.jsonl` at a new path, Claude Code moved it
+    /// (on entering a worktree) and the interactor follows it.
     pub transcript_path: String,
 }

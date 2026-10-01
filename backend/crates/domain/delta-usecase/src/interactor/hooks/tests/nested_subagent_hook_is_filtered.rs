@@ -9,7 +9,7 @@
 //! `tool_use(Agent)` is written to the subagent's own JSONL, never the
 //! parent's, so it cannot produce a parent indicator.
 //!
-//! The `is_foreign_transcript` short-circuit on the `PreToolUse` /
+//! The foreign-transcript short-circuit on the `PreToolUse` /
 //! `PostToolUse` paths is retained for the permission-row path — if Claude
 //! Code does reliably tag the nested call with the subagent's transcript path
 //! the older guard still prevents a permission row from being attached to the
@@ -21,9 +21,9 @@ use crate::interactor::testing::*;
 use crate::ports::SessionEvent;
 
 /// A nested subagent's transcript lives under the parent session's transcript
-/// directory: `<parent>.jsonl` is sibling to `<parent>/subagents/agent-…jsonl`.
-/// Pick any path that differs from [`SEED_TRANSCRIPT_PATH`] (`/tmp/t.jsonl`) to
-/// simulate the nested case.
+/// directory: `<parent>.jsonl` is sibling to `<parent>/subagents/agent-…jsonl`,
+/// and it is that `subagents/` location — not merely differing from
+/// [`SEED_TRANSCRIPT_PATH`] (`/tmp/t.jsonl`) — that marks the hook as foreign.
 const NESTED_TRANSCRIPT_PATH: &str = "/tmp/t/subagents/agent-deadbeef.jsonl";
 
 const AGENT_INPUT: &str = r#"{"subagent_type":"general-purpose","description":"Long crawl","prompt":"…","run_in_background":true}"#;
@@ -145,7 +145,7 @@ async fn post_tool_use_against_a_nested_transcript_does_not_clear_the_parents_ru
 
     // A nested subagent's `PostToolUse` arrives carrying the SAME `tool_use_id`
     // by accident but its `transcript_path` is the nested transcript. The
-    // `is_foreign_transcript` guard drops it before the running-subagent
+    // foreign-transcript guard drops it before the running-subagent
     // lookup, leaving the parent's entry intact and broadcasting nothing.
     let events = ix
         .on_post_tool_use(

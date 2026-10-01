@@ -54,6 +54,7 @@ impl Transcript for JsonlTranscript {
                 return Ok(TranscriptRead {
                     messages: Vec::new(),
                     total_lines: 0,
+                    relocated_cwd: None,
                 })
             }
             Err(e) => return Err(Error::from(e).into()),
@@ -76,6 +77,7 @@ impl Transcript for JsonlTranscript {
         // it). Message outcomes already carry their absolute line index as `seq`.
         let mut outcomes = Vec::new();
         let mut total_lines = 0;
+        let mut relocated_cwd = None;
         for (idx, line) in terminated.lines().enumerate() {
             total_lines = idx + 1;
             if idx < from_line {
@@ -88,6 +90,9 @@ impl Transcript for JsonlTranscript {
                     outcomes.push(ParsedLine::Message(msg));
                 }
                 Ok(other @ ParsedLine::TurnDuration { .. }) => outcomes.push(other),
+                // A moved transcript can carry several `relocated` lines (one
+                // per move); the last one names where the session is now.
+                Ok(ParsedLine::Relocated { cwd }) => relocated_cwd = Some(cwd),
                 Ok(ParsedLine::Skip) => {}
                 Err(err) => {
                     tracing::warn!(error = %err, "skipping unparsable transcript line");
@@ -102,13 +107,16 @@ impl Transcript for JsonlTranscript {
             .into_iter()
             .filter_map(|outcome| match outcome {
                 ParsedLine::Message(msg) => Some(*msg),
-                ParsedLine::TurnDuration { .. } | ParsedLine::Skip => None,
+                ParsedLine::TurnDuration { .. }
+                | ParsedLine::Relocated { .. }
+                | ParsedLine::Skip => None,
             })
             .collect();
 
         Ok(TranscriptRead {
             messages,
             total_lines,
+            relocated_cwd,
         })
     }
 
@@ -153,6 +161,52 @@ mod tests {
         assert_eq!(tail.total_lines, 2);
         assert_eq!(tail.messages[0].flatten_text().as_deref(), Some("b"));
         assert_eq!(tail.messages[0].seq, 1);
+    }
+
+    /// A transcript Claude Code moved keeps every earlier line and gains a
+    /// `relocated` line (plus other uuid-less bookkeeping): those occupy lines
+    /// but produce no message, and the read reports the last relocated cwd.
+    #[tokio::test]
+    async fn relocated_lines_advance_the_index_and_report_the_last_cwd() {
+        let mut file = tempfile_jsonl();
+        writeln!(
+            file,
+            r#"{{"uuid":"u1","type":"user","message":{{"content":"a","role":"user"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"relocated","sessionId":"s1","relocatedCwd":"/work/wt-a"}}"#
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"worktree-state","worktreeSession":{{"worktreePath":"/work/wt-a"}},"sessionId":"s1"}}"#
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"relocated","relocatedCwd":"/work/wt-b","sessionId":"s1"}}"#
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"uuid":"a1","type":"assistant","message":{{"role":"assistant","content":[{{"type":"text","text":"b"}}]}}}}"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let t = JsonlTranscript::new();
+        let all = t.read_from(&path, 0).await.unwrap();
+        assert_eq!(all.total_lines, 5);
+        assert_eq!(all.messages.len(), 2);
+        assert_eq!(all.messages[1].seq, 4);
+        assert_eq!(all.relocated_cwd.as_deref(), Some("/work/wt-b"));
+
+        // A read starting past the relocated lines reports none.
+        let tail = t.read_from(&path, 4).await.unwrap();
+        assert_eq!(tail.relocated_cwd, None);
     }
 
     #[tokio::test]
