@@ -21,6 +21,7 @@ mod open_session;
 mod reap_stale_spawns;
 mod reap_tick;
 mod record_launched_pane;
+mod refresh_session_settings;
 mod spawn_fresh;
 mod tear_down_bound_session;
 mod workdir_for;

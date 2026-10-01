@@ -172,6 +172,7 @@ mod tests {
             hook_secret: "test-hook-secret".into(),
             transcript_root: "/tmp".into(),
             port: 7878,
+            hook_endpoint_changed: false,
             launch: delta_usecase::LaunchConfig::default(),
         }
     }

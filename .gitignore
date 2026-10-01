@@ -18,6 +18,9 @@ playwright-report/
 # Pre-migration snapshots the schema ladder writes before a destructive step.
 # Never deleted automatically — keep them out of the tree, not off the disk.
 *.db.bak-v*
+# The hook state file a server keeps beside its database.
+delta-hook-state.json
+delta-hook-state.json.tmp
 
 # Scratch / agent progress logs
 .tmp/

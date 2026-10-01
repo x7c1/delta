@@ -37,7 +37,14 @@ make dev WORKDIR=~/scratch # or pass your own working directory for claude
    --settings <file>` with Delta's rendered session settings (so the hooks point
    at `http://127.0.0.1:7878/hooks/...`); the settings file lives outside the
    working directory, so a real project's own `.claude/settings.json` is never
-   touched. Nothing is spawned on startup.
+   touched. Nothing is spawned on startup. The hook URLs also carry a hook
+   secret, which the server keeps in `backend/delta-hook-state.json` (beside
+   `backend/delta.db`, mode `0600`) and reuses on every start, so a session
+   still running when the server restarts — after a crash, or when you restart
+   only `delta-server` — still reaches it. `make down` ends the dev sessions
+   along with the server, so none outlives that.
+   Delete that file to rotate the secret; `DELTA_HOOK_SECRET` overrides it
+   without replacing it.
 2. Installs and builds the frontend workspace libraries, then starts the web dev
    server against the real backend (port 5173).
 
@@ -124,8 +131,17 @@ either.
   `DELTA_DB_PATH` / `DELTA_SESSION_WORKDIR` still wins, and the worktree base
   (`$HOME/.delta/worktrees`) and the transcript root (where Claude Code writes)
   keep their usual defaults.
-- **Port.** The server takes a free loopback port on every launch, so it never
-  collides with a `make dev` server on 7878; `DELTA_PORT` pins one.
+- **Port.** The app has no fixed port, so it never collides with a `make dev`
+  server on 7878. It records the port it took in the hook state file (below) and
+  tries that one again on the next launch, falling back to a free loopback port
+  — with a warning, and the new port recorded — when something else holds it.
+  `DELTA_PORT` pins a port; that one is used as-is and never recorded.
+- **Hook state file.** `delta-hook-state.json`, next to the database (the
+  directory of `DELTA_DB_PATH`), keeps the hook secret and the app's port so a
+  session that outlives a restart still reaches the server with hook URLs it
+  accepts. It is created `0600`; a file found readable by others is tightened
+  to `0600` with a warning. `DELTA_HOOK_SECRET` overrides the recorded secret
+  without replacing it. Delete the file to rotate the secret.
 - **`PATH` and locale.** An app launched from Finder or a desktop file does not
   inherit your shell's environment, so at startup the app asks your login shell
   (`$SHELL`, or `/bin/sh`) for it and adopts its `PATH`, `LANG` and every
@@ -156,9 +172,9 @@ either.
   message cannot open local files or other applications; the app logs the
   refusal to its standard output. On Linux without `xdg-open`, web links do
   nothing either and the log says the opener could not start.
-- **Startup errors.** The two failures you have to act on — a database the
-  binary refuses to open, and a missing `tmux` — are shown in a dialog, and the
-  app exits after it is dismissed.
+- **Startup errors.** The failures you have to act on — a database the binary
+  refuses to open, a missing `tmux`, and a hook state file that cannot be read
+  or written — are shown in a dialog, and the app exits after it is dismissed.
 - **Quitting.** Closing the window stops the server. The tmux server keeps
   running, so open sessions survive and are resumed on the next launch.
 

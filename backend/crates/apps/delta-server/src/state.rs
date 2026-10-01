@@ -65,12 +65,13 @@ pub struct AppState {
     /// lifetime — see `config::config_from_env` — and never rotated. Held as an
     /// `Arc<str>` mirroring [`Self::tmux_socket`], so cloning the state is cheap.
     auth_token: Arc<str>,
-    /// The per-run hook secret every `/hooks/*` request must carry as an `?hs=`
-    /// query parameter, enforced by [`crate::hook_auth_guard`]. Minted (or
-    /// handed in) once for the server's lifetime alongside [`Self::auth_token`]
-    /// — see `config::config_from_env` — and rendered into the session settings
-    /// so genuine Claude Code callbacks present it. Held as an `Arc<str>`
-    /// mirroring [`Self::auth_token`], so cloning the state is cheap.
+    /// The hook secret every `/hooks/*` request must carry as an `?hs=` query
+    /// parameter, enforced by [`crate::hook_auth_guard`]. Fixed for the
+    /// server's lifetime and, unlike [`Self::auth_token`], kept across restarts
+    /// in the hook state file — see `config::adopt_persisted_hook_secret` — and
+    /// rendered into the session settings so genuine Claude Code callbacks
+    /// present it. Held as an `Arc<str>` mirroring [`Self::auth_token`], so
+    /// cloning the state is cheap.
     hook_secret: Arc<str>,
     /// The per-session comms log the `/comms` stream serves.
     ///
@@ -175,7 +176,7 @@ impl AppState {
         &self.auth_token
     }
 
-    /// The per-run hook secret every `/hooks/*` request must present as an `?hs=`
+    /// The hook secret every `/hooks/*` request must present as an `?hs=`
     /// query parameter. Read by [`crate::hook_auth_guard`] to authorize a hook
     /// callback, and by the integration tests to attach a valid secret to the
     /// hook requests they drive through the router.
