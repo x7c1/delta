@@ -39,6 +39,7 @@ jobs:
   bundle:
     name: bundle (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
 
     # Uploading to a Release needs write access. A called workflow cannot hold
     # more than its caller grants, and a pull_request token from a fork stays
@@ -72,6 +73,7 @@ jobs:
       # app-indicator and SVG libraries) links against — the list ci.yml
       # installs for its shell build.
       - name: Install system packages
+        timeout-minutes: 10
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update

@@ -11,6 +11,7 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Only consider main runs that finished green: a red CI must never
     # tag a release.
     if: ${{ github.event.workflow_run.conclusion == 'success' }}

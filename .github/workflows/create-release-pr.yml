@@ -10,6 +10,7 @@ on:
 jobs:
   create-release-pr:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # Gate both triggers:
     # - push: skip the commit that merged a release PR (its message starts
     #   with "Release v") — otherwise we'd loop, opening a new release PR
