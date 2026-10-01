@@ -76,7 +76,7 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
-      # The apt archive cache, as in ci.yml's backend job (see the comment there).
+      # The apt archive cache, as in ci.yml's e2e-fake job (see the comment there).
       - name: Prepare the apt archive cache
         if: runner.os == 'Linux'
         id: apt-cache-key

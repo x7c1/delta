@@ -10,9 +10,6 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      # The apt packages the job installs; also part of their cache key.
-      APT_PACKAGES: tmux
     defaults:
       run:
         working-directory: backend
@@ -36,52 +33,16 @@ jobs:
             ${{ runner.os }}-cargo-
 
       # The .deb archives are cached so a run normally installs from the cache
-      # instead of the Ubuntu mirror, which has stalled these installs for over
-      # 20 minutes. Only the downloads are cached: `apt-get update` and
-      # `apt-get install` still run, so dpkg registers the packages and runs
-      # their scripts as before, and apt re-downloads any cached archive that
-      # does not match the signed index. The key holds the runner image (a new
-      # image can ship different versions) and the package list; on a new image
-      # the previous image's set for the same list is restored.
-      #
-      # The cache action runs as the runner user, so it is given the root-owned
-      # archive directory (`lock` and `partial/` stay apt's), and apt must keep
-      # what it downloads: drop the Docker-style clean hook if the image has one.
-      #
-      # e2e-fake and bundle.yml repeat these steps; keep them in sync.
-      - name: Prepare the apt archive cache
-        id: apt-cache-key
-        run: |
-          sudo rm -f /etc/apt/apt.conf.d/docker-clean
-          sudo chown "$(id -u):$(id -g)" /var/cache/apt/archives
-          packages_hash=$(printf '%s' "$APT_PACKAGES" | sha256sum | cut -c1-16)
-          prefix="apt-${{ runner.os }}-${ImageOS}-${packages_hash}-"
-          echo "prefix=${prefix}" >> "$GITHUB_OUTPUT"
-          echo "key=${prefix}${ImageVersion}" >> "$GITHUB_OUTPUT"
-
-      - name: Cache apt archives
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives/*.deb
-          key: ${{ steps.apt-cache-key.outputs.key }}
-          restore-keys: |
-            ${{ steps.apt-cache-key.outputs.prefix }}
-
-      # tmux is a hard prerequisite for this job: the composition root
+      # instead of the Ubunt      # tmux is a hard prerequisite for this job: the composition root
       # probes for it at startup, so every test that wires the production root
       # fails without it — except the fake-claude full-loop test, which wires
       # that same root to drive a real tmux server but probes `PATH` itself
       # first and merely skips.
+      # The runner image usually ships tmux already, so this rarely downloads
+      # anything and its archives are not cached (unlike e2e-fake's).
       - name: Install tmux
         timeout-minutes: 10
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y -o APT::Keep-Downloaded-Packages=true $APT_PACKAGES
-          # Drop archives the current index no longer offers, so a cache saved
-          # from a restored older set does not keep growing, and let the cache
-          # action read what apt (as root) downloaded.
-          sudo apt-get autoclean
-          sudo find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec chmod a+r {} +
+        run: sudo apt-get update && sudo apt-get install -y tmux
 
       - name: Build
         run: cargo build --locked
@@ -194,7 +155,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The apt archive cache, as in the backend job (see the comment there).
+      # The .deb archives are cached so a run normally installs from the cache
+      # instead of the Ubuntu mirror, which has stalled these installs for over
+      # 20 minutes. Only the downloads are cached: `apt-get update` and
+      # `apt-get install` still run, so dpkg registers the packages and runs
+      # their scripts as before, and apt re-downloads any cached archive that
+      # does not match the signed index. The key holds the runner image (a new
+      # image can ship different versions) and the package list; on a new image
+      # the previous image's set for the same list is restored.
+      #
+      # The cache action runs as the runner user, so it is given the root-owned
+      # archive directory (`lock` and `partial/` stay apt's), and apt must keep
+      # what it downloads: drop the Docker-style clean hook if the image has one.
+      #
+      # bundle.yml repeats these steps; keep them in sync.
       - name: Prepare the apt archive cache
         id: apt-cache-key
         run: |
@@ -217,6 +191,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y -o APT::Keep-Downloaded-Packages=true $APT_PACKAGES
+          # Drop archives the current index no longer offers, so a cache saved
+          # from a restored older set does not keep growing, and let the cache
+          # action read what apt (as root) downloaded.
           sudo apt-get autoclean
           sudo find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec chmod a+r {} +
 
