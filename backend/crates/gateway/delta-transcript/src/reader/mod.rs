@@ -59,7 +59,7 @@ impl Transcript for JsonlTranscript {
                     relocated_cwd: None,
                 })
             }
-            Err(e) => return Err(Error::from(e).into()),
+            Err(e) => return Err(Error::io(path, e).into()),
         };
 
         // Consume only newline-terminated lines: a trailing remainder without a
@@ -125,7 +125,7 @@ impl Transcript for JsonlTranscript {
     async fn exists(&self, path: &str) -> std::result::Result<bool, delta_usecase::Error> {
         fs::try_exists(path)
             .await
-            .map_err(|e| Error::from(e).into())
+            .map_err(|e| Error::io(path, e).into())
     }
 
     async fn find_session_transcript(
@@ -230,6 +230,24 @@ mod tests {
             .unwrap();
         assert!(out.messages.is_empty());
         assert_eq!(out.total_lines, 0);
+    }
+
+    /// A read that fails for a reason other than a missing file surfaces an
+    /// error naming the transcript it was reading.
+    #[tokio::test]
+    async fn a_failed_read_names_the_transcript_path() {
+        // Reading a directory as a file fails with an IO error that is not
+        // `NotFound`, so it is reported instead of read as empty.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap().to_owned();
+
+        let t = JsonlTranscript::new();
+        let err = t.read_from(&path, 0).await.unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains(&path),
+            "the error must name {path}, got {message:?}"
+        );
     }
 
     #[tokio::test]
