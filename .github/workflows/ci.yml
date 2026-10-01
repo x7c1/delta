@@ -38,7 +38,7 @@ jobs:
       # that same root to drive a real tmux server but probes `PATH` itself
       # first and merely skips.
       - name: Install tmux
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: sudo apt-get update && sudo apt-get install -y tmux
 
       - name: Build
@@ -147,7 +147,6 @@ jobs:
       # (Tauri v2: WebKitGTK 4.1, GTK 3, the app-indicator and SVG libraries)
       # links against, for the shell build below.
       - name: Install system packages
-        timeout-minutes: 10
         run: |
           sudo apt-get update
           sudo apt-get install -y tmux \
