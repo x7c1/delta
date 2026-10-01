@@ -521,6 +521,17 @@ impl Engine {
                 let _swallowed = self.next_prompt()?;
                 Ok(())
             }
+            Step::LocalCommand { opens_dialog } => {
+                // The command runs without firing any hook or writing
+                // anything (see the variant doc).
+                let _command = self.next_prompt()?;
+                if *opens_dialog {
+                    // The dialog it left up swallows whatever is typed until
+                    // an Escape dismisses it.
+                    self.await_escape()?;
+                }
+                Ok(())
+            }
             Step::CompactGroup => self.transcript.compact_group(),
         }
     }

@@ -23,6 +23,10 @@ fn defaults_are_cwd_relative_and_home_based() {
     let defaults = delta_usecase::LaunchConfig::default();
     assert_eq!(config.launch.claude_bin, defaults.claude_bin);
     assert_eq!(config.launch.echo_deadline, defaults.echo_deadline);
+    assert_eq!(
+        config.launch.slash_command_echo_deadline,
+        defaults.slash_command_echo_deadline
+    );
 }
 
 #[test]
@@ -66,6 +70,7 @@ fn explicit_variables_override_every_default() {
         ("DELTA_LAUNCH_PREP_DEADLINE_MS", "20"),
         ("DELTA_PERMISSION_DECISION_TIMEOUT_MS", "30"),
         ("DELTA_ECHO_DEADLINE_MS", "40"),
+        ("DELTA_SLASH_COMMAND_ECHO_DEADLINE_MS", "50"),
     ]);
     assert_eq!(config.database_path, "/data/d.db");
     assert_eq!(config.session_workdir_base, "/data/s");
@@ -93,6 +98,10 @@ fn explicit_variables_override_every_default() {
         Duration::from_millis(30)
     );
     assert_eq!(config.launch.echo_deadline, Duration::from_millis(40));
+    assert_eq!(
+        config.launch.slash_command_echo_deadline,
+        Duration::from_millis(50)
+    );
 }
 
 #[test]

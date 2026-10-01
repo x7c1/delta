@@ -50,7 +50,7 @@ where
         let Some(pane) = self.state.handle().map(|h| h.pane.clone()) else {
             return Ok(0);
         };
-        let TurnState::AwaitingEcho { send_id } = self.state.turn() else {
+        let TurnState::AwaitingEcho { send_id, .. } = self.state.turn() else {
             return Ok(0);
         };
         let sends = self.store.dispatched_sends(self.id).await?;

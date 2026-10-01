@@ -362,7 +362,7 @@ where
         // before the launch, so the first `UserPromptSubmit` the auto-submitted
         // prompt fires always finds the dispatch recorded.
         if let Some(send) = &first_send {
-            self.apply_turn_input(crate::turn::TurnInput::Dispatch { send_id: send.id })
+            self.apply_turn_input(crate::turn::TurnInput::dispatch(send.id, &send.text))
                 .await?;
         }
 

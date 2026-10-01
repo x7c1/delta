@@ -109,6 +109,11 @@ pub(crate) struct FakeTmux {
     /// When set, `send_line` fails instead of recording the line, simulating a
     /// dispatch failure into the pane.
     pub(crate) fail: bool,
+    /// When set, `send_keys` fails instead of recording the keys, while
+    /// `send_line` keeps working — a key injection that fails on its own.
+    /// Toggled mid-test via [`Self::fail_key_injection`], since the
+    /// interesting case is a session whose earlier dispatch went through.
+    pub(crate) keys_fail: Mutex<bool>,
     /// When set, `create_session` fails instead of recording the spawn,
     /// simulating a failed session launch.
     pub(crate) fail_create: bool,
@@ -165,6 +170,11 @@ impl FakeTmux {
         *self.probe_fails.lock().unwrap() = true;
     }
 
+    /// Make every later `send_keys` fail, leaving `send_line` working.
+    pub(crate) fn fail_key_injection(&self) {
+        *self.keys_fail.lock().unwrap() = true;
+    }
+
     /// Make `pane` "show" `content`, so a `capture_pane` of it reads that back.
     pub(crate) fn show_in_pane(&self, pane: &str, content: &str) {
         self.pane_content
@@ -215,7 +225,7 @@ impl TmuxDriver for FakeTmux {
     }
 
     async fn send_keys(&self, pane: &str, keys: &[&str]) -> Result<()> {
-        if self.fail {
+        if self.fail || *self.keys_fail.lock().unwrap() {
             return Err(crate::error::Error::Tmux("key injection failed".into()));
         }
         self.keyed.lock().unwrap().push((

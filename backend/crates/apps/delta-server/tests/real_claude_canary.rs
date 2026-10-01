@@ -25,9 +25,11 @@
 //!   HTTP POSTs deserializable by Delta's exact wire types; the user line and
 //!   the assistant reply stream into the JSONL at `transcript_path` and parse
 //!   with Delta's parser; the `UserPromptSubmit` `additionalContext` envelope
-//!   is consumed; `/exit` writes an `isMeta` caveat line (`Role::Meta`) and
-//!   fires `SessionEnd`. Also: no `PermissionRequest` fires for a turn with
-//!   no permission dialog.
+//!   is consumed; `/exit` fires `SessionEnd` and — from claude 2.1.286 —
+//!   records nothing for the local command: no `<local-command-caveat>`, no
+//!   command-name line, no `<local-command-stdout>` (Delta frees such a
+//!   command's turn on its short slash-command echo deadline instead). Also:
+//!   no `PermissionRequest` fires for a turn with no permission dialog.
 //! - [`interrupting_a_turn_writes_the_marker_and_queued_prompts_dequeue`]:
 //!   Escape writes the `[Request interrupted by user…` marker as a
 //!   `role: user` line (accepted by `claude_format::is_interrupt_marker`)
@@ -89,6 +91,11 @@ const WAIT_DEADLINE: Duration = Duration::from_secs(90);
 
 /// Poll interval between probes.
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// How long to wait after `SessionEnd` before asserting that a line is ABSENT
+/// from the transcript: claude flushes once more on its way out, so a line it
+/// still wrote for `/exit` could land just after the hook.
+const EXIT_FLUSH_SETTLE: Duration = Duration::from_secs(3);
 
 /// Nested-session environment markers stripped from the spawned `claude`.
 /// With any of these inherited (e.g. when this suite is itself driven from
@@ -565,9 +572,13 @@ async fn prompt_turn_fires_hooks_and_streams_the_transcript() {
             &session,
         )?;
 
-        // `/exit`: the local-command caveat is recorded as an `isMeta` line —
-        // harness-injected content Delta must classify as Role::Meta, not a
-        // human turn — and SessionEnd fires.
+        // `/exit`: SessionEnd fires, and the local command leaves no trace in
+        // the transcript. Up to 2.1.285 claude recorded a local command as a
+        // caveat (`isMeta`) / command-name / stdout group, which Delta resolved
+        // the command's send against; from 2.1.286 it records none of it, so
+        // Delta ends such a turn on the slash-command echo deadline instead.
+        // Should the group come back, that path still resolves it — but the
+        // deadline would then be racing it, so the change is worth knowing.
         session.send_line("/exit").await;
         wait_for(&session, "SessionEnd hook", || {
             capture.bodies("/hooks/session-end").into_iter().next()
@@ -578,17 +589,30 @@ async fn prompt_turn_fires_hooks_and_streams_the_transcript() {
                 .map(|_| ())
                 .map_err(|e| format!("SessionEnd payload: {e}"))
         })?;
-        wait_for(
+        // claude flushes its transcript once more on the way out, after
+        // SessionEnd; let that land before asserting what is absent.
+        tokio::time::sleep(EXIT_FLUSH_SETTLE).await;
+        let raw = std::fs::read_to_string(&transcript_path).unwrap_or_default();
+        ensure(
+            !raw.contains("<local-command-caveat>"),
+            "no local-command caveat line for /exit",
             &session,
-            "an isMeta caveat line parsed as Role::Meta",
-            || {
-                parsed_messages(&transcript_path)
-                    .iter()
-                    .any(|m| m.role == Role::Meta)
-                    .then_some(())
-            },
-        )
-        .await?;
+        )?;
+        ensure(
+            !raw.contains("<local-command-stdout>"),
+            "no local-command stdout line for /exit",
+            &session,
+        )?;
+        ensure(
+            !parsed_messages(&transcript_path).iter().any(|m| {
+                m.flatten_text().is_some_and(|text| {
+                    let text = text.trim();
+                    text == "/exit" || text.contains("<command-name>/exit</command-name>")
+                })
+            }),
+            "no command-name line for /exit",
+            &session,
+        )?;
 
         Ok(())
     })

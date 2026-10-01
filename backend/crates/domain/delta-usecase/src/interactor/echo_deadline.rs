@@ -28,7 +28,18 @@
 //! state Delta has never seen — is caught by the same net, because the signal
 //! is the silence.
 //!
+//! A **slash-command** send reads the same silence the other way. Claude Code
+//! runs a local command (`/cost`, `/model`, …) with no hook and, from 2.1.286
+//! on, no transcript line, so the silence is the command having run: after the
+//! much shorter [`LaunchConfig::slash_command_echo_deadline`] the send settles
+//! as delivered and the queue moves on, with no re-type and no park. A single
+//! `Escape` still goes into the pane first: some local commands do not
+//! print-and-exit but leave a dialog up (`/cost` opens the usage panel, `/model`
+//! the model picker), and that dialog would swallow the next queued send's
+//! keystrokes — or, for the picker, take its Enter as a selection.
+//!
 //! [`LaunchConfig::echo_deadline`]: crate::launch_config::LaunchConfig::echo_deadline
+//! [`LaunchConfig::slash_command_echo_deadline`]: crate::launch_config::LaunchConfig::slash_command_echo_deadline
 
 use std::time::Instant;
 
@@ -37,7 +48,7 @@ use crate::interactor::question_keys::cancel_keys;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::turn_input::RequeueOutcome;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::turn::TurnInput;
+use crate::turn::{TurnInput, TurnState};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -59,22 +70,33 @@ where
     ///
     /// 1. [`TurnInput::EchoDeadline`] returns the machine to
     ///    [`TurnState::Idle`] and orphans the send as a requeue, which the
-    ///    budget turns into either a retry or a park.
+    ///    budget turns into either a retry or a park — or, for a slash-command
+    ///    send, settles it as delivered (a local command that ran), so step 3
+    ///    only promotes whatever was queued behind it.
     /// 2. On a retry, a single `Escape` is injected into the pane before the
     ///    re-type — the same primitive the dispatched-send cancel uses. The
     ///    deadline means *something* is holding the keystrokes; `Escape`
     ///    dismisses a lingering modal and discards a partially-landed composer
     ///    draft, so the re-type stays idempotent even in the "text landed but
-    ///    Enter was eaten" variant. Nothing else re-types with a leading
-    ///    `Escape`: the normal dispatch and the compact re-dispatch have no
-    ///    reason to suspect the pane's state.
+    ///    Enter was eaten" variant. A settled slash command gets the same
+    ///    single `Escape` before its follow-up is promoted: a local command
+    ///    such as `/cost` or `/model` can leave a dialog open that would
+    ///    otherwise swallow the follow-up's keystrokes (and, in the model
+    ///    picker, take its Enter as a selection). On an idle prompt the
+    ///    `Escape` is harmless. Nothing else types with a leading `Escape`: the
+    ///    normal dispatch and the compact re-dispatch have no reason to
+    ///    suspect the pane's state, and a slash command that echoed (a skill
+    ///    or custom command — really a prompt) never reaches this sweep.
     /// 3. The queued-send flush runs in the same actor turn, so the requeued
     ///    send re-types immediately instead of waiting for the next unrelated
     ///    idle signal — and after a park, the send queued behind it dispatches
     ///    there and then. The flush picks the session's oldest `queued` row,
     ///    which after a requeue is necessarily the requeued send itself: it was
     ///    the outstanding one, so every other open send was composed after it
-    ///    and carries a higher id.
+    ///    and carries a higher id. The `Escape` of step 2 is awaited before
+    ///    this flush starts, and both run inside the session actor's single
+    ///    turn, so no dispatch the settle unblocks can reach the pane ahead of
+    ///    it.
     ///
     /// `now` is injected (rather than read here) so the sweep is deterministic
     /// under test, exactly like the launch watchdog's reap: the server loop
@@ -83,38 +105,80 @@ where
     /// caller to broadcast.
     ///
     /// [`SessionRuntime::expired_echo_deadline`]: crate::interactor::session_actor::runtime::SessionRuntime::expired_echo_deadline
-    /// [`TurnState::AwaitingEcho`]: crate::turn::TurnState::AwaitingEcho
-    /// [`TurnState::Idle`]: crate::turn::TurnState::Idle
     pub(in crate::interactor) async fn sweep_echo_deadline(
         &mut self,
         now: Instant,
     ) -> Result<Option<SessionEvent>> {
-        let Some(send_id) = self
-            .state
-            .expired_echo_deadline(now, self.launch.echo_deadline)
-        else {
+        let Some(send_id) = self.state.expired_echo_deadline(
+            now,
+            self.launch.echo_deadline,
+            self.launch.slash_command_echo_deadline,
+        ) else {
             return Ok(None);
         };
-        tracing::warn!(
-            session_id = %self.id,
-            send_id,
-            deadline_ms = self.launch.echo_deadline.as_millis(),
-            "dispatched send produced no echo and no other signal before its deadline; \
-             its keystrokes were swallowed (a TUI dialog, or an Escape in the pane), so \
-             the turn is released and the send retried once before being parked"
+        let slash_command = matches!(
+            self.state.turn(),
+            TurnState::AwaitingEcho {
+                slash_command: true,
+                ..
+            }
         );
+        if slash_command {
+            tracing::info!(
+                session_id = %self.id,
+                send_id,
+                deadline_ms = self.launch.slash_command_echo_deadline.as_millis(),
+                "dispatched slash command produced no echo before its deadline; \
+                 treating it as a local command that ran, so the send is settled as \
+                 delivered and the turn released without a re-type"
+            );
+        } else {
+            tracing::warn!(
+                session_id = %self.id,
+                send_id,
+                deadline_ms = self.launch.echo_deadline.as_millis(),
+                "dispatched send produced no echo and no other signal before its deadline; \
+                 its keystrokes were swallowed (a TUI dialog, or an Escape in the pane), so \
+                 the turn is released and the send retried once before being parked"
+            );
+        }
 
-        let (_, requeued) = self
+        // Read before the settle below moves the row out of `dispatched`: the
+        // thread the command's turn ran on, for the turn-end notice.
+        let command_thread = if slash_command {
+            self.store.send(send_id).await?.map(|send| send.thread_id)
+        } else {
+            None
+        };
+
+        let (next, requeued) = self
             .apply_turn_input_reporting(TurnInput::EchoDeadline { send_id })
             .await?;
+        let command_settled = slash_command && next == TurnState::Idle;
 
-        if requeued == Some(RequeueOutcome::Requeued) {
-            // Clear whatever is holding the pane before the flush re-types the
-            // send into it. Best-effort by design: a pane that cannot take the
-            // Escape cannot take the re-type either, and the following flush
-            // surfaces that failure through its own cancel-on-dispatch-failure
-            // path — so a failed key injection must not abort the recovery.
-            self.escape_pane_before_retype().await;
+        if command_settled {
+            // The command's degenerate turn ended with no `Stop`, exactly as
+            // it does when an older transcript's command line resolves it
+            // (`TurnInput::CommandResolved`), so the browser is told the same
+            // way: `TurnInterrupted` clears its "In progress" state and
+            // refetches the open sends, which no longer hold the command.
+            self.emit_async_event(SessionEvent::TurnInterrupted {
+                session_id: self.id.clone(),
+                thread_id: command_thread,
+            });
+        }
+
+        if requeued == Some(RequeueOutcome::Requeued) || command_settled {
+            // Clear whatever is holding the pane before the flush types into
+            // it: after a retry, the dialog that swallowed the send; after a
+            // settled slash command, the dialog the command itself may have
+            // opened. Awaited here, before the flush below, so the follow-up
+            // can never land in the dialog. Best-effort by design: a pane that
+            // cannot take the Escape cannot take the next send either, and the
+            // following flush surfaces that failure through its own
+            // cancel-on-dispatch-failure path — so a failed key injection must
+            // not abort the recovery or keep the settled command's turn held.
+            self.escape_pane_before_flush().await;
         }
 
         // Flush now rather than waiting for an unrelated idle signal: after a
@@ -144,8 +208,8 @@ where
 
     /// Inject a single `Escape` into the session's pane, logging (but
     /// swallowing) a failure. Nothing happens when the session has no live
-    /// pane — there is no composer state to discard.
-    async fn escape_pane_before_retype(&mut self) {
+    /// pane — there is no dialog or composer state to discard.
+    async fn escape_pane_before_flush(&mut self) {
         let Some(pane) = self.state.handle().map(|handle| handle.pane.clone()) else {
             return;
         };
@@ -155,8 +219,8 @@ where
             tracing::warn!(
                 session_id = %self.id,
                 error = %err,
-                "failed to clear the pane before re-typing a deadline-requeued send \
-                 (continuing: the re-type reports its own failure)"
+                "failed to clear the pane before typing into it after an echo deadline \
+                 (continuing: the next dispatch reports its own failure)"
             );
         }
     }

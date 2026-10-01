@@ -51,7 +51,10 @@ async fn session_with_an_unechoed_send_and_a_dialog() -> (TestInteractor, Sessio
     let (send, _) = ix.enqueue_send(to(main), "go", None).await.unwrap();
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: send.id },
+        TurnState::AwaitingEcho {
+            send_id: send.id,
+            slash_command: false,
+        },
         "the close has an outstanding send to cancel"
     );
     let request_id = raise_dialog(&ix, &session, SEED_TRANSCRIPT_PATH).await;
@@ -64,7 +67,10 @@ async fn assert_still_awaiting_echo(ix: &TestInteractor, session: &SessionId, se
     let turn = ix.live_state_for(session).await.turn;
     assert_eq!(
         turn,
-        TurnState::AwaitingEcho { send_id },
+        TurnState::AwaitingEcho {
+            send_id,
+            slash_command: false
+        },
         "the close must cancel the unechoed send, but the turn was {turn:?}"
     );
 }
@@ -209,7 +215,10 @@ async fn a_vanished_pane_whose_turn_close_fails_still_announces_the_settled_dial
     let (send, _) = ix.enqueue_send(to(main), "go", None).await.unwrap();
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: send.id },
+        TurnState::AwaitingEcho {
+            send_id: send.id,
+            slash_command: false,
+        },
         "the close has an outstanding send to cancel"
     );
     let request_id = raise_dialog(&ix, &session, TRANSCRIPT).await;

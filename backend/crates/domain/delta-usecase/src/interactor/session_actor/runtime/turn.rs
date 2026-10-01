@@ -48,6 +48,23 @@ pub const MAX_REQUEUES_PER_SEND: u32 = 1;
 /// retry-then-park path in seconds.
 pub const ECHO_DEADLINE: Duration = Duration::from_secs(60);
 
+/// How long a dispatched **slash-command** send may wait for its
+/// `UserPromptSubmit` echo before the watchdog treats the silence as the
+/// command having run.
+///
+/// A local command such as `/cost` fires no hook and, from Claude Code 2.1.286
+/// on, writes nothing to the transcript either, so silence is the only way its
+/// turn ends; the deadline then settles the send as delivered rather than
+/// requeueing it (see [`TurnInput::EchoDeadline`]). A slash command that is
+/// really a prompt (a skill or a custom command) echoes within seconds, so this
+/// value only decides how long a local command keeps the session busy — which
+/// is why it is far shorter than [`ECHO_DEADLINE`].
+///
+/// Overridable via `DELTA_SLASH_COMMAND_ECHO_DEADLINE_MS` (see the server's
+/// `launch_from_env`) so the fake end-to-end suite can free a session in
+/// seconds.
+pub const SLASH_COMMAND_ECHO_DEADLINE: Duration = Duration::from_secs(10);
+
 impl SessionRuntime {
     /// The session's current turn state.
     pub fn turn(&self) -> TurnState {
@@ -191,7 +208,8 @@ impl SessionRuntime {
     /// `now` is supplied by the caller rather than read here so the sweep is
     /// deterministic under test, exactly like the launch watchdog's
     /// `take_stale_pending`. Returns `None` unless a send is genuinely being
-    /// awaited AND its wait has run past `deadline`.
+    /// awaited AND its wait has run past its deadline: `slash_command_deadline`
+    /// for a slash-command send, `deadline` for any other.
     ///
     /// A session inside its resume-readiness window is never reported: its
     /// first prompt's keystrokes are deliberately *held* (typing into a pane
@@ -199,12 +217,26 @@ impl SessionRuntime {
     /// in flight to have gone missing. The wait that this deadline measures
     /// starts when the resume settles and the held prompt is actually typed —
     /// which is one of the two [`Self::restamp_awaiting_echo`] call sites.
-    pub fn expired_echo_deadline(&self, now: Instant, deadline: Duration) -> Option<i64> {
+    pub fn expired_echo_deadline(
+        &self,
+        now: Instant,
+        deadline: Duration,
+        slash_command_deadline: Duration,
+    ) -> Option<i64> {
         if self.is_resuming() {
             return None;
         }
-        let TurnState::AwaitingEcho { send_id } = self.turn else {
+        let TurnState::AwaitingEcho {
+            send_id,
+            slash_command,
+        } = self.turn
+        else {
             return None;
+        };
+        let deadline = if slash_command {
+            slash_command_deadline
+        } else {
+            deadline
         };
         let since = self.awaiting_echo_since?;
         (now.duration_since(since) >= deadline).then_some(send_id)

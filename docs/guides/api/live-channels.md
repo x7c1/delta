@@ -281,6 +281,10 @@ which frames arrive, and a client must handle each event whenever it lands.
   straight from its turn-end frame when the turn was interrupted or failed,
   mirroring `turn_completed`'s two paths — and also when its agent process ended
   mid-turn, which produces no turn-end frame at all (see `session_closed`).
+  It also ends the degenerate turn of a slash command Claude Code ran
+  client-side, which fires no `Stop` either: when the transcript records the
+  command's own line, or when a slash-command send's echo deadline passes in
+  silence (see [sends.md](sends.md)).
   `thread_id` is the interrupted turn's thread, `null` only when no thread is
   resolvable.
 - `transcript_updated` — the background tail ingested new transcript lines

@@ -208,9 +208,11 @@ where
     /// time-driven input is the only thing that can recover this class.
     ///
     /// The owning actor retries such a send once (preceded by an `Escape` into
-    /// the pane) and parks it on the second deadline, flushing the queue behind
-    /// it either way; the returned [`SessionEvent::SendDispatched`]s are the
-    /// promotions those flushes produced, for the caller to broadcast. `now` is
+    /// the pane) and parks it on the second deadline — or, for a slash-command
+    /// send, settles it as a local command that ran on its first, shorter
+    /// deadline — flushing the queue behind it either way; the returned
+    /// [`SessionEvent::SendDispatched`]s are the promotions those flushes
+    /// produced, for the caller to broadcast. `now` is
     /// injected so the sweep is deterministic under test; the server owns the
     /// periodic tick that calls this. `bound` caps how long the fan-out waits
     /// on the actors; see [`Self::collect_tick_replies`].

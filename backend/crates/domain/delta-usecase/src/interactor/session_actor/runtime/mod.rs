@@ -52,7 +52,7 @@ pub use spawn::{PendingSpawn, ResumingSession, PENDING_SPAWN_DEADLINE, RESUME_RE
 pub use spawn::RESUME_DISPATCH_SETTLE;
 pub use streaming::StreamingMessage;
 pub use subagents::RunningSubagent;
-pub use turn::ECHO_DEADLINE;
+pub use turn::{ECHO_DEADLINE, SLASH_COMMAND_ECHO_DEADLINE};
 
 use std::collections::HashMap;
 use std::time::Instant;

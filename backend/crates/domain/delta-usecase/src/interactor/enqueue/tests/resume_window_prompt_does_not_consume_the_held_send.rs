@@ -39,7 +39,10 @@ async fn resume_window_prompt_does_not_consume_the_held_send() {
     );
     assert_eq!(
         ix.live_state_for(&session).await.turn,
-        TurnState::AwaitingEcho { send_id: send.id },
+        TurnState::AwaitingEcho {
+            send_id: send.id,
+            slash_command: false,
+        },
     );
 
     // Something submits a prompt while the window is still open — the resumed

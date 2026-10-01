@@ -406,25 +406,51 @@ end-to-end suite uses to exercise the retry-then-park path in seconds.
 Adapter-backed (Codex) sessions are unaffected: their sends are matched inside
 the turn-start call and never wait for an echo.
 
-A **slash-command** send is normally resolved before that deadline can matter,
-by a different route. A command Claude Code handles client-side (`/clear`, a
-project command, a name it does not recognise) fires **no `UserPromptSubmit` and
-no `Stop`** — the TUI answers it itself. What it does write is a line: the
-command's own name line, or an `Unknown command: …` notice. The transcript
-ingest consumes the outstanding send with that line positionally — whatever
-command name the line ended up recording — so the row goes `matched` and the
-degenerate turn it stood for ends there. Without that fold the session would sit
-in "awaiting echo" until the watchdog fired and every send behind it would
-defer; with it, the deadline never comes up.
+A **slash-command** send ends by a different route. A command Claude Code
+handles client-side (`/cost`, `/clear`, a project command, a name it does not
+recognise) fires **no `UserPromptSubmit` and no `Stop`** — the TUI answers it
+itself. Up to Claude Code 2.1.285 it did write a line: the command's own name
+line (one of a caveat / command-name / stdout group), or an `Unknown command: …`
+notice. The transcript ingest consumes the outstanding send with that line
+positionally — whatever command name the line ended up recording — so the row
+goes `matched` and the degenerate turn it stood for ends there. That path is
+still in place for transcripts that carry such lines (older versions, resumed
+sessions).
 
-Unlike an ordinary echo, that fold is guarded by kind: a command line consumes
-the outstanding send only when that send is *itself* a slash command. A plain
-send is consumed by its `UserPromptSubmit` the moment it submits, so a command
-line arriving while one is outstanding means something else was typed into the
-pane — Delta leaves the plain send waiting for its own echo (and, failing that,
-for the echo deadline). A slash command whose keystrokes are swallowed outright
-(a built-in that opens a TUI dialog, say) writes no line at all, and falls back
-to the retry-then-park path above.
+Unlike an ordinary echo, that fold is guarded by kind: a command line
+consumes the outstanding send only when that send is *itself* a slash command.
+A plain send is consumed by its `UserPromptSubmit` the moment it submits, so a
+command line arriving while one is outstanding means something else was typed
+into the pane — Delta leaves the plain send waiting for its own echo (and,
+failing that, for the echo deadline).
+
+From Claude Code 2.1.286 a local command such as `/cost`, `/model` or `/exit`
+writes **nothing** to the transcript, so silence is the only signal left. A
+slash-command send therefore has its own, much shorter echo deadline —
+**10 seconds**, overridable with `DELTA_SLASH_COMMAND_ECHO_DEADLINE_MS` — and
+reaching it means the command ran: the row settles as `matched` (no uuid), the
+turn goes `idle`, a single `Escape` goes into the pane, and only then does the
+next queued send dispatch. There is no re-type (which would run the command
+twice) and no park. A slash command that is really a prompt (a skill or a
+custom command) echoes `UserPromptSubmit` within seconds, well inside that
+window, and runs as an ordinary turn with no `Escape`; if its echo ever
+arrived after the deadline, the session would track it as a prompt typed into
+the pane, so the browser would show the user's own command in an
+`external_input` notice. Whether a local command's turn ends by its transcript
+line or by this deadline, the browser learns of it from `turn_interrupted`
+([live-channels.md](live-channels.md)), because no `Stop` fires to produce a
+`turn_completed`.
+
+The `Escape` is there because the deadline cannot tell a command that finished
+from one that still holds the TUI. Some local commands do not print and exit:
+`/cost` opens the usage panel and `/model` the model picker, and either dialog
+would swallow the next send's keystrokes — the picker would even take its Enter
+as a model selection. One `Escape` dismisses such a dialog before the next send
+is typed, and is harmless on an idle prompt. If pressing it fails, the failure is
+logged and the session is released anyway. A TUI that is busy in a way `Escape`
+does not clear (a `/compact` that is still summarising) can still swallow the
+next send's keystrokes; that send recovers through the retry-then-park path
+above, like any other swallowed send.
 
 ## Permissions
 

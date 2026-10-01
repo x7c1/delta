@@ -123,7 +123,8 @@ async fn unknown_command_unsticks_turn() {
     assert_eq!(
         ix.live_state_for(&session).await.turn,
         TurnState::AwaitingEcho {
-            send_id: follow_up.id
+            send_id: follow_up.id,
+            slash_command: false,
         },
         "the command's turn ended and the follow-up's began"
     );

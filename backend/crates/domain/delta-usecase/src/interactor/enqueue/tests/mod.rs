@@ -1,6 +1,7 @@
 //! Enqueue use-case tests.
 
 mod a_failed_launch_keeps_its_undelivered_text_on_the_row;
+mod a_local_command_send_frees_the_session_at_its_short_deadline;
 mod boot_restored_send_awaits_explicit_release;
 mod branch_send_creates_child_thread;
 mod branch_send_during_external_turn_is_queued;
