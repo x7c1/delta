@@ -8,8 +8,14 @@ tree and a thread's messages. Sends into a session are in
 conventions and error semantics are in [README.md](README.md).
 
 Sessions are addressed by id. Open/closed is process-runtime state held by the
-server (rebuilt empty on restart): a session that exists in the store but has no
-live pane is *closed* and must be reopened before it can receive a send.
+server: a session that exists in the store but has no live pane is *closed* and
+must be reopened before it can receive a send. A restart rebuilds it from what
+is still running: a Claude session's row remembers the tmux pane it is bound to,
+and before serving, the server re-adopts every remembered pane that still exists
+— the session is open again on the same pane, with no `claude` launched, and its
+transcript is caught up from where the previous process stopped reading. A
+remembered pane that is gone is forgotten and its session stays closed. Codex
+sessions end with the server process and are closed after a restart.
 
 A session can also become closed **without being asked to**: when an
 adapter-backed provider's process ends unexpectedly (a killed `codex app-server`)
@@ -60,6 +66,7 @@ Response:
         "session": { /* Session */ },
         "open": true,
         "pane_starting": false,
+        "hooks_unreachable": false,
         "main_thread_id": 1,
         "last_activity_at": "2026-01-01T00:01:01Z"
       }
@@ -74,6 +81,14 @@ Response:
   which the launch may be waiting on an interactive prompt only a human can
   answer (see [`spawn_pane_ready`](live-channels.md#session-lifecycle)). It is
   never `true` together with `open`: binding the pane is what ends that window.
+  `hooks_unreachable` is `true` for an open session re-adopted after a restart
+  whose hook endpoint (port or secret) changed: its agent still calls the old
+  hook URLs, so its transcript and terminal work but no hook arrives — no
+  prompt echo, turn end or permission dialog. Sends into it are refused
+  (`409 session_hooks_unreachable`, see [sends.md](sends.md#post-apisends)).
+  Closing the session and sending again resumes it with current settings,
+  which clears the flag. It is `false`
+  for every session that is not open.
   `last_activity_at` is the ISO-8601 UTC timestamp of the session's
   most recent message (`MAX(message.created_at)`), or `null` when the session has
   no messages yet. `next_cursor` is an opaque token to fetch the following page,
@@ -151,18 +166,21 @@ never becomes usable, the user answers prompts in the embedded terminal (`/pty`)
 ### `POST /api/sessions/{id}/open`
 
 Resume a closed, known session. For a pane-backed (Claude) session this
-re-launches `claude --resume <id>` and binds the new pane; for a terminal-less
-(Codex) session it reconnects the adapter to the provider's thread — there is no
-pane. Either way it broadcasts `session_opened`. Re-opening an already-open
-session is a no-op.
+re-launches `claude --resume <id>` and binds the new pane — unless the row
+remembers a pane that is still running (it survived a restart and was not
+re-adopted at boot), which is adopted instead so the conversation is never
+driven by two `claude` processes. For a terminal-less (Codex) session it
+reconnects the adapter to the provider's thread — there is no pane. Either way
+it broadcasts `session_opened`. Re-opening an already-open session is a no-op.
 
 - **204 No Content** — the session is now open.
 - **404** — no session with that id.
 - **409** — the session's transcript is gone and was not found in
   another project directory, so it cannot be resumed (body
   `code: "resume_unavailable"`); it is left closed and no pane is spawned.
-- **500** — for a Claude session, rewriting the session settings file, seeding
-  git trust, or starting the tmux session failed; for a Codex session, the
+- **500** — for a Claude session, asking tmux whether the remembered pane is
+  still running, rewriting the session settings file, seeding git trust, or
+  starting the tmux session failed; for a Codex session, the
   adapter's thread-resume call failed. The session's working directory is
   already known from the original spawn, so unlike `POST /api/sessions` there
   is no working-directory preparation step to fail here.

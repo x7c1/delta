@@ -210,6 +210,12 @@ where
         SessionInput::OpenSession { reply } => {
             let _ = reply.send(ctx.open_session().await);
         }
+        SessionInput::ReadoptPane {
+            hook_endpoint_changed,
+            reply,
+        } => {
+            let _ = reply.send(ctx.readopt_remembered_pane(hook_endpoint_changed).await);
+        }
         SessionInput::CloseSession { reply } => {
             let _ = reply.send(ctx.close_session().await);
         }

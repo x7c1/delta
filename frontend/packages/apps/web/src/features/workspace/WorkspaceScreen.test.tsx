@@ -1261,6 +1261,7 @@ describe('WorkspaceScreen multi-session', () => {
     open?: boolean;
     status?: 'active' | 'spawning' | 'failed';
     paneStarting?: boolean;
+    hooksUnreachable?: boolean;
   }
 
   /** A `GET /api/sessions` body listing exactly one session. */
@@ -1276,6 +1277,7 @@ describe('WorkspaceScreen multi-session', () => {
       open = true,
       status = 'active',
       paneStarting = false,
+      hooksUnreachable = false,
     }: SingleSessionState = {},
   ) {
     return {
@@ -1298,6 +1300,7 @@ describe('WorkspaceScreen multi-session', () => {
           },
           open,
           pane_starting: paneStarting,
+          hooks_unreachable: hooksUnreachable,
           main_thread_id: mainThreadId,
           last_activity_at: '2026-01-01T00:00:02Z',
         },
@@ -1318,6 +1321,46 @@ describe('WorkspaceScreen multi-session', () => {
       ),
     );
   }
+
+  it('tells the user how to recover a re-adopted session whose hooks no longer arrive', async () => {
+    // A session Delta re-adopted after a restart whose hook endpoint changed:
+    // it is open, but its agent still calls the old hook URLs. The row says so,
+    // and the transcript carries a one-line notice pointing at the terminal and
+    // at Close-then-send.
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID, {
+      hooksUnreachable: true,
+    });
+
+    renderScreen();
+
+    const notice = await screen.findByTestId('hooks-unreachable-notice');
+    expect(notice).toHaveTextContent(
+      "Delta lost contact with this session. Use the terminal, or choose Close in the session's menu and send again to resume.",
+    );
+    expect(screen.queryByTestId('readonly-notice')).not.toBeInTheDocument();
+    // The composer refuses there and points at the notice instead.
+    expect(
+      screen.getByPlaceholderText(
+        'Delta lost contact with this session — see the notice above…',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows no lost-contact notice for an open session whose hooks arrive', async () => {
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID);
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID),
+    );
+    expect(await screen.findByTestId('terminal-toggle')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('hooks-unreachable-notice'),
+    ).not.toBeInTheDocument();
+  });
 
   it('shows the terminal toggle for a session whose provider has a terminal (Claude)', async () => {
     // A focused open Claude session; the default `/api/providers` mock reports

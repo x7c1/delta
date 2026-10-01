@@ -34,6 +34,15 @@ pub struct SessionListing {
     /// what carries the pane once binding ends this window — `false` here is
     /// not "no pane".
     pub pane_starting: bool,
+    /// Whether the session is open on a pane Delta re-adopted after a restart
+    /// whose agent still holds hook URLs this server no longer answers on (the
+    /// hook endpoint changed between the two runs). Its output still reaches
+    /// the browser through the transcript and its terminal still attaches, but
+    /// nothing the agent's hooks report — prompt echoes, turn ends, permission
+    /// dialogs — arrives, so the browser shows a notice: use the terminal, or
+    /// close the session and send again, which resumes it with fresh settings.
+    /// Always `false` for a session that is not open.
+    pub hooks_unreachable: bool,
     /// The id of the session's trunk (`main`) thread, for drilling in.
     pub main_thread_id: ThreadId,
     /// The timestamp of the session's most recent message (ISO-8601 UTC), or

@@ -64,7 +64,9 @@ where
     ///    ingested. It runs while the on-disk transcript still reflects this
     ///    session's own run, and it is safe on a session that is already closed
     ///    (it simply finds no new lines).
-    /// 2. **Drop the binding**, killing the pane when `pane` says to.
+    /// 2. **Drop the binding**, erasing the pane the session row remembers
+    ///    (so a restart does not try to re-adopt it) and killing the pane when
+    ///    `pane` says to.
     /// 3. **Close a terminal-less agent session** through its adapter, which
     ///    tears down that session's local plumbing (the shared provider
     ///    connection stays up for other threads). A pane-backed session holds no
@@ -124,6 +126,11 @@ where
         self.sync_transcript(session).await?;
         let closed_pane = self.state.remove_open();
         if let Some(handle) = &closed_pane {
+            // Forgotten before the kill, and fail-fast: a failed write stops
+            // the teardown with the pane still running and still remembered,
+            // so the next send's resume backstop adopts it rather than
+            // launching a second agent beside it.
+            self.store.forget_pane(self.id).await?;
             if pane == PaneTeardown::Kill {
                 self.tmux.kill_session(handle.token.as_str()).await?;
             }

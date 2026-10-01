@@ -54,7 +54,9 @@ that those calls still reach Delta and are accepted, the app keeps both in
 - `hook_secret` — minted on the first launch and reused on every launch after.
 - `port` — the port the app took. The next launch tries it first; if another
   program holds it by then, the app takes a fresh port, records that one, and
-  logs a warning that sessions which survived the restart cannot reach it.
+  logs a warning that sessions which survived the restart cannot reach it
+  (see [Quitting, relaunching and upgrading](#quitting-relaunching-and-upgrading)
+  for what those sessions look like).
 
 The file is readable by you only (mode `0600`). If it is ever found readable by
 others, the app restricts it to `0600` on startup and logs a warning; delete
@@ -63,18 +65,52 @@ secret on the next launch (and forgets the port). Sessions still running from
 before then keep the old values and can no longer report to Delta, so end them
 first (see below).
 
-Sessions run on Delta's own tmux server (socket `io.github.x7c1.delta`, i.e.
-`tmux -L io.github.x7c1.delta`), not inside the app process. Closing the window stops the
-Delta server but leaves the tmux server running, so open sessions survive and
-are picked up again on the next launch, with their hook URLs still valid (see
-the hook state file above).
+## Quitting, relaunching and upgrading
 
-### Removing everything
+Only one copy of the app runs at a time. Launching it while it is already
+running brings the open window forward and starts nothing else.
+
+Closing the window quits the app and stops the Delta server. What happens to
+the sessions that were open depends on the agent:
+
+- **Claude Code sessions keep running.** They run on Delta's own tmux server
+  (socket `io.github.x7c1.delta`), not inside the app process, so they carry on
+  while the app is closed — a turn in progress finishes. You can watch or type
+  into one meanwhile with `tmux -L io.github.x7c1.delta attach`. On the next
+  launch the app finds them again before it shows anything: each is listed as
+  open, its terminal attaches to the same pane, and whatever it wrote while the
+  app was closed appears in the conversation. A session whose pane ended in the
+  meantime is listed as closed, and sending to it resumes it as usual.
+- **Codex sessions end.** Their `codex app-server` runs inside the app process
+  and stops with it. They are listed as closed on the next launch, and the
+  next send resumes the conversation where it left off.
+
+A surviving Claude Code session reports back to Delta through the hook URLs it
+was launched with. If the next launch could not take the same port, or the
+hook secret changed (see the hook state file above), those calls no longer
+reach Delta. Such a session is still re-adopted — its output and terminal work
+— but prompt echoes, turn ends and permission dialogs do not arrive, and the
+session shows the notice *"Delta lost contact with this session"*. Use its
+terminal, or choose Close in the session's menu and send again: Close ends the
+old process, and the send resumes the conversation with current settings, which
+restores everything.
+
+Upgrading works the same way: install the new version over the old one (see
+[Updating](#updating)) while sessions are running, and the new version
+re-adopts them on its first launch. A re-adopted session keeps running the
+Claude Code it was started with until it is closed and resumed.
+
+To stop everything instead, quit the app and then end its tmux server with
+`tmux -L io.github.x7c1.delta kill-server`. That ends every Claude Code
+session; their conversations stay in Delta and resume on the next send.
+
+## Removing everything
 
 1. Quit the app, then end its sessions: `tmux -L io.github.x7c1.delta kill-server`.
 2. Remove the app: delete `/Applications/Delta.app` on macOS, or run
    `sudo apt remove delta` on Ubuntu.
-3. Delete the data directory above.
+3. Delete the data directory (see
+   [Where the app keeps its data](#where-the-app-keeps-its-data)).
 4. Optionally delete `~/.delta/worktrees/`, where Delta creates git worktrees
    for sessions that asked for one, then run `git worktree prune` in each
    repository they came from so git forgets the removed worktrees.

@@ -41,6 +41,17 @@ export type ComposerMode =
        * rather than going out now.
        */
       spawning: boolean;
+      /**
+       * True when the session is open on a pane re-adopted after a restart
+       * whose agent can no longer deliver hooks to the server (the session
+       * row's `hooks_unreachable`). The server refuses a send there — typing
+       * into the pane without its echo would interrupt the running turn and
+       * submit the prompt twice — so Send is disabled and the placeholder
+       * points at the lost-contact notice above, which says what to do instead
+       * (use the terminal, or Close the session and send again). The draft is
+       * kept, so the text can be sent after the Close.
+       */
+      hooksUnreachable?: boolean;
     };
 
 export interface ComposerProps {
@@ -101,6 +112,8 @@ export function Composer({ mode }: ComposerProps) {
   const activeThread = mode.kind === 'thread' ? mode.activeThread : null;
   const readOnly = mode.kind === 'thread' ? mode.readOnly : false;
   const spawning = mode.kind === 'thread' ? mode.spawning : false;
+  const hooksUnreachable =
+    mode.kind === 'thread' ? (mode.hooksUnreachable ?? false) : false;
   const draftKey: ThreadId = composerDraftKey(mode);
 
   const draft = useComposerStore((state) => state.drafts[draftKey] ?? '');
@@ -272,11 +285,15 @@ export function Composer({ mode }: ComposerProps) {
 
   const placeholder = isNew
     ? 'Message to start a new session…'
-    : // The starting state outranks every other wording, branching included:
-      // whatever the user meant to send waits for the launch rather than going
-      // out now.
-      spawning
-      ? 'Message sends when the session is ready…'
+    : // A session that cannot take sends at all says so first: no other
+      // wording would be true of it.
+      hooksUnreachable
+      ? 'Delta lost contact with this session — see the notice above…'
+      : // The starting state outranks every other wording, branching included:
+        // whatever the user meant to send waits for the launch rather than
+        // going out now.
+        spawning
+        ? 'Message sends when the session is ready…'
       : branching
         ? 'Ask a follow-up on the selected text…'
         : readOnly
@@ -296,6 +313,9 @@ export function Composer({ mode }: ComposerProps) {
   //     value: `pending_remote_branch` means the Other-remote-branch picker
   //     was opened but no branch was picked yet, and the backend rejects
   //     worktree requests without a concrete branch.
+  //   - the session lost contact with its agent's hooks: the server refuses
+  //     the send (`session_hooks_unreachable`), and the notice above says how
+  //     to get it back
   // A still-starting session is deliberately NOT a gate: the server accepts a
   // plain send there as a `queued` row and dispatches it when the launch binds,
   // so holding the user at a disabled button through a minute-long checkout
@@ -303,6 +323,7 @@ export function Composer({ mode }: ComposerProps) {
   const submitDisabled =
     draft.trim().length === 0 ||
     sendInFlight ||
+    hooksUnreachable ||
     (isNew && !newSessionWorkdir) ||
     (isNew &&
       newSessionWorktreeEnabled &&
@@ -378,6 +399,11 @@ export function Composer({ mode }: ComposerProps) {
           type="submit"
           aria-label="Send"
           disabled={submitDisabled}
+          title={
+            hooksUnreachable
+              ? 'Delta lost contact with this session — see the notice above'
+              : undefined
+          }
           // Anchored to the card's bottom-right corner with an equal visual gap
           // to the card's right and bottom borders. The enclosing composer card
           // pads `px-3` (12px) but only `py-2` (8px), so the button sits `right-0`

@@ -1,5 +1,5 @@
 import { test, expect } from './support/fixtures';
-import { shownTerminal, startNewSession } from './support/app';
+import { focusedSessionNode, shownTerminal, startNewSession } from './support/app';
 
 /**
  * The embedded terminal is reachable while a session is still starting.
@@ -79,9 +79,11 @@ test('the terminal attaches to a session that is still starting, and stays attac
   // attached before the bind is still the one on screen — no detach, no
   // reattach, nothing for the user to redo. A rebuild here would land on the
   // user answering the dialog they attached for, which is the whole reason the
-  // instance is held across the bind.
+  // instance is held across the bind. (Scoped to the focused card: this
+  // spec's restart re-adopted the Claude panes earlier specs left running, and
+  // those read `Open` too.)
   await expect(
-    page.getByRole('status', { name: 'Open', exact: true }),
+    focusedSessionNode(page).getByRole('status', { name: 'Open', exact: true }),
   ).toHaveCount(1, { timeout: 20_000 });
   await expect(page.locator('.xterm[data-attached-before-bind]')).toHaveCount(1);
   await expect(shownTerminal(page).locator('.xterm-rows')).toContainText(
@@ -125,7 +127,7 @@ test('a reload mid-launch still reaches the starting session’s pane', async ({
   // And the window closes the way it does without a reload: the launch binds
   // and the card flips to Open with the terminal still on screen.
   await expect(
-    page.getByRole('status', { name: 'Open', exact: true }),
+    focusedSessionNode(page).getByRole('status', { name: 'Open', exact: true }),
   ).toHaveCount(1, { timeout: 20_000 });
   await expect(shownTerminal(page).locator('.xterm-rows')).toContainText(
     'fake-claude session',

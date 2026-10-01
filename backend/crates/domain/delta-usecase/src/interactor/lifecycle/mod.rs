@@ -1,14 +1,16 @@
-//! Session lifecycle use cases: spawn, resume (open), close, remove, and the
-//! background liveness ticks (launch readiness, and the pane probe that closes
-//! an open session whose pane has gone). The `ensure`/`new` entry points live
-//! on the interactor's routing layer (they mint the session id and pick the
-//! actor); everything here runs inside a session's actor.
+//! Session lifecycle use cases: spawn, resume (open), re-adopting a pane that
+//! survived a restart, close, remove, and the background liveness ticks (launch
+//! readiness, and the pane probe that closes an open session whose pane has
+//! gone). The `ensure`/`new` entry points live on the interactor's routing layer
+//! (they mint the session id and pick the actor); everything here runs inside a
+//! session's actor.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 mod adapter_launch;
 mod adapter_session;
+mod adopt_pane;
 mod cancel_launch;
 mod close_if_pane_vanished;
 mod close_session;
@@ -28,6 +30,7 @@ mod workdir_for;
 mod worktree_launch_dir;
 
 pub(in crate::interactor) use adapter_launch::PreparedAdapterLaunch;
+pub(in crate::interactor) use adopt_pane::Readoption;
 pub(in crate::interactor) use cancel_launch::UnboundLaunchEnd;
 pub(in crate::interactor) use record_launched_pane::LaunchApproval;
 pub(in crate::interactor) use spawn_fresh::FreshSpawn;

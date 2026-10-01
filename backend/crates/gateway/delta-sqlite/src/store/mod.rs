@@ -12,6 +12,7 @@ mod launch_options;
 mod messages;
 mod permissions;
 mod prompt_templates;
+mod remembered_panes;
 mod sends;
 mod session_history;
 mod session_store;

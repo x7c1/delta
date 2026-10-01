@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Badge, Button, Spinner } from '@delta/ui-kit';
 import {
   ApiError,
+  invalidateSessions,
   useCancelSendMutation,
   useReleaseSendMutation,
 } from '@delta/api-client';
@@ -107,6 +109,7 @@ export function PendingQueue({
   sessionSpawning = false,
 }: PendingQueueProps) {
   const client = useApiClient();
+  const queryClient = useQueryClient();
   const removeSending = useLiveStore((state) => state.removeSending);
   const forgetLocalSend = useLiveStore((state) => state.forgetLocalSend);
   const forgetParkedSend = useLiveStore((state) => state.forgetParkedSend);
@@ -362,6 +365,24 @@ export function PendingQueue({
                                 showError(
                                   title,
                                   'The message is no longer awaiting a release — it was already sent or cancelled.',
+                                );
+                                return;
+                              }
+                              if (
+                                err instanceof ApiError &&
+                                err.code === 'session_hooks_unreachable'
+                              ) {
+                                // The row stays held; it can be sent once
+                                // the session has been closed. A list that
+                                // still shows the session closed (the release
+                                // itself may have adopted its pane) offers
+                                // Remove rather than Close, so refetch it: the
+                                // fresh row brings the Close item and the
+                                // lost-contact notice this message points at.
+                                invalidateSessions(queryClient);
+                                showError(
+                                  title,
+                                  "Delta lost contact with this session. Use the terminal, or choose Close in the session's menu and send again.",
                                 );
                                 return;
                               }

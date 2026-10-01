@@ -25,9 +25,11 @@
 //!
 //! Recency is the only key SQL sorts on. The list the browser sees is
 //! open-first — live sessions ahead of closed ones, each group by recency — but
-//! liveness is process-runtime state with no column here, so that grouping is
-//! layered on in the usecase and deliberately kept out of the `ORDER BY` this
-//! index serves.
+//! liveness is process-runtime state, so that grouping is layered on in the
+//! usecase and deliberately kept out of the `ORDER BY` this index serves. The
+//! remembered pane below is not a liveness column: it says which pane to look
+//! for after a restart, and whether that pane still exists is only known by
+//! asking tmux.
 //!
 //! **`ix_session_recency` is an expression index**, on
 //! `COALESCE(last_activity_at, created_at)` — the navigator's recency key —
@@ -96,11 +98,24 @@
 //!   watchdog-shaped endings that observe only silence (a launch that exited, a
 //!   spawn that never bound), and for rows written before the column existed.
 //!   It is written once, by the cleanup that marks the row `'failed'`.
+//! - `tmux_session` / `tmux_pane` / `hooks_unreachable` are the **remembered
+//!   pane**: where a pane-backed (Claude) session's agent is running while the
+//!   session is bound. The agent's tmux pane outlives the Delta process, so a
+//!   restarted Delta reads these to re-adopt the pane instead of resuming the
+//!   conversation into a second one. `tmux_session` is the Delta-minted tmux
+//!   session name (`delta-<n>`), `tmux_pane` the pane it addresses
+//!   (`delta-<n>:0.0`), and `hooks_unreachable` is `1` when the agent was
+//!   re-adopted by a process whose hook endpoint differs from the one it was
+//!   launched with, so its hooks no longer arrive. Written whenever a pane is
+//!   bound and reset (NULL, NULL, 0) when the session is torn down. NULL for a
+//!   closed session, a launch that never bound, an adapter-backed session
+//!   (which has no pane), and every row that predates the columns.
 
 use super::Step;
 
 /// The `session` table's history: the v3 baseline table, its recency index, the
-/// v7 pull-request snapshot column, and the v9 failure reason.
+/// v7 pull-request snapshot column, the v9 failure reason, and the v10
+/// remembered pane.
 pub(super) const STEPS: &[Step] = &[
     Step::additive(
         3,
@@ -142,4 +157,17 @@ CREATE INDEX IF NOT EXISTS ix_session_recency
     // watchdog-shaped failure writes, and what the failed session's screen
     // renders as "Delta did not hear why".
     Step::additive(9, "ALTER TABLE session ADD COLUMN failure_reason TEXT;"),
+    // v10: the remembered pane. The two names are nullable with no default,
+    // so every existing row reads "no pane remembered" — which is true: no
+    // binary before this one recorded where a pane was, so there is nothing a
+    // restart could re-adopt from such a row. The flag is a constant-default
+    // `NOT NULL`, which `ADD COLUMN` accepts without a backfill.
+    Step::additive(
+        10,
+        "\
+ALTER TABLE session ADD COLUMN tmux_session TEXT;
+ALTER TABLE session ADD COLUMN tmux_pane TEXT;
+ALTER TABLE session ADD COLUMN hooks_unreachable INTEGER NOT NULL DEFAULT 0
+  CHECK (hooks_unreachable IN (0, 1));",
+    ),
 ];

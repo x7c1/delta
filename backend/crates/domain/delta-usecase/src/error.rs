@@ -61,6 +61,23 @@ pub enum Error {
     #[error("session is open: {0}")]
     SessionOpen(String),
 
+    /// A send aimed at a session open on a re-adopted pane whose agent can no
+    /// longer deliver hooks to this server
+    /// ([`RememberedPane::hooks_unreachable`](crate::ports::RememberedPane::hooks_unreachable)).
+    ///
+    /// Typing into that pane would reach the agent, but its
+    /// `UserPromptSubmit` echo never arrives: the echo deadline would then
+    /// inject `Escape` and type the prompt again, interrupting whatever turn is
+    /// running and submitting the message twice. So nothing is typed and no
+    /// send row is written. The way back is the one the browser's notice
+    /// gives: use the terminal, or close the session and send again, which
+    /// resumes it with current hook settings. Surfaced as `409`: the request
+    /// is fine and succeeds once the session has been closed — it is the
+    /// session's current state that forbids it. Refused rather than closing
+    /// and resuming automatically, which would kill work in progress.
+    #[error("session cannot take sends: its hooks no longer reach this server: {0}")]
+    SessionHooksUnreachable(String),
+
     /// A user-selected working directory is not a usable directory: it does not
     /// exist, is not a directory, or could not be resolved. Surfaced as `400`.
     #[error("invalid working directory: {0}")]

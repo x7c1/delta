@@ -310,6 +310,54 @@ async fn release_held_send_clears_the_marker_only_for_queued_held_rows() {
 }
 
 #[tokio::test]
+async fn settle_held_send_matches_only_queued_held_rows() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+    let line = MessageUuid::from("prompt-line");
+
+    let restored = store
+        .enqueue_send(&session.id, main, None, "restored", None)
+        .await
+        .unwrap();
+    assert_eq!(store.restore_all_dispatched().await.unwrap(), 1);
+
+    // A held row settles as delivered, attributed to the line, and leaves the
+    // open-send list (so the strip stops offering to send it again).
+    assert!(store.settle_held_send(restored.id, &line).await.unwrap());
+    let settled = store.send(restored.id).await.unwrap().unwrap();
+    assert_eq!(settled.status, SendStatus::Matched);
+    assert_eq!(settled.matched_uuid, Some(line.clone()));
+    assert_eq!(settled.held_at, None);
+    assert!(store.open_sends(&session.id).await.unwrap().is_empty());
+
+    // Settling again is a no-op: the row is no longer held.
+    assert!(!store.settle_held_send(restored.id, &line).await.unwrap());
+
+    // A never-held queued row, a dispatched row and a released row are not
+    // settled this way: none of them is the boot restore's to resolve.
+    let plain = store
+        .enqueue_queued_send(&session.id, main, None, "plain", None)
+        .await
+        .unwrap();
+    assert!(!store.settle_held_send(plain.id, &line).await.unwrap());
+    let released = store
+        .enqueue_send(&session.id, main, None, "released", None)
+        .await
+        .unwrap();
+    assert!(!store.settle_held_send(released.id, &line).await.unwrap());
+    assert_eq!(store.restore_all_dispatched().await.unwrap(), 1);
+    assert!(store.release_held_send(released.id).await.unwrap());
+    assert!(!store.settle_held_send(released.id, &line).await.unwrap());
+    assert_eq!(
+        store.send(released.id).await.unwrap().unwrap().status,
+        SendStatus::Queued
+    );
+
+    // An unknown id reports no transition rather than erroring.
+    assert!(!store.settle_held_send(9999, &line).await.unwrap());
+}
+
+#[tokio::test]
 async fn queued_send_is_held_then_promoted_to_dispatched() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();

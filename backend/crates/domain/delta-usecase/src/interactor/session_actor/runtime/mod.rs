@@ -3,7 +3,10 @@
 //! Everything here is **process-runtime** state, never persisted: after a
 //! restart every actor starts from [`SessionRuntime::default`], so every
 //! session that survives in the store is considered "closed" (and its turn
-//! idle) until it is resumed. One value exists per live actor; absence of an
+//! idle) until it is resumed — or, for a pane-backed session whose tmux pane
+//! outlived the restart, re-adopted from the pane its row remembers (the
+//! `adopt_pane` lifecycle module), which is the one piece of an open binding
+//! the store does keep. One value exists per live actor; absence of an
 //! actor reads exactly like this default, which is what makes actor
 //! retirement (see the `actor` module) safe.
 //!

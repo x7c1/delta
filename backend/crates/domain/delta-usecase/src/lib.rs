@@ -35,8 +35,8 @@ pub use agent::{
 pub use error::{Error, Result};
 pub use interactor::{
     AttachablePane, BoxedInteractor, ExternalHandler, ExternalHandlerId, Interactor,
-    PendingPermission, PendingQuestion, PermissionDecision, PermissionWait, RunningSubagent,
-    SessionLiveState, VSCODE_HANDLER_ID,
+    PendingPermission, PendingQuestion, PermissionDecision, PermissionWait, ReadoptionSummary,
+    RunningSubagent, SessionLiveState, VSCODE_HANDLER_ID,
 };
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use pane_token::{PaneToken, PaneTokenMinter};
@@ -44,10 +44,10 @@ pub use ports::{
     pane_for, AsyncEventReceiver, AsyncEventSink, BinaryDetector, CloneRoot, CommsDirection,
     CommsEntry, CommsFrameKind, CommsLogSink, DirEntry, DirListing, ExternalOpener, GhCli,
     GitRepoInfo, GitWorktree, MessageDisplayHook, NewSession, NullCommsLog, RateLimitWindow,
-    RecentWorkdir, RemoteBranches, RepositoryCloneRow, SessionEndHook, SessionEvent,
-    SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore, SpawningSession,
-    StatusSnapshot, StopHook, TmuxDriver, Transcript, TranscriptMessage, TranscriptRead,
-    UserPromptSubmitHook, Workspace, WorktreeStartPoint,
+    RecentWorkdir, RememberedPane, RemoteBranches, RepositoryCloneRow, SessionEndHook,
+    SessionEvent, SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore,
+    SpawningSession, StatusSnapshot, StopHook, TmuxDriver, Transcript, TranscriptMessage,
+    TranscriptRead, UserPromptSubmitHook, Workspace, WorktreeStartPoint,
 };
 pub use pull_request::{PullRequest, PullRequestLens, PullRequestList};
 pub use repository::{display_name, identity_key, worktree_dir_slug, Clone, Repository};

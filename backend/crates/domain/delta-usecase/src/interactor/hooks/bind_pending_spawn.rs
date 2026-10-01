@@ -87,6 +87,8 @@ where
             bound,
             "a spawn that was pending before the await is still pending after it"
         );
+        // The row now names the pane, so a restart of Delta can re-adopt it.
+        self.remember_bound_pane().await;
         // Deliberately posted, not called: see the doc comment above. Weak,
         // like every self-post, so a retired actor simply drops it.
         if let Some(sender) = self.self_sender.upgrade() {

@@ -35,6 +35,15 @@ const SESSION_SPAWNING_CODE: &str = "session_spawning";
 /// tab reopened the session).
 const SESSION_OPEN_CODE: &str = "session_open";
 
+/// Stable machine-readable code for a send (or a held send's release) aimed at
+/// a session open on a pane re-adopted after a restart whose agent can no
+/// longer deliver hooks to this server. Nothing is typed: without the prompt's
+/// echo the echo deadline would interrupt the running turn and type the prompt
+/// twice. The composer refuses such a session itself and points at the
+/// lost-contact notice, so a client meets this from a stale view; the way past
+/// it is the notice's — use the terminal, or close the session and send again.
+const SESSION_HOOKS_UNREACHABLE_CODE: &str = "session_hooks_unreachable";
+
 /// Stable machine-readable code for a permission decision that can no longer
 /// take effect (already decided, or its hook wait timed out and fell back to
 /// the TUI prompt). The frontend switches the notice to guidance chosen by the
@@ -179,6 +188,14 @@ impl IntoResponse for ApiError {
                     // forbids the delete, the line `LaunchOptionIsBuiltin`
                     // already draws.
                     Error::SessionOpen(_) => (StatusCode::CONFLICT, Some(SESSION_OPEN_CODE)),
+                    // A send into a session whose agent's hooks no longer
+                    // reach this server. A 409: the request is fine and the
+                    // same send succeeds once the session has been closed (the
+                    // next send then resumes it) — it is the session's current
+                    // state that forbids typing into it.
+                    Error::SessionHooksUnreachable(_) => {
+                        (StatusCode::CONFLICT, Some(SESSION_HOOKS_UNREACHABLE_CODE))
+                    }
                     // The permission request exists (or existed) but no browser
                     // decision can reach it anymore: a conflict with current
                     // state, with a stable code so the frontend swaps the
@@ -400,5 +417,19 @@ mod tests {
         let (status, code) = rendered(delta_usecase::Error::SessionOpen("sess-1".into())).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(code.as_deref(), Some("session_open"));
+    }
+
+    /// A send into a session whose hooks no longer reach this server is a
+    /// conflict with current state: `409` with its own stable
+    /// `session_hooks_unreachable` code, so a client can point at the
+    /// lost-contact notice instead of offering a plain retry.
+    #[tokio::test]
+    async fn a_session_with_unreachable_hooks_renders_a_conflict_with_its_own_code() {
+        let (status, code) = rendered(delta_usecase::Error::SessionHooksUnreachable(
+            "sess-1".into(),
+        ))
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(code.as_deref(), Some("session_hooks_unreachable"));
     }
 }

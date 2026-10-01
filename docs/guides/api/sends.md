@@ -215,6 +215,17 @@ Response:
 - **409** — the target's session is closed and cannot be resumed because its
   transcript is gone (body `code: "resume_unavailable"`). No send is enqueued and
   the session stays closed.
+- **409** (body `code: "session_hooks_unreachable"`) — the target session is
+  open on a pane re-adopted after a restart whose agent can no longer deliver
+  hooks to this server (the session row's `hooks_unreachable`, see
+  [sessions.md](sessions.md)). Typing into it would reach the agent, but with
+  no prompt echo the [echo deadline](#when-no-echo-ever-arrives) would press
+  `Escape` and type the prompt again, interrupting the running turn and
+  submitting it twice. Nothing is typed and no send is enqueued. A send to a
+  *closed* session whose remembered pane turns out to be such a pane is
+  refused the same way, after the pane has been adopted (the session is then
+  listed open, with the flag). Close the session and send again: that resumes
+  it with current settings.
 - **409** (body `code: "session_spawning"`) — a **branch** send
   (`semantic_parent_uuid`) whose target session is still starting: it is listed
   from the moment its first send was accepted, but its launch has not bound yet,
@@ -309,6 +320,13 @@ disconnected: events fired during the gap are never replayed.
   process's `dispatched` row) and the
   [echo deadline's park](#when-no-echo-ever-arrives).
 
+  A row the boot reconcile held may have been submitted after all, by a
+  Claude pane that outlived the restart. When that pane is re-adopted and its
+  transcript catch-up shows a user line with the send's exact (trimmed) text,
+  stamped no earlier than the send row, the row is settled as delivered
+  (`matched`, attributed to that line) and leaves this list. Each line settles
+  at most one send, oldest first; anything less certain stays held.
+
 - **404** — no session with that id, so a removed session is distinguishable
   from "nothing pending". A launch that failed is not one: its row is kept, and
   this endpoint is where its screen reads the text it never delivered.
@@ -366,6 +384,10 @@ still `queued`, so the guarded queued cancel already covers it.
   held, is already released, or has since been cancelled.
 - **409** (body `code: "resume_unavailable"`) — the session had to be resumed and
   its transcript is gone. The marker is untouched, so the release can be retried.
+- **409** (body `code: "session_hooks_unreachable"`) — the session is open on a
+  pane whose agent can no longer deliver hooks (see the same code under
+  [`POST /api/sends`](#post-apisends)). Nothing is typed and the marker is
+  untouched; close the session, then release again.
 
 ### When no echo ever arrives
 

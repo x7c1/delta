@@ -48,6 +48,7 @@ function seedSessionList(queryClient: QueryClient, ids: readonly string[]) {
     },
     open: false,
     pane_starting: false,
+    hooks_unreachable: false,
     main_thread_id: 1,
     last_activity_at: null,
   }));

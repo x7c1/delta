@@ -270,10 +270,7 @@ impl SessionRuntime {
         let Some(spawn) = self.pending_spawn.take() else {
             return false;
         };
-        self.bind(OpenHandle {
-            token: spawn.token,
-            pane: spawn.pane,
-        });
+        self.bind(OpenHandle::launched(spawn.token, spawn.pane));
         true
     }
 

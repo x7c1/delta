@@ -18,7 +18,7 @@ use super::runtime::{AttachablePane, SessionListingState, SessionLiveState};
 use crate::agent::AgentEvent;
 use crate::error::Result;
 use crate::interactor::hooks::PermissionWait;
-use crate::interactor::lifecycle::{FreshSpawn, LaunchApproval};
+use crate::interactor::lifecycle::{FreshSpawn, LaunchApproval, Readoption};
 use crate::interactor::PermissionDecision;
 use crate::ports::{
     MessageDisplayHook, SessionEndHook, SessionEvent, SessionStartHook, StopHook,
@@ -140,6 +140,16 @@ pub(in crate::interactor) enum SessionInput {
     },
     /// Resume the (closed but known) session.
     OpenSession { reply: Reply<()> },
+    /// Boot-time re-adoption: bind the pane this session's row remembers if it
+    /// survived the restart, or clear the record if it did not. Posted once
+    /// per remembered pane before the server accepts requests; see
+    /// `SessionContext::readopt_remembered_pane`.
+    ReadoptPane {
+        /// Whether the hook endpoint changed since the previous run, so a pane
+        /// found alive is marked as unable to reach this server.
+        hook_endpoint_changed: bool,
+        reply: Reply<Readoption>,
+    },
     /// Close the session: final sync, kill the pane, drop the binding. Replies
     /// with the [`SessionEvent::SubagentFinished`]s the process-gone sweep
     /// produced, for the transport to broadcast.

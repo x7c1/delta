@@ -16,7 +16,8 @@ use delta_model::{
 
 use crate::error::Result;
 use crate::ports::{
-    CloneRoot, NewSession, RepositoryCloneRow, SessionPageRow, SessionStore, SpawningSession,
+    CloneRoot, NewSession, RememberedPane, RepositoryCloneRow, SessionPageRow, SessionStore,
+    SpawningSession,
 };
 use crate::SessionPageCursor;
 
@@ -76,6 +77,22 @@ impl SessionStore for FakeStore {
 
     async fn session(&self, id: &SessionId) -> Result<Option<Session>> {
         self.session(id).await
+    }
+
+    async fn remember_pane(&self, id: &SessionId, pane: &RememberedPane) -> Result<()> {
+        self.remember_pane(id, pane).await
+    }
+
+    async fn forget_pane(&self, id: &SessionId) -> Result<()> {
+        self.forget_pane(id).await
+    }
+
+    async fn remembered_pane(&self, id: &SessionId) -> Result<Option<RememberedPane>> {
+        self.remembered_pane(id).await
+    }
+
+    async fn remembered_panes(&self) -> Result<Vec<(SessionId, RememberedPane)>> {
+        self.remembered_panes().await
     }
 
     async fn last_activity_at(&self, session_id: &SessionId) -> Result<Option<String>> {
@@ -194,6 +211,10 @@ impl SessionStore for FakeStore {
 
     async fn release_held_send(&self, id: i64) -> Result<bool> {
         self.release_held_send(id).await
+    }
+
+    async fn settle_held_send(&self, id: i64, matched_uuid: &MessageUuid) -> Result<bool> {
+        self.settle_held_send(id, matched_uuid).await
     }
 
     async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>> {

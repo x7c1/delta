@@ -30,9 +30,12 @@
 //! Links the page follows never take the window away from Delta; [`links`]
 //! says where they go instead.
 //!
+//! Only one copy runs at a time: launching the app again focuses the running
+//! window and exits (see [`focus_running_window`]).
+//!
 //! Closing the window ends the process and the server with it. The tmux server
-//! on Delta's socket is left running, so open sessions survive a restart and
-//! can be resumed.
+//! on Delta's socket is left running, so the Claude Code sessions open in it
+//! keep running, and the next launch re-adopts them before it serves anything.
 
 mod app_data;
 mod links;
@@ -64,6 +67,14 @@ fn main() {
     };
 
     let result = tauri::Builder::default()
+        // Registered first, so a second launch is caught before anything else
+        // runs: the plugin hands its arguments to the running instance and
+        // exits, and its `setup` below — which would start a second server on
+        // the same database and tmux socket — never runs. See
+        // `focus_running_window`.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            focus_running_window(app);
+        }))
         .plugin(tauri_plugin_dialog::init())
         // Tauri panics on an error returned from here, so every failure is
         // reported (and exits 1) inside the hook instead.
@@ -80,6 +91,33 @@ fn main() {
     if let Err(err) = result {
         tracing::error!("delta-app failed: {err:#}");
         std::process::exit(1);
+    }
+}
+
+/// Bring the running instance's window forward when the app is launched again.
+///
+/// The desktop app is single-instance. A second copy would start a second
+/// server on the same database and tmux socket; worse, the port the first copy
+/// holds is the one recorded in the hook state file, so the second would fall
+/// back to a fresh port, record that one over it and report the hook endpoint
+/// as changed — and the next launch would then find every session the first
+/// copy left running unable to reach it. A second launch therefore only focuses
+/// the window that is already open. The CLI server is not affected.
+fn focus_running_window(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
+        // The running instance has no window yet (it is still starting, or its
+        // start failed and a dialog is up); there is nothing to focus.
+        tracing::info!("delta-app was launched again; the running instance has no window to focus");
+        return;
+    };
+    for (step, result) in [
+        ("unminimize", window.unminimize()),
+        ("show", window.show()),
+        ("focus", window.set_focus()),
+    ] {
+        if let Err(err) = result {
+            tracing::warn!("could not {step} the running window on a second launch: {err}");
+        }
     }
 }
 

@@ -61,9 +61,10 @@ where
     /// send is unknown, was never held, is already released, or has been
     /// cancelled since. The browser drops its Send control and reconciles
     /// from the next refetch on this error. An ensure-open failure (e.g.
-    /// [`Error::ResumeUnavailable`] for a gone transcript, or a spawn error)
-    /// surfaces *before* the marker is touched, so the row stays held and
-    /// the release can be retried.
+    /// [`Error::ResumeUnavailable`] for a gone transcript, a spawn error, or
+    /// [`Error::SessionHooksUnreachable`] for a pane whose agent cannot reach
+    /// this server's hooks) surfaces *before* the marker is touched, so the
+    /// row stays held and the release can be retried.
     ///
     /// After a successful release the session's queued dispatch runs exactly
     /// as it does after a cancel clears a head: if the session is open and
