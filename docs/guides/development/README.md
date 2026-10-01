@@ -111,7 +111,8 @@ variables, all with local-friendly defaults:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `DELTA_PORT` | `7878` | TCP port |
-| `DELTA_DB_PATH` | `delta.db` | SQLite overlay file |
+| `DELTA_DB_PATH` | `delta.db` | SQLite overlay file; its directory also holds the hook state file `delta-hook-state.json` (the hook secret, kept across restarts — see [local run](local-run.md#the-desktop-app)) |
+| `DELTA_HOOK_SECRET` | recorded in the hook state file | the secret every hook URL carries; overrides the recorded one without replacing it |
 | `DELTA_SESSION_WORKDIR` | `.tmp/session` | base directory for per-spawn working directories (`<base>/<token>`) |
 | `DELTA_WORKTREE_BASE` | `$HOME/.delta/worktrees` | base directory for per-session git worktrees (`<base>/delta-<session-id>`), deliberately outside any repo tree so the worktree does not inherit a surrounding `CLAUDE.md`/settings |
 | `DELTA_TMUX_SOCKET` | `io.github.x7c1.delta` | dedicated tmux socket (`tmux -L <socket>`) for Delta's sessions, isolated from your default tmux server (`make dev` sets `io.github.x7c1.delta.dev`) |

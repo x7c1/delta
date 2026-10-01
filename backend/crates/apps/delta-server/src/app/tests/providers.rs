@@ -28,6 +28,7 @@ async fn test_state_with_only_claude_present() -> AppState {
         hook_secret: super::TEST_HOOK_SECRET.into(),
         transcript_root: super::TEST_TRANSCRIPT_ROOT.into(),
         port: 7878,
+        hook_endpoint_changed: false,
         launch: delta_usecase::LaunchConfig::default(),
     };
     let interactor = delta_bootstrap::build(&config, delta_usecase::NullCommsLog::arc())

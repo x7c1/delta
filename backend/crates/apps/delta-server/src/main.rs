@@ -11,7 +11,7 @@ use delta_server::{config, serve, AppState};
 async fn main() -> anyhow::Result<()> {
     serve::init_tracing();
 
-    let config = config::config_from_env();
+    let mut config = config::config_from_env();
 
     // Record which upstream `claude` binary this server is running against,
     // before any session activity, so the boot banner carries the version
@@ -20,10 +20,10 @@ async fn main() -> anyhow::Result<()> {
     // (subdomain 3) and the `claude_version` module docs for the contract.
     delta_server::log_claude_version(&config.launch.claude_bin);
 
-    // The two startup failures the user has to act on get a clear line and exit
-    // 1 with no backtrace (see `user_facing_startup_error`); every other failure
+    // The startup failures the user has to act on get a clear line and exit 1
+    // with no backtrace (see `user_facing_startup_error`); every other failure
     // keeps the default `anyhow` propagation.
-    let state = match AppState::build(&config).await {
+    let state = match build_state(&mut config).await {
         Ok(state) => state,
         Err(err) => match serve::user_facing_startup_error(&err) {
             Some(message) => {
@@ -36,4 +36,14 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = serve::bind_loopback(config.port).await?;
     serve::serve(state, listener).await
+}
+
+/// Settle the hook secret kept beside the database, then build the state.
+///
+/// The port stays the fixed one the configuration names (`DELTA_PORT`, else
+/// [`config::DEFAULT_PORT`]); only the desktop app records and re-chooses its
+/// port.
+async fn build_state(config: &mut delta_bootstrap::Config) -> anyhow::Result<AppState> {
+    config::adopt_persisted_hook_secret(config)?;
+    AppState::build(config).await
 }

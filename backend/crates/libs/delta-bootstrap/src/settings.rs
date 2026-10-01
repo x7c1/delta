@@ -19,7 +19,7 @@ use serde_json::json;
 
 /// Render the session settings JSON for hooks pointing at `127.0.0.1:<port>`.
 ///
-/// `hook_secret` is the per-run secret carried back to the server as an `hs`
+/// `hook_secret` is the secret carried back to the server as an `hs`
 /// query parameter on every hook URL, so the hook auth guard (see
 /// `delta-server`'s `hook_auth_guard`) can tell a genuine Claude Code callback
 /// apart from a forged local POST. It rides in the URL — not a header — because

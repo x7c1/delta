@@ -35,12 +35,15 @@ the local machine, four guards defend the surface:
   the valid token gets `401`. This closes the gap the Origin/Host guard leaves
   open for a local non-browser process. Two paths are exempt from *this* guard:
   `/health` (an unauthenticated liveness probe) and `/hooks/*`, which carries
-  the per-run hook secret instead of a bearer token (next guard) rather than
+  the hook secret instead of a bearer token (next guard) rather than
   being left open.
-- **Per-run hook secret** — the `/hooks/*` control plane is called by Claude
-  Code (not the browser), so it cannot carry a bearer token. Instead Delta
-  renders a per-run secret into the hook URLs (`?hs=<secret>`) and requires it
-  on every hook request, giving that path its own per-run authentication.
+- **Hook secret** — the `/hooks/*` control plane is called by Claude Code (not
+  the browser), so it cannot carry a bearer token. Instead Delta renders a
+  secret into the hook URLs (`?hs=<secret>`) and requires it on every hook
+  request, giving that path its own authentication. Unlike the bearer token it
+  is kept across restarts — in `delta-hook-state.json` beside the database,
+  owner-only (`0600`) — because a Claude Code session outlives Delta in tmux and
+  keeps calling the URLs it was launched with. Deleting the file rotates it.
 - **Scoped trust seeding** — the subject of the next section: Delta pre-accepts
   Claude Code's workspace-trust dialog only for directories it created itself.
 
@@ -80,7 +83,7 @@ Delta writes two files into the system temp directory, both at paths an outsider
 can predict:
 
 - **The session settings file** — `<temp>/delta-<port>/settings.json`, the
-  settings Claude Code is launched with. It embeds the per-run hook secret in
+  settings Claude Code is launched with. It embeds the hook secret in
   every hook URL, and its `statusLine` / `SessionStart` entries are commands
   Claude Code executes. So it is a secret-read surface *and* a command-injection
   surface.

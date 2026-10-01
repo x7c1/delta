@@ -129,3 +129,34 @@ fn empty_overrides_that_must_not_be_empty_fall_back() {
 fn an_unparseable_port_falls_back_to_the_default() {
     assert_eq!(config(&[("DELTA_PORT", "nope")]).port, DEFAULT_PORT);
 }
+
+#[test]
+fn adopting_the_persisted_secret_replaces_the_minted_one_and_flags_a_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("delta.db").to_string_lossy().into_owned();
+    let start = || {
+        let mut config = config(&[("DELTA_DB_PATH", &database)]);
+        adopt_hook_secret(&mut config, None).unwrap();
+        config
+    };
+
+    let first = start();
+    assert!(first.hook_endpoint_changed, "a first run mints its secret");
+
+    let second = start();
+    assert_eq!(second.hook_secret, first.hook_secret);
+    assert!(!second.hook_endpoint_changed);
+    assert_eq!(
+        second.session_settings_json(),
+        first.session_settings_json()
+    );
+    assert_eq!(
+        second.session_settings_path(),
+        first.session_settings_path()
+    );
+
+    let mut overridden = config(&[("DELTA_DB_PATH", &database)]);
+    adopt_hook_secret(&mut overridden, Some("hs".into())).unwrap();
+    assert_eq!(overridden.hook_secret, "hs");
+    assert!(overridden.hook_endpoint_changed);
+}

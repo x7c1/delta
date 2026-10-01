@@ -7,10 +7,17 @@
 //! The server boots fine when no tmux session exists yet: the session is created
 //! lazily on the first `POST /api/sessions`, so none of these need a live session
 //! at startup.
+//!
+//! One value is not from the environment alone: the hook secret is kept in a
+//! state file beside the database so it survives restarts, which
+//! [`adopt_persisted_hook_secret`] applies once the database path is final.
 
 use std::ffi::OsString;
 
 use delta_bootstrap::Config;
+
+pub mod hook_state;
+use hook_state::{HookStateError, HookStateFile};
 
 mod home_paths;
 use home_paths::{default_worktree_base, transcript_root};
@@ -64,8 +71,33 @@ pub fn config_from_vars(var: impl Fn(&str) -> Option<OsString>) -> Config {
             home,
         ),
         port: port_from_vars(&text).unwrap_or(DEFAULT_PORT),
+        hook_endpoint_changed: false,
         launch: launch_from_vars(&text),
     }
+}
+
+/// Give `config` the hook secret kept beside its database, and return the
+/// state file it came from.
+///
+/// Run after `config.database_path` is final (the desktop app moves it into its
+/// data directory first). `DELTA_HOOK_SECRET` still wins when set; otherwise the
+/// recorded secret is reused, or minted and recorded on a first run — see
+/// [`hook_state`]. Sets [`Config::hook_endpoint_changed`] when the secret
+/// differs from the recorded one. The desktop app goes on to settle its port
+/// against the same file ([`crate::serve::bind_app_listener`]).
+pub fn adopt_persisted_hook_secret(config: &mut Config) -> Result<HookStateFile, HookStateError> {
+    adopt_hook_secret(config, std::env::var("DELTA_HOOK_SECRET").ok())
+}
+
+fn adopt_hook_secret(
+    config: &mut Config,
+    explicit: Option<String>,
+) -> Result<HookStateFile, HookStateError> {
+    let mut state = HookStateFile::open_beside(&config.database_path)?;
+    let settled = state.settle_hook_secret(explicit)?;
+    config.hook_secret = settled.secret;
+    config.hook_endpoint_changed |= settled.changed;
+    Ok(state)
 }
 
 /// The port `DELTA_PORT` names in the process environment, if it holds a valid

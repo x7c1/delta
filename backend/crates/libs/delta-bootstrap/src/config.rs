@@ -45,12 +45,17 @@ pub struct Config {
     /// presents it on every request. Not a wire field and never rotated — see
     /// the auth guard.
     pub auth_token: String,
-    /// The per-run hook secret carried back on every hook URL as `?hs=<secret>`,
-    /// enforced by the server's hook auth guard. Minted once for the server's
-    /// lifetime by `delta_server::config::config_from_env` and rendered into
-    /// the session settings by [`render_session_settings`] so genuine Claude
-    /// Code callbacks present it and a forged local POST cannot. Not a wire
-    /// field.
+    /// The hook secret carried back on every hook URL as `?hs=<secret>`,
+    /// enforced by the server's hook auth guard, and rendered into the session
+    /// settings by [`render_session_settings`] so genuine Claude Code callbacks
+    /// present it and a forged local POST cannot. Not a wire field.
+    ///
+    /// Unlike [`Self::auth_token`] it outlives the process: the binaries read
+    /// it from the hook state file beside the database (minting and recording
+    /// it there when absent) through
+    /// `delta_server::config::adopt_persisted_hook_secret`, so a Claude Code
+    /// session that survived a restart in tmux still presents the secret the
+    /// new process accepts. `DELTA_HOOK_SECRET` overrides it.
     pub hook_secret: String,
     /// The directory a hook-reported `transcript_path` must resolve under to be
     /// persisted and read. Defaults to
@@ -64,6 +69,31 @@ pub struct Config {
     pub transcript_root: String,
     /// TCP port the server listens on, used to render the session's hook URLs.
     pub port: u16,
+    /// Whether the hook endpoint this run serves — the port and secret in the
+    /// hook URLs — differs from the one the previous run served, as far as the
+    /// hook state file can tell. When it does, a Claude Code session that
+    /// survived the restart in tmux, still holding the old URLs, can no longer
+    /// reach this server.
+    ///
+    /// Decided against the hook state file beside the database (see
+    /// `delta_server::config::hook_state`). `true` when the secret was minted
+    /// afresh (a first run, an upgrade from a build that did not keep one, or
+    /// the file deleted to rotate it), when an explicit `DELTA_HOOK_SECRET`
+    /// differs from the recorded one, or when the desktop app could not get its
+    /// recorded port back and fell back to a fresh one. `false` otherwise,
+    /// including the CLI's fixed port, which is never compared. Configuration
+    /// built by hand (tests) leaves it `false`.
+    ///
+    /// It says whether surviving sessions *would* be stranded, not that any
+    /// exist: a first run reads `true` with no session to strand, so a caller
+    /// pairs it with the sessions it actually finds. Explicit overrides are
+    /// blind spots, because neither `DELTA_PORT` nor `DELTA_HOOK_SECRET` is
+    /// recorded: an explicit port is never compared, so moving to or from one
+    /// reads `false`; and a secret is compared with the recorded one, not with
+    /// the previous run's, so the same `DELTA_HOOK_SECRET` on every start reads
+    /// `true` each time, while dropping it after a run that used it reads
+    /// `false`.
+    pub hook_endpoint_changed: bool,
     /// How sessions are launched (which binary) and how long the launch
     /// watchdog waits. Defaults are production values; tests and alternative
     /// installs override the binary and shrink the deadlines.
@@ -83,7 +113,9 @@ impl Config {
     /// Lives under the system temp directory (never a user project), so spawning
     /// or resuming in a real repository never overwrites that repository's own
     /// `.claude/settings.json`. Namespaced by port so two Delta servers on
-    /// different ports — whose hook URLs differ — never share one file.
+    /// different ports — whose hook URLs differ — never share one file. With
+    /// the port and hook secret kept across restarts, a restart lands on the
+    /// same path and rewrites it with the same contents.
     pub fn session_settings_path(&self) -> String {
         std::env::temp_dir()
             .join(format!("delta-{}", self.port))

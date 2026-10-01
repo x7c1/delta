@@ -30,7 +30,7 @@ use std::sync::Arc;
 /// baseline they deviate from.
 pub(super) const TEST_AUTH_TOKEN: &str = "delta-test-auth-token";
 
-/// The per-run hook secret every state built in these tests holds, so a request
+/// The hook secret every state built in these tests holds, so a request
 /// the tests drive at `/hooks/*` can present a valid secret and pass the hook
 /// auth guard. The hook group's negative case uses it as the baseline it
 /// deviates from.
@@ -63,6 +63,7 @@ async fn test_state() -> AppState {
         hook_secret: TEST_HOOK_SECRET.into(),
         transcript_root: TEST_TRANSCRIPT_ROOT.into(),
         port: 7878,
+        hook_endpoint_changed: false,
         launch: delta_usecase::LaunchConfig {
             // The permission-request hook test exercises the no-decision
             // passthrough, which waits out this deadline; keep it short.
@@ -129,6 +130,7 @@ async fn test_state_with_gh_stub() -> (AppState, Arc<AtomicUsize>) {
         hook_secret: TEST_HOOK_SECRET.into(),
         transcript_root: TEST_TRANSCRIPT_ROOT.into(),
         port: 7878,
+        hook_endpoint_changed: false,
         launch: delta_usecase::LaunchConfig::default(),
     };
     let interactor = delta_bootstrap::build(&config, delta_usecase::NullCommsLog::arc())
