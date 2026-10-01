@@ -40,6 +40,13 @@ jobs:
     name: bundle (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
+    env:
+      # The system libraries the shell (Tauri v2: WebKitGTK 4.1, GTK 3, the
+      # app-indicator and SVG libraries) links against on Linux — the list
+      # ci.yml installs for its shell build. Also part of their cache key.
+      APT_PACKAGES: >-
+        libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
+        librsvg2-dev libxdo-dev libssl-dev patchelf
 
     # Uploading to a Release needs write access. A called workflow cannot hold
     # more than its caller grants, and a pull_request token from a fork stays
@@ -69,16 +76,34 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
-      # The system libraries the shell (Tauri v2: WebKitGTK 4.1, GTK 3, the
-      # app-indicator and SVG libraries) links against — the list ci.yml
-      # installs for its shell build.
+      # The apt archive cache, as in ci.yml's e2e-fake job (see the comment there).
+      - name: Prepare the apt archive cache
+        if: runner.os == 'Linux'
+        id: apt-cache-key
+        run: |
+          sudo rm -f /etc/apt/apt.conf.d/docker-clean
+          sudo chown "$(id -u):$(id -g)" /var/cache/apt/archives
+          packages_hash=$(printf '%s' "$APT_PACKAGES" | sha256sum | cut -c1-16)
+          prefix="apt-${{ runner.os }}-${ImageOS}-${packages_hash}-"
+          echo "prefix=${prefix}" >> "$GITHUB_OUTPUT"
+          echo "key=${prefix}${ImageVersion}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache apt archives
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives/*.deb
+          key: ${{ steps.apt-cache-key.outputs.key }}
+          restore-keys: |
+            ${{ steps.apt-cache-key.outputs.prefix }}
+
       - name: Install system packages
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-            librsvg2-dev libxdo-dev libssl-dev patchelf
+          sudo apt-get install -y -o APT::Keep-Downloaded-Packages=true $APT_PACKAGES
+          sudo apt-get autoclean
+          sudo find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec chmod a+r {} +
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
