@@ -39,6 +39,7 @@ jobs:
   bundle:
     name: bundle (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
 
     # Uploading to a Release needs write access. A called workflow cannot hold
     # more than its caller grants, and a pull_request token from a fork stays

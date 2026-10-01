@@ -9,6 +9,7 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -37,6 +38,7 @@ jobs:
       # that same root to drive a real tmux server but probes `PATH` itself
       # first and merely skips.
       - name: Install tmux
+        timeout-minutes: 10
         run: sudo apt-get update && sudo apt-get install -y tmux
 
       - name: Build
@@ -67,6 +69,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -136,6 +139,7 @@ jobs:
   # one proves the full loop (REST → spawn → tmux → hooks → transcript → tail → WS).
   e2e-fake:
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
 
