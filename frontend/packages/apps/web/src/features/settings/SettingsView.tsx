@@ -10,6 +10,7 @@ import {
 } from 'react';
 import {
   ApiError,
+  queryKeys,
   useAddCloneRootMutation,
   useCreateLaunchOptionMutation,
   useCreatePromptTemplateMutation,
@@ -24,6 +25,7 @@ import {
   useUpdateLaunchOptionMutation,
   useUpdatePromptTemplateMutation,
 } from '@delta/api-client';
+import { useQueryClient } from '@tanstack/react-query';
 import type {
   AgentProvider,
   LaunchOption,
@@ -345,6 +347,7 @@ const FALLBACK_LAUNCH_OPTION_STYLE: LaunchOptionStyle = 'cli_flag';
  */
 function LaunchOptionsSection({ active }: { active: boolean }) {
   const client = useApiClient();
+  const queryClient = useQueryClient();
   const launchOptionsQuery = useLaunchOptionsQuery(client, active);
   const createLaunchOption = useCreateLaunchOptionMutation(client);
   const updateLaunchOption = useUpdateLaunchOptionMutation(client);
@@ -416,39 +419,49 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
   };
 
   /**
-   * Make `id` the default of a choice group (`null` clears the group).
+   * Make `id` the default of a choice group (`null` clears the group), given
+   * the rows that hold its default now. Resolves `true` once the server has it,
+   * `false` after recording the refusal beside the group.
    *
-   * Two writes, in order: clear every row of the group that currently holds a
-   * default, then set the new one. The server holds one default per group and
-   * never flips a sibling itself, so the reverse order would be refused. More
-   * than one holder is possible only for rows stored before that rule; all of
-   * them are cleared.
+   * Two writes, in order: clear every holder other than `id`, then set `id`
+   * unless it already holds the default. The server holds one default per group
+   * and never flips a sibling itself, so the reverse order would be refused.
+   * More than one holder is possible only for rows stored before that rule; all
+   * of them are cleared. The holders are passed in rather than read from the
+   * list because {@link LaunchOptionGroup} chains switches faster than the list
+   * refetches, and only it knows what the previous switch left behind.
    */
-  const chooseGroupDefault = async (
+  const switchGroupDefault = async (
     group: string,
-    members: LaunchOption[],
+    holders: readonly number[],
     id: number | null,
-  ) => {
+  ): Promise<boolean> => {
     setDefaultSwitchError(null);
     try {
-      for (const holder of members) {
-        if (holder.default_enabled && holder.id !== id) {
+      for (const holder of holders) {
+        if (holder !== id) {
           await updateLaunchOption.mutateAsync({
-            id: holder.id,
+            id: holder,
             body: { default_enabled: false },
           });
         }
       }
-      if (id !== null) {
+      if (id !== null && !holders.includes(id)) {
         await updateLaunchOption.mutateAsync({
           id,
           body: { default_enabled: true },
         });
       }
+      return true;
     } catch (error) {
       setDefaultSwitchError({ group, error });
+      return false;
     }
   };
+
+  /** Refetch the list, resolving once the fresh rows are in the cache. */
+  const refreshLaunchOptions = () =>
+    queryClient.invalidateQueries({ queryKey: queryKeys.launchOptions });
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -670,15 +683,10 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
                 provider={provider}
                 groupKey={entry.key}
                 options={entry.options}
-                switching={
-                  updateLaunchOption.isPending &&
-                  entry.options.some(
-                    (option) => option.id === updateLaunchOption.variables?.id,
-                  )
+                onSwitchDefault={(holders, id) =>
+                  switchGroupDefault(entry.key, holders, id)
                 }
-                onChooseDefault={(id) =>
-                  void chooseGroupDefault(entry.key, entry.options, id)
-                }
+                onSettled={refreshLaunchOptions}
                 error={
                   defaultSwitchError !== null &&
                   defaultSwitchError.group === entry.key
@@ -712,44 +720,111 @@ interface DefaultChoice {
   checked: boolean;
   /** Make this row the group's default. */
   onChoose: () => void;
-  /** Disabled while the group's default is being switched. */
-  switching: boolean;
 }
 
 /**
  * The rows of one choice group of two or more rows — values of one
  * single-valued setting, such as every Claude `--model` row — listed together
  * under the group key, with their `default_enabled` controls as one radio group
- * and an explicit "No default" option first. The server holds one default per group, so switching it is
- * clear-then-set (see `chooseGroupDefault`); a legacy group carrying two
- * defaults shows the first one in list order as chosen — the row the composer
- * picker seeds too, unless that row is dangerous (the picker never seeds one).
+ * and an explicit "No default" option first. The server holds one default per
+ * group, so switching it is clear-then-set (see `switchGroupDefault`); a legacy
+ * group carrying two defaults shows the first one in list order as chosen — the
+ * row the composer picker seeds too, unless that row is dangerous (the picker
+ * never seeds one).
  *
- * The dangerous-row rules apply unchanged inside a group: an undefaulted
- * dangerous row's radio is disabled, and one that already carries a stale
- * default keeps its disarm hint — "No default" (or another row) is how it is
- * cleared.
+ * The radios stay enabled while a switch is being saved, and the group shows
+ * the user's latest choice at once. A native radio group moves the selection
+ * on every arrow key, so disabling it for each in-flight save dropped keyboard
+ * focus after one step. Instead the saves are serialized and coalesced: one
+ * switch runs at a time, and choices made while it runs only update the target,
+ * so when it lands the next switch goes straight to the latest choice. Arrowing
+ * across a group therefore saves at most the first step and the last one, never
+ * every option passed over, and ends with the option the user stopped on. Once
+ * the target stops moving the list is refetched and the server's state takes
+ * over the display again. Committing only on a separate confirm action was the
+ * alternative; it was rejected because a click on a radio would then no longer
+ * be the whole action, unlike every other default control in this section.
+ *
+ * The dangerous-row rules apply unchanged inside a group, judged against the
+ * choice on screen: a dangerous row that is not the shown default has its radio
+ * disabled (choosing it would set its default, which is refused), and one that
+ * already carries a stale default keeps its disarm hint — "No default" (or
+ * another row) is how it is cleared. A failed save reverts the display to the
+ * refetched server state and reports the error beside the group.
  */
 function LaunchOptionGroup({
   provider,
   groupKey,
   options,
-  switching,
-  onChooseDefault,
+  onSwitchDefault,
+  onSettled,
   error,
   renderRow,
 }: {
   provider: AgentProvider;
   groupKey: string;
   options: LaunchOption[];
-  switching: boolean;
-  onChooseDefault: (id: number | null) => void;
+  /** One clear-then-set from `holders` to `id`; resolves whether it saved. */
+  onSwitchDefault: (
+    holders: readonly number[],
+    id: number | null,
+  ) => Promise<boolean>;
+  /** Refetch the list once the switching settles. */
+  onSettled: () => Promise<unknown>;
   error: unknown;
   renderRow: (option: LaunchOption, defaultChoice: DefaultChoice) => ReactNode;
 }) {
   const headingId = useId();
   const name = `launch-option-default-${provider}-${groupKey}`;
   const holder = options.find((option) => option.default_enabled);
+  // The choice on screen while switching is under way (`null` once the
+  // refetched list shows the server's state again), wrapped so "No default"
+  // (`id: null`) is distinguishable from "nothing pending".
+  const [pending, setPending] = useState<{ id: number | null } | null>(null);
+  // The latest choice, read by the running switch loop between saves, and
+  // whether that loop is running. Refs, not state: the loop is one async
+  // closure that must see choices made after it started.
+  const target = useRef<number | null>(null);
+  const running = useRef(false);
+  const shownId = pending !== null ? pending.id : (holder?.id ?? null);
+
+  const choose = (id: number | null) => {
+    setPending({ id });
+    target.current = id;
+    if (running.current) {
+      return;
+    }
+    running.current = true;
+    // Snapshot of the server's holders at the start; each successful switch
+    // leaves exactly its target holding the default.
+    let holders = options
+      .filter((option) => option.default_enabled)
+      .map((option) => option.id);
+    void (async () => {
+      try {
+        for (;;) {
+          const next = target.current;
+          if (!(await onSwitchDefault(holders, next))) {
+            break;
+          }
+          holders = next === null ? [] : [next];
+          if (target.current !== next) {
+            continue;
+          }
+          await onSettled();
+          if (target.current === next) {
+            return;
+          }
+        }
+        // A refused save: show what the server holds now.
+        await onSettled();
+      } finally {
+        running.current = false;
+        setPending(null);
+      }
+    })();
+  };
+
   return (
     <li
       className="flex flex-col gap-2"
@@ -758,6 +833,7 @@ function LaunchOptionGroup({
       <div
         role="radiogroup"
         aria-labelledby={headingId}
+        aria-busy={pending !== null}
         className="flex flex-col gap-2"
       >
         <div className="flex items-center justify-between gap-3 px-1">
@@ -771,9 +847,8 @@ function LaunchOptionGroup({
             <input
               type="radio"
               name={name}
-              checked={holder === undefined}
-              onChange={() => onChooseDefault(null)}
-              disabled={switching}
+              checked={shownId === null}
+              onChange={() => choose(null)}
               aria-label={`No default for ${groupKey}`}
               data-testid={`launch-option-group-${groupKey}-none`}
               className="h-3.5 w-3.5"
@@ -785,9 +860,8 @@ function LaunchOptionGroup({
           {options.map((option) =>
             renderRow(option, {
               name,
-              checked: holder?.id === option.id,
-              onChoose: () => onChooseDefault(option.id),
-              switching,
+              checked: shownId === option.id,
+              onChoose: () => choose(option.id),
             }),
           )}
         </ul>
@@ -1663,8 +1737,13 @@ function LaunchOptionRow({
   defaultChoice,
 }: LaunchOptionRowProps) {
   // Only *setting* the flag is refused, so the control is locked only where
-  // ticking it is what it would do (see this component's doc).
-  const defaultLocked = option.dangerous && !option.default_enabled;
+  // ticking it is what it would do (see this component's doc). In a group that
+  // is judged against the choice on screen, which runs ahead of the server
+  // while a switch is saved: once the user has moved off a stale dangerous
+  // default, choosing it again would be a set.
+  const defaultLocked =
+    option.dangerous &&
+    !(defaultChoice ? defaultChoice.checked : option.default_enabled);
   // Inside a group the siblings share one `name`, so the control's label adds
   // the value to say which row it is.
   const described =
@@ -1729,7 +1808,7 @@ function LaunchOptionRow({
                 name={defaultChoice.name}
                 checked={defaultChoice.checked}
                 onChange={defaultChoice.onChoose}
-                disabled={defaultChoice.switching || defaultLocked}
+                disabled={defaultLocked}
                 aria-label={`Enable launch option ${described} by default`}
                 className="h-3.5 w-3.5"
               />

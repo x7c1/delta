@@ -604,7 +604,11 @@ a multi-select one.
   or an unsupported combination).
 - **409** (body `code: "question_not_pending"`) — the question is no longer
   pending: already answered, its turn ended, or the session has no live pane. The
-  browser falls back to answering in the terminal.
+  browser falls back to answering in the terminal, unless the session is closed:
+  then the card says the session was closed and offers only Dismiss. The 409
+  also makes the browser refetch the session list, so a tab that missed the
+  session's close (a live socket gone silently half-open) learns of it and
+  switches to that copy.
 
 ### `POST /api/sessions/{id}/questions/cancel`
 

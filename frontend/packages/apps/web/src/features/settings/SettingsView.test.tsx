@@ -15,6 +15,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -491,6 +492,86 @@ describe('SettingsView', () => {
     await waitFor(() => {
       expect(patches.slice(2)).toEqual([[21, { default_enabled: false }]]);
     });
+  });
+
+  it('keeps focus in a group default radio group while arrowing across a switch', async () => {
+    // A native radio group moves the selection on every arrow key. If the
+    // group disabled itself while each switch was saved, a keyboard user would
+    // lose focus after one step. The radios stay enabled, the selection follows
+    // the keys, and the saves coalesce onto the option the user stopped on.
+    const row = (id: number, value: string, isDefault: boolean): LaunchOption => ({
+      id,
+      label: null,
+      name: '--model',
+      value,
+      default_enabled: isDefault,
+      created_at: '2026-01-05T00:00:00Z',
+      provider: 'claude',
+      builtin: false,
+      dangerous: false,
+      choice_group: '--model',
+    });
+    const rows = [row(30, 'a', true), row(31, 'b', false), row(32, 'c', false)];
+    const patches: Array<[number, boolean]> = [];
+    // Hold every PATCH until the test lets it through, so the first switch is
+    // still in flight while the user keeps arrowing.
+    let release: () => void = () => {};
+    let gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get('*/api/launch-options', () =>
+        HttpResponse.json({ launch_options: rows }),
+      ),
+      http.patch('*/api/launch-options/:id', async ({ params, request }) => {
+        await gate;
+        const id = Number(params.id);
+        const body = (await request.json()) as { default_enabled: boolean };
+        patches.push([id, body.default_enabled]);
+        const target = rows.find((each) => each.id === id)!;
+        target.default_enabled = body.default_enabled;
+        return HttpResponse.json(target);
+      }),
+    );
+    const user = userEvent.setup();
+    renderSettings();
+    const list = await findList();
+    const group = within(list).getByRole('radiogroup', { name: '--model' });
+    const radio = (value: string) =>
+      within(group).getByRole('radio', {
+        name: `Enable launch option --model ${value} by default`,
+      });
+
+    radio('a').focus();
+    await user.keyboard('{ArrowDown}');
+    // The first step's save is in flight; the group stays operable and focused.
+    expect(radio('b')).toBeChecked();
+    expect(radio('b')).toHaveFocus();
+    for (const each of within(group).getAllByRole('radio')) {
+      expect(each).toBeEnabled();
+    }
+
+    await user.keyboard('{ArrowDown}');
+    expect(radio('c')).toBeChecked();
+    expect(radio('c')).toHaveFocus();
+
+    // Let every save through: the first step lands, then one more switch goes
+    // straight to the option the user stopped on.
+    release();
+    gate = Promise.resolve();
+    await waitFor(() =>
+      expect(patches).toEqual([
+        [30, false],
+        [31, true],
+        [31, false],
+        [32, true],
+      ]),
+    );
+    await waitFor(() =>
+      expect(group.getAttribute('aria-busy')).toBe('false'),
+    );
+    expect(radio('c')).toBeChecked();
+    expect(radio('c')).toHaveFocus();
   });
 
   it('deletes a launch option', async () => {

@@ -1256,7 +1256,15 @@ describe('WorkspaceScreen multi-session', () => {
   // terminal-gating tests below; also used above by the unread-badge tests,
   // which need exactly one session card rendered for `threadRow` to scope to —
   // without it they fail on "found multiple elements", not on a badge.
-  function useSingleSessionOfProvider(
+  /** The options of {@link singleSessionList}. */
+  interface SingleSessionState {
+    open?: boolean;
+    status?: 'active' | 'spawning' | 'failed';
+    paneStarting?: boolean;
+  }
+
+  /** A `GET /api/sessions` body listing exactly one session. */
+  function singleSessionList(
     id: string,
     provider: 'claude' | 'codex',
     mainThreadId: number,
@@ -1268,40 +1276,45 @@ describe('WorkspaceScreen multi-session', () => {
       open = true,
       status = 'active',
       paneStarting = false,
-    }: {
-      open?: boolean;
-      status?: 'active' | 'spawning' | 'failed';
-      paneStarting?: boolean;
-    } = {},
+    }: SingleSessionState = {},
+  ) {
+    return {
+      sessions: [
+        {
+          session: {
+            id,
+            cwd: '/work',
+            transcript_path: '/tmp/s.jsonl',
+            title: `${provider} session`,
+            status,
+            created_at: '2026-01-01T00:00:00Z',
+            branch_at_launch: null,
+            repo_root: null,
+            repository_display_name: null,
+            provider,
+            provider_session_id: null,
+            provider_thread_id: null,
+            pull_request_number: null,
+          },
+          open,
+          pane_starting: paneStarting,
+          main_thread_id: mainThreadId,
+          last_activity_at: '2026-01-01T00:00:02Z',
+        },
+      ],
+      next_cursor: null,
+    };
+  }
+
+  function useSingleSessionOfProvider(
+    id: string,
+    provider: 'claude' | 'codex',
+    mainThreadId: number,
+    state: SingleSessionState = {},
   ) {
     server.use(
       http.get('*/api/sessions', () =>
-        HttpResponse.json({
-          sessions: [
-            {
-              session: {
-                id,
-                cwd: '/work',
-                transcript_path: '/tmp/s.jsonl',
-                title: `${provider} session`,
-                status,
-                created_at: '2026-01-01T00:00:00Z',
-                branch_at_launch: null,
-                repo_root: null,
-                repository_display_name: null,
-                provider,
-                provider_session_id: null,
-                provider_thread_id: null,
-                pull_request_number: null,
-              },
-              open,
-              pane_starting: paneStarting,
-              main_thread_id: mainThreadId,
-              last_activity_at: '2026-01-01T00:00:02Z',
-            },
-          ],
-          next_cursor: null,
-        }),
+        HttpResponse.json(singleSessionList(id, provider, mainThreadId, state)),
       ),
     );
   }
@@ -1563,6 +1576,130 @@ describe('WorkspaceScreen multi-session', () => {
     ).toBeInTheDocument();
     expect(
       within(notice).queryByTestId('permission-notice-unanswerable'),
+    ).not.toBeInTheDocument();
+  });
+
+  /**
+   * Serve the session list as a tab that missed `session_closed` would meet it:
+   * the session is listed open until `closeOnServer` runs, and closed on every
+   * fetch after that. Counts the fetches, so a test can tell a refetch the 409
+   * triggered from the closed copy merely being reachable.
+   */
+  function sessionClosedBehindTheTabsBack() {
+    let listFetches = 0;
+    let open = true;
+    server.use(
+      http.get('*/api/sessions', () => {
+        listFetches += 1;
+        return HttpResponse.json(
+          singleSessionList(SESSION_ID, 'claude', MAIN_THREAD_ID, { open }),
+        );
+      }),
+    );
+    return {
+      listFetches: () => listFetches,
+      closeOnServer: () => {
+        open = false;
+      },
+    };
+  }
+
+  it('refetches a session it believes open when a decision conflicts, and shows the closed copy once it is closed', async () => {
+    // The tab's live socket went silently half-open: the server closed the
+    // session, but this tab never heard `session_closed`, so it still lists the
+    // session open. The 409 is the first sign; it must refetch the session
+    // rather than point at a terminal that no longer exists.
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    const list = sessionClosedBehindTheTabsBack();
+    seedPermissionNotice(SESSION_ID, 13);
+    server.use(
+      http.post('*/api/permissions/:id/decision', () =>
+        HttpResponse.json(
+          { error: 'not pending', code: 'permission_not_pending' },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    renderScreen();
+
+    const notice = await screen.findByTestId('permission-notice');
+    // The tab believes the session open: no closed notice on the composer.
+    expect(screen.queryByTestId('readonly-notice')).not.toBeInTheDocument();
+    const fetchesBefore = list.listFetches();
+    list.closeOnServer();
+    fireEvent.click(within(notice).getByRole('button', { name: 'Allow' }));
+
+    await waitFor(() =>
+      expect(list.listFetches()).toBeGreaterThan(fetchesBefore),
+    );
+    expect(
+      await within(notice).findByTestId('permission-notice-session-closed'),
+    ).toBeInTheDocument();
+    expect(
+      within(notice).queryByText('Answer the prompt in the terminal.'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(notice).queryByRole('button', { name: 'Open terminal' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('refetches a session it believes open when a question answer conflicts, and shows the closed copy once it is closed', async () => {
+    // The question card's twin of the case above: `question_not_pending` on a
+    // session the tab still lists open. Without the refetch the card would keep
+    // sending the user to the terminal of a session that is gone.
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      activeThreadId: MAIN_THREAD_ID,
+    });
+    const list = sessionClosedBehindTheTabsBack();
+    useLiveStore.setState({
+      notices: {
+        [SESSION_ID]: [
+          {
+            kind: 'question',
+            requestId: 14,
+            threadId: MAIN_THREAD_ID,
+            toolInput: JSON.stringify({
+              questions: [
+                {
+                  question: 'Which one?',
+                  header: 'Pick',
+                  options: [{ label: 'This' }, { label: 'That' }],
+                  multiSelect: false,
+                },
+              ],
+            }),
+            dismissed: false,
+          },
+        ],
+      },
+    });
+    server.use(
+      http.post('*/api/sessions/:id/questions/:requestId/answer', () =>
+        HttpResponse.json(
+          { error: 'not pending', code: 'question_not_pending' },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    renderScreen();
+
+    const card = await screen.findByTestId('question-card');
+    const fetchesBefore = list.listFetches();
+    list.closeOnServer();
+    fireEvent.click(within(card).getByTestId('question-option-0-0'));
+
+    await waitFor(() =>
+      expect(list.listFetches()).toBeGreaterThan(fetchesBefore),
+    );
+    expect(
+      await within(card).findByTestId('question-session-closed'),
+    ).toBeInTheDocument();
+    expect(within(card).queryByTestId('question-error')).not.toBeInTheDocument();
+    expect(
+      within(card).queryByRole('button', { name: 'Open terminal' }),
     ).not.toBeInTheDocument();
   });
 

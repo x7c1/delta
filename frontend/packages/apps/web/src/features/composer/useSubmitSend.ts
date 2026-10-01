@@ -120,6 +120,18 @@ export function useSubmitSend(): (args: {
             worktree: target.worktree,
             pullRequestNumber: target.pullRequestNumber,
           });
+          // A user still on the new-session screen is about to be taken to
+          // this session, so the terminal they had open there comes with them
+          // (on the small layout a session with no entry would otherwise start
+          // with its overlay closed). Gated like the hand-over: a send that
+          // lands with the user elsewhere — or a failed spawn's Retry, sent
+          // from that session's own row — was not composed beside the
+          // new-session screen's terminal, so its flag says nothing about it.
+          if (userAwaitingSpawn) {
+            useNavStore
+              .getState()
+              .carryNewSessionTerminalOver(send.session_id);
+          }
           // The server wrote the session row before it launched anything, so
           // the list is already stale: refetch it now rather than waiting for
           // the `session_registered` broadcast a second or more later. The

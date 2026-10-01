@@ -5,7 +5,7 @@ use std::time::SystemTime;
 
 use tokio::fs;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 /// The `<root>/<project dir>/<session id>.jsonl` holding `session_id`'s
 /// transcript, or `None` when no project directory holds one (see
@@ -27,10 +27,14 @@ pub(super) async fn find_session_transcript(
     let mut project_dirs = match fs::read_dir(root).await {
         Ok(dirs) => dirs,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.into()),
+        Err(e) => return Err(Error::io(root, e)),
     };
     let mut candidates: Vec<(PathBuf, SystemTime)> = Vec::new();
-    while let Some(entry) = project_dirs.next_entry().await? {
+    while let Some(entry) = project_dirs
+        .next_entry()
+        .await
+        .map_err(|e| Error::io(root, e))?
+    {
         let candidate = entry.path().join(&file_name);
         if let Some(modified) = transcript_file_modified(&candidate).await {
             candidates.push((candidate, modified));
