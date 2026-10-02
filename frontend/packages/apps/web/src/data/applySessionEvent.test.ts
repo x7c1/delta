@@ -669,23 +669,89 @@ describe('applySessionEvent', () => {
     expect(useLiveStore.getState().spawns[0].status).toBe('failed');
   });
 
-  it('raises no notice of its own for a launch this client was tracking', () => {
-    // The failed session is listed, marked failed, and its own screen says what
-    // happened — so this seam adds nothing. Only a failure naming a session
-    // this client never tracked gets a snackbar, and the spawn registry raises
-    // that one.
-    const queryClient = new QueryClient();
+  /** Track a launch this window started, still starting, under `sessionId`. */
+  function trackStartingSpawn(sessionId: string, text = 'new session') {
     useLiveStore.getState().trackSpawn({
       focusHandedOver: false,
-      sessionId: 'sess-spawned',
+      sessionId,
       threadId: 42,
-      text: 'new session',
+      text,
       firstSendId: 1,
       workdir: null,
       launchOptionIds: [],
       provider: 'claude',
       worktree: null,
+      pullRequestNumber: null,
     });
+  }
+
+  it('names a tracked launch that fails while another session is focused', () => {
+    // The user started a session, moved on to another one while it was
+    // starting, and then it broke. The main pane shows the other session and
+    // the failed card may be scrolled out of view, so the snackbar is the only
+    // thing that tells them — naming the session by the prompt they wrote.
+    const queryClient = new QueryClient();
+    trackStartingSpawn('sess-spawned', 'Fix the flaky login test');
+
+    applySessionEvent(
+      {
+        kind: 'spawn_failed',
+        cancelled: false,
+        session_id: 'sess-spawned',
+        pane_token: 'pane-1',
+        reason: 'git error: worktree add failed\n\n<captured pane>',
+      },
+      queryClient,
+      null,
+      FOCUSED,
+    );
+
+    expect(useNotificationStore.getState().notifications).toEqual([
+      expect.objectContaining({
+        tone: 'error',
+        title: 'Session “Fix the flaky login test” failed to start',
+        detail: 'git error: worktree add failed',
+        // The card shows no prompt, so the name alone would not find it.
+        action: { kind: 'open-session', sessionId: 'sess-spawned' },
+      }),
+    ]);
+  });
+
+  it('shortens a long first prompt to one line when naming the failed launch', () => {
+    const queryClient = new QueryClient();
+    trackStartingSpawn(
+      'sess-spawned',
+      'Refactor the session navigator so that\nlaunches stay pinned until they bind',
+    );
+    // Not on any session at all: the new-session screen routes as no focus.
+    applySessionEvent(
+      {
+        kind: 'spawn_failed',
+        cancelled: false,
+        session_id: 'sess-spawned',
+        pane_token: 'pane-1',
+      },
+      queryClient,
+      null,
+      null,
+    );
+
+    expect(useNotificationStore.getState().notifications).toEqual([
+      expect.objectContaining({
+        title:
+          'Session “Refactor the session navigator so that…” failed to start',
+        // No reason to show: point at the session's own screen.
+        detail: 'Open it to see why.',
+        action: { kind: 'open-session', sessionId: 'sess-spawned' },
+      }),
+    ]);
+  });
+
+  it('raises no snackbar for a tracked launch that fails while it is focused', () => {
+    // The failed session's own screen is on view and says what happened.
+    const queryClient = new QueryClient();
+    useNavStore.setState({ focusedSessionId: 'sess-spawned' });
+    trackStartingSpawn('sess-spawned');
 
     applySessionEvent(
       {
@@ -697,11 +763,107 @@ describe('applySessionEvent', () => {
       },
       queryClient,
       null,
+      'sess-spawned',
+    );
+
+    expect(useNotificationStore.getState().notifications).toEqual([]);
+  });
+
+  it('raises no snackbar for a tracked launch the user cancelled', () => {
+    // Close on a starting session ends its launch with `cancelled: true`. The
+    // user asked for that, wherever they are looking now.
+    const queryClient = new QueryClient();
+    trackStartingSpawn('sess-spawned');
+
+    applySessionEvent(
+      {
+        kind: 'spawn_failed',
+        cancelled: true,
+        session_id: 'sess-spawned',
+        pane_token: 'pane-1',
+      },
+      queryClient,
+      null,
       FOCUSED,
     );
 
     expect(useNotificationStore.getState().notifications).toEqual([]);
   });
+
+  it('raises the tracked-launch snackbar once on a repeated spawn_failed', () => {
+    const queryClient = new QueryClient();
+    trackStartingSpawn('sess-spawned');
+    const event = {
+      kind: 'spawn_failed',
+      cancelled: false,
+      session_id: 'sess-spawned',
+      pane_token: 'pane-1',
+    } as const;
+
+    applySessionEvent(event, queryClient, null, FOCUSED);
+    applySessionEvent(event, queryClient, null, FOCUSED);
+
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+  });
+
+  it.each([
+    { cancelled: false, raised: true },
+    { cancelled: true, raised: false },
+  ])(
+    'names a launch whose failure outran its POST (cancelled: $cancelled)',
+    ({ cancelled, raised }) => {
+      // A launch preparation that breaks at once can report before the POST
+      // response does. The failure is buffered, `trackSpawn` registers the
+      // launch already failed, and the workspace never focuses it — so the
+      // user is left on the new-session screen with only this to tell them.
+      const queryClient = new QueryClient();
+      useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+      useLiveStore.getState().beginSending({
+        id: 'local-new-session',
+        target: {
+          kind: 'new-session',
+          workdir: null,
+          launchOptionIds: [],
+          provider: 'claude',
+          worktree: null,
+          pullRequestNumber: null,
+        },
+        text: 'Fix the flaky login test',
+        status: 'sending',
+        createdAt: Date.now(),
+      });
+      applySessionEvent(
+        {
+          kind: 'spawn_failed',
+          cancelled,
+          session_id: 'sess-spawned',
+          pane_token: 'pane-1',
+          reason: 'git error: worktree add failed\n\n<captured pane>',
+        },
+        queryClient,
+        null,
+        null,
+      );
+      expect(useNotificationStore.getState().notifications).toEqual([]);
+
+      trackStartingSpawn('sess-spawned', 'Fix the flaky login test');
+
+      expect(useLiveStore.getState().spawns[0].status).toBe('failed');
+      expect(useNotificationStore.getState().notifications).toEqual(
+        raised
+          ? [
+              expect.objectContaining({
+                tone: 'error',
+                title: 'Session “Fix the flaky login test” failed to start',
+                // The buffered notice kept the reason for this snackbar.
+                detail: 'git error: worktree add failed',
+                action: { kind: 'open-session', sessionId: 'sess-spawned' },
+              }),
+            ]
+          : [],
+      );
+    },
+  );
 
   it('drops the removed session and hands focus to the next one on session_removed', () => {
     // The row is gone server-side, so the cached open sends go with it (a
@@ -762,6 +924,34 @@ describe('applySessionEvent', () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions'] });
     expect(useNavStore.getState().focusedSessionId).toBe(FOCUSED);
+  });
+
+  it('withdraws a snackbar that offers to open a removed session', () => {
+    // Retry removes the failed row, as does Remove (here or in another tab).
+    // An Open left on screen would focus an id that no longer exists.
+    const queryClient = new QueryClient();
+    seedSessionList(queryClient, [FOCUSED, 'sess-2']);
+    const notifications = useNotificationStore.getState();
+    notifications.showError('Session “a” failed to start', undefined, {
+      kind: 'open-session',
+      sessionId: 'sess-2',
+    });
+    notifications.showError('Session “b” failed to start', undefined, {
+      kind: 'open-session',
+      sessionId: 'sess-3',
+    });
+    notifications.showError('Could not open in VS Code');
+
+    applySessionEvent(
+      { kind: 'session_removed', session_id: 'sess-2' },
+      queryClient,
+      null,
+      FOCUSED,
+    );
+
+    expect(
+      useNotificationStore.getState().notifications.map((n) => n.title),
+    ).toEqual(['Session “b” failed to start', 'Could not open in VS Code']);
   });
 
   it('routes a permission request to the store as a notice', () => {

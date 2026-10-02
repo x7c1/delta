@@ -203,13 +203,18 @@ export interface ResumeUnavailableNotice {
 export interface SpawnFailureBufferedNotice {
   kind: 'spawn_failure_buffered';
   /**
-   * Whether the user asked for the launch to stop. The one thing the event
-   * carries that the entry `trackSpawn` registers cannot get from anywhere
-   * else, and it must word a cancel differently from a breakage. The `reason`
-   * needs no carrying: it is persisted on the session row (see
-   * {@link SpawnItem.status}).
+   * Whether the user asked for the launch to stop. The entry `trackSpawn`
+   * registers cannot get it from anywhere else, and it must word a cancel
+   * differently from a breakage.
    */
   cancelled: boolean;
+  /**
+   * The event's `reason`, kept for the snackbar `trackSpawn` raises once it
+   * consumes this notice (see `reportUnwatchedSpawnFailure`). The session row
+   * persists the reason as well, but that snackbar is raised from the store,
+   * which has no session list to read it from. Absent when the event had none.
+   */
+  reason?: string;
 }
 
 /** One per-session notice; at most one of each kind exists per session. */

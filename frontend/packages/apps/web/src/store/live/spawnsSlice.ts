@@ -1,6 +1,9 @@
 import type { StateCreator } from 'zustand';
 import type { SessionId, ThreadId } from '@delta/model';
-import { useNotificationStore } from '../notificationStore';
+import {
+  type NotificationAction,
+  useNotificationStore,
+} from '../notificationStore';
 import type { EventReducer } from './eventReducer';
 import type { NoticesSlice } from './noticesSlice';
 import { noticeOf, removeNotices, withNotice } from './noticesSlice';
@@ -127,14 +130,29 @@ function newSessionPostInFlight(state: Pick<SendsSlice, 'sending'>): boolean {
 }
 
 /**
+ * The first line of a `spawn_failed` reason — what a snackbar shows of it.
+ *
+ * Since the watchdog began quoting the pane, a reason can be a line of
+ * explanation, a blank line, and then a dozen lines of a TUI — and the snackbar
+ * is a fixed-width box that dismisses itself after a few seconds, so a captured
+ * screen pasted into it is a wall of text nobody can read in time. It is also
+ * not where that content belongs: the failed session's own screen shows the
+ * reason in full. A single-line reason is its own first line, and an absent one
+ * stays absent.
+ */
+function reasonHeadline(reason: string | undefined): string | undefined {
+  return reason?.split('\n', 1)[0];
+}
+
+/**
  * Tell the user, through the app-wide snackbar, how a launch this client never
  * tracked ended — it broke, or somebody cancelled it.
  *
- * A tracked launch needs no snackbar: its session is listed, marked failed, and
- * its own screen says what happened. An untracked one has no such connection to
- * this window — it was started by another tab, or before a reload — so the
- * snackbar is what says a launch somewhere ended, and the failed row in the
- * navigator is what the user opens to read the rest.
+ * A tracked launch gets a snackbar only when the user is not looking at it
+ * (see {@link reportUnwatchedSpawnFailure}). An untracked one has no connection
+ * to this window — it was started by another tab, or before a reload — so the
+ * snackbar is what says a launch somewhere ended, and its Open action (or the
+ * failed row in the navigator) is how the user gets to the rest.
  *
  * One producer of this event leaves no such row: a *resume* that never became
  * ready fails a session that was already bound once, so the server closes it
@@ -143,26 +161,80 @@ function newSessionPostInFlight(state: Pick<SendsSlice, 'sending'>): boolean {
  * what the user gets.
  */
 function reportUntrackedSpawnFailure(
+  sessionId: SessionId,
   reason: string | undefined,
   cancelled: boolean,
 ): void {
   const notifications = useNotificationStore.getState();
-  // The headline alone. Since the watchdog began quoting the pane, a reason can
-  // be a line of explanation, a blank line, and then a dozen lines of a TUI —
-  // and the snackbar is a fixed-width box that dismisses itself after a few
-  // seconds, so a captured screen pasted into it is a wall of text nobody can
-  // read in time. It is also no longer where that content belongs: the failed
-  // session's own screen shows the reason in full, and nothing else here is
-  // narrowed. A single-line reason is its own first line, and an absent one
-  // stays absent.
-  const headline = reason?.split('\n', 1)[0];
+  const headline = reasonHeadline(reason);
+  const open = openSession(sessionId);
   // A cancel is something the user asked for, so it states what happened
   // instead of alarming: only a launch that broke on its own is an error.
   if (cancelled) {
-    notifications.showInfo('Launch cancelled', headline);
+    notifications.showInfo('Launch cancelled', headline, open);
     return;
   }
-  notifications.showError('The session failed to start', headline);
+  notifications.showError('The session failed to start', headline, open);
+}
+
+/** The snackbar action that takes the user to the session a launch ended in. */
+function openSession(sessionId: SessionId): NotificationAction {
+  return { kind: 'open-session', sessionId };
+}
+
+/** How many characters of the first prompt name a session in a snackbar. */
+const PROMPT_EXCERPT_CHARS = 40;
+
+/**
+ * The session a tracked launch was starting, named by the one thing the user
+ * wrote for it: the first prompt, as a short quoted excerpt. A launch always
+ * carries a prompt; the fallback only keeps the title a sentence if it is blank.
+ */
+function launchName(spawn: Pick<SpawnItem, 'text'>): string {
+  const prompt = spawn.text.trim().replace(/\s+/g, ' ');
+  if (prompt === '') {
+    return 'Your new session';
+  }
+  const excerpt =
+    prompt.length > PROMPT_EXCERPT_CHARS
+      ? `${prompt.slice(0, PROMPT_EXCERPT_CHARS - 1).trimEnd()}…`
+      : prompt;
+  return `Session “${excerpt}”`;
+}
+
+/**
+ * Tell the user, through the app-wide snackbar, that a launch this window
+ * started broke while they were looking at something else.
+ *
+ * A tracked launch's failure normally needs no snackbar: the workspace focuses
+ * a spawn as soon as it is accepted, so the user is usually on the failed
+ * session's screen when the news arrives, and that screen says what happened.
+ * But the user may have moved on while it was starting; then the main pane
+ * shows another session, and the failed card — pinned to the top of the
+ * navigator — is out of view whenever the list is scrolled. The snackbar names
+ * the session by its first prompt, the one thing the user wrote for it, and
+ * offers to open it: the card itself shows only the branch and repository, so
+ * the name alone would not lead the user to it.
+ *
+ * Two callers decide when to raise it, and neither does for a launch the user
+ * cancelled (they asked for that ending): the event router, which alone knows
+ * the focus, for a launch that fails while tracked; and `trackSpawn`, for a
+ * failure that arrived before the POST response — that launch is registered
+ * already failed and never focused, so nobody is watching it.
+ */
+export function reportUnwatchedSpawnFailure(
+  spawn: Pick<SpawnItem, 'sessionId' | 'text'>,
+  reason: string | undefined,
+): void {
+  useNotificationStore
+    .getState()
+    .showError(
+      `${launchName(spawn)} failed to start`,
+      // The event's reason is optional. When it is missing, point at the
+      // session's own screen, which shows whatever the server recorded.
+      reasonHeadline(reason) || 'Open it to see why.',
+      openSession(spawn.sessionId),
+    );
 }
 
 export const createSpawnsSlice: StateCreator<
@@ -206,6 +278,14 @@ export const createSpawnsSlice: StateCreator<
       ),
       ...dropLocalSendsForSession(state, spawn.sessionId),
     }));
+    // Nobody is watching this launch: the workspace never hands focus to a
+    // spawn registered already `failed`, so the user stays wherever they were
+    // (typically the new-session screen). The event router saw the failure
+    // before this launch was tracked and only buffered it, so the snackbar is
+    // raised here, with the reason the buffered notice kept for it.
+    if (!buffered.cancelled) {
+      reportUnwatchedSpawnFailure(spawn, buffered.reason);
+    }
   },
 
   markSpawnFocusHandedOver: (sessionId) =>
@@ -277,10 +357,15 @@ export const reduceSpawnFailed: EventReducer<SpawnsState, 'spawn_failed'> = (
         notices: withNotice(state.notices, event.session_id, {
           kind: 'spawn_failure_buffered',
           cancelled: event.cancelled,
+          reason: event.reason,
         }),
       };
     }
-    reportUntrackedSpawnFailure(event.reason, event.cancelled);
+    reportUntrackedSpawnFailure(
+      event.session_id,
+      event.reason,
+      event.cancelled,
+    );
     // The buffered entry stays behind purely as the "already handled" marker
     // the guard above reads.
     return {

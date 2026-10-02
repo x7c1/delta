@@ -58,6 +58,7 @@ export type {
   NewSessionLaunch,
 } from './live/sendsSlice';
 export type { SpawnItem } from './live/spawnsSlice';
+export { reportUnwatchedSpawnFailure } from './live/spawnsSlice';
 export type { StreamingMessage } from './live/streamingSlice';
 export type { SubagentActivity } from './live/subagentsSlice';
 export { threadIsRunning } from './live/runningThreadsSlice';
