@@ -75,24 +75,29 @@ desktop-dev:
 desktop-dev-build: web-dist
 	scripts/dev.sh --desktop-build
 
-## desktop: build the SPA, then bundle the desktop shell under backend/target/release/bundle/ (macOS: Delta.app and a .dmg; Linux: the delta-desktop .deb) (one-time: `cargo install tauri-cli --version '^2' --locked`)
-.PHONY: desktop
-# TAURI_CONFIG is unset so an exported value (the dev identifier override, say)
-# cannot leak into the bundle: releases carry tauri.conf.json's identifier.
-desktop: web-dist
-	cd backend/crates/apps/delta-desktop && env -u TAURI_CONFIG cargo tauri build
-
-## desktop-install: Linux only — `make desktop`, then install the .deb it produced with `sudo apt install --reinstall` (restart a running Delta afterwards)
+## desktop: build the installed app (make desktop-build), then install it — Linux: `sudo apt install --reinstall` the new .deb; macOS: replace /Applications/Delta.app (restart a running Delta afterwards)
 # --reinstall because a local build keeps the release's version number, which
 # apt would otherwise treat as already installed. The newest .deb is the one
 # just built; older ones may still sit in the bundle directory.
-DESKTOP_DEB_DIR := backend/target/release/bundle/deb
-.PHONY: desktop-install
-desktop-install:
-	@[ "$$(uname -s)" = Linux ] || { echo "desktop-install: Linux only (it installs the .deb). On macOS run make desktop and copy backend/target/release/bundle/macos/Delta.app to /Applications." >&2; exit 1; }
-	$(MAKE) --no-print-directory desktop
-	sudo apt install --reinstall "$(CURDIR)/$$(ls -t $(DESKTOP_DEB_DIR)/delta-desktop_*.deb | head -n 1)"
+DESKTOP_BUNDLE_DIR := backend/target/release/bundle
+.PHONY: desktop
+desktop:
+	@case "$$(uname -s)" in Linux|Darwin) ;; *) echo "desktop: installs on Linux and macOS only; use make desktop-build" >&2; exit 1;; esac
+	$(MAKE) --no-print-directory desktop-build
+	@if [ "$$(uname -s)" = Darwin ]; then \
+	  echo "Installing $(DESKTOP_BUNDLE_DIR)/macos/Delta.app to /Applications"; \
+	  rm -rf /Applications/Delta.app && ditto "$(DESKTOP_BUNDLE_DIR)/macos/Delta.app" /Applications/Delta.app; \
+	else \
+	  sudo apt install --reinstall "$(CURDIR)/$$(ls -t $(DESKTOP_BUNDLE_DIR)/deb/delta-desktop_*.deb | head -n 1)"; \
+	fi
 	@echo "Installed. If Delta is running, quit it and start it again to use the new build."
+
+## desktop-build: build the SPA, then bundle the installed app under backend/target/release/bundle/ without installing it (macOS: Delta.app and a .dmg; Linux: the delta-desktop .deb) (one-time: `cargo install tauri-cli --version '^2' --locked`)
+.PHONY: desktop-build
+# TAURI_CONFIG is unset so an exported value (the dev identifier override, say)
+# cannot leak into the bundle: releases carry tauri.conf.json's identifier.
+desktop-build: web-dist
+	cd backend/crates/apps/delta-desktop && env -u TAURI_CONFIG cargo tauri build
 
 # --- Generated code -----------------------------------------------------------
 

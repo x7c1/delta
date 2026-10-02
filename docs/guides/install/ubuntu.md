@@ -3,7 +3,7 @@
 The Linux bundle is a `.deb` for Ubuntu and other Debian-based distributions
 (x86_64). What the app needs on the host and where it keeps its data are in
 the [install guide](README.md). For other distributions, build from source
-with `make desktop` (see [the development guide](../development/README.md)).
+with `make desktop-build` (see [the development guide](../development/README.md)).
 
 ## Download and install
 
