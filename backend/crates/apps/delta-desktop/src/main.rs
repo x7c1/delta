@@ -58,6 +58,10 @@ fn main() {
     serve::init_tracing();
     login_env::import_login_shell_env();
 
+    let context = tauri::generate_context!();
+    #[cfg(target_os = "linux")]
+    set_window_app_id(&context.config().identifier);
+
     let runtime = match Runtime::new() {
         Ok(runtime) => runtime,
         Err(err) => {
@@ -72,6 +76,12 @@ fn main() {
         // exits, and its `setup` below — which would start a second server on
         // the same database and tmux socket — never runs. See
         // `focus_running_window`.
+        //
+        // On Linux `enableGTKAppId` also makes the GTK application unique on
+        // the session bus, but that does not get in the way: plugins are set
+        // up while the app is built, before the event loop runs, so a second
+        // launch exits here before GTK would forward an `activate` to the
+        // running copy.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             focus_running_window(app);
         }))
@@ -87,11 +97,24 @@ fn main() {
             app.manage(runtime);
             Ok(())
         })
-        .run(tauri::generate_context!());
+        .run(context);
     if let Err(err) = result {
         tracing::error!("delta-desktop failed: {err:#}");
         std::process::exit(1);
     }
+}
+
+/// Make the identifier the window's app ID, so the desktop tells this build's
+/// window apart from another build's (the dev environment's app and the
+/// installed one are both an executable named `delta-desktop`).
+///
+/// GTK 3 takes a Wayland window's app ID (and the X11 `WM_CLASS`) from the
+/// program name, not from the GTK application ID that `enableGTKAppId` sets, so
+/// the program name has to be set too, before GTK starts. GNOME matches this ID
+/// to the desktop entry's `StartupWMClass`.
+#[cfg(target_os = "linux")]
+fn set_window_app_id(identifier: &str) {
+    glib::set_prgname(Some(identifier));
 }
 
 /// Bring the running instance's window forward when the app is launched again.

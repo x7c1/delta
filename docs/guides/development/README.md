@@ -170,9 +170,14 @@ app, with `tauri.conf.json`'s identifier `io.github.x7c1.delta`. `make
 desktop-dev` is the dev environment — the one `make dev` runs — seen through the
 desktop shell instead of the browser: `make desktop-dev-build` builds a debug
 `delta-desktop` whose identifier is `io.github.x7c1.delta.dev`, so its app data
-directory (webview storage included) and its single-instance scope are its own,
-and it neither focuses nor disturbs a running installed app. The override is
-the `TAURI_CONFIG` environment variable (`{"identifier": …}`), which
+directory (webview storage included), its single-instance scope and, on Linux,
+its window's identity are its own, and it neither focuses nor disturbs a running
+installed app. The window's identity follows the identifier because `main.rs`
+sets GLib's program name to it before GTK starts — GTK 3 takes the Wayland app
+ID from the program name — and `tauri.conf.json` sets `app.enableGTKAppId`, so
+the GTK application ID is the identifier too. GNOME groups windows by that ID,
+so the two apps get separate dock icons. The override is the `TAURI_CONFIG`
+environment variable (`{"identifier": …}`), which
 tauri-build and `generate_context!` merge over the config files at compile
 time; a plain `cargo build` honours it, so the dev build needs neither the Tauri
 CLI nor a second config file. `scripts/dev.sh --desktop-build` sets it, and
@@ -236,7 +241,12 @@ would treat ours as a version of it. Tauri derives the package name (and the
 only, sets `productName` to `delta-desktop`. The name users see stays `Delta`:
 the desktop entry template (`linux/delta-desktop.desktop`, a copy of Tauri's
 default) names the application menu entry, the window title is set in
-`main.rs`, and macOS still builds `Delta.app`.
+`main.rs`, and macOS still builds `Delta.app`. The template's `StartupWMClass`
+is the installed app's identifier, written literally since the template has no
+variable for it: it is what ties the installed app's window (whose app ID is
+the identifier) to the entry's name and icon, so it must change with
+`identifier`. The dev build has no desktop entry, so its window matches none
+and GNOME never raises it for "Delta".
 
 ### Reading the SQLite schema
 
