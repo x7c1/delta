@@ -120,8 +120,10 @@ What is served, and how the page gets the token, is in
 
 ## Two environments: the installed app and the dev environment
 
-A developer runs two Delta environments side by side. They share nothing, so
-dogfooding the installed app and developing Delta never get in each other's way.
+A developer runs two Delta environments side by side. They share nothing of
+Delta's own, so dogfooding the installed app and developing Delta never get in
+each other's way. (Both read the agents' own records — Claude Code's
+`~/.claude`, Codex's `~/.codex` — each by its own session ids.)
 
 | | Installed app | Dev environment |
 | --- | --- | --- |
@@ -129,13 +131,14 @@ dogfooding the installed app and developing Delta never get in each other's way.
 | Identifier | `io.github.x7c1.delta` | `io.github.x7c1.delta.dev` (`make desktop-dev` only) |
 | Database | `delta.db` in the app data directory | `backend/delta.db` (or `DELTA_DB_PATH`) |
 | Session workdirs | `sessions/` in the app data directory | `.tmp/session` (or `WORKDIR`) |
+| Git worktrees | `~/.delta/worktrees` | `~/.delta-dev/worktrees` |
 | tmux socket | `io.github.x7c1.delta` | `io.github.x7c1.delta.dev` |
 | Port | the one recorded in the hook state file | 7878, pinned |
 | Stopped by | closing its window | `make down` (`make reset` also deletes the database); closing the `make desktop-dev` window stops only its server |
 
 `make dev` and `make desktop-dev` are two views of the **same** dev environment:
-`scripts/dev.sh` holds the database, tmux socket, port and session workdir for
-both, so a session spawned in the browser is listed in the dev desktop shell and
+`scripts/dev.sh` holds the database, tmux socket, port, session workdir and
+worktree base for both, so a session spawned in the browser is listed in the dev desktop shell and
 the other way round. Only the frontend differs — Vite on port 5173 for `make
 dev`, the SPA embedded in the shell (built by `make web-dist`) for `make
 desktop-dev`. They cannot run at the same time: both bind 127.0.0.1:7878, so
