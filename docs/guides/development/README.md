@@ -150,12 +150,22 @@ it (`cargo build -p delta-desktop`); `make check` does so in `check-desktop-buil
 and CI does in the job that builds the embedded server.
 
 ```bash
-make desktop-dev        # the dev environment in the desktop shell (refuses while make dev runs)
+make desktop-dev        # build the dev environment's shell, then run it (refuses while make dev runs)
 make desktop-dev-build  # build the SPA, then the binary make desktop-dev runs, without starting it
-make desktop            # build the SPA, then bundle the installed app with cargo tauri build
+make desktop            # build the installed app, then install it
+make desktop-build      # build the SPA, then bundle the installed app with cargo tauri build, without installing it
 ```
 
-The two targets build two different apps. `make desktop` bundles the installed
+Each pair follows one rule: the `-build` target only builds, and the plain one
+also takes the result to where you use it. `make desktop-dev` runs the debug
+binary from `backend/target/` — nothing is installed. `make desktop` installs
+the bundle: on Linux it runs `sudo apt install --reinstall` on the new `.deb`
+(reinstall, because a local build keeps the release's version number, which
+`apt` would otherwise treat as already installed); on macOS it replaces
+`/Applications/Delta.app`. A running Delta keeps the old build until you quit it
+and start it again.
+
+The two pairs build two different apps. `make desktop-build` bundles the installed
 app, with `tauri.conf.json`'s identifier `io.github.x7c1.delta`. `make
 desktop-dev` is the dev environment — the one `make dev` runs — seen through the
 desktop shell instead of the browser: `make desktop-dev-build` builds a debug
@@ -178,13 +188,13 @@ tauri-build reruns when `TAURI_CONFIG` changes, so after `make check` the next
 seconds), and the other way round; neither reuses a binary built with the other
 identifier.
 
-`make desktop` needs the Tauri CLI, installed once:
+`make desktop-build` (and so `make desktop`) needs the Tauri CLI, installed once:
 
 ```bash
 cargo install tauri-cli --version '^2' --locked
 ```
 
-On Linux, `make desktop` links with whatever `cc` is first on `PATH`. If that is
+On Linux, `make desktop-build` links with whatever `cc` is first on `PATH`. If that is
 another toolchain's compiler — for example a Nix `gcc` wrapper — the built
 `delta-desktop` gets that toolchain's dynamic loader as its interpreter, which
 does not read the system library cache, so the installed `.deb` fails to start with
@@ -194,8 +204,18 @@ looks fine). Point the build at the system compiler in that case:
 ```bash
 CC=/usr/bin/gcc CXX=/usr/bin/g++ \
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/gcc \
-  make desktop
+  make desktop-build
 readelf -l backend/target/release/delta-desktop | grep interpreter   # /lib64/ld-linux-x86-64.so.2
+```
+
+To keep this for every `make desktop-build` (and so `make desktop`), put it in
+the gitignored `local.mk` (see `local.mk.example`), scoped to the
+`desktop-build` target so other builds keep their cache:
+
+```make
+desktop-build: export CC := /usr/bin/gcc
+desktop-build: export CXX := /usr/bin/g++
+desktop-build: export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER := /usr/bin/gcc
 ```
 
 The bundles land under `backend/target/release/bundle/` (`macos/Delta.app` and

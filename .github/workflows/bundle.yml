@@ -141,7 +141,7 @@ jobs:
 
       # tauri.conf.json has no build section: the shell embeds the web app's
       # dist/ through delta-server's `embed-web` feature, so the SPA has to be
-      # built before `tauri build` compiles it in (as `make desktop` does).
+      # built before `tauri build` compiles it in (as `make desktop-build` does).
       - name: Build the web app
         run: make web-dist
 

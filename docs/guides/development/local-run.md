@@ -125,7 +125,7 @@ dogfooding the installed app and developing Delta never get in each other's way.
 
 | | Installed app | Dev environment |
 | --- | --- | --- |
-| Started by | the bundle `make desktop` produces (the `.deb`, `Delta.app`) | `make dev` (browser) or `make desktop-dev` (desktop shell) |
+| Started by | the bundle `make desktop` builds and installs (the `.deb`, `Delta.app`) | `make dev` (browser) or `make desktop-dev` (desktop shell) |
 | Identifier | `io.github.x7c1.delta` | `io.github.x7c1.delta.dev` (`make desktop-dev` only) |
 | Database | `delta.db` in the app data directory | `backend/delta.db` (or `DELTA_DB_PATH`) |
 | Session workdirs | `sessions/` in the app data directory | `.tmp/session` (or `WORKDIR`) |
@@ -152,7 +152,7 @@ opens the installed app's database or re-adopts its sessions.
 
 ## The desktop app
 
-The installed app — the bundle `make desktop` produces — runs the same server
+The installed app — the bundle `make desktop` builds and installs — runs the same server
 inside a desktop window instead; `make desktop-dev` runs the dev environment in
 that same shell (above). See
 [the development guide](README.md#desktop-shell-delta-desktop) for the targets.
