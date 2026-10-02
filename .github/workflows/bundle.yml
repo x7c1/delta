@@ -1,7 +1,7 @@
 name: Bundle
 
 # Builds the unsigned desktop bundles of the Tauri shell
-# (backend/crates/apps/delta-app). Called by the Release workflow with a
+# (backend/crates/apps/delta-desktop). Called by the Release workflow with a
 # release_id, it attaches them to that Release; on pull requests and manual
 # runs it uploads them as workflow artifacts. See docs/guides/release.md
 # ("Desktop bundles").
@@ -20,7 +20,7 @@ on:
   pull_request:
     branches: [main, 'feat/**']
     paths:
-      - backend/crates/apps/delta-app/**
+      - backend/crates/apps/delta-desktop/**
       # A tauri bump lands in the lockfile only, and the workspace manifest
       # carries the version the bundle file names use.
       - backend/Cargo.toml
@@ -141,7 +141,7 @@ jobs:
 
       # tauri.conf.json has no build section: the shell embeds the web app's
       # dist/ through delta-server's `embed-web` feature, so the SPA has to be
-      # built before `tauri build` compiles it in (as `make app` does).
+      # built before `tauri build` compiles it in (as `make desktop` does).
       - name: Build the web app
         run: make web-dist
 
@@ -154,7 +154,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          projectPath: backend/crates/apps/delta-app
+          projectPath: backend/crates/apps/delta-desktop
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           releaseId: ${{ inputs.release_id }}
           uploadUpdaterJson: false

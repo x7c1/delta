@@ -2,7 +2,7 @@
  * Which native shell, if any, the page is running inside.
  *
  * The macOS desktop shell marks `<html data-shell="tauri-macos">` before the
- * page's scripts run (see delta-app's `macos_title_bar.rs`); the browser and
+ * page's scripts run (see delta-desktop's `macos_title_bar.rs`); the browser and
  * the Linux shell do not.
  */
 export const MACOS_SHELL = 'tauri-macos';

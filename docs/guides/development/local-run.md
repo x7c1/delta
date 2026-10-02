@@ -114,10 +114,10 @@ What is served, and how the page gets the token, is in
 
 ## The desktop app
 
-`make app-dev` (from source) or the bundle `make app` produces runs the same
-server inside a desktop window instead — see
-[the development guide](README.md#desktop-shell-delta-app) for the targets. It
-does not touch `make dev`, which keeps serving the UI from Vite on its own ports,
+`make desktop-dev` (from source) or the bundle `make desktop` produces runs the
+same server inside a desktop window instead — see
+[the development guide](README.md#desktop-shell-delta-desktop) for the targets.
+It does not touch `make dev`, which keeps serving the UI from Vite on its own ports,
 database and working directories; the two can run side by side. They also use
 separate tmux servers: the app uses the default socket
 (`tmux -L io.github.x7c1.delta`) and `make dev` uses

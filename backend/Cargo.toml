@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = ["crates/*/*"]
-# Everything except the desktop shell (`crates/apps/delta-app`), so a plain
+# Everything except the desktop shell (`crates/apps/delta-desktop`), so a plain
 # `cargo build` / `cargo test` / `cargo clippy` never pulls in Tauri and its
 # system webview libraries. Build the shell by naming it: `cargo build -p
-# delta-app` (or `make app-dev` / `make app`).
+# delta-desktop` (or `make desktop-dev` / `make desktop`).
 default-members = [
     "crates/apps/delta-server",
     "crates/apps/fake-claude",

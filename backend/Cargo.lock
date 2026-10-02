@@ -810,24 +810,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "delta-app"
-version = "0.4.0"
-dependencies = [
- "anyhow",
- "delta-bootstrap",
- "delta-server",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-single-instance",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "delta-attribution"
 version = "0.4.0"
 dependencies = [
@@ -859,6 +841,24 @@ dependencies = [
  "tokio",
  "tracing",
  "workspace-fs",
+]
+
+[[package]]
+name = "delta-desktop"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "delta-bootstrap",
+ "delta-server",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-single-instance",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

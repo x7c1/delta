@@ -1,7 +1,7 @@
 //! Starting the server: logging, the loopback listener, the startup errors a
 //! user has to act on, and serving the [`router`] on a bound listener.
 //!
-//! Shared by the `delta-server` binary and the desktop shell (`delta-app`) so
+//! Shared by the `delta-server` binary and the desktop shell (`delta-desktop`) so
 //! both start the server the same way. Delta is a local tool and never listens
 //! on a public interface, so the only listener offered here is a loopback one.
 

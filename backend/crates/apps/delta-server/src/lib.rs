@@ -7,7 +7,7 @@
 //! `main.rs` is a thin wrapper that binds a listener and serves [`router`];
 //! everything testable lives here so integration tests can drive [`router`]
 //! directly. The [`config`] and [`serve`] modules hold the startup both the
-//! binary and the desktop shell (`delta-app`) run.
+//! binary and the desktop shell (`delta-desktop`) run.
 
 mod api;
 mod app;
