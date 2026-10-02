@@ -1138,6 +1138,30 @@ describe('liveStore spawn tracking', () => {
     ]);
   });
 
+  it('offers to open the session an untracked launch ended in', () => {
+    // The snackbar says a launch somewhere ended; the action takes the user to
+    // it, for a breakage and a cancel alike — the event names the session.
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      cancelled: false,
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+    });
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      cancelled: true,
+      session_id: 'sess-spawn-2',
+      pane_token: 'pane-2',
+    });
+
+    expect(
+      useNotificationStore.getState().notifications.map(({ action }) => action),
+    ).toEqual([
+      { kind: 'open-session', sessionId: 'sess-spawn-1' },
+      { kind: 'open-session', sessionId: 'sess-spawn-2' },
+    ]);
+  });
+
   it('announces an untracked failure once, however often it repeats', () => {
     const event = {
       kind: 'spawn_failed',

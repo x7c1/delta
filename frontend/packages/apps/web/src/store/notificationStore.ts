@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { SessionId } from '@delta/model';
 
 /**
  * How long an auto-dismissing notification stays visible, in milliseconds.
@@ -19,6 +20,18 @@ const AUTO_DISMISS_MS = 6000;
  */
 export type NotificationTone = 'error' | 'info';
 
+/**
+ * Something a notification offers to do next, rendered as a button beside its
+ * text. A typed intent rather than a callback, so a store slice can attach one
+ * without reaching into navigation, the queue stays plain data, and the
+ * snackbar decides how each intent is carried out.
+ *
+ * - `open-session` — focus the named session, as picking its navigator card
+ *   does. Offered when the notification is about a session the user may not
+ *   be able to find on their own (see `reportUnwatchedSpawnFailure`).
+ */
+export type NotificationAction = { kind: 'open-session'; sessionId: SessionId };
+
 /** One transient notification presented in the app-wide snackbar. */
 export interface AppNotification {
   /**
@@ -35,6 +48,8 @@ export interface AppNotification {
    * installed"). Absent when the title alone is descriptive.
    */
   detail?: string;
+  /** Optional next step, rendered as a button (see {@link NotificationAction}). */
+  action?: NotificationAction;
 }
 
 /**
@@ -49,10 +64,11 @@ export interface AppNotification {
  * live. A tiny queued snackbar is the minimum surface that fits both
  * click sites without inventing a heavy pattern.
  *
- * It is also the only surface that outlives a session, which is why the
- * spawn-failure paths raise it: the session whose launch ended is being
- * deleted as the news arrives, so a notice rendered inside its pane has
- * nowhere to live either (see `reportUntrackedSpawnFailure`).
+ * It is also the only surface visible from every pane, which is why the
+ * spawn-failure paths raise it: a launch that ends while the user is looking
+ * at another session — or one this window never started — has no pane on
+ * screen to explain itself in (see `reportUntrackedSpawnFailure` and
+ * `reportUnwatchedSpawnFailure`).
  *
  * Kept isolated to this file (rather than folded into `useNavStore`)
  * because a global notification queue is a genuinely cross-cutting
@@ -62,33 +78,84 @@ export interface AppNotification {
 export interface NotificationState {
   notifications: AppNotification[];
   /** Push a failure, returning its id for programmatic dismissal. */
-  showError: (title: string, detail?: string) => number;
+  showError: (
+    title: string,
+    detail?: string,
+    action?: NotificationAction,
+  ) => number;
   /**
    * Push a plain statement of fact — an outcome the user asked for, and where
    * its aftermath went. Same queue and same auto-dismiss as
    * {@link NotificationState.showError}; only the tone differs.
    */
-  showInfo: (title: string, detail?: string) => number;
+  showInfo: (
+    title: string,
+    detail?: string,
+    action?: NotificationAction,
+  ) => number;
   /** Dismiss a specific notification by id (no-op if it is already gone). */
   dismissNotification: (id: number) => void;
+  /**
+   * Dismiss every notification whose action opens this session. Called when
+   * the session is removed: its Open would otherwise focus an id that no
+   * longer exists, and the workspace would then move focus somewhere the user
+   * never asked to go.
+   */
+  dismissSessionNotifications: (sessionId: SessionId) => void;
+  /**
+   * Keep a notification on screen past its auto-dismiss time while the user is
+   * pointing at it or has keyboard focus inside it — so it does not vanish
+   * under a reader, or from beneath a focused button. Paired with
+   * {@link NotificationState.releaseNotification}.
+   */
+  holdNotification: (id: number) => void;
+  /**
+   * End a {@link NotificationState.holdNotification}. A notification whose
+   * time ran out while it was held is dismissed now.
+   */
+  releaseNotification: (id: number) => void;
 }
 
 let nextNotificationId = 1;
 
-export const useNotificationStore = create<NotificationState>((set) => {
-  const push = (tone: NotificationTone, title: string, detail?: string) => {
+export const useNotificationStore = create<NotificationState>((set, get) => {
+  // Ids currently held on screen, and held ids whose time has run out. Plain
+  // bookkeeping, not state: nothing renders from them, and an id is never
+  // reused, so a stale entry is inert.
+  const held = new Set<number>();
+  const expiredWhileHeld = new Set<number>();
+
+  const dismiss = (id: number) => {
+    held.delete(id);
+    expiredWhileHeld.delete(id);
+    set((state) => ({
+      notifications: state.notifications.filter((n) => n.id !== id),
+    }));
+  };
+
+  const push = (
+    tone: NotificationTone,
+    title: string,
+    detail?: string,
+    action?: NotificationAction,
+  ) => {
     const id = nextNotificationId++;
     set((state) => ({
-      notifications: [...state.notifications, { id, tone, title, detail }],
+      notifications: [
+        ...state.notifications,
+        { id, tone, title, detail, action },
+      ],
     }));
-    // Auto-dismiss so a stale click does not linger. Guarded by an
-    // existence check because the user may have dismissed it explicitly
-    // in the meantime.
+    // Auto-dismiss so a stale click does not linger — unless the user is on
+    // it, in which case it goes when they leave. Dismissing an entry the user
+    // already closed is a no-op filter.
     if (typeof window !== 'undefined') {
       window.setTimeout(() => {
-        set((state) => ({
-          notifications: state.notifications.filter((n) => n.id !== id),
-        }));
+        if (held.has(id)) {
+          expiredWhileHeld.add(id);
+          return;
+        }
+        dismiss(id);
       }, AUTO_DISMISS_MS);
     }
     return id;
@@ -96,12 +163,27 @@ export const useNotificationStore = create<NotificationState>((set) => {
 
   return {
     notifications: [],
-    showError: (title, detail) => push('error', title, detail),
-    showInfo: (title, detail) => push('info', title, detail),
-    dismissNotification: (id) => {
-      set((state) => ({
-        notifications: state.notifications.filter((n) => n.id !== id),
-      }));
+    showError: (title, detail, action) => push('error', title, detail, action),
+    showInfo: (title, detail, action) => push('info', title, detail, action),
+    dismissNotification: dismiss,
+    dismissSessionNotifications: (sessionId) => {
+      for (const notification of get().notifications) {
+        if (
+          notification.action?.kind === 'open-session' &&
+          notification.action.sessionId === sessionId
+        ) {
+          dismiss(notification.id);
+        }
+      }
+    },
+    holdNotification: (id) => {
+      held.add(id);
+    },
+    releaseNotification: (id) => {
+      held.delete(id);
+      if (expiredWhileHeld.has(id)) {
+        dismiss(id);
+      }
     },
   };
 });

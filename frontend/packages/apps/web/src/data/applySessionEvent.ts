@@ -10,8 +10,9 @@ import {
   invalidateThreadMessages,
   removeSessionSends,
 } from '@delta/api-client';
-import { useLiveStore } from '../store/liveStore';
+import { reportUnwatchedSpawnFailure, useLiveStore } from '../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
+import { useNotificationStore } from '../store/notificationStore';
 
 /**
  * Route a live `SessionEvent` to the two state homes:
@@ -34,7 +35,8 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
  *   only when it was the focused one. A `session_removed` hands focus to the
  *   first other session in the list cache, falling back to the new-session
  *   screen when there is none. A `spawn_failed` moves no focus at all: its
- *   session is still there, now with a screen that explains itself.
+ *   session is still there, now with a screen that explains itself (and a
+ *   snackbar points at it when the user is looking elsewhere).
  * - **Live store** (Zustand): ephemeral UI signals that are not REST resources
  *   — turn tracking, the spawn registry, permission notices, unread badges,
  *   per-thread latest activity, external input, and the per-session resuming
@@ -59,6 +61,18 @@ export function applySessionEvent(
   focusedSessionId: SessionId | null,
 ): void {
   const store = useLiveStore.getState();
+
+  // The launch a `spawn_failed` ends, if this window started it and it was
+  // still starting — read BEFORE `applyEvent` flips it to `failed`, which is
+  // what makes this the first failure for it rather than a repeat.
+  const endingSpawn =
+    event.kind === 'spawn_failed'
+      ? store.spawns.find(
+          (spawn) =>
+            spawn.sessionId === event.session_id &&
+            spawn.status === 'spawning',
+        )
+      : undefined;
 
   // Session-scoped ephemeral signals (turn tracking, spawn registry,
   // permission) always go to the store; focus-dependent signals are handled
@@ -248,6 +262,11 @@ export function applySessionEvent(
         : null;
       removeSessionSends(queryClient, event.session_id);
       invalidateSessions(queryClient);
+      // A snackbar still offering to open it (a failed launch, now retried or
+      // removed) would focus a session that is gone.
+      useNotificationStore.getState().dismissSessionNotifications(
+        event.session_id,
+      );
       // A session the user is NOT looking at being removed changes nothing on
       // their screen but the card disappearing; moving focus there would yank
       // them out of what they are reading. Reconciling rather than navigating
@@ -317,12 +336,18 @@ export function applySessionEvent(
       //
       // Focus is deliberately left alone, whoever was watching: the user who
       // was on the failed session now sees its failure screen, and a user
-      // elsewhere sees the navigator row turn failed.
+      // elsewhere is told by a snackbar instead of being pulled away from what
+      // they moved on to. For a launch this window started, that snackbar is
+      // raised here, because only this seam knows the focus; it is skipped when
+      // the user cancelled the launch or is looking at it.
       //
       // The store did the rest above (`store.applyEvent`): it flipped the
       // tracked spawn to `failed` (see `SpawnItem.status`) and raised the
       // snackbar for a spawn this client never tracked
       // (`reportUntrackedSpawnFailure`).
+      if (endingSpawn !== undefined && !event.cancelled && !isFocused) {
+        reportUnwatchedSpawnFailure(endingSpawn, event.reason);
+      }
       invalidateSessionSends(queryClient, event.session_id);
       invalidateSessions(queryClient);
       break;
