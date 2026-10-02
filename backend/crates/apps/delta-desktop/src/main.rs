@@ -72,6 +72,12 @@ fn main() {
         // exits, and its `setup` below — which would start a second server on
         // the same database and tmux socket — never runs. See
         // `focus_running_window`.
+        //
+        // On Linux `enableGTKAppId` also makes the GTK application unique on
+        // the session bus, but that does not get in the way: plugins are set
+        // up while the app is built, before the event loop runs, so a second
+        // launch exits here before GTK would forward an `activate` to the
+        // running copy.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             focus_running_window(app);
         }))

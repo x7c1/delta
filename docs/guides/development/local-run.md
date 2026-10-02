@@ -149,9 +149,10 @@ frees port 7878, which ends a running `make desktop-dev` and closes its window
 
 `make desktop-dev` is a debug build of the shell with its own identifier (see
 [the development guide](README.md#desktop-shell-delta-desktop)), so its app data
-directory, webview storage and single-instance lock are separate from the
-installed app's: it opens its own window while the installed app runs, and never
-opens the installed app's database or re-adopts its sessions.
+directory, webview storage, single-instance lock and, on Linux, window identity
+are separate from the installed app's: it opens its own window, under its own
+dock icon, while the installed app runs, and never opens the installed app's
+database or re-adopts its sessions.
 
 ## The desktop app
 

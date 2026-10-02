@@ -4,7 +4,10 @@ Categories={{categories}}
 Comment={{comment}}
 {{/if}}
 Exec={{exec}}
-StartupWMClass={{exec}}
+{{!-- StartupWMClass is tauri.conf.json's identifier, written literally: with
+app.enableGTKAppId the window's app ID is the identifier, which is what GNOME
+matches here. The template has no variable for it; keep the two equal. --}}
+StartupWMClass=io.github.x7c1.delta
 Icon={{icon}}
 Name=Delta
 Terminal=false

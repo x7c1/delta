@@ -3,6 +3,7 @@
   "productName": "Delta",
   "identifier": "io.github.x7c1.delta",
   "app": {
+    "enableGTKAppId": true,
     "windows": [],
     "security": {
       "csp": null
