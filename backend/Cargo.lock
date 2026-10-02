@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-contract"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "delta-usecase",
 ]
@@ -307,7 +307,7 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "binary-detector"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "delta-usecase",
@@ -561,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "claude-agent"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "agent-contract",
  "async-trait",
@@ -573,7 +573,7 @@ dependencies = [
 
 [[package]]
 name = "codex-agent"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -811,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "delta-attribution"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "delta-model",
  "delta-transcript",
@@ -822,7 +822,7 @@ dependencies = [
 
 [[package]]
 name = "delta-bootstrap"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "binary-detector",
@@ -845,7 +845,7 @@ dependencies = [
 
 [[package]]
 name = "delta-desktop"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "delta-bootstrap",
@@ -864,14 +864,14 @@ dependencies = [
 
 [[package]]
 name = "delta-model"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "delta-server"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "delta-sqlite"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "delta-attribution",
@@ -917,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "delta-transcript"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "delta-model",
@@ -932,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "delta-usecase"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "delta-attribution",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "delta-wire"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "delta-model",
  "delta-usecase",
@@ -1217,7 +1217,7 @@ dependencies = [
 
 [[package]]
 name = "external-opener"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "delta-usecase",
@@ -1227,7 +1227,7 @@ dependencies = [
 
 [[package]]
 name = "fake-claude"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "axum",
  "delta-bootstrap",
@@ -1243,7 +1243,7 @@ dependencies = [
 
 [[package]]
 name = "fake-codex"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "agent-contract",
  "axum",
@@ -1601,7 +1601,7 @@ dependencies = [
 
 [[package]]
 name = "gh-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1647,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "git-worktree"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "delta-usecase",
@@ -4488,7 +4488,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tmux-driver"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "delta-usecase",
@@ -5725,7 +5725,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-fs"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "delta-usecase",
