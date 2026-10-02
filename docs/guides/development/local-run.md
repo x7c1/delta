@@ -12,6 +12,12 @@ lifecycle but does not spawn anything on startup or on page load: on load the UI
 shows the session list (empty on a fresh database), and the first Send from the
 composer (or a New action) spawns a session, so there is nothing else to launch.
 
+`make desktop-dev` shows the same dev environment — database, sessions, tmux
+socket, port — through the desktop shell instead of the browser; it and `make
+dev` never run at once. The installed desktop app is a separate environment;
+[Two environments](#two-environments-the-installed-app-and-the-dev-environment)
+lays out which is which.
+
 ## Prerequisites
 
 - `tmux` on your PATH (it hosts the `claude` session the server creates).
@@ -112,18 +118,51 @@ What is served, and how the page gets the token, is in
 [the API guide](../api/README.md#the-built-frontend-embed-web). A plain
 `cargo build` never needs `dist/`: only the `embed-web` feature compiles it in.
 
+## Two environments: the installed app and the dev environment
+
+A developer runs two Delta environments side by side. They share nothing, so
+dogfooding the installed app and developing Delta never get in each other's way.
+
+| | Installed app | Dev environment |
+| --- | --- | --- |
+| Started by | the bundle `make desktop` produces (the `.deb`, `Delta.app`) | `make dev` (browser) or `make desktop-dev` (desktop shell) |
+| Identifier | `io.github.x7c1.delta` | `io.github.x7c1.delta.dev` (`make desktop-dev` only) |
+| Database | `delta.db` in the app data directory | `backend/delta.db` (or `DELTA_DB_PATH`) |
+| Session workdirs | `sessions/` in the app data directory | `.tmp/session` (or `WORKDIR`) |
+| tmux socket | `io.github.x7c1.delta` | `io.github.x7c1.delta.dev` |
+| Port | the one recorded in the hook state file | 7878, pinned |
+| Stopped by | closing its window | `make down` (`make reset` also deletes the database); closing the `make desktop-dev` window stops only its server |
+
+`make dev` and `make desktop-dev` are two views of the **same** dev environment:
+`scripts/dev.sh` holds the database, tmux socket, port and session workdir for
+both, so a session spawned in the browser is listed in the dev desktop shell and
+the other way round. Only the frontend differs — Vite on port 5173 for `make
+dev`, the SPA embedded in the shell (built by `make web-dist`) for `make
+desktop-dev`. They cannot run at the same time: both bind 127.0.0.1:7878, so
+each refuses to start while the other (or anything else) holds that port, with a
+message pointing at `make down`. `make down` stops whichever is running — it
+frees port 7878, which ends a running `make desktop-dev` and closes its window
+— and kills the dev tmux server; after it, either starts.
+
+`make desktop-dev` is a debug build of the shell with its own identifier (see
+[the development guide](README.md#desktop-shell-delta-desktop)), so its app data
+directory, webview storage and single-instance lock are separate from the
+installed app's: it opens its own window while the installed app runs, and never
+opens the installed app's database or re-adopts its sessions.
+
 ## The desktop app
 
-`make desktop-dev` (from source) or the bundle `make desktop` produces runs the
-same server inside a desktop window instead — see
+The installed app — the bundle `make desktop` produces — runs the same server
+inside a desktop window instead; `make desktop-dev` runs the dev environment in
+that same shell (above). See
 [the development guide](README.md#desktop-shell-delta-desktop) for the targets.
-It does not touch `make dev`, which keeps serving the UI from Vite on its own ports,
-database and working directories; the two can run side by side. They also use
-separate tmux servers: the app uses the default socket
-(`tmux -L io.github.x7c1.delta`) and `make dev` uses
-`tmux -L io.github.x7c1.delta.dev`, so `make down` and `make reset` end only the
-dev sessions and leave the app's sessions running. `DELTA_TMUX_SOCKET` overrides
-either.
+The installed app shares nothing with `make dev` (the table above), so the two
+run side by side and `make down` and `make reset` leave the app's sessions
+running. `DELTA_TMUX_SOCKET` overrides either tmux socket. The points below
+describe the installed app; `make desktop-dev` sets `DELTA_DB_PATH`,
+`DELTA_SESSION_WORKDIR`, `DELTA_TMUX_SOCKET` and `DELTA_PORT` to the dev
+environment's values, so the data and port rules that follow from them apply
+to it instead.
 
 - **Data.** The database and the per-spawn working directories live in the app
   data directory, created on first run: `delta.db` and `sessions/` under
@@ -137,7 +176,9 @@ either.
   server on 7878. It records the port it took in the hook state file (below) and
   tries that one again on the next launch, falling back to a free loopback port
   — with a warning, and the new port recorded — when something else holds it.
-  `DELTA_PORT` pins a port; that one is used as-is and never recorded.
+  `DELTA_PORT` pins a port; that one is used as-is and never recorded. The dev
+  environment pins 7878 this way, so the port recording is exercised only by
+  the installed app.
 - **Hook state file.** `delta-hook-state.json`, next to the database (the
   directory of `DELTA_DB_PATH`), keeps the hook secret and the app's port so a
   session that outlives a restart still reaches the server with hook URLs it
@@ -186,6 +227,7 @@ either.
 make down
 ```
 
-This stops `delta-server`, the frontend dev server (port 5173), and every
-`delta-<n>` tmux session the server spawned. To also delete the SQLite overlay
+This stops `delta-server` (or a running `make desktop-dev`, which holds the same
+port 7878), the frontend dev server (port 5173), and every `delta-<n>` tmux
+session the server spawned. To also delete the SQLite overlay
 so the next start recreates an empty schema, run `make reset` instead.

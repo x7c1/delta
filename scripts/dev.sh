@@ -27,8 +27,24 @@
 # yet authenticated, run `claude` once on its own (or attach to a spawned pane
 # with `tmux -L io.github.x7c1.delta.dev attach -t delta-1`) to complete login, then reload the browser.
 #
+# The same dev environment — database, tmux socket, port 7878 and session
+# workdir — can also be shown through the desktop shell instead of the browser
+# (`make desktop-dev`). That is a debug build of `delta-desktop` with its own
+# identifier (`io.github.x7c1.delta.dev`), so it never touches the installed
+# app's data directory, tmux socket or single-instance lock. Because it binds the
+# same port, it and the browser loop refuse to start while the other is running,
+# and --down stops either.
+#
 # Usage:
 #   scripts/dev.sh [WORKDIR]   # bring the loop up (default WORKDIR: .tmp/session)
+#   scripts/dev.sh --desktop-build
+#                              # build the dev desktop shell (debug, dev identifier)
+#   scripts/dev.sh --desktop-preflight
+#                              # fail if the dev environment is already running
+#   scripts/dev.sh --desktop [WORKDIR]
+#                              # run the binary --desktop-build built, on the dev
+#                              # environment (does not build; `make desktop-dev`
+#                              # runs preflight, build, then this)
 #   scripts/dev.sh --down      # tear the loop down (same as scripts/stop.sh)
 #   scripts/dev.sh --reset     # tear down, then delete the SQLite database — and
 #                              # the pre-migration snapshots taken from it — so the
@@ -44,13 +60,18 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKEND_DIR="$REPO_ROOT/backend"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 
+# The dev environment's name. It is the tmux socket below and the identifier the
+# dev desktop shell is built with (DESKTOP_DEV_TAURI_CONFIG), both distinct from
+# the installed app's `io.github.x7c1.delta`.
+DEV_NAME="io.github.x7c1.delta.dev"
+
 # Delta runs its sessions on a dedicated tmux server, separate from the user's
-# default tmux server. The dev loop uses its own socket
-# (`io.github.x7c1.delta.dev`), distinct from the desktop app's default
-# (`io.github.x7c1.delta`), so teardown never ends the installed app's sessions.
-# The server mints a unique session per spawn (`delta-<n>`) on this socket;
-# teardown just kills the whole socket. An explicit DELTA_TMUX_SOCKET wins.
-DELTA_TMUX_SOCKET="${DELTA_TMUX_SOCKET:-io.github.x7c1.delta.dev}"
+# default tmux server. The dev loop uses its own socket ($DEV_NAME), distinct
+# from the desktop app's default (`io.github.x7c1.delta`), so teardown never ends
+# the installed app's sessions. The server mints a unique session per spawn
+# (`delta-<n>`) on this socket; teardown just kills the whole socket. An explicit
+# DELTA_TMUX_SOCKET wins.
+DELTA_TMUX_SOCKET="${DELTA_TMUX_SOCKET:-$DEV_NAME}"
 DELTA_PORT="7878"
 FRONTEND_PORT="5173"
 DEFAULT_WORKDIR="$REPO_ROOT/.tmp/session"
@@ -59,6 +80,19 @@ DEFAULT_WORKDIR="$REPO_ROOT/.tmp/session"
 # relative to its cwd (the backend dir); honor DELTA_DB_PATH if the developer
 # overrode it. `--reset` deletes this so the next start recreates empty schema.
 DELTA_DB="${DELTA_DB_PATH:-$BACKEND_DIR/delta.db}"
+
+# The dev desktop shell. `tauri.conf.json` keeps the installed app's identifier
+# for `make desktop` and releases; the dev build overrides only the identifier,
+# through the TAURI_CONFIG environment variable, which tauri-build and
+# `generate_context!` merge over the config files at compile time. A plain
+# `cargo build` honours it, so the dev build needs neither the Tauri CLI nor a
+# second config file, and the identifier — hence the app data directory, webview
+# storage and single-instance scope — is baked into the binary. tauri-build declares
+# `rerun-if-env-changed=TAURI_CONFIG`, so switching between this build and a
+# plain one (`make check`) recompiles the shell rather than reusing a binary
+# with the other identifier.
+DESKTOP_DEV_TAURI_CONFIG="{\"identifier\":\"$DEV_NAME\"}"
+DESKTOP_DEV_BIN="${CARGO_TARGET_DIR:-$BACKEND_DIR/target}/debug/delta-desktop"
 
 # delta-server and the frontend dev server each log to a per-run timestamped file
 # so a new run never clobbers a previous run's log. A stable `*.log` symlink
@@ -83,7 +117,7 @@ usage() {
 # Tear everything down: stop the server, the frontend dev server, and the tmux
 # session the server created for `claude`.
 down() {
-  log "Stopping delta-server (port $DELTA_PORT) ..."
+  log "Stopping the dev server on port $DELTA_PORT (delta-server or make desktop-dev) ..."
   # delta-server binds 127.0.0.1:$DELTA_PORT; match the listener and kill it.
   if command -v pkill >/dev/null 2>&1; then
     pkill -f "delta-server" 2>/dev/null || true
@@ -136,7 +170,7 @@ reset() {
   log "Deleting SQLite database: $DELTA_DB (with its WAL/SHM sidecars and .bak-v* snapshots) ..."
   # An unmatched `.bak-v*` glob stays literal and `rm -f` ignores it.
   rm -f "$DELTA_DB" "$DELTA_DB-wal" "$DELTA_DB-shm" "$DELTA_DB".bak-v*
-  log "Database reset. The next 'scripts/dev.sh' will recreate an empty schema."
+  log "Database reset. The next 'make dev' or 'make desktop-dev' will recreate an empty schema."
 }
 
 require() {
@@ -270,8 +304,59 @@ wait_until_listening() {
   done
 }
 
-up() {
+# The dev environment owns 127.0.0.1:$DELTA_PORT, whether the browser loop or the
+# dev desktop shell holds it. Starting either while something listens there would
+# put two servers on one database and tmux socket (or fail partway through with
+# "Address already in use"), so refuse up front and point at --down rather than
+# clobbering the running server's state.
+refuse_if_dev_port_taken() {
+  if port_in_use "$DELTA_PORT"; then
+    die "A server is already listening on 127.0.0.1:$DELTA_PORT — 'make dev' or 'make desktop-dev' is running (they share the dev database and tmux socket, so only one runs at a time). Run 'make down' (scripts/dev.sh --down) first, or stop whatever owns the port."
+  fi
+}
+
+# Resolve the base working directory for spawns ($1, default .tmp/session) to an
+# absolute path, creating it. The server creates a per-spawn `<base>/<token>`
+# subdirectory under it on demand and provisions that subdirectory's
+# .claude/settings.json.
+resolve_workdir() {
   local workdir="${1:-$DEFAULT_WORKDIR}"
+  mkdir -p "$workdir" && cd "$workdir" && pwd
+}
+
+# Build the dev desktop shell: the debug `delta-desktop` with the dev identifier.
+# `make desktop-dev-build` runs this after building the SPA it embeds.
+desktop_build() {
+  require cargo "Install the Rust toolchain (https://rustup.rs)."
+  log "Building delta-desktop (debug) with identifier $DEV_NAME ..."
+  (cd "$BACKEND_DIR" && TAURI_CONFIG="$DESKTOP_DEV_TAURI_CONFIG" cargo build -p delta-desktop)
+}
+
+# Run the dev desktop shell on the dev environment: the same database, tmux
+# socket, port and session workdir as `up`. The shell honours these variables
+# over its app data directory, and binds an explicit DELTA_PORT as is without
+# recording it in the hook state file. Runs in the foreground until the window
+# closes.
+desktop() {
+  require tmux "Install tmux to host the claude session."
+  refuse_if_dev_port_taken
+  [ -x "$DESKTOP_DEV_BIN" ] ||
+    die "$DESKTOP_DEV_BIN not found. Build it with 'make desktop-dev-build' (or run 'make desktop-dev')."
+  local workdir
+  workdir="$(resolve_workdir "${1:-}")"
+  log "Starting the dev desktop shell ($DEV_NAME) on 127.0.0.1:$DELTA_PORT"
+  log "Database: $DELTA_DB, tmux socket: $DELTA_TMUX_SOCKET, session workdir base: $workdir"
+  log "Closing the window stops the server; its tmux sessions keep running until 'make down'."
+  cd "$BACKEND_DIR"
+  DELTA_PORT="$DELTA_PORT" \
+    DELTA_DB_PATH="$DELTA_DB" \
+    DELTA_SESSION_WORKDIR="$workdir" \
+    DELTA_TMUX_SOCKET="$DELTA_TMUX_SOCKET" \
+    exec "$DESKTOP_DEV_BIN"
+}
+
+up() {
+  local workdir
 
   # --- Preflight: every moving part must exist before we touch anything. ---
   require tmux  "Install tmux to host the claude session."
@@ -283,20 +368,12 @@ up() {
   # no fixed name to collide with up front. Any leftover `delta-*` sessions from
   # a previous run are reaped by teardown ('scripts/dev.sh --down').
 
-  # A running server already owns the port; starting a second one would fail
-  # with "Address already in use" partway through. Abort cleanly up front and
-  # point at --down rather than clobbering the running server's state.
-  if port_in_use "$DELTA_PORT"; then
-    die "A server is already listening on 127.0.0.1:$DELTA_PORT. Run 'scripts/dev.sh --down' first (or stop whatever owns the port)."
-  fi
+  refuse_if_dev_port_taken
   if port_in_use "$FRONTEND_PORT"; then
     die "Something is already listening on 127.0.0.1:$FRONTEND_PORT (the frontend dev server). Run 'scripts/dev.sh --down' first."
   fi
 
-  # The base working directory for spawns; resolve it to an absolute path. The
-  # server creates a per-spawn `<base>/<token>` subdirectory under it on demand
-  # and provisions that subdirectory's .claude/settings.json.
-  workdir="$(mkdir -p "$workdir" && cd "$workdir" && pwd)"
+  workdir="$(resolve_workdir "${1:-}")"
   log "Session workdir base: $workdir (the server provisions <base>/<token>/.claude/settings.json per spawn)"
 
   mkdir -p "$LOG_DIR"
@@ -391,6 +468,9 @@ main() {
   case "${1:-}" in
     --down|down)   down ;;
     --reset|reset) reset ;;
+    --desktop-build) desktop_build ;;
+    --desktop-preflight) refuse_if_dev_port_taken ;;
+    --desktop) desktop "${2:-}" ;;
     -h|--help|help) usage ;;
     *)             up "${1:-}" ;;
   esac

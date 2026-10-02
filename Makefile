@@ -32,7 +32,7 @@ dev:
 mock:
 	cd frontend && pnpm -r build && VITE_API_MOCK=1 pnpm --filter @delta/web dev --force
 
-## down: stop the local loop (server, web dev server, spawned tmux sessions)
+## down: stop the dev environment (the server or a running `make desktop-dev` on port 7878, the web dev server, spawned tmux sessions)
 .PHONY: down
 down:
 	scripts/dev.sh --down
@@ -58,15 +58,29 @@ server-embedded: web-dist
 
 # --- Desktop app (Tauri shell around the embedded server) ---------------------
 
-## desktop-dev: build the SPA (make web-dist), then run the desktop shell from source (`cargo run -p delta-desktop`)
+## desktop-dev: the dev environment in the desktop shell — refuse if `make dev` (port 7878) is up, `make desktop-dev-build`, then run it on make dev's database, tmux socket, port and WORKDIR
+# scripts/dev.sh owns the dev environment's values (database, tmux socket, port,
+# session workdir) and the dev identifier, so `make dev` and this target cannot
+# drift. The preflight runs first so a running dev environment is reported
+# before a long build, and `--desktop` checks the port again right before it
+# launches.
 .PHONY: desktop-dev
-desktop-dev: web-dist
-	cd backend && cargo run -p delta-desktop
+desktop-dev:
+	scripts/dev.sh --desktop-preflight
+	$(MAKE) --no-print-directory desktop-dev-build
+	scripts/dev.sh --desktop $(WORKDIR)
+
+## desktop-dev-build: build the SPA, then the debug delta-desktop `make desktop-dev` runs (identifier io.github.x7c1.delta.dev, set through TAURI_CONFIG — see scripts/dev.sh) without starting it
+.PHONY: desktop-dev-build
+desktop-dev-build: web-dist
+	scripts/dev.sh --desktop-build
 
 ## desktop: build the SPA, then bundle the desktop shell under backend/target/release/bundle/ (macOS: Delta.app and a .dmg; Linux: the delta-desktop .deb) (one-time: `cargo install tauri-cli --version '^2' --locked`)
 .PHONY: desktop
+# TAURI_CONFIG is unset so an exported value (the dev identifier override, say)
+# cannot leak into the bundle: releases carry tauri.conf.json's identifier.
 desktop: web-dist
-	cd backend/crates/apps/delta-desktop && cargo tauri build
+	cd backend/crates/apps/delta-desktop && env -u TAURI_CONFIG cargo tauri build
 
 # --- Generated code -----------------------------------------------------------
 
@@ -200,9 +214,10 @@ check-embedded: check-backend-build check-frontend-build
 
 # The desktop shell is outside the workspace's default members, so only this
 # step builds, tests and lints it. It embeds the same `dist/` through
-# delta-server's `embed-web`. Debug is enough.
+# delta-server's `embed-web`. Debug is enough. It builds tauri.conf.json as is
+# (TAURI_CONFIG unset), so it checks the installed app's configuration.
 check-desktop-build: check-backend-build check-frontend-build
-	cd backend && cargo build -p delta-desktop && cargo test -p delta-desktop && cargo clippy -p delta-desktop --all-targets -- -D warnings
+	cd backend && unset TAURI_CONFIG && cargo build -p delta-desktop && cargo test -p delta-desktop && cargo clippy -p delta-desktop --all-targets -- -D warnings
 
 ## e2e: run the headless Playwright suite (one-time: `pnpm --filter @delta/web exec playwright install --with-deps chromium`)
 # Pin a dedicated mock-server port so the suite never collides with a dev server
