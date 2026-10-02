@@ -172,10 +172,11 @@ desktop shell instead of the browser: `make desktop-dev-build` builds a debug
 `delta-desktop` whose identifier is `io.github.x7c1.delta.dev`, so its app data
 directory (webview storage included), its single-instance scope and, on Linux,
 its window's identity are its own, and it neither focuses nor disturbs a running
-installed app. The window's identity follows the identifier because
-`tauri.conf.json` sets `app.enableGTKAppId`, which makes the identifier the GTK
-application ID and so the Wayland app ID; GNOME groups windows by that ID, so
-the two apps get separate dock icons. The override is the `TAURI_CONFIG`
+installed app. The window's identity follows the identifier because `main.rs`
+sets GLib's program name to it before GTK starts — GTK 3 takes the Wayland app
+ID from the program name — and `tauri.conf.json` sets `app.enableGTKAppId`, so
+the GTK application ID is the identifier too. GNOME groups windows by that ID,
+so the two apps get separate dock icons. The override is the `TAURI_CONFIG`
 environment variable (`{"identifier": …}`), which
 tauri-build and `generate_context!` merge over the config files at compile
 time; a plain `cargo build` honours it, so the dev build needs neither the Tauri
