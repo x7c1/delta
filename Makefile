@@ -82,6 +82,18 @@ desktop-dev-build: web-dist
 desktop: web-dist
 	cd backend/crates/apps/delta-desktop && env -u TAURI_CONFIG cargo tauri build
 
+## desktop-install: Linux only — `make desktop`, then install the .deb it produced with `sudo apt install --reinstall` (restart a running Delta afterwards)
+# --reinstall because a local build keeps the release's version number, which
+# apt would otherwise treat as already installed. The newest .deb is the one
+# just built; older ones may still sit in the bundle directory.
+DESKTOP_DEB_DIR := backend/target/release/bundle/deb
+.PHONY: desktop-install
+desktop-install:
+	@[ "$$(uname -s)" = Linux ] || { echo "desktop-install: Linux only (it installs the .deb). On macOS run make desktop and copy backend/target/release/bundle/macos/Delta.app to /Applications." >&2; exit 1; }
+	$(MAKE) --no-print-directory desktop
+	sudo apt install --reinstall "$(CURDIR)/$$(ls -t $(DESKTOP_DEB_DIR)/delta-desktop_*.deb | head -n 1)"
+	@echo "Installed. If Delta is running, quit it and start it again to use the new build."
+
 # --- Generated code -----------------------------------------------------------
 
 ## gen: regenerate the TypeScript wire bindings (@delta/wire-gen) from the Rust wire contract

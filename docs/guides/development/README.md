@@ -153,7 +153,13 @@ and CI does in the job that builds the embedded server.
 make desktop-dev        # the dev environment in the desktop shell (refuses while make dev runs)
 make desktop-dev-build  # build the SPA, then the binary make desktop-dev runs, without starting it
 make desktop            # build the SPA, then bundle the installed app with cargo tauri build
+make desktop-install    # Linux: make desktop, then sudo apt install --reinstall the new .deb
 ```
+
+`make desktop-install` reinstalls on every run because a local build keeps the
+release's version number, which `apt` would otherwise treat as already
+installed. A running Delta keeps the old build until you quit it and start it
+again.
 
 The two targets build two different apps. `make desktop` bundles the installed
 app, with `tauri.conf.json`'s identifier `io.github.x7c1.delta`. `make
@@ -196,6 +202,16 @@ CC=/usr/bin/gcc CXX=/usr/bin/g++ \
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/gcc \
   make desktop
 readelf -l backend/target/release/delta-desktop | grep interpreter   # /lib64/ld-linux-x86-64.so.2
+```
+
+To keep this for every `make desktop` (and so `make desktop-install`), put it in
+the gitignored `local.mk` (see `local.mk.example`), scoped to the `desktop`
+target so other builds keep their cache:
+
+```make
+desktop: export CC := /usr/bin/gcc
+desktop: export CXX := /usr/bin/g++
+desktop: export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER := /usr/bin/gcc
 ```
 
 The bundles land under `backend/target/release/bundle/` (`macos/Delta.app` and
