@@ -88,11 +88,13 @@ described, if anywhere.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] With the installed app and `make desktop-dev` both running on GNOME
+- [x] With the installed app and `make desktop-dev` both running on GNOME
       (Wayland), the dock shows them as two separate icons.
-- [ ] With both running, choosing "Delta" from the Activities search always
+- [x] With both running, choosing "Delta" from the Activities search always
       raises the installed app's window, whichever window had focus last.
-- [ ] The installed app's window shows the Delta name and icon in the dock and
+- [x] The installed app's window shows the Delta name and icon in the dock and
       the app switcher (it is still matched to its desktop entry).
-- [ ] Launching the installed app again while it is running focuses the
-      running window and exits, without starting a second server.
+- [x] Launching the installed app again while it is running hands over to the
+      running copy and exits, without starting a second server. (Launched from
+      a terminal, GNOME's focus-stealing prevention shows a "Delta is ready"
+      notification instead of raising the window; clicking it raises it.)
