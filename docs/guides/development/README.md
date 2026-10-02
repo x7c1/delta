@@ -39,7 +39,7 @@ by both — see "Portability conventions" below.
 |----------|---------------|
 | Linux | `tmux`, `lsof`, `jq`, GNU `make`, `bash` — install via the system package manager (e.g. `apt install tmux lsof jq make`). |
 | macOS | `tmux` and `jq` via Homebrew (`brew install tmux jq`). `lsof`, `make` (GNU make 3.81), `awk`, `bash` 3.2, `date`, and `pkill` ship with the system. Installing the Xcode Command Line Tools (`xcode-select --install`) is the standard way to get `make`. |
-| Linux, desktop shell only | The system libraries Tauri v2 links against, needed only to build `delta-app` (`make app-dev`, `make app`, and `make check`'s `check-app-build`): on Debian/Ubuntu `apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf build-essential file`. macOS needs nothing beyond the Xcode Command Line Tools. |
+| Linux, desktop shell only | The system libraries Tauri v2 links against, needed only to build `delta-desktop` (`make desktop-dev`, `make desktop`, and `make check`'s `check-desktop-build`): on Debian/Ubuntu `apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf build-essential file`. macOS needs nothing beyond the Xcode Command Line Tools. |
 
 In addition, both platforms need the Rust toolchain (`cargo`) and pnpm (via
 `corepack enable`), plus the agent CLIs you plan to drive: an authenticated
@@ -132,9 +132,9 @@ other persisted conversation is "closed" until it is resumed. Authentication is
 assumed — the server relies on a cached Claude Code token (or
 `CLAUDE_CODE_OAUTH_TOKEN`) and never runs interactive OAuth.
 
-### Desktop shell (`delta-app`)
+### Desktop shell (`delta-desktop`)
 
-`backend/crates/apps/delta-app` is a Tauri v2 shell that runs `delta-server`
+`backend/crates/apps/delta-desktop` is a Tauri v2 shell that runs `delta-server`
 inside its own process on a free loopback port and opens one window on it,
 serving the built SPA (`embed-web`). It is a launcher only: the page talks to
 the server over plain HTTP exactly as a browser does, with no Tauri IPC. It is
@@ -145,32 +145,32 @@ database and tmux socket, nor take over the hook port the running copy holds.
 The crate is left out of the workspace's `default-members`, so `cargo build`,
 `cargo test` and `cargo clippy` in `backend/` (and `make build` / `make test` /
 `make lint`) never build it or need the Linux libraries above. Name it to build
-it (`cargo build -p delta-app`); `make check` does so in `check-app-build`, and
-CI does in the job that builds the embedded server.
+it (`cargo build -p delta-desktop`); `make check` does so in `check-desktop-build`,
+and CI does in the job that builds the embedded server.
 
 ```bash
-make app-dev   # build the SPA (make web-dist), then cargo run -p delta-app
-make app       # build the SPA, then bundle with cargo tauri build
+make desktop-dev   # build the SPA (make web-dist), then cargo run -p delta-desktop
+make desktop       # build the SPA, then bundle with cargo tauri build
 ```
 
-`make app` needs the Tauri CLI, installed once:
+`make desktop` needs the Tauri CLI, installed once:
 
 ```bash
 cargo install tauri-cli --version '^2' --locked
 ```
 
-On Linux, `make app` links with whatever `cc` is first on `PATH`. If that is
+On Linux, `make desktop` links with whatever `cc` is first on `PATH`. If that is
 another toolchain's compiler — for example a Nix `gcc` wrapper — the built
-`delta-app` gets that toolchain's dynamic loader as its interpreter, which does
-not read the system library cache, so the installed `.deb` fails to start with
+`delta-desktop` gets that toolchain's dynamic loader as its interpreter, which
+does not read the system library cache, so the installed `.deb` fails to start with
 `error while loading shared libraries: libpango-1.0.so.0` (while `ldd` still
 looks fine). Point the build at the system compiler in that case:
 
 ```bash
 CC=/usr/bin/gcc CXX=/usr/bin/g++ \
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/gcc \
-  make app
-readelf -l backend/target/release/delta-app | grep interpreter   # /lib64/ld-linux-x86-64.so.2
+  make desktop
+readelf -l backend/target/release/delta-desktop | grep interpreter   # /lib64/ld-linux-x86-64.so.2
 ```
 
 The bundles land under `backend/target/release/bundle/` (`macos/Delta.app` and
@@ -183,6 +183,16 @@ app. Where the app keeps its data, and how it finds `tmux` and `claude` when
 launched from Finder or a desktop file, is in
 [local-run.md](local-run.md#the-desktop-app). Installing and opening a released
 bundle is in [the install guide](../install/README.md).
+
+The Debian package is named `delta-desktop`, like the command it installs, not
+`delta`: Ubuntu's archive already has an unrelated `delta` package, and apt
+would treat ours as a version of it. Tauri derives the package name (and the
+`.deb` file name) from `productName` and has no deb-specific override, so
+`tauri.linux.conf.json`, which Tauri merges over `tauri.conf.json` on Linux
+only, sets `productName` to `delta-desktop`. The name users see stays `Delta`:
+the desktop entry template (`linux/delta-desktop.desktop`, a copy of Tauri's
+default) names the application menu entry, the window title is set in
+`main.rs`, and macOS still builds `Delta.app`.
 
 ### Reading the SQLite schema
 

@@ -115,13 +115,13 @@ stays in sync with every force-push.
 ## Desktop bundles
 
 Every Release carries unsigned bundles of the desktop shell
-(`backend/crates/apps/delta-app`), built by `.github/workflows/bundle.yml`:
+(`backend/crates/apps/delta-desktop`), built by `.github/workflows/bundle.yml`:
 
 | File | Platform |
 |---|---|
 | `Delta_<version>_aarch64.dmg` | macOS, Apple silicon |
 | `Delta_<version>_aarch64.app.tar.gz` | macOS, Apple silicon (the `.app` the `.dmg` holds, as a tarball) |
-| `Delta_<version>_amd64.deb` | Linux (Debian/Ubuntu), x86_64 |
+| `delta-desktop_<version>_amd64.deb` | Linux (Debian/Ubuntu), x86_64 |
 
 The version in each file name is the workspace version Tauri reads from the
 shell crate, so it matches the tag by construction. The bundles are neither

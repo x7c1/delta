@@ -273,9 +273,9 @@ jobs:
       # The desktop shell is outside the workspace's default members, so the
       # backend job never builds, tests or lints it. It embeds the same dist/
       # through delta-server's `embed-web` (`make check` runs the same step as
-      # check-app-build).
+      # check-desktop-build).
       - name: Build, test and lint the desktop shell
-        run: cargo build --locked -p delta-app && cargo test --locked -p delta-app && cargo clippy --locked -p delta-app --all-targets -- -D warnings
+        run: cargo build --locked -p delta-desktop && cargo test --locked -p delta-desktop && cargo clippy --locked -p delta-desktop --all-targets -- -D warnings
         working-directory: backend
 
       - name: Install Playwright browser

@@ -1,6 +1,6 @@
 //! Server configuration built from the environment.
 //!
-//! Shared by the `delta-server` binary and the desktop shell (`delta-app`), so
+//! Shared by the `delta-server` binary and the desktop shell (`delta-desktop`), so
 //! both read the same `DELTA_*` variables with the same defaults. Every value
 //! has a local-friendly default, so a bare run needs no setup.
 //!

@@ -108,7 +108,7 @@ session; their conversations stay in Delta and resume on the next send.
 
 1. Quit the app, then end its sessions: `tmux -L io.github.x7c1.delta kill-server`.
 2. Remove the app: delete `/Applications/Delta.app` on macOS, or run
-   `sudo apt remove delta` on Ubuntu.
+   `sudo apt remove delta-desktop` on Ubuntu.
 3. Delete the data directory (see
    [Where the app keeps its data](#where-the-app-keeps-its-data)).
 4. Optionally delete `~/.delta/worktrees/`, where Delta creates git worktrees

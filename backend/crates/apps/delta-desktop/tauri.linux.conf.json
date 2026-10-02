@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "delta-desktop",
+  "bundle": {
+    "linux": {
+      "deb": {
+        "desktopTemplate": "linux/delta-desktop.desktop"
+      }
+    }
+  }
+}

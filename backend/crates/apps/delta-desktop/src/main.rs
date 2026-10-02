@@ -89,7 +89,7 @@ fn main() {
         })
         .run(tauri::generate_context!());
     if let Err(err) = result {
-        tracing::error!("delta-app failed: {err:#}");
+        tracing::error!("delta-desktop failed: {err:#}");
         std::process::exit(1);
     }
 }
@@ -107,7 +107,9 @@ fn focus_running_window(app: &AppHandle) {
     let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
         // The running instance has no window yet (it is still starting, or its
         // start failed and a dialog is up); there is nothing to focus.
-        tracing::info!("delta-app was launched again; the running instance has no window to focus");
+        tracing::info!(
+            "delta-desktop was launched again; the running instance has no window to focus"
+        );
         return;
     };
     for (step, result) in [
@@ -140,7 +142,7 @@ fn start_server(app: &App, runtime: &Runtime) -> anyhow::Result<u16> {
     tracing::info!(
         database = %config.database_path,
         sessions = %config.session_workdir_base,
-        "delta-app data locations"
+        "delta-desktop data locations"
     );
 
     let mut hook_state = config::adopt_persisted_hook_secret(&mut config)?;
@@ -152,7 +154,7 @@ fn start_server(app: &App, runtime: &Runtime) -> anyhow::Result<u16> {
     tracing::info!(
         state_file = %hook_state.path().display(),
         hook_endpoint_changed = config.hook_endpoint_changed,
-        "delta-app hook endpoint settled"
+        "delta-desktop hook endpoint settled"
     );
 
     delta_server::log_claude_version(&config.launch.claude_bin);
@@ -213,7 +215,7 @@ fn open_in_browser(url: &Url, kind: links::LinkKind) {
 fn report_startup_failure(handle: &AppHandle, err: &anyhow::Error) {
     match serve::user_facing_startup_error(err) {
         Some(message) => {
-            tracing::error!("delta-app: {message}");
+            tracing::error!("delta-desktop: {message}");
             let exit_handle = handle.clone();
             handle
                 .dialog()
@@ -223,7 +225,7 @@ fn report_startup_failure(handle: &AppHandle, err: &anyhow::Error) {
                 .show(move |_| exit_handle.exit(1));
         }
         None => {
-            tracing::error!("delta-app could not start: {err:#}");
+            tracing::error!("delta-desktop could not start: {err:#}");
             handle.exit(1);
         }
     }

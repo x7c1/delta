@@ -58,15 +58,15 @@ server-embedded: web-dist
 
 # --- Desktop app (Tauri shell around the embedded server) ---------------------
 
-## app-dev: build the SPA (make web-dist), then run the desktop shell from source (`cargo run -p delta-app`)
-.PHONY: app-dev
-app-dev: web-dist
-	cd backend && cargo run -p delta-app
+## desktop-dev: build the SPA (make web-dist), then run the desktop shell from source (`cargo run -p delta-desktop`)
+.PHONY: desktop-dev
+desktop-dev: web-dist
+	cd backend && cargo run -p delta-desktop
 
-## app: build the SPA, then bundle the desktop shell under backend/target/release/bundle/ (macOS: Delta.app and a .dmg; Linux: a .deb) (one-time: `cargo install tauri-cli --version '^2' --locked`)
-.PHONY: app
-app: web-dist
-	cd backend/crates/apps/delta-app && cargo tauri build
+## desktop: build the SPA, then bundle the desktop shell under backend/target/release/bundle/ (macOS: Delta.app and a .dmg; Linux: the delta-desktop .deb) (one-time: `cargo install tauri-cli --version '^2' --locked`)
+.PHONY: desktop
+desktop: web-dist
+	cd backend/crates/apps/delta-desktop && cargo tauri build
 
 # --- Generated code -----------------------------------------------------------
 
@@ -137,7 +137,7 @@ lint:
 #
 #   check-backend-fmt → check-backend-build → { check-backend-test, check-backend-clippy, check-gen }
 #   check-frontend-build → { check-frontend-typecheck, check-frontend-test, check-frontend-lint, check-e2e }
-#   { check-backend-build, check-frontend-build } → { check-e2e-fake, check-embedded, check-app-build }
+#   { check-backend-build, check-frontend-build } → { check-e2e-fake, check-embedded, check-desktop-build }
 #   vendor-codex-schema-check, vendor-codex-schema-test, e2e-real-gate-test, gen-check-test (no prerequisites)
 #
 # Without -j, make walks the same graph left to right, which is the serial
@@ -153,7 +153,7 @@ CHECK_STEPS := \
 	check-backend-test check-backend-clippy check-gen \
 	vendor-codex-schema-check vendor-codex-schema-test e2e-real-gate-test gen-check-test \
 	check-frontend-typecheck check-frontend-test check-frontend-lint \
-	check-e2e check-e2e-fake check-embedded check-app-build
+	check-e2e check-e2e-fake check-embedded check-desktop-build
 
 .PHONY: check $(CHECK_STEPS) check-backend-fmt check-backend-build check-frontend-build
 check: $(CHECK_STEPS)
@@ -201,8 +201,8 @@ check-embedded: check-backend-build check-frontend-build
 # The desktop shell is outside the workspace's default members, so only this
 # step builds, tests and lints it. It embeds the same `dist/` through
 # delta-server's `embed-web`. Debug is enough.
-check-app-build: check-backend-build check-frontend-build
-	cd backend && cargo build -p delta-app && cargo test -p delta-app && cargo clippy -p delta-app --all-targets -- -D warnings
+check-desktop-build: check-backend-build check-frontend-build
+	cd backend && cargo build -p delta-desktop && cargo test -p delta-desktop && cargo clippy -p delta-desktop --all-targets -- -D warnings
 
 ## e2e: run the headless Playwright suite (one-time: `pnpm --filter @delta/web exec playwright install --with-deps chromium`)
 # Pin a dedicated mock-server port so the suite never collides with a dev server
