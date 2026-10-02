@@ -194,29 +194,28 @@ identifier.
 cargo install tauri-cli --version '^2' --locked
 ```
 
-On Linux, `make desktop-build` links with whatever `cc` is first on `PATH`. If that is
-another toolchain's compiler — for example a Nix `gcc` wrapper — the built
-`delta-desktop` gets that toolchain's dynamic loader as its interpreter, which
-does not read the system library cache, so the installed `.deb` fails to start with
+On Linux, every build of `delta-desktop` links with whatever `cc` is first on
+`PATH`. If that is another toolchain's compiler — for example a Nix `gcc`
+wrapper — the binary gets that toolchain's dynamic loader as its interpreter,
+which does not read the system library cache, so it fails to start with
 `error while loading shared libraries: libpango-1.0.so.0` (while `ldd` still
-looks fine). Point the build at the system compiler in that case:
-
-```bash
-CC=/usr/bin/gcc CXX=/usr/bin/g++ \
-CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=/usr/bin/gcc \
-  make desktop-build
-readelf -l backend/target/release/delta-desktop | grep interpreter   # /lib64/ld-linux-x86-64.so.2
-```
-
-To keep this for every `make desktop-build` (and so `make desktop`), put it in
-the gitignored `local.mk` (see `local.mk.example`), scoped to the
-`desktop-build` target so other builds keep their cache:
+looks fine). That hits both the installed `.deb` (`make desktop`) and
+`make desktop-dev`. Point the builds at the system compiler in that case, best
+in the gitignored `local.mk` (see `local.mk.example`). Export it for every
+target, not only the desktop ones: `make check` builds the same debug
+`delta-desktop` as `make desktop-dev`, and a compiler that differs between the
+two would make each rebuild the C dependencies the other just built.
 
 ```make
-desktop-build: export CC := /usr/bin/gcc
-desktop-build: export CXX := /usr/bin/g++
-desktop-build: export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER := /usr/bin/gcc
+export CC := /usr/bin/gcc
+export CXX := /usr/bin/g++
+export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER := /usr/bin/gcc
 ```
+
+Check a build with
+`readelf -l backend/target/debug/delta-desktop | grep interpreter` (or
+`target/release/` for the bundle); it should print
+`/lib64/ld-linux-x86-64.so.2`.
 
 The bundles land under `backend/target/release/bundle/` (`macos/Delta.app` and
 a `.dmg` on macOS; a `.deb` on Linux). On macOS the `.dmg`
