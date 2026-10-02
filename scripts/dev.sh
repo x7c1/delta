@@ -76,6 +76,12 @@ DELTA_PORT="7878"
 FRONTEND_PORT="5173"
 DEFAULT_WORKDIR="$REPO_ROOT/.tmp/session"
 
+# Where sessions that ask for a git worktree get one. The installed app keeps
+# the server's default ($HOME/.delta/worktrees); the dev environment uses a
+# sibling root of its own, so neither environment's cleanup can reach the
+# other's worktrees. An explicit DELTA_WORKTREE_BASE wins.
+DELTA_WORKTREE_BASE="${DELTA_WORKTREE_BASE:-$HOME/.delta-dev/worktrees}"
+
 # The SQLite database delta-server opens. The server defaults to `delta.db`
 # relative to its cwd (the backend dir); honor DELTA_DB_PATH if the developer
 # overrode it. `--reset` deletes this so the next start recreates empty schema.
@@ -345,12 +351,13 @@ desktop() {
   local workdir
   workdir="$(resolve_workdir "${1:-}")"
   log "Starting the dev desktop shell ($DEV_NAME) on 127.0.0.1:$DELTA_PORT"
-  log "Database: $DELTA_DB, tmux socket: $DELTA_TMUX_SOCKET, session workdir base: $workdir"
+  log "Database: $DELTA_DB, tmux socket: $DELTA_TMUX_SOCKET, session workdir base: $workdir, worktree base: $DELTA_WORKTREE_BASE"
   log "Closing the window stops the server; its tmux sessions keep running until 'make down'."
   cd "$BACKEND_DIR"
   DELTA_PORT="$DELTA_PORT" \
     DELTA_DB_PATH="$DELTA_DB" \
     DELTA_SESSION_WORKDIR="$workdir" \
+    DELTA_WORKTREE_BASE="$DELTA_WORKTREE_BASE" \
     DELTA_TMUX_SOCKET="$DELTA_TMUX_SOCKET" \
     exec "$DESKTOP_DEV_BIN"
 }
@@ -397,6 +404,7 @@ up() {
     cd "$BACKEND_DIR"
     DELTA_PORT="$DELTA_PORT" \
       DELTA_SESSION_WORKDIR="$workdir" \
+      DELTA_WORKTREE_BASE="$DELTA_WORKTREE_BASE" \
       DELTA_TMUX_SOCKET="$DELTA_TMUX_SOCKET" \
       DELTA_AUTH_TOKEN="$auth_token" \
       cargo run -p delta-server >"$SERVER_LOG" 2>&1
