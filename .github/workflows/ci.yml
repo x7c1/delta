@@ -109,8 +109,34 @@ jobs:
       - name: Lint
         run: pnpm -r lint
 
+      # The apt archive cache, as in the e2e-fake job (see the comment there).
+      # This job installs no apt packages of its own: `--with-deps` below makes
+      # Playwright install Chromium's system libraries, so the key holds the
+      # Playwright version instead of a package list.
+      - name: Prepare the apt archive cache
+        id: apt-cache-key
+        run: |
+          sudo rm -f /etc/apt/apt.conf.d/docker-clean
+          sudo chown "$(id -u):$(id -g)" /var/cache/apt/archives
+          playwright_version=$(pnpm --filter @delta/web exec playwright --version | awk '/^Version /{print $2}')
+          test -n "$playwright_version"
+          prefix="apt-${{ runner.os }}-${ImageOS}-playwright-${playwright_version}-"
+          echo "prefix=${prefix}" >> "$GITHUB_OUTPUT"
+          echo "key=${prefix}${ImageVersion}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache apt archives
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives/*.deb
+          key: ${{ steps.apt-cache-key.outputs.key }}
+          restore-keys: |
+            ${{ steps.apt-cache-key.outputs.prefix }}
+
       - name: Install Playwright browser
-        run: pnpm --filter @delta/web exec playwright install --with-deps chromium
+        run: |
+          pnpm --filter @delta/web exec playwright install --with-deps chromium
+          sudo apt-get autoclean
+          sudo find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec chmod a+r {} +
 
       - name: E2E (mock mode)
         run: pnpm --filter @delta/web e2e
@@ -168,7 +194,8 @@ jobs:
       # archive directory (`lock` and `partial/` stay apt's), and apt must keep
       # what it downloads: drop the Docker-style clean hook if the image has one.
       #
-      # bundle.yml repeats these steps; keep them in sync.
+      # bundle.yml and the frontend job above repeat these steps; keep them in
+      # sync.
       - name: Prepare the apt archive cache
         id: apt-cache-key
         run: |
