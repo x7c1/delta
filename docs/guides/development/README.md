@@ -138,9 +138,10 @@ assumed — the server relies on a cached Claude Code token (or
 inside its own process on a free loopback port and opens one window on it,
 serving the built SPA (`embed-web`). It is a launcher only: the page talks to
 the server over plain HTTP exactly as a browser does, with no Tauri IPC. It is
-single-instance (`tauri-plugin-single-instance`): a second launch focuses the
-running window and exits, so it cannot start a rival server on the same
-database and tmux socket, nor take over the hook port the running copy holds.
+single-instance (`tauri-plugin-single-instance`, scoped by the app's
+identifier): a second launch focuses the running window and exits, so it cannot
+start a rival server on the same database and tmux socket, nor take over the
+hook port the running copy holds.
 
 The crate is left out of the workspace's `default-members`, so `cargo build`,
 `cargo test` and `cargo clippy` in `backend/` (and `make build` / `make test` /
@@ -149,9 +150,33 @@ it (`cargo build -p delta-desktop`); `make check` does so in `check-desktop-buil
 and CI does in the job that builds the embedded server.
 
 ```bash
-make desktop-dev   # build the SPA (make web-dist), then cargo run -p delta-desktop
-make desktop       # build the SPA, then bundle with cargo tauri build
+make desktop-dev        # the dev environment in the desktop shell (refuses while make dev runs)
+make desktop-dev-build  # build the SPA, then the binary make desktop-dev runs, without starting it
+make desktop            # build the SPA, then bundle the installed app with cargo tauri build
 ```
+
+The two targets build two different apps. `make desktop` bundles the installed
+app, with `tauri.conf.json`'s identifier `io.github.x7c1.delta`. `make
+desktop-dev` is the dev environment — the one `make dev` runs — seen through the
+desktop shell instead of the browser: `make desktop-dev-build` builds a debug
+`delta-desktop` whose identifier is `io.github.x7c1.delta.dev`, so its app data
+directory (webview storage included) and its single-instance scope are its own,
+and it neither focuses nor disturbs a running installed app. The override is
+the `TAURI_CONFIG` environment variable (`{"identifier": …}`), which
+tauri-build and `generate_context!` merge over the config files at compile
+time; a plain `cargo build` honours it, so the dev build needs neither the Tauri
+CLI nor a second config file. `scripts/dev.sh --desktop-build` sets it, and
+`scripts/dev.sh --desktop` then runs the binary on `make dev`'s database, tmux
+socket, port and session working directory (`WORKDIR` works as for `make dev`).
+How the two environments relate is in
+[local-run.md](local-run.md#two-environments-the-installed-app-and-the-dev-environment).
+
+`check-desktop-build` builds the shell with `TAURI_CONFIG` unset, i.e. the
+installed app's configuration, into the same `backend/target/debug/delta-desktop`.
+tauri-build reruns when `TAURI_CONFIG` changes, so after `make check` the next
+`make desktop-dev-build` recompiles the `delta-desktop` crate alone (a few
+seconds), and the other way round; neither reuses a binary built with the other
+identifier.
 
 `make desktop` needs the Tauri CLI, installed once:
 
