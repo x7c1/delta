@@ -10,7 +10,7 @@ check_command: "make check && git grep -q 'auto_vacuum' -- backend/crates/gatewa
 assignee: null
 branch: task/1006-0715-feat-sqlite-keep-the-database-file-sized-to-its-contents
 created_at: 2026-10-05T22:11:49Z
-updated_at: 2026-10-05T22:34:55Z
+updated_at: 2026-10-05T22:35:41Z
 ---
 
 # feat(sqlite): keep the database file sized to its contents
@@ -92,7 +92,8 @@ its contents at all times.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On the development machine, open an existing Delta database created
-      before this change through the new server once; it opens, `sqlite3
-      delta.db 'PRAGMA auto_vacuum'` reports `1`, and the Storage view still
-      shows it.
+- [x] On the development machine, a copy of a Delta database created before
+      this change (223 MB, `auto_vacuum = 0`, schema v9) was opened through
+      the new server once: it opened, `sqlite3 delta.db 'PRAGMA auto_vacuum'`
+      reported `1` afterwards (schema at v10, rows intact), and
+      `GET /api/storage` reported it with its size.
