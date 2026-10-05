@@ -1,4 +1,12 @@
 //! [`Git`]: the concrete [`GitWorktree`].
+//!
+//! Split by responsibility: this module holds the struct, the shared `git`
+//! invocation helpers and the [`GitWorktree`] trait wiring, and `removal` the
+//! worktree removal and branch deletion.
+
+mod removal;
+#[cfg(test)]
+mod testing;
 
 use std::path::PathBuf;
 
@@ -6,7 +14,9 @@ use async_trait::async_trait;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
-use delta_usecase::{GitWorktree, RemoteBranches, WorktreeStartPoint};
+use delta_usecase::{
+    BranchDeletion, GitWorktree, RemoteBranches, WorktreeRemoval, WorktreeStartPoint,
+};
 
 use crate::error::Error;
 
@@ -18,8 +28,8 @@ const ORIGIN_PREFIX: &str = "origin/";
 /// and the default branch is read from `origin/HEAD`.
 const REMOTE: &str = "origin";
 
-/// Detects git repositories and creates per-session git worktrees by shelling
-/// out to `git`.
+/// Detects git repositories, and creates and removes per-session git
+/// worktrees, by shelling out to `git`.
 ///
 /// The git operations are stateless: every git method takes the repository (or
 /// candidate) path explicitly and invokes `git -C <path> …`, so the gateway is
@@ -414,37 +424,50 @@ impl GitWorktree for Git {
             .await
             .map_err(delta_usecase::Error::from)
     }
+
+    async fn remove_worktree(
+        &self,
+        repo_root: &str,
+        path: &str,
+    ) -> std::result::Result<WorktreeRemoval, delta_usecase::Error> {
+        self.remove_clean_worktree(repo_root, path)
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
+    async fn delete_branch_if_merged(
+        &self,
+        repo_root: &str,
+        branch: &str,
+    ) -> std::result::Result<BranchDeletion, delta_usecase::Error> {
+        self.delete_merged_branch(repo_root, branch)
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
+    async fn prune_worktrees(
+        &self,
+        repo_root: &str,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        self.run(repo_root, "worktree prune", &["worktree", "prune"])
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
+    async fn forget_dir_trusted(&self, dir: &str) -> std::result::Result<(), delta_usecase::Error> {
+        // The same process-local lock as `ensure_dir_trusted`: both are a
+        // read-modify-write of the one config file.
+        let _guard = self.trust_lock.lock().await;
+        crate::trust::forget_dir_trusted(&self.config_path, dir)
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::testing::{canonical, git_ok, init_repo_with_commit};
     use super::*;
-
-    /// Initialize a git repository at `dir` with one commit, so it has a `HEAD`
-    /// to branch off, and a deterministic identity/branch name regardless of the
-    /// host's git config.
-    async fn init_repo_with_commit(dir: &std::path::Path) {
-        let dir = dir.to_str().unwrap();
-        for args in [
-            vec!["init", "-q", "-b", "main"],
-            vec!["config", "user.email", "test@example.com"],
-            vec!["config", "user.name", "Test"],
-            vec!["commit", "-q", "--allow-empty", "-m", "initial"],
-        ] {
-            let status = Command::new("git")
-                .arg("-C")
-                .arg(dir)
-                .args(&args)
-                .output()
-                .await
-                .expect("git available");
-            assert!(
-                status.status.success(),
-                "git {args:?} failed: {}",
-                String::from_utf8_lossy(&status.stderr)
-            );
-        }
-    }
 
     #[tokio::test]
     async fn repo_root_reports_the_toplevel_for_a_git_dir() {
@@ -792,33 +815,6 @@ mod tests {
         );
     }
 
-    /// Run `git -C <dir> <args>`, asserting success, returning trimmed stdout.
-    async fn git_ok(dir: &str, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(args)
-            .output()
-            .await
-            .expect("git available");
-        assert!(
-            output.status.success(),
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        trimmed_stdout(&output)
-    }
-
-    /// Canonicalize a path so comparisons survive symlink resolution (macOS
-    /// `/var` → `/private/var`).
-    async fn canonical(path: &str) -> String {
-        tokio::fs::canonicalize(path)
-            .await
-            .unwrap()
-            .to_string_lossy()
-            .into_owned()
-    }
-
     /// Clone `origin_path` into a fresh temp dir, returning the clone path.
     async fn clone_into(origin_path: &str, parent: &std::path::Path) -> String {
         let clone_path = parent.join("clone").to_string_lossy().into_owned();
@@ -962,5 +958,25 @@ mod tests {
         )
         .await;
         assert_eq!(upstream, "origin/feature");
+    }
+
+    #[tokio::test]
+    async fn forget_dir_trusted_removes_only_that_project_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(".claude.json");
+        let git = Git::with_config_path(config.clone());
+        git.ensure_dir_trusted("/worktrees/a").await.unwrap();
+        git.ensure_dir_trusted("/worktrees/b").await.unwrap();
+
+        git.forget_dir_trusted("/worktrees/a").await.unwrap();
+
+        let value: serde_json::Value =
+            serde_json::from_slice(&tokio::fs::read(&config).await.unwrap()).unwrap();
+        let projects = value["projects"].as_object().unwrap();
+        assert_eq!(
+            projects.keys().collect::<Vec<_>>(),
+            vec!["/worktrees/b"],
+            "exactly one projects key is gone"
+        );
     }
 }

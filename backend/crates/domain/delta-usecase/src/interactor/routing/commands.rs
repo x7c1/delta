@@ -13,6 +13,7 @@ use crate::pane_token::PaneToken;
 use crate::ports::{
     GitWorktree, SessionEvent, SessionLifecycle, SessionStore, TmuxDriver, Transcript, Workspace,
 };
+use crate::session_removal::SessionRemoval;
 
 impl<T, X, S, W, G> Interactor<T, X, S, W, G>
 where
@@ -93,13 +94,15 @@ where
     }
 
     /// Remove a closed session from Delta: delete its row and, by cascade,
-    /// every row that hangs off it.
+    /// every row that hangs off it, then the worktree and branch Delta created
+    /// for it when they hold no work.
     ///
-    /// Delta's own rows are all that go. Nothing on disk is touched — see
-    /// `SessionContext::delete_session` for why, and for the two states this is
-    /// refused in (open, still starting). Unknown ids are a clean
+    /// Returns what was removed and what was kept on disk, for the transport to
+    /// log; a kept item never refuses the removal. See
+    /// `SessionContext::delete_session` for the rule, and for the two states
+    /// this is refused in (open, still starting). Unknown ids are a clean
     /// `SessionNotFound`, as for [`Self::close_session`].
-    pub async fn delete_session(&self, id: &SessionId) -> Result<()> {
+    pub async fn delete_session(&self, id: &SessionId) -> Result<SessionRemoval> {
         self.request(id, |reply| SessionInput::DeleteSession { reply })
             .await
     }

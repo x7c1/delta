@@ -23,8 +23,9 @@
 //! 6. `POST /api/sessions/{id}/close` tears the pane down; the session then
 //!    lists as closed, and open/close/threads on an unknown id are `404`.
 //! 7. `DELETE /api/sessions/{id}` removes a closed session outright — its rows
-//!    go, nothing on disk does — and is refused with a stable `code` while the
-//!    session is open or still starting.
+//!    go (a session outside a Delta worktree leaves nothing on disk to
+//!    remove) — and is refused with a stable `code` while the session is open
+//!    or still starting.
 
 use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -42,7 +43,8 @@ use delta_server::{router, AppState, StorageInventory};
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{
-    GitWorktree, Interactor, RemoteBranches, TmuxDriver, Workspace, WorktreeStartPoint,
+    BranchDeletion, GitWorktree, Interactor, RemoteBranches, TmuxDriver, Workspace,
+    WorktreeRemoval, WorktreeStartPoint,
 };
 
 /// A `TmuxDriver` that records the lines it would have sent instead of touching
@@ -244,6 +246,33 @@ impl GitWorktree for NoopGitWorktree {
     async fn ensure_dir_trusted(&self, _dir: &str) -> delta_usecase::Result<()> {
         // The end-to-end flow launches in a non-git scratch dir (`repo_root`
         // returns `None`), so trust-seeding is never reached; a no-op suffices.
+        Ok(())
+    }
+
+    // The end-to-end flow never runs in a Delta worktree, so removing a
+    // session never reaches the worktree cleanup; these are never called.
+
+    async fn remove_worktree(
+        &self,
+        _repo_root: &str,
+        _path: &str,
+    ) -> delta_usecase::Result<WorktreeRemoval> {
+        Ok(WorktreeRemoval::KeptDirty)
+    }
+
+    async fn delete_branch_if_merged(
+        &self,
+        _repo_root: &str,
+        _branch: &str,
+    ) -> delta_usecase::Result<BranchDeletion> {
+        Ok(BranchDeletion::KeptUnmerged)
+    }
+
+    async fn prune_worktrees(&self, _repo_root: &str) -> delta_usecase::Result<()> {
+        Ok(())
+    }
+
+    async fn forget_dir_trusted(&self, _dir: &str) -> delta_usecase::Result<()> {
         Ok(())
     }
 }
@@ -974,10 +1003,10 @@ async fn async_event_drain_can_only_be_claimed_once() {
 /// and the session, its thread and its message are gone from every surface that
 /// served them a moment earlier.
 ///
-/// What is removed is Delta's own data and nothing else: the use case reaches
-/// for no filesystem or tmux gateway at all (pinned in the use-case suite), so
-/// the worktree and the agent's own transcript survive a removal — this test's
-/// temp transcript file is still on disk when it cleans it up below.
+/// The session ran outside any Delta worktree, so what is removed is Delta's
+/// own data and nothing else (the worktree rules are pinned in the use-case
+/// suite), and the agent's own transcript is never touched — this test's temp
+/// transcript file is still on disk when it cleans it up below.
 ///
 /// The removal is also announced on the event stream, which is the only way a
 /// tab that did not issue it learns the row is gone.

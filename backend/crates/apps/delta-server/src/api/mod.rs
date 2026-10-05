@@ -173,19 +173,21 @@ pub(crate) async fn close_session(
 
 /// `DELETE /api/sessions/{id}` — remove a closed session from Delta's list.
 ///
-/// Deletes the `session` row and, by cascade, everything hanging off it. It
-/// deletes **nothing on disk**: the git worktree the session ran in (which may
-/// hold uncommitted work), its branch, and the agent's own transcript and state
-/// files all stay exactly where they are. Closing already keeps the worktree so
-/// a session can be resumed; this is the user tidying Delta's list, not a
-/// command to destroy work.
+/// Deletes the `session` row and, by cascade, everything hanging off it, then
+/// the git worktree Delta created for the session and its `delta-<id>` branch
+/// **when they hold no work**: a worktree with modified or untracked files and
+/// a branch that is not merged are kept, as is a branch the session was
+/// started on rather than one Delta cut for it. The agent's own transcript and
+/// state files are never touched. What was removed and what was kept is logged
+/// at `info`; the response carries no body either way, and a kept item never
+/// refuses the removal.
 ///
 /// Only a session that is neither open nor still starting can be removed — the
 /// use case refuses the other two states with `409` (`session_open` /
-/// `session_spawning`) and touches no row when it does, and an unknown id is a
-/// `404`. The browser only offers the action on a closed card, so those
-/// refusals answer a stale card (another tab reopened the session) rather than
-/// anything a user meets in normal use.
+/// `session_spawning`) and touches no row or file when it does, and an unknown
+/// id is a `404`. The browser only offers the action on a closed card, so
+/// those refusals answer a stale card (another tab reopened the session)
+/// rather than anything a user meets in normal use.
 ///
 /// `SessionRemoved` is broadcast on success, not `SessionClosed`: every open tab
 /// has to drop the row, which is not what closing means.
@@ -194,7 +196,8 @@ pub(crate) async fn delete_session(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let id = SessionId::from(id);
-    state.interactor().delete_session(&id).await?;
+    let removal = state.interactor().delete_session(&id).await?;
+    tracing::info!(session_id = %id, "removed session; {removal}");
     state.broadcast([delta_usecase::SessionEvent::SessionRemoved { session_id: id }]);
     Ok(StatusCode::NO_CONTENT)
 }

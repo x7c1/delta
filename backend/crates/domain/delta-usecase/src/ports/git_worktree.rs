@@ -1,8 +1,10 @@
-//! Detecting git repositories and creating per-session git worktrees.
+//! Detecting git repositories, and creating and removing per-session git
+//! worktrees.
 
 use async_trait::async_trait;
 
 use crate::error::Result;
+use crate::ports::{BranchDeletion, WorktreeRemoval};
 
 /// Where a new session's worktree should start from, and whether it gets its
 /// own `delta-<id>` branch or works on an existing branch directly.
@@ -66,12 +68,12 @@ pub struct RemoteBranches {
     pub branches: Vec<String>,
 }
 
-/// Detects git repositories and creates per-session git worktrees.
+/// Detects git repositories, and creates and removes per-session git worktrees.
 ///
 /// All `git` subprocess interaction is isolated behind this port: the domain
 /// asks for repository facts (is this a git repo, what is its default branch,
-/// what remote branches exist) and for a worktree to be created, and the
-/// gateway shells out to `git`. Every method takes the repository path
+/// what remote branches exist) and for a worktree to be created or removed,
+/// and the gateway shells out to `git`. Every method takes the repository path
 /// explicitly (the gateway always invokes `git -C <repo>`), so the port is
 /// stateless and cwd-independent — mirroring the [`TmuxDriver`] port.
 ///
@@ -196,6 +198,45 @@ pub trait GitWorktree: Send + Sync {
     /// files. Both this and the git facts above are "what the gateway knows about
     /// git working directories", so they share one port.
     async fn ensure_dir_trusted(&self, dir: &str) -> Result<()>;
+
+    /// Remove the linked worktree at `path` from the repository at
+    /// `repo_root`, **only if it holds no work**.
+    ///
+    /// Runs `git -C <repo_root> worktree remove <path>` without `--force`, so
+    /// git itself refuses a worktree with modified or untracked files: that
+    /// refusal is [`WorktreeRemoval::KeptDirty`] and the worktree is left as it
+    /// was. A worktree whose directory is already gone is removed (git drops
+    /// its administrative entry). Any other failure — the repository is gone,
+    /// the worktree is locked, `git` is missing — is an error.
+    async fn remove_worktree(&self, repo_root: &str, path: &str) -> Result<WorktreeRemoval>;
+
+    /// Delete local branch `branch` in the repository at `repo_root`, **only
+    /// if it is merged**.
+    ///
+    /// Runs `git -C <repo_root> branch -d <branch>` (never `-D`), which git
+    /// refuses for a branch not merged into its upstream, or into `HEAD` when
+    /// it has no upstream: that refusal is [`BranchDeletion::KeptUnmerged`].
+    /// A branch that does not exist is [`BranchDeletion::Absent`]. Any other
+    /// failure (for example the branch is still checked out in a worktree) is
+    /// an error.
+    async fn delete_branch_if_merged(
+        &self,
+        repo_root: &str,
+        branch: &str,
+    ) -> Result<BranchDeletion>;
+
+    /// Drop the administrative entries of worktrees whose directories no
+    /// longer exist: `git -C <repo_root> worktree prune`.
+    async fn prune_worktrees(&self, repo_root: &str) -> Result<()>;
+
+    /// Remove `dir`'s entry from Claude Code's user config — the inverse of
+    /// [`Self::ensure_dir_trusted`], for a worktree Delta has removed.
+    ///
+    /// Deletes the whole `projects.<dir>` key from `~/.claude.json` and leaves
+    /// every other key as it was. A missing config file or a missing entry is
+    /// not an error (there is nothing to forget); a config file that does not
+    /// parse is an error and is left untouched.
+    async fn forget_dir_trusted(&self, dir: &str) -> Result<()>;
 }
 
 #[async_trait]
@@ -253,5 +294,25 @@ impl GitWorktree for Box<dyn GitWorktree> {
 
     async fn ensure_dir_trusted(&self, dir: &str) -> Result<()> {
         (**self).ensure_dir_trusted(dir).await
+    }
+
+    async fn remove_worktree(&self, repo_root: &str, path: &str) -> Result<WorktreeRemoval> {
+        (**self).remove_worktree(repo_root, path).await
+    }
+
+    async fn delete_branch_if_merged(
+        &self,
+        repo_root: &str,
+        branch: &str,
+    ) -> Result<BranchDeletion> {
+        (**self).delete_branch_if_merged(repo_root, branch).await
+    }
+
+    async fn prune_worktrees(&self, repo_root: &str) -> Result<()> {
+        (**self).prune_worktrees(repo_root).await
+    }
+
+    async fn forget_dir_trusted(&self, dir: &str) -> Result<()> {
+        (**self).forget_dir_trusted(dir).await
     }
 }
