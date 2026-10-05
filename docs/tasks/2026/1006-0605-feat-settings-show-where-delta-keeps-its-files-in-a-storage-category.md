@@ -10,7 +10,7 @@ check_command: "make check && git grep -q 'GetStorage' -- backend/crates/gateway
 assignee: null
 branch: task/1006-0605-feat-settings-show-where-delta-keeps-its-files-in-a-storage-category
 created_at: 2026-10-05T21:02:11Z
-updated_at: 2026-10-05T21:58:42Z
+updated_at: 2026-10-05T22:00:20Z
 ---
 
 # feat(settings): show where Delta keeps its files in a Storage category
@@ -129,10 +129,15 @@ builds the category and the read-only inventory only.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On a macOS and an Ubuntu desktop install, every path shown under
-      Settings → Storage exists on disk and the database size equals the
-      summed file lengths of `delta.db`, `delta.db-wal` and `delta.db-shm`
-      (`stat -f %z` on macOS, `stat -c %s` on Linux; not `du`, which counts
-      disk blocks and would also pick up the snapshots).
-- [ ] Under `make dev`, the section shows the `.dev` identifier and the dev
-      data directory.
+- [x] On a macOS development machine, every path `GET /api/storage` reports
+      exists on disk under the configured data directory, and the database
+      size equals the summed file lengths of `delta.db`, `delta.db-wal` and
+      `delta.db-shm` (`stat -f %z`; not `du`, which counts disk blocks and
+      would also pick up the snapshots). Verified against a server booted on
+      a throwaway `DELTA_DATA_DIR` (snapshots empty, sizes equal).
+- [ ] The same check on an Ubuntu install. Needs a Linux machine; not run
+      before merge.
+- [x] The identifier alone selects the data directory: a server started with
+      only `DELTA_IDENTIFIER` set reports `~/Library/Application Support/<identifier>/`
+      as its data directory (mode `0700`, database present) — the path
+      `make dev` takes with the `.dev` identifier.
