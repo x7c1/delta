@@ -18,7 +18,7 @@ use crate::rest::{
     WirePermissionDecisionRequest, WirePromptTemplate, WirePromptTemplatesResponse,
     WireProvidersResponse, WirePullRequestsResponse, WireQuestionAnswerRequest,
     WireQuestionCancelRequest, WireRepositoriesResponse, WireSendResponse, WireSendsResponse,
-    WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
+    WireSessionsResponse, WireStorageResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
     WireUpdatePromptTemplateRequest, WireVersionResponse, WireWorkdirListResponse,
     WireWorkdirRecentResponse,
 };
@@ -233,6 +233,12 @@ declare_endpoints! {
     /// The Delta workspace version for the browser footer. Pre-formatted
     /// server-side, so the browser never has to know how to render `+dev.<sha>`.
     GetVersion: GET "/api/version", response = WireVersionResponse;
+
+    /// Where this running Delta keeps its files — the data directory and every
+    /// path derived from it, the worktree base, the transcript root, the tmux
+    /// socket name — with the database's and its snapshots' sizes read at
+    /// request time. Read-only, and never carries a secret.
+    GetStorage: GET "/api/storage", response = WireStorageResponse;
 
     // Streams. Each upgrades to a WebSocket, so the declared response type is
     // the shape of one frame on the socket rather than a response body.

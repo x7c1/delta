@@ -38,7 +38,7 @@ use axum::Router;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
-use delta_server::{router, AppState};
+use delta_server::{router, AppState, StorageInventory};
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{
@@ -275,7 +275,15 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf, AppState) {
         "/tmp/delta-e2e-settings.json",
     );
 
-    let state = AppState::from_interactor(interactor, "delta-e2e", AUTH_TOKEN, HOOK_SECRET);
+    let storage = StorageInventory::new(
+        "delta-e2e",
+        "/tmp/delta-e2e-data",
+        7878,
+        "/tmp/delta-e2e-worktrees",
+        "/tmp",
+    );
+    let state =
+        AppState::from_interactor(interactor, "delta-e2e", AUTH_TOKEN, HOOK_SECRET, storage);
     (router(state.clone()), tmux, transcript_path, state)
 }
 

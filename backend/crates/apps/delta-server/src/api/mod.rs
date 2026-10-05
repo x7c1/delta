@@ -22,6 +22,8 @@ mod api_error;
 pub(crate) use api_error::ApiError;
 pub(crate) mod clone_root_path;
 mod session_cursor;
+mod storage;
+pub(crate) use storage::get_storage;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;

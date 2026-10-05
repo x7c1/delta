@@ -23,6 +23,7 @@ mod pty;
 mod route_binder;
 pub mod serve;
 mod state;
+mod storage_inventory;
 mod version;
 mod ws;
 
@@ -30,4 +31,5 @@ pub use app::router;
 pub use claude_version::log_claude_version;
 pub use comms_log::{CommsLogHub, CommsSubscription, COMMS_RING_CAPACITY};
 pub use state::AppState;
+pub use storage_inventory::StorageInventory;
 pub use version::display_version;

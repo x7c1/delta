@@ -27,6 +27,7 @@ import type {
   SendResponse,
   SendsResponse,
   SessionsResponse,
+  StorageResponse,
   ThreadsResponse,
   UpdateLaunchOptionRequest,
   UpdatePromptTemplateRequest,
@@ -787,6 +788,16 @@ export class ApiClient {
    */
   getVersion(): Promise<VersionResponse> {
     return this.request<VersionResponse>('/api/version');
+  }
+
+  /**
+   * `GET /api/storage` — where the running server keeps its files: the data
+   * directory and every path derived from it, the worktree base, the
+   * transcript root and the tmux socket name, with the database's and its
+   * snapshots' sizes read at request time. Never carries a secret.
+   */
+  getStorage(): Promise<StorageResponse> {
+    return this.request<StorageResponse>('/api/storage');
   }
 
   /**

@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 
 use codex_agent::{CodexAdapterFactory, CodexLaunchConfig};
-use delta_server::{router, AppState, CommsLogHub};
+use delta_server::{router, AppState, CommsLogHub, StorageInventory};
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{
@@ -202,9 +202,21 @@ pub(crate) fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (R
         Arc::new(CodexLaunchOptionVocabulary) as Arc<dyn LaunchOptionVocabulary>
     );
 
-    let state =
-        AppState::from_interactor(interactor, "delta-codex-full-loop", AUTH_TOKEN, HOOK_SECRET)
-            .with_comms_log(comms_log);
+    let storage = StorageInventory::new(
+        "delta-codex-full-loop",
+        &scenario.dir,
+        7878,
+        std::env::temp_dir().join("delta-codex-full-loop-worktrees"),
+        std::env::temp_dir(),
+    );
+    let state = AppState::from_interactor(
+        interactor,
+        "delta-codex-full-loop",
+        AUTH_TOKEN,
+        HOOK_SECRET,
+        storage,
+    )
+    .with_comms_log(comms_log);
     (router(state.clone()), state)
 }
 

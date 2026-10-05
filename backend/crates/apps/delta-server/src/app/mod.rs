@@ -90,6 +90,7 @@ fn api_router(state: AppState) -> Router {
         .bind(endpoint::UpdatePromptTemplate, api::update_prompt_template)
         .bind(endpoint::DeletePromptTemplate, api::delete_prompt_template)
         .bind(endpoint::GetVersion, api::get_version)
+        .bind(endpoint::GetStorage, api::get_storage)
         // Streams.
         .bind(endpoint::SessionEventStream, ws::ws_handler)
         .bind(endpoint::PtyStream, pty::pty_handler)

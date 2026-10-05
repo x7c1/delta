@@ -20,7 +20,8 @@ kinds of traffic, and this directory has one page per area:
     directories, git detection, repositories and clone roots, pull requests, and
     opening a known directory in an external editor.
   - **[settings.md](settings.md)** — provider availability and capabilities, the
-    launch-option and prompt-template registries, and the server version.
+    launch-option and prompt-template registries, the server version, and the
+    storage inventory (where the server keeps its files).
 - **[live-channels.md](live-channels.md)** — the browser live channels: a
   WebSocket event stream (`/ws`) carrying `SessionEvent`s, a PTY bridge
   (`/pty`) attaching an xterm.js terminal to a session's tmux pane, and a
