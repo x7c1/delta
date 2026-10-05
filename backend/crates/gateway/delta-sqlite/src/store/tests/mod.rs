@@ -2,6 +2,7 @@
 //! implementation, plus `schema` for migrations and the startup gate.
 
 mod clone_roots;
+mod file_size;
 mod launch_options;
 mod messages;
 mod permissions;
