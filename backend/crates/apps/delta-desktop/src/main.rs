@@ -56,7 +56,7 @@ const WINDOW_TITLE: &str = "Delta";
 
 fn main() {
     serve::init_tracing();
-    login_env::import_login_shell_env();
+    let path_not_imported = login_env::import_login_shell_env();
 
     let context = tauri::generate_context!();
     #[cfg(target_os = "linux")]
@@ -91,7 +91,7 @@ fn main() {
         .setup(move |app| {
             let started = start_server(app, &runtime).and_then(|port| open_window(app, port));
             if let Err(err) = started {
-                report_startup_failure(app.handle(), &err);
+                report_startup_failure(app.handle(), &err, path_not_imported.as_ref());
             }
             // The runtime serves for the app's whole lifetime.
             app.manage(runtime);
@@ -234,10 +234,20 @@ fn open_in_browser(url: &Url, kind: links::LinkKind) {
 }
 
 /// Show a user-facing startup error in a message dialog and exit 1 when it is
-/// dismissed; log any other error and exit 1 straight away.
-fn report_startup_failure(handle: &AppHandle, err: &anyhow::Error) {
+/// dismissed; log any other error and exit 1 straight away. A missing command
+/// is explained by the login shell's `PATH` not having been read, when it was
+/// not.
+fn report_startup_failure(
+    handle: &AppHandle,
+    err: &anyhow::Error,
+    path_not_imported: Option<&login_env::PathNotImported>,
+) {
     match serve::user_facing_startup_error(err) {
         Some(message) => {
+            let message = match path_not_imported {
+                Some(not_imported) => not_imported.explain(message, err),
+                None => message,
+            };
             tracing::error!("delta-desktop: {message}");
             let exit_handle = handle.clone();
             handle

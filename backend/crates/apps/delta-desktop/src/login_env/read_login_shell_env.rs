@@ -7,7 +7,11 @@ use std::time::Duration;
 use super::{parse_printed_env, MARKER};
 
 /// How long the login shell may take to print its environment.
-pub const TIMEOUT: Duration = Duration::from_secs(5);
+///
+/// It usually answers in well under a second, but the first launch of a newly
+/// installed build can take longer. The window cannot open until the import
+/// is done, so the limit stays a few seconds rather than being raised further.
+pub const TIMEOUT: Duration = Duration::from_secs(8);
 
 /// The arguments that make a shell print its environment between the markers,
 /// as an interactive login shell.

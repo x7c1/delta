@@ -22,7 +22,9 @@
 //! write to stdout around it is ignored. A shell that does not answer within
 //! [`TIMEOUT`](read_login_shell_env::TIMEOUT), exits without printing the
 //! markers, or cannot be spawned leaves the inherited environment in place with
-//! a warning; the locale fallback applies either way.
+//! a warning; the locale fallback applies either way. Why the `PATH` was not
+//! adopted is returned as a [`PathNotImported`], so a startup that then stops
+//! on a missing command can say so in its dialog.
 
 mod locale_fallback;
 use locale_fallback::locale_fallback;
@@ -33,6 +35,9 @@ use login_shell::login_shell;
 mod parse_printed_env;
 use parse_printed_env::parse_printed_env;
 
+mod path_not_imported;
+pub use path_not_imported::PathNotImported;
+
 mod read_login_shell_env;
 use read_login_shell_env::read_login_shell_env;
 
@@ -42,15 +47,21 @@ const MARKER: &str = "__DELTA_LOGIN_SHELL_ENV__";
 
 /// Adopt the login shell's `PATH` and locale, or keep the inherited ones (with
 /// a warning) when they cannot be read, then fall back to a UTF-8 `LANG` when
-/// no locale is set.
+/// no locale is set. Returns why the `PATH` was not adopted, if it was not.
 ///
 /// Call it first thing in `main`, before other threads start: it mutates the
 /// process environment.
-pub fn import_login_shell_env() {
+pub fn import_login_shell_env() -> Option<PathNotImported> {
     let shell = login_shell(std::env::var_os("SHELL"));
-    match read_login_shell_env(&shell) {
+    let not_imported = |reason: String| PathNotImported {
+        shell: shell.clone(),
+        reason,
+        inherited_path: std::env::var_os("PATH"),
+    };
+    let path_not_imported = match read_login_shell_env(&shell) {
         Ok(vars) => {
-            if !vars.iter().any(|(name, _)| name == "PATH") {
+            let printed_path = vars.iter().any(|(name, _)| name == "PATH");
+            if !printed_path {
                 tracing::warn!(
                     shell = %shell.to_string_lossy(),
                     "the login shell printed no PATH; keeping the inherited one"
@@ -65,14 +76,19 @@ pub fn import_login_shell_env() {
             for (name, value) in &vars {
                 std::env::set_var(name, value);
             }
+            (!printed_path).then(|| not_imported("it printed no PATH".to_owned()))
         }
-        Err(reason) => tracing::warn!(
-            shell = %shell.to_string_lossy(),
-            "could not read the login shell's environment ({reason}); keeping the inherited one"
-        ),
-    }
+        Err(reason) => {
+            tracing::warn!(
+                shell = %shell.to_string_lossy(),
+                "could not read the login shell's environment ({reason}); keeping the inherited one"
+            );
+            Some(not_imported(reason))
+        }
+    };
     if let Some((name, value)) = locale_fallback(|name| std::env::var_os(name)) {
         tracing::info!("no locale is set; using {name}={value}");
         std::env::set_var(name, value);
     }
+    path_not_imported
 }
