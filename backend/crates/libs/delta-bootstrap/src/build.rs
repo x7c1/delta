@@ -23,6 +23,12 @@ use crate::{
 
 /// Construct the wired [`AppInteractor`] from configuration.
 ///
+/// Every path comes from the configuration's [`DataLayout`](crate::DataLayout),
+/// whose directories the caller has already created
+/// ([`DataLayout::create_dirs`](crate::DataLayout::create_dirs)): the database
+/// opened here, the per-spawn working-directory base, the session settings
+/// file and the tmux configuration.
+///
 /// Opening the store applies the schema migration. The transcript path is not
 /// needed here — it is learned from the first `UserPromptSubmit` hook. The
 /// stateless [`Tmux`] driver mints a fresh tmux session per spawn, so no fixed
@@ -69,7 +75,8 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     // endpoint, so both read one memo.
     let binary_detector: Arc<dyn BinaryDetector> = Arc::new(PathBinaryDetector::new());
     ensure_tmux_available(binary_detector.as_ref()).await?;
-    let store = SqliteStore::open(&config.database_path)?;
+    let layout = config.data_layout();
+    let store = SqliteStore::open(&layout.database().to_string_lossy())?;
     let restored = delta_usecase::SessionStore::restore_all_dispatched(&store).await?;
     if restored > 0 {
         tracing::info!(
@@ -79,7 +86,10 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
         );
     }
     let transcript = JsonlTranscript::new();
-    let tmux = Tmux::new(config.tmux_socket.clone());
+    let tmux = Tmux::new(
+        config.tmux_socket.clone(),
+        layout.tmux_conf().to_string_lossy().into_owned(),
+    );
     let workspace = FsWorkspace::new();
     let git_worktree = Git::new();
     let gh_cli: Arc<dyn GhCli> = Arc::new(Gh::new());
@@ -106,7 +116,7 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
         Box::new(store) as Box<dyn delta_usecase::SessionStore>,
         Box::new(workspace) as Box<dyn delta_usecase::Workspace>,
         Box::new(git_worktree) as Box<dyn delta_usecase::GitWorktree>,
-        config.session_workdir_base.clone(),
+        layout.sessions().to_string_lossy().into_owned(),
         config.worktree_base.clone(),
         config.session_settings_json(),
         config.session_settings_path(),
@@ -160,14 +170,15 @@ mod tests {
     use delta_model::AgentProvider;
     use delta_usecase::NullCommsLog;
 
-    use crate::DEFAULT_TMUX_SOCKET;
+    use crate::DEFAULT_IDENTIFIER;
 
-    fn test_config() -> Config {
+    /// A configuration whose data directory is `dir`.
+    fn test_config(dir: &tempfile::TempDir) -> Config {
         Config {
-            database_path: ":memory:".into(),
-            session_workdir_base: "/tmp/delta-session".into(),
+            identifier: DEFAULT_IDENTIFIER.into(),
+            data_dir: dir.path().to_string_lossy().into_owned(),
             worktree_base: "/tmp/delta-worktrees".into(),
-            tmux_socket: DEFAULT_TMUX_SOCKET.into(),
+            tmux_socket: DEFAULT_IDENTIFIER.into(),
             auth_token: "test-token".into(),
             hook_secret: "test-hook-secret".into(),
             transcript_root: "/tmp".into(),
@@ -177,14 +188,24 @@ mod tests {
         }
     }
 
-    /// Wiring succeeds against an in-memory store.
+    /// The database file `config` opens.
+    fn database(config: &Config) -> String {
+        config
+            .data_layout()
+            .database()
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// Wiring succeeds against a fresh data directory.
     ///
     /// Runs the real host-requirement probe (see [`build`]), so it needs tmux on
     /// the test host's `PATH`. CI installs it for the backend job.
     #[tokio::test]
-    async fn build_wires_an_interactor_with_in_memory_store() {
+    async fn build_wires_an_interactor_in_a_fresh_data_dir() {
+        let dir = tempfile::tempdir().unwrap();
         assert!(
-            build(&test_config(), NullCommsLog::arc()).await.is_ok(),
+            build(&test_config(&dir), NullCommsLog::arc()).await.is_ok(),
             "wiring failed; if this host has no tmux on PATH that is the cause — \
              `build` refuses to wire without it"
         );
@@ -198,7 +219,10 @@ mod tests {
     /// permissive default in place with every gateway test still green.
     #[tokio::test]
     async fn build_wires_the_gateway_launch_option_vocabulary() {
-        let interactor = build(&test_config(), NullCommsLog::arc()).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let interactor = build(&test_config(&dir), NullCommsLog::arc())
+            .await
+            .unwrap();
         let dangerous = |provider, name: &str, value: Option<&str>| {
             interactor.is_launch_option_pair_dangerous(provider, name, value)
         };
@@ -256,17 +280,11 @@ mod tests {
     async fn build_materializes_the_declared_launch_option_catalog() {
         use delta_usecase::SessionStore;
 
-        let dir = std::env::temp_dir().join(format!("delta-bootstrap-lo-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("builtin-launch-options.sqlite");
-        let _ = std::fs::remove_file(&path);
-        let config = Config {
-            database_path: path.to_str().unwrap().to_owned(),
-            ..test_config()
-        };
+        let dir = tempfile::tempdir().unwrap();
+        let config = test_config(&dir);
 
         build(&config, NullCommsLog::arc()).await.unwrap();
-        let first = SqliteStore::open(&config.database_path)
+        let first = SqliteStore::open(&database(&config))
             .unwrap()
             .list_launch_options()
             .await
@@ -288,7 +306,7 @@ mod tests {
 
         // A second boot is a no-op, ids included.
         build(&config, NullCommsLog::arc()).await.unwrap();
-        let second = SqliteStore::open(&config.database_path)
+        let second = SqliteStore::open(&database(&config))
             .unwrap()
             .list_launch_options()
             .await
@@ -308,11 +326,9 @@ mod tests {
         use delta_model::SendStatus;
         use delta_usecase::{NewSession, SessionStore};
 
-        let dir = std::env::temp_dir().join(format!("delta-bootstrap-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("boot-reconcile.sqlite");
-        let _ = std::fs::remove_file(&path);
-        let path_str = path.to_str().unwrap().to_owned();
+        let dir = tempfile::tempdir().unwrap();
+        let config = test_config(&dir);
+        let path_str = database(&config);
 
         // The "previous process": register a session, leave one send
         // `dispatched` (what `enqueue_send` writes), and drop the connection.
@@ -340,10 +356,6 @@ mod tests {
         // The next process boots against the same file. The returned
         // interactor is dropped at the end of the statement, releasing its
         // connection before the verification re-open below.
-        let config = Config {
-            database_path: path_str.clone(),
-            ..test_config()
-        };
         build(&config, NullCommsLog::arc()).await.unwrap();
 
         let store = SqliteStore::open(&path_str).unwrap();

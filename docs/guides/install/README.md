@@ -47,7 +47,15 @@ It holds:
   that rewrites data (see [Updating](#updating)). Snapshots are kept until you
   delete them.
 - `delta-hook-state.json`, the hook state file (see below).
-- `sessions/`, the per-session working directories.
+- `sessions/`, the working directories of sessions started without a
+  repository or a chosen folder.
+- `settings/<port>.json`, the settings a session is launched with. There is one
+  file for every port the app has used.
+- `tmux.conf`, the configuration of Delta's tmux server.
+
+The directory is readable by you only (mode `0700`) when the app creates it. A
+directory an earlier version created keeps its mode; the hook state file and the
+settings files are readable by you only either way.
 
 Conversation transcripts are not in it: they stay where Claude Code and Codex
 write them.
@@ -60,17 +68,6 @@ The webview that draws the UI keeps its own storage:
 - **Ubuntu.** Inside the data directory, in `localstorage/`, `storage/`,
   `CacheStorage/` and `WebKitCache/`.
 
-The app also writes two kinds of file to the system temp directory. On Ubuntu
-that is `/tmp`. On macOS it is `$TMPDIR`, a per-user directory under
-`/var/folders/` (run `echo $TMPDIR` to see yours).
-
-- `delta-<port>/settings.json`, the settings a session is launched with. There
-  is one `delta-<port>/` directory for every port the app has used.
-- `delta-tmux-io.github.x7c1.delta.conf`, the configuration of Delta's tmux
-  server.
-
-Neither is deleted when the app quits.
-
 tmux keeps the socket of Delta's tmux server, `io.github.x7c1.delta`, in
 `/tmp/tmux-<uid>/` on both platforms (under `$TMUX_TMPDIR` instead, if you set
 it). The socket file stays there after the server ends.
@@ -81,7 +78,7 @@ Each Claude Code session calls back into Delta through hook URLs that carry
 Delta's port and a hook secret, and it keeps calling the URLs it was launched
 with until it exits — also after Delta itself has quit and started again. So
 that those calls still reach Delta and are accepted, the app keeps both in
-`delta-hook-state.json`, next to the database:
+`delta-hook-state.json`, in the data directory:
 
 - `hook_secret` — minted on the first launch and reused on every launch after.
 - `port` — the port the app took. The next launch tries it first; if another
@@ -138,7 +135,7 @@ session; their conversations stay in Delta and resume on the next send.
 
 ## Removing everything
 
-Follow these steps in order. Steps 1 to 5 delete everything listed in
+Follow these steps in order. Steps 1 to 4 delete everything listed in
 [Where the app keeps its data](#where-the-app-keeps-its-data).
 
 1. Quit the app, then end its sessions and delete the tmux socket, which
@@ -159,7 +156,10 @@ Follow these steps in order. Steps 1 to 5 delete everything listed in
    rm -rf ~/Library/WebKit/io.github.x7c1.delta ~/Library/Caches/io.github.x7c1.delta
    ```
 
-5. Delete the files in the temp directory. On macOS:
+5. If you ever ran a version from before the settings and the tmux
+   configuration moved into the data directory, delete what it left in the
+   system temp directory — `/tmp` on Ubuntu, `$TMPDIR` on macOS (a per-user
+   directory under `/var/folders/`; run `echo $TMPDIR` to see yours). On macOS:
 
    ```sh
    rm -rf "$TMPDIR"/delta-[0-9]* "$TMPDIR"/delta-tmux-io.github.x7c1.delta.conf

@@ -17,6 +17,7 @@ delta-usecase = { workspace = true }
 delta-bootstrap = { workspace = true }
 delta-wire = { workspace = true }
 anyhow = { workspace = true }
+dirs = { workspace = true }
 axum = { workspace = true }
 futures-util = { workspace = true }
 include_dir = { workspace = true, optional = true }

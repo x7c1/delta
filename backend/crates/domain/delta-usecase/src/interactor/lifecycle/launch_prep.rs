@@ -106,8 +106,14 @@ where
     W: Workspace,
     G: GitWorktree,
 {
-    /// Prepare and launch an accepted session: the shared worktree build, then
-    /// the chosen provider's tail.
+    /// Prepare and launch an accepted session: the shared worktree build (or,
+    /// for a session with neither a repository nor a chosen directory, its
+    /// scratch directory), then the chosen provider's tail.
+    ///
+    /// The scratch directory is created here, before the tail, because nothing
+    /// else creates it and neither tail can tell it is missing: tmux silently
+    /// ignores a `-c` directory that does not exist and starts the agent in the
+    /// tmux server's own working directory instead.
     ///
     /// The build comes first for both providers and must land on the path the
     /// accept phase planned — that path is already stored as the session's
@@ -142,6 +148,11 @@ where
                     built,
                 });
             }
+        }
+        if launching.scratch_workdir {
+            self.workspace
+                .create_private_dir(&launching.workdir)
+                .await?;
         }
         match &launching.target {
             LaunchTarget::Pane(pane) => {

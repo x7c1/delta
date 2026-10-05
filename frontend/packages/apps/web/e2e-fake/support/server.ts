@@ -25,9 +25,11 @@ import { ARTIFACT_DIR, REPO_ROOT } from './paths';
  *
  * ## Per-run isolation (mirrors the retired bash locals)
  *
- * - the SQLite database, spawn workdirs, the scripted-claude and scripted-codex
- *   wrappers, and a pid file live in a fresh temp dir
- *   (`delta-e2e-fake.<rand>/`), removed on teardown;
+ * - the server's data directory is a fresh temp dir (`delta-e2e-fake.<rand>/`,
+ *   handed over as `DELTA_DATA_DIR`), removed on teardown: the SQLite
+ *   database, the session settings, the tmux configuration and the spawn
+ *   workdirs land in it, beside the scripted-claude and scripted-codex
+ *   wrappers and a pid file;
  * - tmux runs on a unique per-run socket (`delta-e2e-fake-<pid>`), killed on
  *   teardown, so a leftover or parallel run never collides;
  * - the fake's transcripts live under the temp dir too, and are copied into
@@ -220,17 +222,6 @@ function sweepStaleRuns(): void {
     }
     fs.rmSync(dir, { recursive: true, force: true });
   }
-
-  // Stale tmux config files: the server writes /tmp/delta-tmux-<socket>.conf
-  // for every socket it opens and never deletes it, so even clean runs leave
-  // one behind. Prefix-matched to this suite's sockets, so a dev socket's
-  // conf is never touched.
-  for (const name of entries) {
-    if (!name.startsWith(`delta-tmux-${SOCKET_PREFIX}`) || !name.endsWith('.conf')) {
-      continue;
-    }
-    fs.rmSync(path.join(tmpBase, name), { force: true });
-  }
 }
 
 /**
@@ -296,12 +287,9 @@ export async function bootServer(): Promise<ServerHandle> {
   sweepStaleRuns();
 
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), TMP_PREFIX));
-  const dbPath = path.join(runDir, 'delta.db');
-  const workdir = path.join(runDir, 'workdir');
   const transcripts = path.join(runDir, 'transcripts');
   const pidFile = path.join(runDir, 'server.pids');
   const tmuxSocket = `${SOCKET_PREFIX}${process.pid}`;
-  fs.mkdirSync(workdir, { recursive: true });
   fs.mkdirSync(transcripts, { recursive: true });
   // Everything this boot preserves for CI goes here: its generation logs, and
   // the transcripts copied out on teardown.
@@ -374,8 +362,7 @@ export async function bootServer(): Promise<ServerHandle> {
           RUST_LOG: SERVER_RUST_LOG,
           DELTA_PORT: String(BACKEND_PORT),
           DELTA_AUTH_TOKEN: AUTH_TOKEN,
-          DELTA_DB_PATH: dbPath,
-          DELTA_SESSION_WORKDIR: workdir,
+          DELTA_DATA_DIR: runDir,
           DELTA_TMUX_SOCKET: tmuxSocket,
           DELTA_CLAUDE_BIN: wrapper,
           DELTA_CODEX_BIN: codexWrapper,

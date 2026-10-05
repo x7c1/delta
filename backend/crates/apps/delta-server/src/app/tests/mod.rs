@@ -21,6 +21,7 @@ mod workdir;
 
 use super::{router, AppState};
 use delta_bootstrap::Config;
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -53,10 +54,26 @@ pub(super) fn hook_query() -> String {
     format!("?hs={TEST_HOOK_SECRET}")
 }
 
-async fn test_state() -> AppState {
-    AppState::build(&Config {
-        database_path: ":memory:".into(),
-        session_workdir_base: "/tmp/delta-test-session".into(),
+thread_local! {
+    /// The data directories of the states built on this thread.
+    ///
+    /// A state's database lives in its data directory, which has to outlive the
+    /// state, but the states are handed out bare. Each test runs on a thread of
+    /// its own (libtest spawns one per test, and a `#[tokio::test]` runtime runs
+    /// on it), so the directories are removed when the test that built them
+    /// ends.
+    static DATA_DIRS: RefCell<Vec<tempfile::TempDir>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The configuration every state built in these tests starts from, in a fresh
+/// data directory of its own, so no two tests share a database.
+pub(super) fn test_config() -> Config {
+    let dir = tempfile::tempdir().unwrap();
+    let data_dir = dir.path().to_string_lossy().into_owned();
+    DATA_DIRS.with_borrow_mut(|dirs| dirs.push(dir));
+    Config {
+        identifier: "delta-test".into(),
+        data_dir,
         worktree_base: "/tmp/delta-test-worktrees".into(),
         tmux_socket: "delta-test".into(),
         auth_token: TEST_AUTH_TOKEN.into(),
@@ -64,12 +81,19 @@ async fn test_state() -> AppState {
         transcript_root: TEST_TRANSCRIPT_ROOT.into(),
         port: 7878,
         hook_endpoint_changed: false,
+        launch: delta_usecase::LaunchConfig::default(),
+    }
+}
+
+async fn test_state() -> AppState {
+    AppState::build(&Config {
         launch: delta_usecase::LaunchConfig {
             // The permission-request hook test exercises the no-decision
             // passthrough, which waits out this deadline; keep it short.
             permission_decision_deadline: std::time::Duration::from_millis(50),
             ..delta_usecase::LaunchConfig::default()
         },
+        ..test_config()
     })
     .await
     .unwrap()
@@ -89,7 +113,7 @@ async fn test_state_with_unavailable_gh() -> AppState {
 /// is only observable as "gh was never invoked" — this counter is that
 /// observation.
 async fn test_state_with_gh_stub() -> (AppState, Arc<AtomicUsize>) {
-    // Mirror `test_state()`'s config exactly, then override the
+    // Start from the shared `test_config()`, then override the
     // wired Interactor's gh driver with a deterministic stub.
     struct UnavailableGh {
         clone_calls: Arc<AtomicUsize>,
@@ -121,18 +145,7 @@ async fn test_state_with_gh_stub() -> (AppState, Arc<AtomicUsize>) {
     let gh = Arc::new(UnavailableGh {
         clone_calls: Arc::clone(&clone_calls),
     });
-    let config = delta_bootstrap::Config {
-        database_path: ":memory:".into(),
-        session_workdir_base: "/tmp/delta-test-session".into(),
-        worktree_base: "/tmp/delta-test-worktrees".into(),
-        tmux_socket: "delta-test".into(),
-        auth_token: TEST_AUTH_TOKEN.into(),
-        hook_secret: TEST_HOOK_SECRET.into(),
-        transcript_root: TEST_TRANSCRIPT_ROOT.into(),
-        port: 7878,
-        hook_endpoint_changed: false,
-        launch: delta_usecase::LaunchConfig::default(),
-    };
+    let config = test_config();
     let interactor = delta_bootstrap::build(&config, delta_usecase::NullCommsLog::arc())
         .await
         .unwrap()

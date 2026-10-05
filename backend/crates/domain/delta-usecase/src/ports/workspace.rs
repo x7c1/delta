@@ -28,6 +28,15 @@ pub trait Workspace: Send + Sync {
     /// the current port.
     async fn write_session_settings(&self, settings_path: &str, settings_json: &str) -> Result<()>;
 
+    /// Create the directory `path` (and any missing ancestors) owner-only,
+    /// leaving one that already exists as it is.
+    ///
+    /// Used for the per-spawn scratch directory a session without a repository
+    /// is launched in, which nothing else creates: an agent asked to start in a
+    /// directory that does not exist would start somewhere else instead (tmux
+    /// silently ignores a missing `-c` directory).
+    async fn create_private_dir(&self, path: &str) -> Result<()>;
+
     /// Canonicalize `path` and confirm it is an existing directory, returning
     /// the canonical absolute path.
     ///
@@ -54,6 +63,10 @@ impl Workspace for Box<dyn Workspace> {
         (**self)
             .write_session_settings(settings_path, settings_json)
             .await
+    }
+
+    async fn create_private_dir(&self, path: &str) -> Result<()> {
+        (**self).create_private_dir(path).await
     }
 
     async fn resolve_existing_dir(&self, path: &str) -> Result<String> {

@@ -22,7 +22,7 @@ pub(super) fn auth_token(from_env: Option<String>) -> String {
 /// it (kept as a seam symmetrical with `DELTA_AUTH_TOKEN`); otherwise a random
 /// one is minted — the server must always hold a non-empty secret, since an
 /// empty one would authenticate every hook request. The binaries then replace a
-/// minted one with the secret kept beside the database (see
+/// minted one with the secret kept in the data directory (see
 /// [`super::adopt_persisted_hook_secret`]), so it survives restarts.
 pub(super) fn hook_secret(from_env: Option<String>) -> String {
     from_env

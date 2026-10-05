@@ -12,13 +12,11 @@ fn config(vars: &[(&str, &str)]) -> Config {
 }
 
 #[test]
-fn defaults_are_cwd_relative_and_home_based() {
+fn defaults_are_named_by_the_identifier_and_home_based() {
     let config = config(&[("HOME", "/home/u")]);
-    assert_eq!(config.database_path, "delta.db");
-    assert_eq!(config.session_workdir_base, ".tmp/session");
+    assert_eq!(config.identifier, DEFAULT_IDENTIFIER);
     assert_eq!(config.worktree_base, "/home/u/.delta/worktrees");
     assert_eq!(config.transcript_root, "/home/u/.claude/projects");
-    assert_eq!(config.tmux_socket, delta_bootstrap::DEFAULT_TMUX_SOCKET);
     assert_eq!(config.port, 7878);
     let defaults = delta_usecase::LaunchConfig::default();
     assert_eq!(config.launch.claude_bin, defaults.claude_bin);
@@ -27,6 +25,57 @@ fn defaults_are_cwd_relative_and_home_based() {
         config.launch.slash_command_echo_deadline,
         defaults.slash_command_echo_deadline
     );
+}
+
+#[test]
+fn the_default_data_dir_and_tmux_socket_are_named_by_the_identifier() {
+    for (vars, identifier) in [
+        (&[][..], DEFAULT_IDENTIFIER),
+        (
+            &[("DELTA_IDENTIFIER", "io.example.other")][..],
+            "io.example.other",
+        ),
+    ] {
+        let config = config(vars);
+        assert_eq!(config.identifier, identifier);
+        let data_dir = std::path::Path::new(&config.data_dir);
+        assert!(
+            data_dir.is_absolute(),
+            "{} must not depend on the working directory",
+            config.data_dir
+        );
+        assert!(
+            data_dir.ends_with(identifier),
+            "{} must end with the identifier",
+            config.data_dir
+        );
+        assert_eq!(config.tmux_socket, identifier);
+    }
+}
+
+#[test]
+fn the_default_data_dir_is_the_platform_data_dir() {
+    // The directory Tauri's `app_data_dir()` names for the desktop app, so an
+    // existing install keeps its database.
+    let config = config(&[]);
+    assert_eq!(
+        std::path::PathBuf::from(&config.data_dir),
+        dirs::data_dir().unwrap().join(DEFAULT_IDENTIFIER)
+    );
+}
+
+#[test]
+fn a_shell_identifier_wins_over_the_variable() {
+    let vars: HashMap<&str, OsString> = [("DELTA_IDENTIFIER", OsString::from("io.example.env"))]
+        .into_iter()
+        .collect();
+    let config = config_from_vars_for(
+        |name| vars.get(name).cloned(),
+        Some("io.example.app".to_owned()),
+    );
+    assert_eq!(config.identifier, "io.example.app");
+    assert_eq!(config.tmux_socket, "io.example.app");
+    assert!(config.data_dir.ends_with("io.example.app"));
 }
 
 #[test]
@@ -57,8 +106,8 @@ fn minted_secrets_are_64_hex_characters_and_distinct() {
 fn explicit_variables_override_every_default() {
     let config = config(&[
         ("HOME", "/home/u"),
-        ("DELTA_DB_PATH", "/data/d.db"),
-        ("DELTA_SESSION_WORKDIR", "/data/s"),
+        ("DELTA_IDENTIFIER", "io.example.delta"),
+        ("DELTA_DATA_DIR", "/data/d"),
         ("DELTA_WORKTREE_BASE", "/data/w"),
         ("DELTA_TMUX_SOCKET", "sock"),
         ("DELTA_AUTH_TOKEN", "tok"),
@@ -72,8 +121,8 @@ fn explicit_variables_override_every_default() {
         ("DELTA_ECHO_DEADLINE_MS", "40"),
         ("DELTA_SLASH_COMMAND_ECHO_DEADLINE_MS", "50"),
     ]);
-    assert_eq!(config.database_path, "/data/d.db");
-    assert_eq!(config.session_workdir_base, "/data/s");
+    assert_eq!(config.identifier, "io.example.delta");
+    assert_eq!(config.data_dir, "/data/d");
     assert_eq!(config.worktree_base, "/data/w");
     assert_eq!(config.tmux_socket, "sock");
     assert_eq!(config.auth_token, "tok");
@@ -117,7 +166,13 @@ fn empty_overrides_that_must_not_be_empty_fall_back() {
         ("DELTA_TRANSCRIPT_ROOT", ""),
         ("CLAUDE_CONFIG_DIR", ""),
         ("DELTA_CLAUDE_BIN", ""),
+        ("DELTA_IDENTIFIER", ""),
+        ("DELTA_DATA_DIR", ""),
+        ("DELTA_TMUX_SOCKET", ""),
     ]);
+    assert_eq!(config.identifier, DEFAULT_IDENTIFIER);
+    assert!(config.data_dir.ends_with(DEFAULT_IDENTIFIER));
+    assert_eq!(config.tmux_socket, DEFAULT_IDENTIFIER);
     assert_eq!(config.transcript_root, "/home/u/.claude/projects");
     assert_eq!(
         config.launch.claude_bin,
@@ -133,9 +188,9 @@ fn an_unparseable_port_falls_back_to_the_default() {
 #[test]
 fn adopting_the_persisted_secret_replaces_the_minted_one_and_flags_a_change() {
     let dir = tempfile::tempdir().unwrap();
-    let database = dir.path().join("delta.db").to_string_lossy().into_owned();
+    let data_dir = dir.path().to_string_lossy().into_owned();
     let start = || {
-        let mut config = config(&[("DELTA_DB_PATH", &database)]);
+        let mut config = config(&[("DELTA_DATA_DIR", &data_dir)]);
         adopt_hook_secret(&mut config, None).unwrap();
         config
     };
@@ -155,7 +210,7 @@ fn adopting_the_persisted_secret_replaces_the_minted_one_and_flags_a_change() {
         first.session_settings_path()
     );
 
-    let mut overridden = config(&[("DELTA_DB_PATH", &database)]);
+    let mut overridden = config(&[("DELTA_DATA_DIR", &data_dir)]);
     adopt_hook_secret(&mut overridden, Some("hs".into())).unwrap();
     assert_eq!(overridden.hook_secret, "hs");
     assert!(overridden.hook_endpoint_changed);

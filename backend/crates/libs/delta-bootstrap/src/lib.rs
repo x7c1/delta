@@ -31,7 +31,13 @@ mod build;
 pub use build::build;
 
 mod config;
-pub use config::{Config, DEFAULT_TMUX_SOCKET};
+pub use config::{Config, DEFAULT_IDENTIFIER};
+
+mod data_layout;
+pub use data_layout::DataLayout;
+
+mod data_dir_error;
+pub use data_dir_error::DataDirError;
 
 mod launch_option_catalog;
 pub use launch_option_catalog::{all_launch_option_presets, launch_option_catalog};

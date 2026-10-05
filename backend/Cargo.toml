@@ -47,6 +47,11 @@ async-trait = "0.1"
 # bits required for the current use (computing a date-naive cutoff for gh
 # search queries).
 chrono = "0.4"
+# The platform data directory (`~/Library/Application Support`, `$XDG_DATA_HOME`
+# or `~/.local/share`), resolved the way Tauri's `app_data_dir()` resolves it —
+# Tauri builds on this same crate — so the server's default data directory is
+# the desktop app's.
+dirs = "7"
 libc = "0.2"
 axum = { version = "0.8", features = ["ws"] }
 futures-util = "0.3"

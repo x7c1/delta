@@ -83,9 +83,12 @@ async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
         .expect("bind hook listener");
     let port = listener.local_addr().expect("local addr").port();
 
+    // The run directory is the server's data directory: the database, the
+    // session settings, the tmux configuration and the per-spawn working
+    // directories all land in it, so the run leaves nothing elsewhere.
     let config = Config {
-        database_path: temp.path().join("delta.db").to_string_lossy().into_owned(),
-        session_workdir_base: temp.path().join("workdirs").to_string_lossy().into_owned(),
+        identifier: tmux_socket.clone(),
+        data_dir: temp.path().to_string_lossy().into_owned(),
         worktree_base: temp.path().join("worktrees").to_string_lossy().into_owned(),
         tmux_socket: tmux_socket.clone(),
         auth_token: AUTH_TOKEN.into(),

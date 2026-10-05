@@ -76,7 +76,7 @@ use axum::Json;
 use serde_json::Value;
 
 use delta_attribution::claude_format;
-use delta_bootstrap::render_session_settings;
+use delta_bootstrap::{render_session_settings, DataLayout};
 use delta_model::Role;
 use delta_usecase::{pane_for, TmuxDriver};
 use delta_wire::hooks::{
@@ -262,7 +262,15 @@ impl ClaudeSession {
         ]);
 
         let socket = format!("delta-canary-{name}-{}", std::process::id());
-        let tmux = Tmux::new(socket.clone());
+        // The run directory stands in for the server's data directory, so the
+        // tmux configuration lands there and goes with it on drop.
+        let tmux = Tmux::new(
+            socket.clone(),
+            DataLayout::new(&run_dir)
+                .tmux_conf()
+                .to_string_lossy()
+                .into_owned(),
+        );
         let tmux_name = "canary";
         tmux.create_session(tmux_name, &workdir.to_string_lossy(), &command)
             .await
@@ -309,10 +317,6 @@ impl Drop for ClaudeSession {
             .args(["-L", &self.socket, "kill-server"])
             .output();
         let _ = std::fs::remove_dir_all(&self.run_dir);
-        // The per-socket config tmux-driver renders for `-f`.
-        let _ = std::fs::remove_file(
-            std::env::temp_dir().join(format!("delta-tmux-{}.conf", self.socket)),
-        );
     }
 }
 

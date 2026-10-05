@@ -18,10 +18,10 @@ pub enum Error {
     #[error("permission denied: {0}")]
     Permission(String),
 
-    /// A Delta-owned path the settings file is written through is not safe to
-    /// use (e.g. its parent directory exists as a symlink, so writing would
-    /// land somewhere another local user chose).
-    #[error("unsafe settings path: {0}")]
+    /// A Delta-owned path is not safe to use (e.g. the settings file's parent
+    /// directory exists as a symlink, so writing would land somewhere another
+    /// local user chose, or a directory to create exists as a file).
+    #[error("unsafe path: {0}")]
     UnsafePath(String),
 }
 

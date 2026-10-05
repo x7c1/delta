@@ -127,7 +127,6 @@ teardown() {
   # untouched.
   tmux -L "$TMUX_SOCKET" kill-server 2>/dev/null || true
   rm -rf "$RUN_DIR" "$WORKDIR"
-  rm -f "${TMPDIR:-/tmp}/delta-tmux-$TMUX_SOCKET.conf"
   # Best-effort removal of the transcript claude wrote for this run's
   # session under ~/.claude/projects (the project directory is the munged
   # working-directory path). The killed claude flushes its transcript once
@@ -150,9 +149,11 @@ log "Server log: $RUN_DIR/server.log"
 # breaks the whole loop. Delta in production is launched from a normal shell
 # where these are unset; this only matters when the suite itself is driven
 # from inside a Claude Code session.
+#
+# The run directory is the server's data directory: the database, the session
+# settings and the tmux configuration land in it and go with it on teardown.
 DELTA_PORT="$BACKEND_PORT" \
-  DELTA_DB_PATH="$RUN_DIR/delta.db" \
-  DELTA_SESSION_WORKDIR="$WORKDIR" \
+  DELTA_DATA_DIR="$RUN_DIR" \
   DELTA_TMUX_SOCKET="$TMUX_SOCKET" \
   DELTA_CLAUDE_BIN="$CLAUDE_BIN" \
   DELTA_AUTH_TOKEN="$DELTA_AUTH_TOKEN" \

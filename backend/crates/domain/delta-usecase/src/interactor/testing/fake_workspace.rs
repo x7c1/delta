@@ -9,7 +9,8 @@ use crate::error::Result;
 use crate::ports::Workspace;
 
 /// Records the session settings written, so tests can assert the path and the
-/// rendered JSON the server passed in. Also models a small set of "existing"
+/// rendered JSON the server passed in, and the directories it was asked to
+/// create. Also models a small set of "existing"
 /// directories so the workdir-validation path can be exercised: a resolvable
 /// path is returned canonicalized (here, prefixed with `/canon` so a test can
 /// tell the canonical form apart from the input), anything else is an
@@ -17,6 +18,11 @@ use crate::ports::Workspace;
 #[derive(Default)]
 pub(crate) struct FakeWorkspace {
     pub(crate) written: Mutex<Vec<(String, String)>>,
+    /// The directories `create_private_dir` was asked to create, in order.
+    pub(crate) created_dirs: Mutex<Vec<String>>,
+    /// When set, `create_private_dir` fails instead of recording the
+    /// directory, simulating a scratch directory that cannot be created.
+    pub(crate) fail_create_dir: Mutex<bool>,
     /// Paths that "exist" as directories; `resolve_existing_dir` accepts these.
     pub(crate) existing_dirs: Mutex<Vec<String>>,
 }
@@ -36,6 +42,16 @@ impl Workspace for FakeWorkspace {
             .lock()
             .unwrap()
             .push((settings_path.to_owned(), settings_json.to_owned()));
+        Ok(())
+    }
+
+    async fn create_private_dir(&self, path: &str) -> Result<()> {
+        if *self.fail_create_dir.lock().unwrap() {
+            return Err(crate::error::Error::Workspace(format!(
+                "{path}: could not create the directory"
+            )));
+        }
+        self.created_dirs.lock().unwrap().push(path.to_owned());
         Ok(())
     }
 

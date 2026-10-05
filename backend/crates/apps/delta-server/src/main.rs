@@ -11,7 +11,13 @@ use delta_server::{config, serve, AppState};
 async fn main() -> anyhow::Result<()> {
     serve::init_tracing();
 
-    let mut config = config::config_from_env();
+    let mut config = config::config_from_env()?;
+    tracing::info!(
+        identifier = %config.identifier,
+        data_dir = %config.data_dir,
+        tmux_socket = %config.tmux_socket,
+        "delta-server data directory"
+    );
 
     // Record which upstream `claude` binary this server is running against,
     // before any session activity, so the boot banner carries the version
@@ -38,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
     serve::serve(state, listener).await
 }
 
-/// Settle the hook secret kept beside the database, then build the state.
+/// Settle the hook secret kept in the data directory, then build the state.
 ///
 /// The port stays the fixed one the configuration names (`DELTA_PORT`, else
 /// [`config::DEFAULT_PORT`]); only the desktop app records and re-chooses its

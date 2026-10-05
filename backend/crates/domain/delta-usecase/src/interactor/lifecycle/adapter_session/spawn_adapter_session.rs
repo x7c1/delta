@@ -190,10 +190,7 @@ where
                 None => {
                     let cwd = match &requested_workdir {
                         Some(dir) => dir.clone(),
-                        None => std::path::Path::new(&self.session_workdir_base)
-                            .join(session_id.as_str())
-                            .to_string_lossy()
-                            .into_owned(),
+                        None => self.scratch_workdir_for(session_id.as_str()),
                     };
                     (None, None, None, cwd, None)
                 }
@@ -259,6 +256,7 @@ where
         let launching = LaunchingSpawn {
             token: PaneToken::for_adapter_launch(&session_id),
             workdir: cwd,
+            scratch_workdir: planned_worktree.is_none() && requested_workdir.is_none(),
             worktree: planned_worktree,
             target: LaunchTarget::Adapter(AdapterLaunch {
                 provider,
