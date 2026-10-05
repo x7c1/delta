@@ -12,8 +12,8 @@ lifecycle but does not spawn anything on startup or on page load: on load the UI
 shows the session list (empty on a fresh database), and the first Send from the
 composer (or a New action) spawns a session, so there is nothing else to launch.
 
-`make desktop-dev` shows the same dev environment — database, sessions, tmux
-socket, port — through the desktop shell instead of the browser; it and `make
+`make desktop-dev` shows the same dev environment — data directory, tmux socket,
+port — through the desktop shell instead of the browser; it and `make
 dev` never run at once. The installed desktop app is a separate environment;
 [Two environments](#two-environments-the-installed-app-and-the-dev-environment)
 lays out which is which.
@@ -31,26 +31,36 @@ lays out which is which.
 ## Launch
 
 ```bash
-make dev                 # default session workdir: .tmp/session
-make dev WORKDIR=~/scratch # or pass your own working directory for claude
+make dev
 ```
 
 `make dev` runs `scripts/dev.sh`, which:
 
-1. Starts `delta-server` (`DELTA_PORT=7878`), passing the session working
-   directory. The server owns the `claude` session lifecycle: when a session is
-   spawned (first Send / New) it creates the tmux session and launches `claude
-   --settings <file>` with Delta's rendered session settings (so the hooks point
-   at `http://127.0.0.1:7878/hooks/...`); the settings file lives outside the
-   working directory, so a real project's own `.claude/settings.json` is never
-   touched. Nothing is spawned on startup. The hook URLs also carry a hook
-   secret, which the server keeps in `backend/delta-hook-state.json` (beside
-   `backend/delta.db`, mode `0600`) and reuses on every start, so a session
-   still running when the server restarts — after a crash, or when you restart
-   only `delta-server` — still reaches it. `make down` ends the dev sessions
-   along with the server, so none outlives that.
-   Delete that file to rotate the secret; `DELTA_HOOK_SECRET` overrides it
-   without replacing it.
+1. Starts `delta-server` (`DELTA_PORT=7878`) under the dev identifier
+   (`DELTA_IDENTIFIER=io.github.x7c1.delta.dev`). The identifier gives the
+   server its own data directory — `~/.local/share/io.github.x7c1.delta.dev/`
+   on Linux (`$XDG_DATA_HOME` when set), `~/Library/Application
+   Support/io.github.x7c1.delta.dev/` on macOS — and its own tmux socket, so
+   nothing it writes mixes with the installed app's. The layout of that
+   directory is in [the development guide](README.md#backend-backend). The
+   server owns the `claude` session lifecycle: when a session is spawned (first
+   Send / New) it creates the tmux session and launches `claude --settings
+   <file>` with Delta's rendered session settings (so the hooks point at
+   `http://127.0.0.1:7878/hooks/...`); the settings file lives in the data
+   directory, so a real project's own `.claude/settings.json` is never touched.
+   A session started without a repository or a chosen directory runs in
+   `sessions/<token>` there. Nothing is spawned on startup. The hook URLs also
+   carry a hook secret, which the server keeps in `delta-hook-state.json` in the
+   data directory (mode `0600`) and reuses on every start, so a session still
+   running when the server restarts — after a crash, or when you restart only
+   `delta-server` — still reaches it. `make down` ends the dev sessions along
+   with the server, so none outlives that. Delete that file to rotate the
+   secret; `DELTA_HOOK_SECRET` overrides it without replacing it.
+
+   A dev environment from before the data directory kept its database in
+   `backend/delta.db`. That file is no longer read: `make dev` starts with an
+   empty session list in the new directory, and the old file stays where it is
+   until you delete it.
 2. Installs and builds the frontend workspace libraries, then starts the web dev
    server against the real backend (port 5173).
 
@@ -101,19 +111,18 @@ build the server with the frontend compiled in:
 ```bash
 make server-embedded   # builds the SPA (make web-dist), then delta-server with --features embed-web
 make down              # the binary takes the same port 7878 as make dev's server
-DELTA_PORT=7878 DELTA_DB_PATH=backend/delta.db DELTA_TMUX_SOCKET=io.github.x7c1.delta.dev \
+DELTA_PORT=7878 DELTA_IDENTIFIER=io.github.x7c1.delta.dev \
   backend/target/release/delta-server
 ```
 
 Then open <http://127.0.0.1:7878/>. The server hands out the page with the
 per-run token injected, so `DELTA_AUTH_TOKEN` is optional (a bare run mints
-one). Unlike `make dev`, nothing sets the other `DELTA_*` variables for you, and
-the server's defaults are relative to its working directory: `DELTA_DB_PATH`
-defaults to `delta.db` there, so from the repository root pass
-`backend/delta.db` (the database `make dev` uses) to see the same sessions.
-`DELTA_TMUX_SOCKET` likewise points it at `make dev`'s tmux server; without it
-the server uses the default socket, the one the desktop app runs its sessions
-on, and `make down` would not end the sessions it spawns.
+one). Unlike `make dev`, nothing sets the other `DELTA_*` variables for you.
+`DELTA_IDENTIFIER` points it at `make dev`'s data directory, so it shows the
+same sessions, and at `make dev`'s tmux server; without it the server runs
+under the installed app's identifier — its data directory and the tmux socket
+it runs its sessions on — and `make down` would not end the sessions it
+spawns.
 What is served, and how the page gets the token, is in
 [the API guide](../api/README.md#the-built-frontend-embed-web). A plain
 `cargo build` never needs `dist/`: only the `embed-web` feature compiles it in.
@@ -128,17 +137,16 @@ each other's way. (Both read the agents' own records — Claude Code's
 | | Installed app | Dev environment |
 | --- | --- | --- |
 | Started by | the bundle `make desktop` builds and installs (the `.deb`, `Delta.app`) | `make dev` (browser) or `make desktop-dev` (desktop shell) |
-| Identifier | `io.github.x7c1.delta` | `io.github.x7c1.delta.dev` (`make desktop-dev` only) |
-| Database | `delta.db` in the app data directory | `backend/delta.db` (or `DELTA_DB_PATH`) |
-| Session workdirs | `sessions/` in the app data directory | `.tmp/session` (or `WORKDIR`) |
+| Identifier | `io.github.x7c1.delta` | `io.github.x7c1.delta.dev` |
+| Data directory (database, settings, tmux config, session workdirs) | `<platform data dir>/io.github.x7c1.delta/` | `<platform data dir>/io.github.x7c1.delta.dev/` |
 | Git worktrees | `~/.delta/worktrees` | `~/.delta-dev/worktrees` |
 | tmux socket | `io.github.x7c1.delta` | `io.github.x7c1.delta.dev` |
 | Port | the one recorded in the hook state file | 7878, pinned |
 | Stopped by | closing its window | `make down` (`make reset` also deletes the database); closing the `make desktop-dev` window stops only its server |
 
 `make dev` and `make desktop-dev` are two views of the **same** dev environment:
-`scripts/dev.sh` holds the database, tmux socket, port, session workdir and
-worktree base for both, so a session spawned in the browser is listed in the dev desktop shell and
+`scripts/dev.sh` holds the identifier (which names the data directory and the
+tmux socket), the port and the worktree base for both, so a session spawned in the browser is listed in the dev desktop shell and
 the other way round. Only the frontend differs — Vite on port 5173 for `make
 dev`, the SPA embedded in the shell (built by `make web-dist`) for `make
 desktop-dev`. They cannot run at the same time: both bind 127.0.0.1:7878, so
@@ -163,17 +171,18 @@ that same shell (above). See
 The installed app shares nothing with `make dev` (the table above), so the two
 run side by side and `make down` and `make reset` leave the app's sessions
 running. `DELTA_TMUX_SOCKET` overrides either tmux socket. The points below
-describe the installed app; `make desktop-dev` sets `DELTA_DB_PATH`,
-`DELTA_SESSION_WORKDIR`, `DELTA_TMUX_SOCKET` and `DELTA_PORT` to the dev
-environment's values, so the data and port rules that follow from them apply
+describe the installed app; `make desktop-dev` runs under the dev identifier,
+which names the dev environment's data directory and tmux socket, and sets
+`DELTA_PORT` to 7878, so the data and port rules that follow from them apply
 to it instead.
 
-- **Data.** The database and the per-spawn working directories live in the app
-  data directory, created on first run: `delta.db` and `sessions/` under
-  `~/Library/Application Support/io.github.x7c1.delta/` on macOS and
-  `~/.local/share/io.github.x7c1.delta/` on Linux. So the app starts with its own
-  session list, not the one `make dev` shows from `backend/delta.db`. An explicit
-  `DELTA_DB_PATH` / `DELTA_SESSION_WORKDIR` still wins, and the worktree base
+- **Data.** The app passes its bundle identifier to the server, which keeps
+  everything it writes in the data directory that identifier names, created on
+  first run: `~/Library/Application Support/io.github.x7c1.delta/` on macOS and
+  `~/.local/share/io.github.x7c1.delta/` on Linux — the directory Tauri names
+  the app data directory, so an install from before keeps its database. So the
+  app starts with its own session list, not the one `make dev` shows. An
+  explicit `DELTA_DATA_DIR` still wins, and the worktree base
   (`$HOME/.delta/worktrees`) and the transcript root (where Claude Code writes)
   keep their usual defaults.
 - **Port.** The app has no fixed port, so it never collides with a `make dev`
@@ -183,8 +192,7 @@ to it instead.
   `DELTA_PORT` pins a port; that one is used as-is and never recorded. The dev
   environment pins 7878 this way, so the port recording is exercised only by
   the installed app.
-- **Hook state file.** `delta-hook-state.json`, next to the database (the
-  directory of `DELTA_DB_PATH`), keeps the hook secret and the app's port so a
+- **Hook state file.** `delta-hook-state.json`, in the data directory, keeps the hook secret and the app's port so a
   session that outlives a restart still reaches the server with hook URLs it
   accepts. It is created `0600`; a file found readable by others is tightened
   to `0600` with a warning. `DELTA_HOOK_SECRET` overrides the recorded secret
@@ -233,5 +241,6 @@ make down
 
 This stops `delta-server` (or a running `make desktop-dev`, which holds the same
 port 7878), the frontend dev server (port 5173), and every `delta-<n>` tmux
-session the server spawned. To also delete the SQLite overlay
-so the next start recreates an empty schema, run `make reset` instead.
+session the server spawned. To also delete the SQLite overlay in the dev data
+directory so the next start recreates an empty schema, run `make reset`
+instead.

@@ -24,9 +24,9 @@ mod reap_stale_spawns;
 mod reap_tick;
 mod record_launched_pane;
 mod refresh_session_settings;
+mod scratch_workdir_for;
 mod spawn_fresh;
 mod tear_down_bound_session;
-mod workdir_for;
 mod worktree_launch_dir;
 
 pub(in crate::interactor) use adapter_launch::PreparedAdapterLaunch;

@@ -36,22 +36,21 @@ pub struct Tmux {
     socket: String,
     /// Path to the rendered [`conf::DELTA_TMUX_CONF`] file passed via `tmux -f`.
     ///
-    /// Per-socket so concurrent Delta servers on different sockets never share a
-    /// file. Written by
+    /// Chosen by the caller (the server derives it from its data directory, so
+    /// servers with different data directories never share a file). Written by
     /// [`create_session`](delta_usecase::TmuxDriver::create_session) before the
     /// server starts.
     conf_path: String,
 }
 
 impl Tmux {
-    /// Create a driver bound to a dedicated tmux socket.
-    pub fn new(socket: impl Into<String>) -> Self {
-        let socket = socket.into();
-        let conf_path = std::env::temp_dir()
-            .join(format!("delta-tmux-{socket}.conf"))
-            .to_string_lossy()
-            .into_owned();
-        Self { socket, conf_path }
+    /// Create a driver bound to a dedicated tmux socket, starting that socket's
+    /// server with the configuration written to `conf_path`.
+    pub fn new(socket: impl Into<String>, conf_path: impl Into<String>) -> Self {
+        Self {
+            socket: socket.into(),
+            conf_path: conf_path.into(),
+        }
     }
 
     /// Run `tmux -L <socket> -f <conf> <args>`, returning the captured output.
@@ -108,14 +107,9 @@ mod tests {
     }
 
     #[test]
-    fn conf_path_is_derived_per_socket() {
-        // The config path is namespaced by socket so concurrent Delta servers on
-        // different sockets never write over each other's config.
-        assert!(Tmux::new("delta")
-            .conf_path
-            .ends_with("delta-tmux-delta.conf"));
-        assert!(Tmux::new("other")
-            .conf_path
-            .ends_with("delta-tmux-other.conf"));
+    fn conf_path_is_the_one_the_caller_chose() {
+        let tmux = Tmux::new("delta", "/data/delta/tmux.conf");
+        assert_eq!(tmux.socket, "delta");
+        assert_eq!(tmux.conf_path, "/data/delta/tmux.conf");
     }
 }

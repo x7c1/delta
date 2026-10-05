@@ -167,28 +167,31 @@ pub(crate) fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (R
     );
 
     let interactor = Interactor::new(
-        Box::new(Tmux::new("delta-codex-full-loop")) as Box<dyn TmuxDriver>,
+        // The guard's directory stands in for the server's data directory: the
+        // tmux configuration, the scratch working directories and the settings
+        // file land in it and go with it on drop.
+        Box::new(Tmux::new(
+            "delta-codex-full-loop",
+            scenario
+                .dir
+                .join("tmux.conf")
+                .to_string_lossy()
+                .into_owned(),
+        )) as Box<dyn TmuxDriver>,
         Box::new(JsonlTranscript::new()) as Box<dyn Transcript>,
         Box::new(store) as Box<dyn delta_usecase::SessionStore>,
         Box::new(FsWorkspace::new()) as Box<dyn Workspace>,
         Box::new(Git::new()) as Box<dyn GitWorktree>,
-        std::env::temp_dir()
-            .join("delta-codex-full-loop-session")
-            .to_string_lossy()
-            .into_owned(),
+        scenario.dir.join("sessions").to_string_lossy().into_owned(),
         std::env::temp_dir()
             .join("delta-codex-full-loop-worktrees")
             .to_string_lossy()
             .into_owned(),
         "{}",
-        // Per-process, not a fixed shared path: the settings file is now written
-        // 0600, so a leftover owned by another user on a shared host would make
-        // every later run of this suite fail to open it.
-        std::env::temp_dir()
-            .join(format!(
-                "delta-codex-full-loop-settings-{}.json",
-                std::process::id()
-            ))
+        scenario
+            .dir
+            .join("settings")
+            .join("7878.json")
             .to_string_lossy()
             .into_owned(),
     )

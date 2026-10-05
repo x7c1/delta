@@ -64,16 +64,14 @@ impl Tmux {
     /// Write [`DELTA_TMUX_CONF`] to [`Tmux::conf_path`], owner-readable only and
     /// never through a symlink.
     ///
-    /// The path is fully predictable (the production socket is a constant), and
-    /// tmux *executes* every directive in the file it is handed via `-f`. On a
-    /// shared Linux host, where `/tmp` is world-writable, another local user
-    /// could therefore pre-plant this file — or a symlink standing in for it —
-    /// and have Delta's tmux server load their directives. (macOS `$TMPDIR` is
-    /// already per-user 0700, so the exposure is the multi-user Linux case.)
-    /// `O_NOFOLLOW` makes the `open(2)` fail on a symlink instead of following
-    /// it, and 0600 keeps the file un-writable by anyone but its owner
-    /// afterwards; `mode` applies only on creation, so a file left at 0644 by an
-    /// older Delta run is tightened explicitly.
+    /// tmux *executes* every directive in the file it is handed via `-f`, so
+    /// nobody but its owner may be able to plant or change it. The server keeps
+    /// it in its owner-only data directory; the write still refuses a symlink
+    /// (`O_NOFOLLOW` makes the `open(2)` fail instead of following one), so a
+    /// data directory pointed somewhere shared (`DELTA_DATA_DIR`) cannot be used
+    /// to redirect it, and 0600 keeps the file un-writable by anyone but its
+    /// owner afterwards; `mode` applies only on creation, so a file that already
+    /// exists with looser bits is tightened explicitly.
     pub(super) async fn write_conf(&self) -> std::result::Result<(), Error> {
         let path = Path::new(&self.conf_path);
         let mut file = tokio::fs::OpenOptions::new()
@@ -111,8 +109,8 @@ impl Tmux {
 mod tests {
     use super::*;
 
-    /// A driver whose config path points at `conf_path` instead of the system
-    /// temp directory, so the write can be inspected in a test-owned directory.
+    /// A driver whose config path points at `conf_path`, so the write can be
+    /// inspected in a test-owned directory.
     fn driver_writing_to(conf_path: &Path) -> Tmux {
         Tmux {
             socket: "delta-test".to_owned(),
@@ -164,7 +162,7 @@ mod tests {
     #[tokio::test]
     async fn refuses_to_write_the_conf_through_a_symlink() {
         let dir = tempfile::tempdir().unwrap();
-        // A symlink pre-planted at the (fully predictable) config path: writing
+        // A symlink pre-planted at the config path: writing
         // through it would let another local user pick the file tmux loads.
         let target = dir.path().join("attacker-owned.conf");
         tokio::fs::write(&target, "untouched").await.unwrap();

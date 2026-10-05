@@ -7,9 +7,10 @@
 //! port and the hook secret have to survive the restart. This file records
 //! them.
 //!
-//! It is `delta-hook-state.json` in the directory of the configured database
-//! path, so the desktop app's data directory and the dev database's directory
-//! each get their own. It holds a JSON object with:
+//! It is `delta-hook-state.json` in the server's data directory
+//! ([`DataLayout::hook_state`](delta_bootstrap::DataLayout::hook_state)), so
+//! the installed app, the desktop dev build and `make dev` each get their own.
+//! It holds a JSON object with:
 //!
 //! - `hook_secret` — the secret every hook URL carries. Read on start; minted
 //!   and recorded when absent. `DELTA_HOOK_SECRET` overrides it and is never
@@ -38,9 +39,6 @@ use super::secrets::mint_secret;
 
 #[cfg(test)]
 mod tests;
-
-/// The state file's name, inside the database's directory.
-pub const STATE_FILE_NAME: &str = "delta-hook-state.json";
 
 /// Owner read/write only: the file holds the hook secret.
 const STATE_FILE_MODE: u32 = 0o600;
@@ -113,7 +111,7 @@ struct Recorded {
     port: Option<u16>,
 }
 
-/// The hook state file beside a database, as read at startup.
+/// The hook state file, as read at startup.
 #[derive(Debug)]
 pub struct HookStateFile {
     path: PathBuf,
@@ -121,16 +119,11 @@ pub struct HookStateFile {
 }
 
 impl HookStateFile {
-    /// Read the state file in the directory of `database_path`.
+    /// Read the state file at `path`.
     ///
     /// A missing file reads as empty. A file with permissions looser than 0600
     /// is tightened first (see the module docs).
-    pub fn open_beside(database_path: &str) -> Result<Self, HookStateError> {
-        Self::open(path_beside(database_path))
-    }
-
-    /// Read the state file at `path`.
-    fn open(path: PathBuf) -> Result<Self, HookStateError> {
+    pub fn open(path: PathBuf) -> Result<Self, HookStateError> {
         let Some(text) = read_private(&path)? else {
             return Ok(Self {
                 path,
@@ -227,17 +220,6 @@ impl HookStateFile {
         self.recorded = recorded;
         Ok(())
     }
-}
-
-/// The state file's path for the database at `database_path`.
-fn path_beside(database_path: &str) -> PathBuf {
-    let dir = match Path::new(database_path).parent() {
-        // A bare file name (`delta.db`) has an empty parent: the working
-        // directory, which is where the database itself lands.
-        Some(dir) if !dir.as_os_str().is_empty() => dir,
-        _ => Path::new("."),
-    };
-    dir.join(STATE_FILE_NAME)
 }
 
 /// Read `path` as text, tightening its permissions to 0600 first when the group

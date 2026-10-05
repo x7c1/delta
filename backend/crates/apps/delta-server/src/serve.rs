@@ -147,14 +147,14 @@ mod tests {
 
     /// A configuration whose hook state file lives in `dir`.
     fn config_in(dir: &tempfile::TempDir) -> delta_bootstrap::Config {
-        let database = dir.path().join("delta.db").to_string_lossy().into_owned();
+        let data_dir = dir.path().to_string_lossy().into_owned();
         crate::config::config_from_vars(|name| {
-            (name == "DELTA_DB_PATH").then(|| database.clone().into())
+            (name == "DELTA_DATA_DIR").then(|| data_dir.clone().into())
         })
     }
 
     fn state_in(config: &delta_bootstrap::Config) -> HookStateFile {
-        HookStateFile::open_beside(&config.database_path).unwrap()
+        HookStateFile::open(config.data_layout().hook_state()).unwrap()
     }
 
     /// A port that is free right now: bound and released.

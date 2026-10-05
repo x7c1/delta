@@ -19,18 +19,7 @@ async fn test_state_with_only_claude_present() -> AppState {
             bin == "claude"
         }
     }
-    let config = delta_bootstrap::Config {
-        database_path: ":memory:".into(),
-        session_workdir_base: "/tmp/delta-test-session".into(),
-        worktree_base: "/tmp/delta-test-worktrees".into(),
-        tmux_socket: "delta-test".into(),
-        auth_token: super::TEST_AUTH_TOKEN.into(),
-        hook_secret: super::TEST_HOOK_SECRET.into(),
-        transcript_root: super::TEST_TRANSCRIPT_ROOT.into(),
-        port: 7878,
-        hook_endpoint_changed: false,
-        launch: delta_usecase::LaunchConfig::default(),
-    };
+    let config = super::test_config();
     let interactor = delta_bootstrap::build(&config, delta_usecase::NullCommsLog::arc())
         .await
         .unwrap()

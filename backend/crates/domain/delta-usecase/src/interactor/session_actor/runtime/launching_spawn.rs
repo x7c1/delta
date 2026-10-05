@@ -66,6 +66,11 @@ pub struct LaunchingSpawn {
     /// stored as its `cwd`, which is why it is computed before the build rather
     /// than read back from it.
     pub workdir: String,
+    /// Whether [`Self::workdir`] is the per-token (Claude) or per-session
+    /// (adapter) scratch dir under the spawn base, which the preparation creates
+    /// before launching there. A worktree is created by its build, and a
+    /// user-selected directory already exists (it was resolved on accept).
+    pub scratch_workdir: bool,
     /// The worktree still to build, when one was requested. `None` for a plain
     /// spawn, which has no git work left to do.
     pub worktree: Option<PlannedWorktree>,

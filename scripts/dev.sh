@@ -11,10 +11,14 @@
 #      └──── WebSocket ──────┴──── hooks (HTTP) ◀───────────┘
 #
 # What it does:
-#   1. Starts `delta-server` (DELTA_PORT=7878). The server owns the claude
-#      session lifecycle: spawning a session creates a tmux session running
-#      `claude` (and writes its `.claude/settings.json` so the hooks point back
-#      at the server). No session is spawned on startup or on page load.
+#   1. Starts `delta-server` (DELTA_PORT=7878) under the dev identifier
+#      (DELTA_IDENTIFIER=io.github.x7c1.delta.dev), which gives it its own data
+#      directory — `~/.local/share/io.github.x7c1.delta.dev/` on Linux,
+#      `~/Library/Application Support/io.github.x7c1.delta.dev/` on macOS — and
+#      its own tmux socket. The server owns the claude session lifecycle:
+#      spawning a session creates a tmux session running `claude` (with a
+#      settings file in the data directory so the hooks point back at the
+#      server). No session is spawned on startup or on page load.
 #   2. Starts the frontend dev server against the real backend.
 #
 # Opening the browser is the only manual step. On load the UI shows the session
@@ -27,8 +31,8 @@
 # yet authenticated, run `claude` once on its own (or attach to a spawned pane
 # with `tmux -L io.github.x7c1.delta.dev attach -t delta-1`) to complete login, then reload the browser.
 #
-# The same dev environment — database, tmux socket, port 7878 and session
-# workdir — can also be shown through the desktop shell instead of the browser
+# The same dev environment — data directory, tmux socket and port 7878 — can
+# also be shown through the desktop shell instead of the browser
 # (`make desktop-dev`). That is a debug build of `delta-desktop` with its own
 # identifier (`io.github.x7c1.delta.dev`), so it never touches the installed
 # app's data directory, tmux socket or single-instance lock. Because it binds the
@@ -36,20 +40,21 @@
 # and --down stops either.
 #
 # Usage:
-#   scripts/dev.sh [WORKDIR]   # bring the loop up (default WORKDIR: .tmp/session)
+#   scripts/dev.sh             # bring the loop up
 #   scripts/dev.sh --desktop-build
 #                              # build the dev desktop shell (debug, dev identifier)
 #   scripts/dev.sh --desktop-preflight
 #                              # fail if the dev environment is already running
-#   scripts/dev.sh --desktop [WORKDIR]
+#   scripts/dev.sh --desktop
 #                              # run the binary --desktop-build built, on the dev
 #                              # environment (does not build; `make desktop-dev`
 #                              # runs preflight, build, then this)
 #   scripts/dev.sh --down      # tear the loop down (same as scripts/stop.sh)
-#   scripts/dev.sh --reset     # tear down, then delete the SQLite database — and
-#                              # the pre-migration snapshots taken from it — so the
-#                              # next start recreates an empty schema (same as
-#                              # scripts/reset.sh). Honors DELTA_DB_PATH.
+#   scripts/dev.sh --reset     # tear down, then delete the SQLite database in the
+#                              # dev data directory — and the pre-migration
+#                              # snapshots taken from it — so the next start
+#                              # recreates an empty schema (same as
+#                              # scripts/reset.sh). Honors DELTA_DATA_DIR.
 #   scripts/dev.sh --help
 
 set -euo pipefail
@@ -60,21 +65,23 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKEND_DIR="$REPO_ROOT/backend"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 
-# The dev environment's name. It is the tmux socket below and the identifier the
-# dev desktop shell is built with (DESKTOP_DEV_TAURI_CONFIG), both distinct from
-# the installed app's `io.github.x7c1.delta`.
+# The dev environment's name: the identifier the server runs under
+# (DELTA_IDENTIFIER) and the one the dev desktop shell is built with
+# (DESKTOP_DEV_TAURI_CONFIG), distinct from the installed app's
+# `io.github.x7c1.delta`. The server derives its data directory and its tmux
+# socket from it, so the dev environment never touches the installed app's.
 DEV_NAME="io.github.x7c1.delta.dev"
+DELTA_IDENTIFIER="$DEV_NAME"
 
 # Delta runs its sessions on a dedicated tmux server, separate from the user's
-# default tmux server. The dev loop uses its own socket ($DEV_NAME), distinct
-# from the desktop app's default (`io.github.x7c1.delta`), so teardown never ends
-# the installed app's sessions. The server mints a unique session per spawn
-# (`delta-<n>`) on this socket; teardown just kills the whole socket. An explicit
-# DELTA_TMUX_SOCKET wins.
-DELTA_TMUX_SOCKET="${DELTA_TMUX_SOCKET:-$DEV_NAME}"
+# default tmux server. The server names the socket after its identifier, so the
+# dev loop's is $DEV_NAME and teardown never ends the installed app's sessions.
+# The server mints a unique session per spawn (`delta-<n>`) on this socket;
+# teardown just kills the whole socket. An explicit DELTA_TMUX_SOCKET wins, here
+# and in the server.
+DELTA_TMUX_SOCKET="${DELTA_TMUX_SOCKET:-$DELTA_IDENTIFIER}"
 DELTA_PORT="7878"
 FRONTEND_PORT="5173"
-DEFAULT_WORKDIR="$REPO_ROOT/.tmp/session"
 
 # Where sessions that ask for a git worktree get one. The installed app keeps
 # the server's default ($HOME/.delta/worktrees); the dev environment uses a
@@ -82,10 +89,29 @@ DEFAULT_WORKDIR="$REPO_ROOT/.tmp/session"
 # other's worktrees. An explicit DELTA_WORKTREE_BASE wins.
 DELTA_WORKTREE_BASE="${DELTA_WORKTREE_BASE:-$HOME/.delta-dev/worktrees}"
 
-# The SQLite database delta-server opens. The server defaults to `delta.db`
-# relative to its cwd (the backend dir); honor DELTA_DB_PATH if the developer
-# overrode it. `--reset` deletes this so the next start recreates empty schema.
-DELTA_DB="${DELTA_DB_PATH:-$BACKEND_DIR/delta.db}"
+# The dev data directory, as the server resolves it: <platform data dir>/<identifier>,
+# where the platform data dir is ~/Library/Application Support on macOS and
+# $XDG_DATA_HOME (when absolute) or ~/.local/share elsewhere. An explicit
+# DELTA_DATA_DIR wins, here and in the server. Only `--reset` and the log lines
+# need it; the server creates it.
+platform_data_dir() {
+  case "$(uname -s)" in
+    Darwin) printf '%s\n' "$HOME/Library/Application Support" ;;
+    *)
+      case "${XDG_DATA_HOME:-}" in
+        /*) printf '%s\n' "$XDG_DATA_HOME" ;;
+        *) printf '%s\n' "$HOME/.local/share" ;;
+      esac
+      ;;
+  esac
+}
+DEV_DATA_DIR="${DELTA_DATA_DIR:-$(platform_data_dir)/$DELTA_IDENTIFIER}"
+
+# The SQLite database delta-server opens in the data directory. `--reset`
+# deletes it so the next start recreates an empty schema. A `backend/delta.db`
+# left by a dev environment from before the data directory is not used any more
+# and is left alone.
+DELTA_DB="$DEV_DATA_DIR/delta.db"
 
 # The dev desktop shell. `tauri.conf.json` keeps the installed app's identifier
 # for `make desktop` and releases; the dev build overrides only the identifier,
@@ -321,15 +347,6 @@ refuse_if_dev_port_taken() {
   fi
 }
 
-# Resolve the base working directory for spawns ($1, default .tmp/session) to an
-# absolute path, creating it. The server creates a per-spawn `<base>/<token>`
-# subdirectory under it on demand and provisions that subdirectory's
-# .claude/settings.json.
-resolve_workdir() {
-  local workdir="${1:-$DEFAULT_WORKDIR}"
-  mkdir -p "$workdir" && cd "$workdir" && pwd
-}
-
 # Build the dev desktop shell: the debug `delta-desktop` with the dev identifier.
 # `make desktop-dev-build` runs this after building the SPA it embeds.
 desktop_build() {
@@ -338,33 +355,27 @@ desktop_build() {
   (cd "$BACKEND_DIR" && TAURI_CONFIG="$DESKTOP_DEV_TAURI_CONFIG" cargo build -p delta-desktop)
 }
 
-# Run the dev desktop shell on the dev environment: the same database, tmux
-# socket, port and session workdir as `up`. The shell honours these variables
-# over its app data directory, and binds an explicit DELTA_PORT as is without
-# recording it in the hook state file. Runs in the foreground until the window
-# closes.
+# Run the dev desktop shell on the dev environment: the same data directory,
+# tmux socket and port as `up`. The shell runs under the identifier it was built
+# with ($DEV_NAME), which names the same data directory and tmux socket, and
+# binds an explicit DELTA_PORT as is without recording it in the hook state
+# file. Runs in the foreground until the window closes.
 desktop() {
   require tmux "Install tmux to host the claude session."
   refuse_if_dev_port_taken
   [ -x "$DESKTOP_DEV_BIN" ] ||
     die "$DESKTOP_DEV_BIN not found. Build it with 'make desktop-dev-build' (or run 'make desktop-dev')."
-  local workdir
-  workdir="$(resolve_workdir "${1:-}")"
   log "Starting the dev desktop shell ($DEV_NAME) on 127.0.0.1:$DELTA_PORT"
-  log "Database: $DELTA_DB, tmux socket: $DELTA_TMUX_SOCKET, session workdir base: $workdir, worktree base: $DELTA_WORKTREE_BASE"
+  log "Data directory: $DEV_DATA_DIR, tmux socket: $DELTA_TMUX_SOCKET, worktree base: $DELTA_WORKTREE_BASE"
   log "Closing the window stops the server; its tmux sessions keep running until 'make down'."
   cd "$BACKEND_DIR"
   DELTA_PORT="$DELTA_PORT" \
-    DELTA_DB_PATH="$DELTA_DB" \
-    DELTA_SESSION_WORKDIR="$workdir" \
     DELTA_WORKTREE_BASE="$DELTA_WORKTREE_BASE" \
     DELTA_TMUX_SOCKET="$DELTA_TMUX_SOCKET" \
     exec "$DESKTOP_DEV_BIN"
 }
 
 up() {
-  local workdir
-
   # --- Preflight: every moving part must exist before we touch anything. ---
   require tmux  "Install tmux to host the claude session."
   require claude "Install Claude Code and authenticate it first (run 'claude' once)."
@@ -380,8 +391,7 @@ up() {
     die "Something is already listening on 127.0.0.1:$FRONTEND_PORT (the frontend dev server). Run 'scripts/dev.sh --down' first."
   fi
 
-  workdir="$(resolve_workdir "${1:-}")"
-  log "Session workdir base: $workdir (the server provisions <base>/<token>/.claude/settings.json per spawn)"
+  log "Data directory: $DEV_DATA_DIR (database, session settings, tmux config and per-spawn workdirs)"
 
   mkdir -p "$LOG_DIR"
 
@@ -403,7 +413,7 @@ up() {
   (
     cd "$BACKEND_DIR"
     DELTA_PORT="$DELTA_PORT" \
-      DELTA_SESSION_WORKDIR="$workdir" \
+      DELTA_IDENTIFIER="$DELTA_IDENTIFIER" \
       DELTA_WORKTREE_BASE="$DELTA_WORKTREE_BASE" \
       DELTA_TMUX_SOCKET="$DELTA_TMUX_SOCKET" \
       DELTA_AUTH_TOKEN="$auth_token" \
@@ -478,9 +488,10 @@ main() {
     --reset|reset) reset ;;
     --desktop-build) desktop_build ;;
     --desktop-preflight) refuse_if_dev_port_taken ;;
-    --desktop) desktop "${2:-}" ;;
+    --desktop) desktop ;;
     -h|--help|help) usage ;;
-    *)             up "${1:-}" ;;
+    "")            up ;;
+    *)             usage >&2; die "Unknown argument: $1 (the session workdir is no longer an argument: sessions run under the data directory)" ;;
   esac
 }
 

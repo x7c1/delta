@@ -111,18 +111,36 @@ variables, all with local-friendly defaults:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `DELTA_PORT` | `7878` | TCP port |
-| `DELTA_DB_PATH` | `delta.db` | SQLite overlay file; its directory also holds the hook state file `delta-hook-state.json` (the hook secret, kept across restarts — see [local run](local-run.md#the-desktop-app)) |
+| `DELTA_IDENTIFIER` | `io.github.x7c1.delta` | the name the server runs under: it names the default data directory and the default tmux socket (`make dev` sets `io.github.x7c1.delta.dev`; the desktop app uses its bundle identifier and ignores this variable) |
+| `DELTA_DATA_DIR` | `<platform data dir>/<identifier>` | the directory every file the server writes lives in (layout below); the platform data dir is `~/Library/Application Support` on macOS and `$XDG_DATA_HOME` or `~/.local/share` on Linux |
 | `DELTA_HOOK_SECRET` | recorded in the hook state file | the secret every hook URL carries; overrides the recorded one without replacing it |
-| `DELTA_SESSION_WORKDIR` | `.tmp/session` | base directory for per-spawn working directories (`<base>/<token>`) |
 | `DELTA_WORKTREE_BASE` | `$HOME/.delta/worktrees` (`scripts/dev.sh`: `$HOME/.delta-dev/worktrees`) | base directory for per-session git worktrees (`<base>/<repo>-<session-id>`), deliberately outside any repo tree so the worktree does not inherit a surrounding `CLAUDE.md`/settings |
-| `DELTA_TMUX_SOCKET` | `io.github.x7c1.delta` | dedicated tmux socket (`tmux -L <socket>`) for Delta's sessions, isolated from your default tmux server (`make dev` sets `io.github.x7c1.delta.dev`) |
+| `DELTA_TMUX_SOCKET` | the identifier | dedicated tmux socket (`tmux -L <socket>`) for Delta's sessions, isolated from your default tmux server |
+
+The server creates the data directory (owner-only) at startup and derives every
+path it writes from it, in one place
+(`delta_bootstrap::DataLayout`):
+
+```text
+<data dir>/
+  delta.db                 SQLite overlay (with its -wal/-shm and .bak-v<N> siblings)
+  delta-hook-state.json    the hook secret and the desktop app's port, kept across restarts
+  sessions/<token>/        per-spawn working directory of a session started without a repository
+  settings/<port>.json     the Claude Code settings handed to `claude --settings`
+  tmux.conf                the configuration Delta's tmux server starts with
+```
+
+Why the hook state file exists is in
+[local run](local-run.md#the-desktop-app). Per-session git worktrees stay under
+`DELTA_WORKTREE_BASE`, outside the data directory on purpose: they are paths you
+see, which git metadata and Claude Code's trust configuration record.
 
 The server owns the `claude` session lifecycle: it boots fine with no tmux
 session present and spawns nothing on startup or page load. A session is spawned
 lazily when first needed — the composer's first Send, a New action, or
 `POST /api/sessions`. Each spawn gets its own tmux session, named after a
 Delta-minted token (`delta-<n>`), running `claude` in its own working directory
-(`<base>/<token>`) with Claude Code hooks pointed back at this server. Naming the
+(`<data dir>/sessions/<token>` unless a directory or repository was chosen) with Claude Code hooks pointed back at this server. Naming the
 tmux session after a Delta-owned token (never Claude's `session_id`) is what lets
 a closed conversation be resumed (`claude --resume <id>`) under a fresh tmux
 session without a name collision. Open/closed is in-memory, except that a
@@ -181,8 +199,8 @@ environment variable (`{"identifier": …}`), which
 tauri-build and `generate_context!` merge over the config files at compile
 time; a plain `cargo build` honours it, so the dev build needs neither the Tauri
 CLI nor a second config file. `scripts/dev.sh --desktop-build` sets it, and
-`scripts/dev.sh --desktop` then runs the binary on `make dev`'s database, tmux
-socket, port and session working directory (`WORKDIR` works as for `make dev`).
+`scripts/dev.sh --desktop` then runs the binary on `make dev`'s port; its
+identifier already gives it `make dev`'s data directory and tmux socket.
 How the two environments relate is in
 [local-run.md](local-run.md#two-environments-the-installed-app-and-the-dev-environment).
 
@@ -253,7 +271,9 @@ and GNOME never raises it for "Delta".
 The schema has no single file to open: it is built by replaying the migration
 ladder in `backend/crates/gateway/delta-sqlite/src/migrations/`, one module per
 schema subject. To read the whole thing at once, dump it from a database the
-ladder built:
+ladder built — `make dev`'s is `delta.db` in its data directory
+(`~/.local/share/io.github.x7c1.delta.dev/` on Linux,
+`~/Library/Application Support/io.github.x7c1.delta.dev/` on macOS):
 
 ```bash
 sqlite3 delta.db .schema
@@ -267,8 +287,8 @@ see the [compatibility policy](../compatibility.md).
 
 Pulling a change that adds a step migrates the file in place on the next server
 start — there is no command to run. A *destructive* step (the first is v6)
-additionally leaves `delta.db.bak-v<source version>` beside it, gitignored and
-removed only by `make reset`. That snapshot is also the way back: the ladder
+additionally leaves `delta.db.bak-v<source version>` beside it, removed only
+by `make reset`. That snapshot is also the way back: the ladder
 runs forward only, so an older checkout refuses to open a database a newer one
 migrated, and the error it prints offers `make reset` — which deletes the
 thread overlay and the send queue with it. To keep those, stop the server,

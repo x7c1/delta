@@ -9,7 +9,7 @@ Delta therefore treats **reaching the loopback port as the trust boundary**
 ("unauthenticated-by-port") and layers explicit guards on top of it. This
 document states what each guard covers, the one deliberate trade-off in how
 Delta pre-accepts Claude Code's workspace-trust dialog, how the files Delta
-writes into the system temp directory are protected, what its logs deliberately
+writes into its data directory are protected, what its logs deliberately
 leave out, and how Delta handles the launch options that switch an agent's own
 safety mechanisms off.
 
@@ -41,7 +41,7 @@ the local machine, four guards defend the surface:
   the browser), so it cannot carry a bearer token. Instead Delta renders a
   secret into the hook URLs (`?hs=<secret>`) and requires it on every hook
   request, giving that path its own authentication. Unlike the bearer token it
-  is kept across restarts — in `delta-hook-state.json` beside the database,
+  is kept across restarts — in `delta-hook-state.json` in the data directory,
   owner-only (`0600`) — because a Claude Code session outlives Delta in tmux and
   keeps calling the URLs it was launched with. Deleting the file rotates it.
 - **Scoped trust seeding** — the subject of the next section: Delta pre-accepts
@@ -77,42 +77,41 @@ directories are canonicalized (so a `/tmp` vs `/private/tmp` symlink or a `..`
 cannot disguise a path) and compared by path components (so a sibling like
 `<base>-evil` is not mistaken for a child of `<base>`).
 
-## Temp-file hardening
+## Data-file hardening
 
-Delta writes two files into the system temp directory, both at paths an outsider
-can predict:
+Delta keeps every file it writes in its data directory (the layout is in
+[the development guide](development/README.md#backend-backend)). Two of them
+need more than an ordinary file:
 
-- **The session settings file** — `<temp>/delta-<port>/settings.json`, the
-  settings Claude Code is launched with. It embeds the hook secret in
-  every hook URL, and its `statusLine` / `SessionStart` entries are commands
-  Claude Code executes. So it is a secret-read surface *and* a command-injection
-  surface.
-- **The tmux config** — `<temp>/delta-tmux-<socket>.conf`, handed to tmux with
-  `-f`. It holds no secret, but tmux executes every directive in it, so it is a
+- **The session settings file** — `<data dir>/settings/<port>.json`, the
+  settings Claude Code is launched with. It embeds the hook secret in every hook
+  URL, and its `statusLine` / `SessionStart` entries are commands Claude Code
+  executes. So it is a secret-read surface *and* a command-injection surface.
+- **The tmux config** — `<data dir>/tmux.conf`, handed to tmux with `-f`. It
+  holds no secret, but tmux executes every directive in it, so it is a
   directive-injection surface.
 
-The realistic exposure is a **multi-user Linux host**: `/tmp` is world-writable,
-so another local user can pre-create either path, or plant a symlink standing in
-for it, and either read what Delta writes or choose where the write lands. On
-macOS the platform already covers this — `$TMPDIR` is per-user and mode 0700 —
-which is why the fix stays cheap rather than relocating the files.
+The server creates the data directory with mode **0700**, so by default no
+other local user can reach either file. The writes do not rely on that, because
+`DELTA_DATA_DIR` can point the data directory anywhere.
 
-Delta therefore creates the settings directory with mode **0700** and both files
-with mode **0600**, and opens each file with `O_NOFOLLOW` so a symlink makes the
-`open(2)` fail instead of redirecting the write. A settings directory that
-already exists *as a symlink* is refused outright, since hardening only the file
-would leave the directory as the swap target. An existing real directory is left
-as it is: the ancestors may be system-owned (`/tmp` itself) and are not Delta's
-to tighten. The permission bits are re-applied on every write, because the
-creation mode does not touch a file left behind by an earlier Delta run.
+Delta creates the settings directory with mode **0700** and both files with mode
+**0600**, and opens each file with `O_NOFOLLOW` so a symlink makes the `open(2)`
+fail instead of redirecting the write. A settings directory that already exists
+*as a symlink* is refused outright, since hardening only the file would leave the
+directory as the swap target. An existing real directory is left as it is: it
+may be one Delta does not own and is not Delta's to tighten. The permission bits
+are re-applied on every write, because the creation mode does not touch a file
+that already exists. The per-spawn working directories under
+`sessions/` are created **0700** the same way, refusing a symlink.
 
-That leaves one case open by construction: a `delta-<port>` directory another
-local user pre-created — a real directory, not a symlink — is used as it stands.
-What Delta writes there is still unreadable to them (0600), but the directory is
-theirs to unlink from, so a file swapped in between Delta's write and Claude
-Code's read would be the settings Claude Code launches with. Closing that would
-mean refusing a settings directory Delta does not own, which Delta does not do
-today.
+That leaves one case open by construction, and only for a data directory pointed
+at a place other users can write to: a `settings` directory another local user
+pre-created — a real directory, not a symlink — is used as it stands. What Delta
+writes there is still unreadable to them (0600), but the directory is theirs to
+unlink from, so a file swapped in between Delta's write and Claude Code's read
+would be the settings Claude Code launches with. Closing that would mean refusing
+a settings directory Delta does not own, which Delta does not do today.
 
 Both files are still rewritten on every run — the settings file must be, so that
 the hook URLs carry the current run's secret.

@@ -159,6 +159,10 @@ impl Workspace for NoopWorkspace {
         Ok(())
     }
 
+    async fn create_private_dir(&self, _path: &str) -> delta_usecase::Result<()> {
+        Ok(())
+    }
+
     async fn resolve_existing_dir(&self, path: &str) -> delta_usecase::Result<String> {
         // The end-to-end tests never request a user-selected workdir, so a real
         // resolution is unnecessary; echo the path back as already-canonical.

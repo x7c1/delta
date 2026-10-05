@@ -4,10 +4,6 @@
 # existing entry point (scripts/dev.sh or the per-part cargo/pnpm commands) so
 # the repo has one place to run things from: the repo root.
 
-# Working directory passed to scripts/dev.sh. Empty by default so dev.sh uses
-# its own default (.tmp/session). Override per-invocation: `make dev WORKDIR=~/scratch`.
-WORKDIR ?=
-
 # Optional host-specific overrides (gitignored). Use it to `export` env vars every
 # target should inherit — e.g. a linker override on hosts where the default `cc`
 # cannot link macOS binaries. See local.mk.example. Missing file is fine (`-`).
@@ -22,10 +18,10 @@ help:
 
 # --- Run the full local loop (backend + frontend + claude/tmux) ---------------
 
-## dev: start the full local loop (server + web dev server); WORKDIR overrides the claude workdir
+## dev: start the full local loop (server + web dev server) on the dev data directory (identifier io.github.x7c1.delta.dev)
 .PHONY: dev
 dev:
-	scripts/dev.sh $(WORKDIR)
+	scripts/dev.sh
 
 ## mock: frontend-only mock-data mode (no backend/tmux/claude) at http://localhost:5173
 .PHONY: mock
@@ -37,7 +33,7 @@ mock:
 down:
 	scripts/dev.sh --down
 
-## reset: stop the loop and reset the database (empty schema on next start)
+## reset: stop the loop and delete the dev data directory's database (empty schema on next start)
 .PHONY: reset
 reset:
 	scripts/dev.sh --reset
@@ -58,17 +54,17 @@ server-embedded: web-dist
 
 # --- Desktop app (Tauri shell around the embedded server) ---------------------
 
-## desktop-dev: the dev environment in the desktop shell — refuse if `make dev` (port 7878) is up, `make desktop-dev-build`, then run it on make dev's database, tmux socket, port and WORKDIR
-# scripts/dev.sh owns the dev environment's values (database, tmux socket, port,
-# session workdir) and the dev identifier, so `make dev` and this target cannot
-# drift. The preflight runs first so a running dev environment is reported
+## desktop-dev: the dev environment in the desktop shell — refuse if `make dev` (port 7878) is up, `make desktop-dev-build`, then run it on make dev's data directory, tmux socket and port
+# scripts/dev.sh owns the dev environment's values (the dev identifier, which
+# names the data directory and tmux socket, and the port), so `make dev` and
+# this target cannot drift. The preflight runs first so a running dev environment is reported
 # before a long build, and `--desktop` checks the port again right before it
 # launches.
 .PHONY: desktop-dev
 desktop-dev:
 	scripts/dev.sh --desktop-preflight
 	$(MAKE) --no-print-directory desktop-dev-build
-	scripts/dev.sh --desktop $(WORKDIR)
+	scripts/dev.sh --desktop
 
 ## desktop-dev-build: build the SPA, then the debug delta-desktop `make desktop-dev` runs (identifier io.github.x7c1.delta.dev, set through TAURI_CONFIG — see scripts/dev.sh) without starting it
 .PHONY: desktop-dev-build

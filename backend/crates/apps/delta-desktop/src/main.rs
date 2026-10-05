@@ -13,11 +13,14 @@
 //! 1. adopt the login shell's `PATH` and locale ([`login_env`]), so `tmux`,
 //!    `claude` and `codex` are found and run in a UTF-8 locale when launched
 //!    from Finder or a desktop file;
-//! 2. build the server configuration the CLI builds, with the database and the
-//!    per-spawn working directories moved into the app data directory
-//!    ([`app_data`]);
-//! 3. settle the hook secret and the port against the hook state file beside
-//!    the database: reuse the secret recorded there, and bind the port the
+//! 2. build the server configuration the CLI builds, under the app's bundle
+//!    identifier: the server derives its data directory
+//!    (`<platform data dir>/<identifier>`, the directory Tauri names the app
+//!    data directory) and its tmux socket from it and creates the directory,
+//!    so the dev build (`io.github.x7c1.delta.dev`) keeps apart from the
+//!    installed app with no further settings;
+//! 3. settle the hook secret and the port against the hook state file in the
+//!    data directory: reuse the secret recorded there, and bind the port the
 //!    previous launch recorded, falling back to a free `127.0.0.1:0` port when
 //!    it is taken (an explicit `DELTA_PORT` wins and is not recorded). Both are
 //!    written into the configuration before the state is built, since the hook
@@ -37,7 +40,6 @@
 //! on Delta's socket is left running, so the Claude Code sessions open in it
 //! keep running, and the next launch re-adopts them before it serves anything.
 
-mod app_data;
 mod links;
 mod login_env;
 #[cfg(target_os = "macos")]
@@ -59,8 +61,9 @@ fn main() {
     let path_not_imported = login_env::import_login_shell_env();
 
     let context = tauri::generate_context!();
+    let identifier = context.config().identifier.clone();
     #[cfg(target_os = "linux")]
-    set_window_app_id(&context.config().identifier);
+    set_window_app_id(&identifier);
 
     let runtime = match Runtime::new() {
         Ok(runtime) => runtime,
@@ -89,7 +92,8 @@ fn main() {
         // Tauri panics on an error returned from here, so every failure is
         // reported (and exits 1) inside the hook instead.
         .setup(move |app| {
-            let started = start_server(app, &runtime).and_then(|port| open_window(app, port));
+            let started =
+                start_server(app, &runtime, &identifier).and_then(|port| open_window(app, port));
             if let Err(err) = started {
                 report_startup_failure(app.handle(), &err, path_not_imported.as_ref());
             }
@@ -148,24 +152,13 @@ fn focus_running_window(app: &AppHandle) {
 
 /// Build the configuration and state, and start serving. Returns the port the
 /// server listens on.
-fn start_server(app: &App, runtime: &Runtime) -> anyhow::Result<u16> {
-    let data_dir = app.path().app_data_dir()?;
-    let app_data::Placement {
-        mut config,
-        dirs_to_create,
-    } = app_data::place_in_app_data_dir(
-        config::config_from_env(),
-        &data_dir,
-        app_data::ExplicitPaths::from_env(),
-    );
-    for dir in &dirs_to_create {
-        std::fs::create_dir_all(dir)
-            .map_err(|err| anyhow::anyhow!("could not create {}: {err}", dir.display()))?;
-    }
+fn start_server(app: &App, runtime: &Runtime, identifier: &str) -> anyhow::Result<u16> {
+    let mut config = config::config_from_env_for(identifier)?;
     tracing::info!(
-        database = %config.database_path,
-        sessions = %config.session_workdir_base,
-        "delta-desktop data locations"
+        identifier = %config.identifier,
+        data_dir = %config.data_dir,
+        tmux_socket = %config.tmux_socket,
+        "delta-desktop data directory"
     );
 
     let mut hook_state = config::adopt_persisted_hook_secret(&mut config)?;

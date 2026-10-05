@@ -311,7 +311,7 @@ where
                 // The default per-token scratch dir is created empty and is
                 // never a git repository, so there is no branch to read and no
                 // trust dialog to seed; skip both on the hot path.
-                None => (self.workdir_for(&token), None, None),
+                None => (self.scratch_workdir_for(token.as_str()), None, None),
             },
         };
 
@@ -394,6 +394,7 @@ where
         let launching = LaunchingSpawn {
             token: token.clone(),
             workdir,
+            scratch_workdir: planned_worktree.is_none() && requested_workdir_recorded.is_none(),
             worktree: planned_worktree,
             target: LaunchTarget::Pane(PaneLaunch {
                 pane,

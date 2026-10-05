@@ -1,36 +1,31 @@
 //! The settings-file write: an owner-only file under an owner-only directory,
 //! never reached through a symlink.
 
-use std::io::ErrorKind;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use tokio::io::AsyncWriteExt;
 
+use super::create_dir::create_private_dir_all;
 use super::FsWorkspace;
 use crate::error::Error;
 
 /// Permission bits for the settings file: owner read/write, nobody else.
 const SETTINGS_FILE_MODE: u32 = 0o600;
 
-/// Permission bits for the directory Delta creates to hold the settings file:
-/// owner-only, so the file cannot be swapped out from under Delta by creating a
-/// sibling entry.
-const SETTINGS_DIR_MODE: u32 = 0o700;
-
 impl FsWorkspace {
     /// Write the session settings JSON, owner-readable only.
     ///
-    /// The settings file lives under the system temp directory at a
-    /// port-predictable path, and it is doubly sensitive: it embeds the
-    /// hook secret in every hook URL, and its `statusLine` / `SessionStart`
-    /// entries are commands Claude Code executes. On a machine where the temp
-    /// directory is per-user (macOS `$TMPDIR`, mode 0700) that is already
-    /// covered, but on a shared Linux host `/tmp` is world-writable, so another
-    /// local user could read the secret out of a 0644 file — or pre-plant a
-    /// symlink (or the parent directory) and have Delta write commands into a
-    /// file of their choosing. Hence: an owner-only parent directory, an
-    /// owner-only file, and a refusal to follow a symlink at either level.
+    /// The settings file is `settings/<port>.json` in the server's data
+    /// directory, and it is doubly sensitive: it embeds the hook secret in
+    /// every hook URL, and its `statusLine` / `SessionStart` entries are
+    /// commands Claude Code executes. The data directory is created owner-only,
+    /// but it can be pointed anywhere (`DELTA_DATA_DIR`), so the write does not
+    /// rely on it: another local user must not be able to read the secret out
+    /// of a 0644 file, or pre-plant a symlink (for the file or its directory)
+    /// and have Delta write commands into a file of their choosing. Hence: an
+    /// owner-only parent directory, an owner-only file, and a refusal to follow
+    /// a symlink at either level.
     ///
     /// Overwrite semantics are deliberate (see `overwrites_existing_settings`):
     /// the file is truncated on every write so the hook URLs stay current.
@@ -45,42 +40,6 @@ impl FsWorkspace {
         }
         write_private_file(path, settings_json.as_bytes()).await
     }
-}
-
-/// Create `dir` (and any missing ancestors) with owner-only permissions,
-/// refusing a path that already exists as a symlink.
-///
-/// `DirBuilder::mode` is what makes the new directories 0700: a bare
-/// `create_dir_all` asks for 0777 and lets the process umask decide, which on a
-/// typical host lands at 0755 — group- and world-readable. The explicit mode is
-/// applied by `mkdir(2)` itself and is not subject to the umask.
-///
-/// An *existing* directory is left exactly as it is (its mode included): the
-/// last component may be a shared system directory such as `/tmp` that Delta
-/// neither owns nor may tighten. The symlink refusal is the guard that matters
-/// there — hardening only the file would leave the directory as the swap
-/// target, so a pre-planted `…/delta-<port> -> /somewhere/else` link must fail
-/// the write rather than redirect it.
-async fn create_private_dir_all(dir: &Path) -> Result<(), Error> {
-    match tokio::fs::symlink_metadata(dir).await {
-        Ok(meta) if meta.file_type().is_symlink() => {
-            return Err(Error::UnsafePath(format!(
-                "{}: the settings directory is a symlink",
-                dir.display()
-            )));
-        }
-        // Already a real directory (or a file, which the write below will
-        // reject): nothing to create.
-        Ok(_) => return Ok(()),
-        Err(err) if err.kind() == ErrorKind::NotFound => {}
-        Err(err) => return Err(err.into()),
-    }
-    tokio::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(SETTINGS_DIR_MODE)
-        .create(dir)
-        .await?;
-    Ok(())
 }
 
 /// Write `bytes` to `path` as an owner-only file, never following a symlink.
@@ -110,6 +69,7 @@ async fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), Error> {
 mod tests {
     use delta_usecase::Workspace;
 
+    use super::super::create_dir::PRIVATE_DIR_MODE;
     use super::*;
 
     #[tokio::test]
@@ -156,8 +116,8 @@ mod tests {
         // the file must be 0600 and the directory Delta made 0700, or the hook
         // secret embedded in the settings is readable by every local user on a
         // shared host.
-        let parent = dir.path().join("delta-4000");
-        let settings_path = parent.join("settings.json");
+        let parent = dir.path().join("settings");
+        let settings_path = parent.join("4000.json");
 
         let ws = FsWorkspace::new();
         ws.write_session_settings(settings_path.to_str().unwrap(), r#"{"hooks":{}}"#)
@@ -181,7 +141,7 @@ mod tests {
             .mode();
         assert_eq!(
             dir_mode & 0o777,
-            SETTINGS_DIR_MODE,
+            PRIVATE_DIR_MODE,
             "a group/world-writable parent would let another user swap the file"
         );
     }
@@ -245,12 +205,12 @@ mod tests {
         // target, so a symlinked parent is refused before anything is written.
         let elsewhere = dir.path().join("elsewhere");
         tokio::fs::create_dir(&elsewhere).await.unwrap();
-        let parent = dir.path().join("delta-4000");
+        let parent = dir.path().join("settings");
         std::os::unix::fs::symlink(&elsewhere, &parent).unwrap();
 
         let ws = FsWorkspace::new();
         let err = ws
-            .write_session_settings(parent.join("settings.json").to_str().unwrap(), "secret")
+            .write_session_settings(parent.join("4000.json").to_str().unwrap(), "secret")
             .await
             .unwrap_err();
 
@@ -259,7 +219,7 @@ mod tests {
             "a symlinked settings directory is a workspace failure, got {err:?}"
         );
         assert!(
-            !elsewhere.join("settings.json").exists(),
+            !elsewhere.join("4000.json").exists(),
             "nothing is written through the redirected directory"
         );
     }

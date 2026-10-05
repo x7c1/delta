@@ -3,6 +3,23 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+/// The default data directory: `<platform data dir>/<identifier>`.
+///
+/// The platform data directory is `~/Library/Application Support` on macOS and
+/// `$XDG_DATA_HOME` (else `~/.local/share`) on Linux — what [`dirs::data_dir`]
+/// returns, and what Tauri's `app_data_dir()` joins the bundle identifier to,
+/// so the desktop app keeps the directory it used before the server chose it.
+/// When there is no home directory to resolve it from — only in degenerate
+/// environments — fall back to the temp directory so the server still starts,
+/// mirroring [`default_worktree_base`].
+pub(super) fn default_data_dir(identifier: &str) -> String {
+    dirs::data_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(identifier)
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// The directory a hook-reported `transcript_path` must resolve under.
 ///
 /// Real Claude Code writes transcripts under its config directory's `projects/`
