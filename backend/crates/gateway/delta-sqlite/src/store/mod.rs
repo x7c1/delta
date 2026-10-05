@@ -25,6 +25,7 @@ mod tests;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use tokio::sync::Mutex;
+use tracing::info;
 
 use delta_model::{SessionId, ThreadId};
 
@@ -64,6 +65,26 @@ impl SqliteStore {
         // `wal`, so the returned value is informational, not asserted.
         let _mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
         conn.pragma_update(None, "foreign_keys", true)?;
+        if db_path.is_some() {
+            // Connection setup, not a ladder step: `VACUUM` refuses to run
+            // inside a transaction and the runner wraps every version in one.
+            // It changes no schema and no row, so it neither bumps
+            // `SCHEMA_VERSION` nor takes a pre-migration snapshot. Skipped for
+            // an in-memory database, which has no file to size.
+            enable_full_auto_vacuum(&conn)?;
+        }
+        // Once a checkpoint has run, truncate the `-wal` file down to this
+        // limit instead of leaving it at its high-water mark. 4 MiB matches
+        // the WAL's ordinary working size — the default autocheckpoint fires
+        // at 1000 pages, about 4 MiB at the default 4 KiB page size — so
+        // routine checkpoints reuse the file in place, and only the WAL growth
+        // left behind by an unusually large transaction (a bulk delete) is
+        // given back. The pragma reports the new limit as a result row.
+        let _limit: i64 = conn.query_row(
+            &format!("PRAGMA journal_size_limit = {JOURNAL_SIZE_LIMIT_BYTES}"),
+            [],
+            |row| row.get(0),
+        )?;
         Self::migrate_to_current(&conn, db_path)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -126,6 +147,33 @@ impl SqliteStore {
         }
         migrations::migrate(conn, &steps, user_version, SCHEMA_VERSION, db_path)
     }
+}
+
+/// The `PRAGMA journal_size_limit` every connection is opened with, in bytes.
+pub(crate) const JOURNAL_SIZE_LIMIT_BYTES: i64 = 4 * 1024 * 1024;
+
+/// `PRAGMA auto_vacuum` value for FULL: freed pages are returned to the file
+/// system at every commit, so the file shrinks as rows are deleted. (`2` is
+/// INCREMENTAL, which only shrinks the file when `PRAGMA incremental_vacuum`
+/// is run — the explicit compact step this setting exists to avoid.)
+pub(crate) const AUTO_VACUUM_FULL: i64 = 1;
+
+/// Put the database in `auto_vacuum = FULL` mode if it is not already.
+///
+/// SQLite only honours a changed `auto_vacuum` on an existing file after a
+/// `VACUUM`, which rebuilds it with the pointer-map pages the mode needs. This
+/// is a one-time conversion for a database created before the setting was
+/// introduced and a no-op on every later open. Must run outside a transaction.
+fn enable_full_auto_vacuum(conn: &Connection) -> Result<()> {
+    let mode: i64 = conn.query_row("PRAGMA auto_vacuum", [], |row| row.get(0))?;
+    if mode != AUTO_VACUUM_FULL {
+        conn.execute_batch(&format!("PRAGMA auto_vacuum = {AUTO_VACUUM_FULL}; VACUUM;"))?;
+        info!(
+            from = mode,
+            "converted delta SQLite database to auto_vacuum = FULL"
+        );
+    }
+    Ok(())
 }
 
 /// Whether the database already has delta's `session` table.

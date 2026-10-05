@@ -42,7 +42,9 @@ The app creates its data directory on first launch:
 It holds:
 
 - `delta.db`, the database, with its `delta.db-wal` and `delta.db-shm` files
-  (SQLite runs in WAL mode).
+  (SQLite runs in WAL mode). The database shrinks as sessions are deleted
+  (`auto_vacuum = FULL`), and `delta.db-wal` is cut back to 4 MiB after each
+  checkpoint.
 - `delta.db.bak-v<N>`, a snapshot of the database taken before an upgrade step
   that rewrites data (see [Updating](#updating)). Snapshots are kept until you
   delete them.
