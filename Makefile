@@ -85,6 +85,7 @@ desktop:
 	@case "$$(uname -s)" in Linux|Darwin) ;; *) echo "desktop: installs on Linux and macOS only; use make desktop-build" >&2; exit 1;; esac
 	$(MAKE) --no-print-directory desktop-build
 	@if [ "$$(uname -s)" = Darwin ]; then \
+	  test -d "$(DESKTOP_BUNDLE_DIR)/macos/Delta.app" || { echo "desktop: $(DESKTOP_BUNDLE_DIR)/macos/Delta.app was not built; leaving /Applications/Delta.app as it is" >&2; exit 1; }; \
 	  echo "Installing $(DESKTOP_BUNDLE_DIR)/macos/Delta.app to /Applications"; \
 	  rm -rf /Applications/Delta.app && ditto "$(DESKTOP_BUNDLE_DIR)/macos/Delta.app" /Applications/Delta.app; \
 	else \
@@ -96,6 +97,9 @@ desktop:
 .PHONY: desktop-build
 # TAURI_CONFIG is unset so an exported value (the dev identifier override, say)
 # cannot leak into the bundle: releases carry tauri.conf.json's identifier.
+# tauri.conf.json lists the "app" target next to "dmg" because the bundler
+# deletes the Delta.app it builds for the .dmg unless "app" is requested too,
+# and `make desktop` installs that Delta.app.
 desktop-build: web-dist
 	cd backend/crates/apps/delta-desktop && env -u TAURI_CONFIG cargo tauri build
 
