@@ -14,7 +14,8 @@ export type SettingsCategoryId =
   | 'prompt-templates'
   | 'clone-roots'
   | 'appearance'
-  | 'default-provider';
+  | 'default-provider'
+  | 'storage';
 
 /**
  * The default category on a fresh install: Launch options. It is the oldest and
@@ -35,6 +36,7 @@ const SETTINGS_CATEGORY_IDS: readonly SettingsCategoryId[] = [
   'clone-roots',
   'appearance',
   'default-provider',
+  'storage',
 ];
 
 /**

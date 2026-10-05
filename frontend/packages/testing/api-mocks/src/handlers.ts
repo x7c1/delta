@@ -42,6 +42,7 @@ import {
   MOCK_VERSION,
   MOCK_WORKDIR_HOME,
   mockSpawnSessionId,
+  mockStorage,
   recentWorkdirs,
   mockAuthorPullRequests,
   mockProviders,
@@ -1216,6 +1217,7 @@ export function createMockApi(): MockApi {
     // debug); the mock returns a fixed dev-shaped string so mock-mode e2e can
     // assert on it without depending on the host's git sha.
     http.get('*/api/version', () => HttpResponse.json({ version: MOCK_VERSION })),
+    http.get('*/api/storage', () => HttpResponse.json(mockStorage)),
   ];
 
   /** Resolve every open (queued/dispatched) send of a session to `status`. */

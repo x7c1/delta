@@ -1,14 +1,15 @@
-# Providers, launch options, prompt templates and version (`/api/*`)
+# Providers, launch options, prompt templates, version and storage (`/api/*`)
 
 ## Overview
 
 The REST routes behind the Settings screen and the provider selector: which
 agent providers this host can launch and what each of them can do, the registry
 of custom launch options a session can be started with, the registry of prompt
-templates the composer inserts from, and the server's own version string for the
-browser footer. Applying a launch option to a session is part of a
-`new_session` send ([sends.md](sends.md#post-apisends)); conventions and error
-semantics are in [README.md](README.md).
+templates the composer inserts from, the server's own version string for the
+browser footer, and the inventory of where the server keeps its files.
+Applying a launch option to a session is part of a `new_session` send
+([sends.md](sends.md#post-apisends)); conventions and error semantics are in
+[README.md](README.md).
 
 ## Providers
 
@@ -423,4 +424,52 @@ the `-dev` pre-release form).
 
   ```json
   { "version": "v0.2.1" }
+  ```
+
+## Storage
+
+### `GET /api/storage`
+
+Return where this running Delta keeps its files, for the Settings dialog's
+Storage category. Every path is absolute and is the one this process resolved at
+startup: the data directory and every file derived from it, plus the worktree
+base and the transcript root, which sit outside it on purpose. `version` is the
+same string [`GET /api/version`](#get-apiversion) returns; `tmux_socket` is the
+socket *name* passed to `tmux -L`, not a path; `session_settings` is the file
+for the port this server listens on.
+
+Sizes are read from disk on every request, never cached. Each `bytes` is a file
+length as `stat` reports it, not the disk blocks `du` counts. `database.bytes`
+sums `delta.db`, `delta.db-wal` and `delta.db-shm`, whichever exist, and leaves
+out the snapshots. `snapshots` lists the migration runner's `delta.db.bak-v<N>`
+copies beside the database in ascending `<N>`, and is empty when there are none.
+A file that does not exist counts as zero bytes and is not an error. The
+response never carries the hook secret or the auth token. Read-only: nothing
+here deletes or moves a file.
+
+- **200**:
+
+  ```json
+  {
+    "identifier": "io.github.x7c1.delta",
+    "version": "v0.5.0",
+    "data_dir": "/home/u/.local/share/io.github.x7c1.delta",
+    "database": {
+      "path": "/home/u/.local/share/io.github.x7c1.delta/delta.db",
+      "bytes": 3250176
+    },
+    "snapshots": [
+      {
+        "path": "/home/u/.local/share/io.github.x7c1.delta/delta.db.bak-v3",
+        "bytes": 1048576
+      }
+    ],
+    "hook_state": "/home/u/.local/share/io.github.x7c1.delta/delta-hook-state.json",
+    "sessions_dir": "/home/u/.local/share/io.github.x7c1.delta/sessions",
+    "session_settings": "/home/u/.local/share/io.github.x7c1.delta/settings/7878.json",
+    "tmux_conf": "/home/u/.local/share/io.github.x7c1.delta/tmux.conf",
+    "tmux_socket": "io.github.x7c1.delta",
+    "worktree_base": "/home/u/.delta/worktrees",
+    "transcript_root": "/home/u/.claude/projects"
+  }
   ```

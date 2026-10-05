@@ -66,6 +66,8 @@ export const queryKeys = {
   cloneRoots: ['clone-roots'] as const,
   /** The Delta workspace version (`GET /api/version`) for the navigator footer. */
   version: ['version'] as const,
+  /** Where the server keeps its files (`GET /api/storage`), for Settings → Storage. */
+  storage: ['storage'] as const,
   /**
    * Per-provider launch availability (`GET /api/providers`) for the new-session
    * selector. A single cache entry: the answer is host-level, not per-session.

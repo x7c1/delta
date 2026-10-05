@@ -11,6 +11,7 @@ use delta_usecase::{
 };
 
 use crate::comms_log::{CommsLogHub, CommsSubscription};
+use crate::storage_inventory::StorageInventory;
 
 /// Capacity of the per-process event broadcast channel.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -73,6 +74,9 @@ pub struct AppState {
     /// present it. Held as an `Arc<str>` mirroring [`Self::auth_token`], so
     /// cloning the state is cheap.
     hook_secret: Arc<str>,
+    /// Where this server keeps its files, for `GET /api/storage`. Paths only,
+    /// fixed at startup; the sizes are read on each request.
+    storage: Arc<StorageInventory>,
     /// The per-session comms log the `/comms` stream serves.
     ///
     /// The same instance the adapters record into (it is handed to the
@@ -102,6 +106,7 @@ impl AppState {
             &config.tmux_socket,
             &config.auth_token,
             &config.hook_secret,
+            StorageInventory::from_config(config),
         )
         .with_comms_log(comms_log);
         state
@@ -151,12 +156,14 @@ impl AppState {
     /// integration tests can inject fakes (an in-memory store, a temp-file
     /// transcript, a no-op tmux driver) and still produce this exact
     /// [`AppState`] type — no generics leak into the transport layer. The spawn
-    /// configuration (base workdir, hook settings) lives inside the Interactor.
+    /// configuration (base workdir, hook settings) lives inside the Interactor;
+    /// `storage` names the paths `GET /api/storage` reports.
     pub fn from_interactor(
         interactor: AppInteractor,
         tmux_socket: &str,
         auth_token: &str,
         hook_secret: &str,
+        storage: StorageInventory,
     ) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         // Wire the interactor's async event seam here — before the interactor is
@@ -174,6 +181,7 @@ impl AppState {
             tmux_socket: Arc::from(tmux_socket),
             auth_token: Arc::from(auth_token),
             hook_secret: Arc::from(hook_secret),
+            storage: Arc::new(storage),
             // An unwired log: `/comms` then serves an always-idle stream, which
             // is exactly right for a state whose interactor records nowhere.
             // `build` (and any test that wants live frames) replaces it via
@@ -223,6 +231,11 @@ impl AppState {
     /// hook requests they drive through the router.
     pub fn hook_secret(&self) -> &str {
         &self.hook_secret
+    }
+
+    /// Where this server keeps its files, for `GET /api/storage`.
+    pub fn storage(&self) -> &StorageInventory {
+        &self.storage
     }
 
     /// The wired Interactor.

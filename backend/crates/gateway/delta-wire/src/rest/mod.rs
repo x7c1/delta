@@ -63,6 +63,10 @@ pub use sends_response::{
 };
 mod sessions_response;
 pub use sessions_response::{WireSessionListItem, WireSessionsResponse};
+mod storage_file;
+pub use storage_file::WireStorageFile;
+mod storage_response;
+pub use storage_response::WireStorageResponse;
 mod threads_response;
 pub use threads_response::WireThreadsResponse;
 mod version_response;

@@ -17,6 +17,7 @@ mod pull_requests;
 mod sessions;
 mod static_web;
 mod status_line;
+mod storage;
 mod workdir;
 
 use super::{router, AppState};
@@ -156,6 +157,7 @@ async fn test_state_with_gh_stub() -> (AppState, Arc<AtomicUsize>) {
             &config.tmux_socket,
             &config.auth_token,
             &config.hook_secret,
+            crate::StorageInventory::from_config(&config),
         ),
         clone_calls,
     )

@@ -964,6 +964,7 @@ describe('SettingsView', () => {
         'Clone roots',
         'Appearance',
         'Default provider',
+        'Storage',
       ]);
       expect(
         screen.getByTestId('settings-category-launch-options'),

@@ -32,6 +32,7 @@ import type {
   SendResponse,
   SendsResponse,
   SessionsResponse,
+  StorageResponse,
   ThreadsResponse,
   UpdateLaunchOptionRequest,
   UpdatePromptTemplateRequest,
@@ -797,6 +798,29 @@ export function useVersionQuery(
     staleTime: Infinity,
     gcTime: Infinity,
     retry: false,
+  });
+}
+
+/** How long a fetched storage inventory counts as fresh (see {@link useStorageQuery}). */
+const STORAGE_STALE_TIME_MS = 30_000;
+
+/**
+ * Where the server keeps its files (`GET /api/storage`), for the Settings
+ * Storage category. `enabled` gates the fetch to while that category is
+ * shown. The paths are fixed for the server's lifetime but the sizes are read
+ * on each request, so the answer goes stale after 30 s: reopening the category
+ * later shows the database as it is now, without refetching on every tab
+ * switch in between.
+ */
+export function useStorageQuery(
+  client: ApiClient,
+  enabled: boolean,
+): UseQueryResult<StorageResponse> {
+  return useQuery({
+    queryKey: queryKeys.storage,
+    queryFn: () => client.getStorage(),
+    enabled,
+    staleTime: STORAGE_STALE_TIME_MS,
   });
 }
 

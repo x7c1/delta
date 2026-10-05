@@ -53,6 +53,7 @@ import { THEMES } from '../../themes/registry';
 import { displayPath } from '../../utils/displayPath';
 import { PROVIDER_OPTIONS } from '../../providers';
 import { WorkdirPickerBody } from '../composer/WorkdirPickerBody';
+import { StorageSection } from './storage/StorageSection';
 
 /**
  * The settings modal: hosts the registry of per-provider CLI launch options,
@@ -115,6 +116,11 @@ export function SettingsView() {
       // The Default provider section reads a persisted preference only; no data
       // fetch, so the `active` prop is ignored.
       render: () => <DefaultProviderSection />,
+    },
+    {
+      id: 'storage',
+      label: 'Storage',
+      render: (active) => <StorageSection active={active} />,
     },
   ];
 

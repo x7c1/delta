@@ -62,6 +62,7 @@ export {
   useCloneRepositoryMutation,
   useOpenCwdMutation,
   useVersionQuery,
+  useStorageQuery,
   useProvidersQuery,
 } from './query-hooks';
 export {

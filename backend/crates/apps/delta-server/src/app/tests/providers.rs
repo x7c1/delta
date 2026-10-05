@@ -30,6 +30,7 @@ async fn test_state_with_only_claude_present() -> AppState {
         &config.tmux_socket,
         &config.auth_token,
         &config.hook_secret,
+        crate::StorageInventory::from_config(&config),
     )
 }
 

@@ -11,6 +11,7 @@ import type {
   RunningSubagent,
   Send,
   Session,
+  StorageResponse,
   Thread,
 } from '@delta/wire-gen';
 
@@ -902,6 +903,29 @@ export const MOCK_WORKDIR_HOME = '/home/dev';
  * verbatim without importing build metadata into the mock package.
  */
 export const MOCK_VERSION = 'v0.0.0-mock';
+
+/** The data directory the mock `GET /api/storage` reports. */
+export const MOCK_DATA_DIR = '/home/u/.local/share/io.github.x7c1.delta';
+
+/**
+ * The inventory the mock `GET /api/storage` returns: placeholder paths under
+ * {@link MOCK_DATA_DIR}, one migration snapshot so mock mode shows the
+ * snapshot sub-list, and the same version string as `GET /api/version`.
+ */
+export const mockStorage: StorageResponse = {
+  identifier: 'io.github.x7c1.delta',
+  version: MOCK_VERSION,
+  data_dir: MOCK_DATA_DIR,
+  database: { path: `${MOCK_DATA_DIR}/delta.db`, bytes: 3_250_176 },
+  snapshots: [{ path: `${MOCK_DATA_DIR}/delta.db.bak-v3`, bytes: 1_048_576 }],
+  hook_state: `${MOCK_DATA_DIR}/delta-hook-state.json`,
+  sessions_dir: `${MOCK_DATA_DIR}/sessions`,
+  session_settings: `${MOCK_DATA_DIR}/settings/7878.json`,
+  tmux_conf: `${MOCK_DATA_DIR}/tmux.conf`,
+  tmux_socket: 'io.github.x7c1.delta',
+  worktree_base: '/home/u/.delta/worktrees',
+  transcript_root: '/home/u/.claude/projects',
+};
 
 /**
  * A tiny static directory tree backing the workdir-picker mock. Each key is a
