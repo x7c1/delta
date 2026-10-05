@@ -39,9 +39,41 @@ The app creates its data directory on first launch:
 | macOS | `~/Library/Application Support/io.github.x7c1.delta/` |
 | Ubuntu | `~/.local/share/io.github.x7c1.delta/` |
 
-It holds the database (`delta.db`), the per-session working directories
-(`sessions/`), and the hook state file (`delta-hook-state.json`). Conversation
-transcripts are not in it: they stay where Claude Code and Codex write them.
+It holds:
+
+- `delta.db`, the database, with its `delta.db-wal` and `delta.db-shm` files
+  (SQLite runs in WAL mode).
+- `delta.db.bak-v<N>`, a snapshot of the database taken before an upgrade step
+  that rewrites data (see [Updating](#updating)). Snapshots are kept until you
+  delete them.
+- `delta-hook-state.json`, the hook state file (see below).
+- `sessions/`, the per-session working directories.
+
+Conversation transcripts are not in it: they stay where Claude Code and Codex
+write them.
+
+The webview that draws the UI keeps its own storage:
+
+- **macOS.** Outside the data directory, in
+  `~/Library/WebKit/io.github.x7c1.delta/` and
+  `~/Library/Caches/io.github.x7c1.delta/`.
+- **Ubuntu.** Inside the data directory, in `localstorage/`, `storage/`,
+  `CacheStorage/` and `WebKitCache/`.
+
+The app also writes two kinds of file to the system temp directory. On Ubuntu
+that is `/tmp`. On macOS it is `$TMPDIR`, a per-user directory under
+`/var/folders/` (run `echo $TMPDIR` to see yours).
+
+- `delta-<port>/settings.json`, the settings a session is launched with. There
+  is one `delta-<port>/` directory for every port the app has used.
+- `delta-tmux-io.github.x7c1.delta.conf`, the configuration of Delta's tmux
+  server.
+
+Neither is deleted when the app quits.
+
+tmux keeps the socket of Delta's tmux server, `io.github.x7c1.delta`, in
+`/tmp/tmux-<uid>/` on both platforms (under `$TMUX_TMPDIR` instead, if you set
+it). The socket file stays there after the server ends.
 
 ### The hook state file
 
@@ -106,14 +138,62 @@ session; their conversations stay in Delta and resume on the next send.
 
 ## Removing everything
 
-1. Quit the app, then end its sessions: `tmux -L io.github.x7c1.delta kill-server`.
+Follow these steps in order. Steps 1 to 5 delete everything listed in
+[Where the app keeps its data](#where-the-app-keeps-its-data).
+
+1. Quit the app, then end its sessions and delete the tmux socket, which
+   `kill-server` leaves behind:
+
+   ```sh
+   tmux -L io.github.x7c1.delta kill-server
+   rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/io.github.x7c1.delta"
+   ```
+
 2. Remove the app: delete `/Applications/Delta.app` on macOS, or run
    `sudo apt remove delta-desktop` on Ubuntu.
-3. Delete the data directory (see
-   [Where the app keeps its data](#where-the-app-keeps-its-data)).
-4. Optionally delete `~/.delta/worktrees/`, where Delta creates git worktrees
-   for sessions that asked for one, then run `git worktree prune` in each
-   repository they came from so git forgets the removed worktrees.
+3. Delete the data directory. This also removes the
+   [hook state file](#the-hook-state-file), and on Ubuntu the webview storage.
+4. On macOS, delete the webview storage:
+
+   ```sh
+   rm -rf ~/Library/WebKit/io.github.x7c1.delta ~/Library/Caches/io.github.x7c1.delta
+   ```
+
+5. Delete the files in the temp directory. On macOS:
+
+   ```sh
+   rm -rf "$TMPDIR"/delta-[0-9]* "$TMPDIR"/delta-tmux-io.github.x7c1.delta.conf
+   ```
+
+   On Ubuntu:
+
+   ```sh
+   rm -rf /tmp/delta-[0-9]* /tmp/delta-tmux-io.github.x7c1.delta.conf
+   ```
+
+6. Optionally remove the git worktrees. For a session that asked for one, Delta
+   creates a worktree under `~/.delta/worktrees/` on a new branch named
+   `delta-<session id>` in the repository it came from. Delete
+   `~/.delta/worktrees/`, then in each of those repositories run
+   `git worktree prune` so git forgets the removed worktrees, and delete the
+   branches you no longer want. `git branch --list 'delta-*'` lists them, and
+   `git branch -D <branch>` deletes one. A session started from an existing
+   branch, such as a pull request's, uses that branch instead; if the
+   repository had no local branch of that name, Delta created one, and it does
+   not start with `delta-`.
+7. Optionally remove the trust entries. For each worktree, Delta adds an entry
+   keyed by the worktree's path under `projects` in `~/.claude.json`, so Claude
+   Code does not ask whether to trust the folder. The file belongs to Claude
+   Code and holds your other settings too, so do not delete it. Look for the
+   keys under `projects` that start with your `~/.delta/worktrees/` path and
+   remove the ones you no longer want.
+
+If you ran a version before v0.5.0, it used older names that the current app
+never touches, and these may also exist: `~/Library/WebKit/delta-app/` and
+`~/Library/Caches/delta-app/` on macOS, `delta-tmux-delta.conf` in the temp
+directory, and the tmux socket `delta` in `/tmp/tmux-<uid>/`.
+End that version's tmux server with `tmux -L delta kill-server` before
+deleting them.
 
 ## Updating
 
