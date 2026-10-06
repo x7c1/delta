@@ -25,6 +25,7 @@ use crate::ports::{
     UserPromptSubmitHook,
 };
 use crate::send_target::WorktreeSpec;
+use crate::session_removal::SessionRemoval;
 
 /// The reply channel for an input that produces a result.
 pub(in crate::interactor) type Reply<R> = oneshot::Sender<Result<R>>;
@@ -154,11 +155,12 @@ pub(in crate::interactor) enum SessionInput {
     /// with the [`SessionEvent::SubagentFinished`]s the process-gone sweep
     /// produced, for the transport to broadcast.
     CloseSession { reply: Reply<Vec<SessionEvent>> },
-    /// Delete the session's rows, once it is neither open nor still starting.
-    /// Refused (leaving every row untouched) otherwise — see
+    /// Delete the session's rows, once it is neither open nor still starting,
+    /// and the worktree and branch Delta created for it when they hold no
+    /// work. Refused (leaving every row and file untouched) otherwise — see
     /// `SessionContext::delete_session` for the two refusals and for what is
-    /// deliberately *not* deleted.
-    DeleteSession { reply: Reply<()> },
+    /// kept. Replies with what was removed and kept on disk.
+    DeleteSession { reply: Reply<SessionRemoval> },
     /// Interrupt the session's in-flight turn without closing it: reach the open
     /// agent and drive [`AgentAdapter::interrupt`], leaving the open agent (and
     /// its event pump) in place so the provider's `turn/completed{interrupted}`

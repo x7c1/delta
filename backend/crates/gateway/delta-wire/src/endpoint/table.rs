@@ -90,9 +90,10 @@ declare_endpoints! {
     CloseSession: POST "/api/sessions/{id}/close";
 
     /// Removes a closed session from Delta: its row and every row that hangs
-    /// off it. Nothing on disk is touched — not the git worktree, not the
-    /// agent's own transcript or state. Refused while the session is open or
-    /// still starting.
+    /// off it, then the git worktree and `delta-<id>` branch Delta created for
+    /// it when they hold no work (a dirty worktree or an unmerged branch is
+    /// kept). The agent's own transcript and state are never touched. Refused
+    /// while the session is open or still starting.
     DeleteSession: DELETE "/api/sessions/{id}";
 
     /// Interrupts the session's in-flight turn.

@@ -23,6 +23,10 @@
 //! cannot answer them, so the reaper would eventually kill the spawn as
 //! `SpawnFailed`. Pre-seeding both is what keeps fresh-workdir spawns alive.
 //!
+//! When Delta removes a worktree it created, [`forget_dir_trusted`] drops the
+//! whole `projects.<abs-path>` entry again, so `~/.claude.json` does not
+//! accumulate entries for directories that no longer exist.
+//!
 //! ## Concurrency
 //!
 //! delta-server is a single process, so a [`tokio::sync::Mutex`] held across the
@@ -118,6 +122,34 @@ pub(crate) async fn ensure_dir_trusted(config_path: &Path, dir: &str) -> Result<
         return Ok(());
     }
 
+    let serialized = serde_json::to_vec_pretty(&root).map_err(|source| Error::TrustSerialize {
+        path: config_path.display().to_string(),
+        source,
+    })?;
+    write_atomic(config_path, dir, &serialized).await
+}
+
+/// Remove `dir`'s `projects.<dir>` entry from the config file at
+/// `config_path`, leaving every other key exactly as it was.
+///
+/// A missing config file, a missing `projects` object, or a missing entry is
+/// not an error: there is nothing to forget, and the file is not rewritten. A
+/// config file that does not parse as JSON yields an error and is left
+/// untouched, as for [`ensure_dir_trusted`].
+pub(crate) async fn forget_dir_trusted(config_path: &Path, dir: &str) -> Result<(), Error> {
+    let mut root = match tokio::fs::read(config_path).await {
+        Ok(bytes) => parse_config(config_path, &bytes)?,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => return Err(io_error(config_path, source)),
+    };
+    let removed = root
+        .get_mut(PROJECTS_KEY)
+        .and_then(Value::as_object_mut)
+        .and_then(|projects| projects.remove(dir))
+        .is_some();
+    if !removed {
+        return Ok(());
+    }
     let serialized = serde_json::to_vec_pretty(&root).map_err(|source| Error::TrustSerialize {
         path: config_path.display().to_string(),
         source,
@@ -363,6 +395,57 @@ mod tests {
         // Unrelated keys on the same project entry are preserved verbatim.
         let project = value.get(PROJECTS_KEY).and_then(|p| p.get(dir)).unwrap();
         assert_eq!(project.get("history"), Some(&serde_json::json!(["a", "b"])));
+    }
+
+    #[tokio::test]
+    async fn forget_removes_exactly_one_project_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(".claude.json");
+        let gone = "/home/u/.delta/worktrees/org-repo-sess-1";
+        let initial = serde_json::json!({
+            "numStartups": 7,
+            "projects": {
+                gone: { TRUST_KEY: true, "history": ["a"] },
+                "/home/u/repos/existing": { TRUST_KEY: true, "history": ["b"] }
+            }
+        });
+        tokio::fs::write(&config, serde_json::to_vec_pretty(&initial).unwrap())
+            .await
+            .unwrap();
+
+        forget_dir_trusted(&config, gone).await.unwrap();
+
+        let mut expected = initial.clone();
+        expected[PROJECTS_KEY].as_object_mut().unwrap().remove(gone);
+        assert_eq!(
+            read_json(&config).await,
+            expected,
+            "only the forgotten dir's projects key is gone"
+        );
+    }
+
+    #[tokio::test]
+    async fn forget_a_missing_entry_or_file_is_a_no_op() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(".claude.json");
+
+        forget_dir_trusted(&config, "/nowhere")
+            .await
+            .expect("a missing config file has nothing to forget");
+        assert!(!config.exists(), "no config file is created");
+
+        let initial = serde_json::json!({ PROJECTS_KEY: { "/kept": { TRUST_KEY: true } } });
+        let bytes = serde_json::to_vec_pretty(&initial).unwrap();
+        tokio::fs::write(&config, &bytes).await.unwrap();
+
+        forget_dir_trusted(&config, "/nowhere")
+            .await
+            .expect("a missing entry has nothing to forget");
+        assert_eq!(
+            tokio::fs::read(&config).await.unwrap(),
+            bytes,
+            "the file is not rewritten"
+        );
     }
 
     #[tokio::test]

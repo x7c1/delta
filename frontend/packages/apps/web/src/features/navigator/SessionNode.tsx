@@ -120,8 +120,10 @@ function removalRefusalDetail(error: unknown): string {
  * `Close` while there is something to close — an open session, or one that is
  * still starting, where closing cancels its launch, the only way out of a launch
  * that has wedged — and otherwise `Remove`, which takes a closed session off the
- * list for good (its rows go; the worktree and the agent's own files stay). The
- * focused card is lifted with an indigo border, tint, and ring.
+ * list for good (its rows go, and so do the worktree and `delta-<id>` branch
+ * Delta created for it when they hold no work; anything holding work and the
+ * agent's own files stay). The focused card is lifted with an indigo border,
+ * tint, and ring.
  *
  * Every session that has branched into sub-threads shows its {@link ThreadTree}
  * expanded by default — focused or not — so the whole visible list reads as a
@@ -574,7 +576,9 @@ export const SessionNode = memo(function SessionNode({
               // The exact inverse of the condition above, so a card always
               // offers exactly one of Close and Remove — never both, never
               // neither. Removal takes the session off the list for good: its
-              // rows go, while the worktree on disk and the agent's own
+              // rows go, and so do the worktree and `delta-<id>` branch Delta
+              // created for it when they hold no work, while a worktree with
+              // uncommitted files, an unmerged branch and the agent's own
               // transcript stay (see `DELETE /api/sessions/{id}`). No
               // confirmation dialog: opening the kebab and picking a red item
               // is already two steps, and Close — the other destructive-looking
@@ -588,8 +592,9 @@ export const SessionNode = memo(function SessionNode({
               // left to live. The refusal, because the card stays put and the
               // click would otherwise produce nothing. The success, because the
               // card vanishing under a red `Remove` reads as "my work is gone"
-              // when the worktree, its branch and the agent's transcript are
-              // all still where they were.
+              // when anything that held work is still where it was. The
+              // response carries no outcome, so the line states the rule
+              // rather than what this removal did.
               ...(!item.open && !spawning
                 ? [
                     {
@@ -599,7 +604,7 @@ export const SessionNode = memo(function SessionNode({
                           onSuccess: () => {
                             showInfo(
                               'Session removed',
-                              `Nothing on disk was deleted — ${item.session.cwd} is untouched.`,
+                              'Its worktree and branch were removed only if Delta created them and they held no uncommitted or unmerged work; anything that did is kept.',
                             );
                           },
                           onError: (error: unknown) => {

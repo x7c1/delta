@@ -265,13 +265,35 @@ cascade takes everything hanging off it: threads, messages, sends, permission
 requests, subagent records and the transcript sync cursor. There is no request
 body.
 
-**Nothing on disk is deleted.** The git worktree the session ran in — which may
-hold uncommitted work — its branch, and the agent's own transcript and state
-files (Claude Code's JSONL, Codex's thread) all stay exactly where they are.
-Closing already keeps the worktree so a session can be resumed; this route is
-the user tidying Delta's list, not a command to destroy work. A session removed
-here cannot be resumed, because the row `POST /api/sessions/{id}/open` resumes
-by id is gone.
+**A session owns the worktree and the branch Delta created for it, and Delta
+never destroys the user's work.** After the rows are deleted, a session that ran
+in a git worktree Delta created — its `cwd` lies under the worktree base and it
+was cut from a repository (`repo_root`) — has that worktree and branch removed
+when they hold no work:
+
+- The worktree is removed with `git worktree remove` **without** `--force`, so
+  git itself refuses one with modified or untracked files, and Delta keeps it.
+  Files the repository ignores (build output, a `.env` listed in
+  `.gitignore`) do not count: git deletes them with a clean worktree. A
+  worktree another listed session still works in is kept too.
+- After a removal, `git worktree prune` runs in the repository, and the
+  `projects` entry Delta seeded for the worktree path in `~/.claude.json` is
+  removed.
+- The branch is deleted only when it is the `delta-<session id>` branch Delta
+  cut for the session, and only with `git branch -d` (never `-D`), which git
+  refuses for a branch not merged into its upstream (or `HEAD`); Delta then
+  keeps it. A branch still checked out in a kept worktree is kept with it. A
+  session started on an existing branch — a pull request's, for example —
+  never has that branch deleted.
+
+A git failure other than git's refusal (the repository is gone, `git` is
+missing) keeps the item as well. Whatever is kept never refuses the removal:
+the rows are deleted regardless, and the server logs, at `info`, what was
+removed and what was kept and why. A session that ran in the user's own
+directory or in a scratch directory has nothing of this kind, and git is not
+asked anything. The agent's own transcript and state files (Claude Code's
+JSONL, Codex's thread) are never touched. A session removed here cannot be
+resumed, because the row `POST /api/sessions/{id}/open` resumes by id is gone.
 
 Removal also stops nothing that is still running, and a session reads as closed
 whenever Delta holds no pane for it — including a `claude` started *outside*
@@ -279,7 +301,10 @@ Delta, which Delta knows only through its hooks and never holds a pane for, so i
 is listed as closed while it runs. Removing one of those does not end it: its
 next hook registers the same id again from scratch, so the card comes back, and
 — the sync cursor having gone with the row — the JSONL on disk is re-ingested
-from its first line. Remove such a session once its agent has exited.
+from its first line. Remove such a session once its agent has exited. The same
+goes for a session Delta started in a worktree and that was later resumed
+outside Delta: removing it while that agent runs can take a clean worktree out
+from under it.
 
 Removal is allowed only for a session that is neither open nor still starting;
 state is checked before anything is deleted, so a refusal leaves every row
@@ -291,7 +316,8 @@ the overview above), not the row's `status`.
 `session_removed` is broadcast on success — its own event, not `session_closed`:
 a client hearing it must drop the session rather than re-render it as closed.
 
-- **204 No Content** — the session and its rows are gone.
+- **204 No Content** — the session and its rows are gone (whatever was kept on
+  disk; the response has no body).
 - **404** — no session with that id (including a second removal of the same
   session).
 - **409** — the session is open (body `code: "session_open"`), whether idle or

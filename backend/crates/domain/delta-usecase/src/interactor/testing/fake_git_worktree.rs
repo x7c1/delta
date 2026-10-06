@@ -8,7 +8,9 @@ use async_trait::async_trait;
 use tokio::sync::Notify;
 
 use crate::error::Result;
-use crate::ports::{GitWorktree, RemoteBranches, WorktreeStartPoint};
+use crate::ports::{
+    BranchDeletion, GitWorktree, RemoteBranches, WorktreeRemoval, WorktreeStartPoint,
+};
 
 /// A hold on the fake's worktree build, so a test can observe the window in
 /// which a session is accepted but not yet launched.
@@ -70,6 +72,40 @@ pub(crate) struct CheckedOutWorktree {
     pub(crate) repo_root: String,
     pub(crate) worktree_path: String,
     pub(crate) branch: String,
+}
+
+/// A scripted answer for one of the fake's removal calls: git's outcome, or a
+/// failure other than git's refusal (the repository is gone, `git` is missing).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Scripted<T> {
+    /// The call returns this outcome.
+    Answer(T),
+    /// The call fails with a git error.
+    GitFailure,
+}
+
+impl<T: Copy> Scripted<T> {
+    fn into_result(self, what: &str) -> Result<T> {
+        match self {
+            Self::Answer(outcome) => Ok(outcome),
+            Self::GitFailure => Err(crate::error::Error::Git(format!("{what} failed"))),
+        }
+    }
+}
+
+/// Look up `key`'s scripted answer, falling back to `default`.
+fn scripted<T: Copy>(
+    script: &Mutex<Vec<(String, Scripted<T>)>>,
+    key: &str,
+    default: T,
+) -> Scripted<T> {
+    script
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, answer)| *answer)
+        .unwrap_or(Scripted::Answer(default))
 }
 
 /// Models git detection and worktree creation for the use-case tests.
@@ -138,6 +174,21 @@ pub(crate) struct FakeGitWorktree {
     /// `None` (the default) means no wait at all, so every other test is
     /// unaffected.
     pub(crate) gate: Option<WorktreeGate>,
+    /// Scripted `remove_worktree` answers, keyed by worktree path. A path
+    /// absent from the map is removed ([`WorktreeRemoval::Removed`]).
+    pub(crate) worktree_removal_script: Mutex<Vec<(String, Scripted<WorktreeRemoval>)>>,
+    /// Scripted `delete_branch_if_merged` answers, keyed by branch name. A
+    /// branch absent from the map is deleted ([`BranchDeletion::Deleted`]).
+    pub(crate) branch_deletion_script: Mutex<Vec<(String, Scripted<BranchDeletion>)>>,
+    /// The `(repo_root, path)` of every `remove_worktree` call, in order.
+    pub(crate) removed_worktrees: Mutex<Vec<(String, String)>>,
+    /// The `(repo_root, branch)` of every `delete_branch_if_merged` call, in
+    /// order.
+    pub(crate) deleted_branches: Mutex<Vec<(String, String)>>,
+    /// The repo roots passed to `prune_worktrees`, in order.
+    pub(crate) pruned: Mutex<Vec<String>>,
+    /// The dirs passed to `forget_dir_trusted`, in order.
+    pub(crate) forgotten: Mutex<Vec<String>>,
 }
 
 impl FakeGitWorktree {
@@ -215,6 +266,42 @@ impl FakeGitWorktree {
             .unwrap()
             .push((branch.to_owned(), answers));
         self
+    }
+
+    /// Script `remove_worktree(_, path)` to answer `answer`.
+    pub(crate) fn with_worktree_removal(
+        self,
+        path: &str,
+        answer: Scripted<WorktreeRemoval>,
+    ) -> Self {
+        self.worktree_removal_script
+            .lock()
+            .unwrap()
+            .push((path.to_owned(), answer));
+        self
+    }
+
+    /// Script `delete_branch_if_merged(_, branch)` to answer `answer`.
+    pub(crate) fn with_branch_deletion(
+        self,
+        branch: &str,
+        answer: Scripted<BranchDeletion>,
+    ) -> Self {
+        self.branch_deletion_script
+            .lock()
+            .unwrap()
+            .push((branch.to_owned(), answer));
+        self
+    }
+
+    /// True iff no removal-side call (`remove_worktree`,
+    /// `delete_branch_if_merged`, `prune_worktrees`, `forget_dir_trusted`)
+    /// was made.
+    pub(crate) fn removal_untouched(&self) -> bool {
+        self.removed_worktrees.lock().unwrap().is_empty()
+            && self.deleted_branches.lock().unwrap().is_empty()
+            && self.pruned.lock().unwrap().is_empty()
+            && self.forgotten.lock().unwrap().is_empty()
     }
 
     /// The next scripted answer for `branch`, or `None` when the branch is not
@@ -338,6 +425,46 @@ impl GitWorktree for FakeGitWorktree {
 
     async fn ensure_dir_trusted(&self, dir: &str) -> Result<()> {
         self.trusted.lock().unwrap().push(dir.to_owned());
+        Ok(())
+    }
+
+    async fn remove_worktree(&self, repo_root: &str, path: &str) -> Result<WorktreeRemoval> {
+        self.removed_worktrees
+            .lock()
+            .unwrap()
+            .push((repo_root.to_owned(), path.to_owned()));
+        scripted(
+            &self.worktree_removal_script,
+            path,
+            WorktreeRemoval::Removed,
+        )
+        .into_result("worktree remove")
+    }
+
+    async fn delete_branch_if_merged(
+        &self,
+        repo_root: &str,
+        branch: &str,
+    ) -> Result<BranchDeletion> {
+        self.deleted_branches
+            .lock()
+            .unwrap()
+            .push((repo_root.to_owned(), branch.to_owned()));
+        scripted(
+            &self.branch_deletion_script,
+            branch,
+            BranchDeletion::Deleted,
+        )
+        .into_result("branch -d")
+    }
+
+    async fn prune_worktrees(&self, repo_root: &str) -> Result<()> {
+        self.pruned.lock().unwrap().push(repo_root.to_owned());
+        Ok(())
+    }
+
+    async fn forget_dir_trusted(&self, dir: &str) -> Result<()> {
+        self.forgotten.lock().unwrap().push(dir.to_owned());
         Ok(())
     }
 }

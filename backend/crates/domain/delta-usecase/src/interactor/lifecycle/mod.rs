@@ -76,6 +76,13 @@ const SETTINGS_FLAG: &str = "--settings";
 ///
 /// [`ensure_dir_trusted`]: crate::ports::GitWorktree::ensure_dir_trusted
 pub(in crate::interactor) fn is_under_worktree_base(base: &str, candidate: &str) -> bool {
+    is_at_or_below(base, candidate)
+}
+
+/// True iff `candidate` resolves to `base` or a path below it, comparing
+/// canonicalized paths by component — the robust comparison
+/// [`is_under_worktree_base`] describes, for any pair of paths.
+pub(in crate::interactor) fn is_at_or_below(base: &str, candidate: &str) -> bool {
     let base = canonicalize_existing_ancestor(Path::new(base));
     let candidate = canonicalize_existing_ancestor(Path::new(candidate));
     candidate.starts_with(&base)

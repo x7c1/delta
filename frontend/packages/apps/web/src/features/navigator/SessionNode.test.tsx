@@ -624,11 +624,12 @@ describe('SessionNode kebab menu', () => {
     await waitFor(() => expect(removed).toHaveBeenCalledWith(item.session.id));
   });
 
-  it('says that nothing on disk was deleted after a removal', async () => {
+  it('says that work on disk was kept after a removal', async () => {
     // The only on-screen result of a successful `Remove` is the card
     // disappearing, which under a red menu item reads as the work being gone.
-    // The snackbar is what corrects that, so it must name the directory that
-    // survived rather than describe the rows that went.
+    // The snackbar is what corrects that: it says that only a worktree and
+    // branch holding no work were removed, rather than describe the rows that
+    // went.
     server.use(
       http.delete(
         '*/api/sessions/:id',
@@ -648,7 +649,8 @@ describe('SessionNode kebab menu', () => {
           id: expect.any(Number),
           tone: 'info',
           title: 'Session removed',
-          detail: `Nothing on disk was deleted — ${item.session.cwd} is untouched.`,
+          detail:
+            'Its worktree and branch were removed only if Delta created them and they held no uncommitted or unmerged work; anything that did is kept.',
         },
       ]),
     );

@@ -175,8 +175,11 @@ Follow these steps in order. Steps 1 to 4 delete everything listed in
 
 6. Optionally remove the git worktrees. For a session that asked for one, Delta
    creates a worktree under `~/.delta/worktrees/` on a new branch named
-   `delta-<session id>` in the repository it came from. Delete
-   `~/.delta/worktrees/`, then in each of those repositories run
+   `delta-<session id>` in the repository it came from. Removing a session in
+   Delta already removes its worktree and that branch when they hold no work,
+   so what is left either holds work, belongs to a session still listed, or
+   belongs to a session removed by an earlier version that did not clean up.
+   Delete `~/.delta/worktrees/`, then in each of those repositories run
    `git worktree prune` so git forgets the removed worktrees, and delete the
    branches you no longer want. `git branch --list 'delta-*'` lists them, and
    `git branch -D <branch>` deletes one. A session started from an existing

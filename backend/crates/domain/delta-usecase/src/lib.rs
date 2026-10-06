@@ -19,6 +19,7 @@ mod repository;
 mod send_target;
 mod session_listing;
 mod session_page;
+mod session_removal;
 mod turn;
 
 pub use agent::{
@@ -41,19 +42,20 @@ pub use interactor::{
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use pane_token::{PaneToken, PaneTokenMinter};
 pub use ports::{
-    pane_for, AsyncEventReceiver, AsyncEventSink, BinaryDetector, CloneRoot, CommsDirection,
-    CommsEntry, CommsFrameKind, CommsLogSink, DirEntry, DirListing, ExternalOpener, GhCli,
-    GitRepoInfo, GitWorktree, MessageDisplayHook, NewSession, NullCommsLog, RateLimitWindow,
+    pane_for, AsyncEventReceiver, AsyncEventSink, BinaryDetector, BranchDeletion, CloneRoot,
+    CommsDirection, CommsEntry, CommsFrameKind, CommsLogSink, DirEntry, DirListing, ExternalOpener,
+    GhCli, GitRepoInfo, GitWorktree, MessageDisplayHook, NewSession, NullCommsLog, RateLimitWindow,
     RecentWorkdir, RememberedPane, RemoteBranches, RepositoryCloneRow, SessionEndHook,
     SessionEvent, SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore,
     SpawningSession, StatusSnapshot, StopHook, TmuxDriver, Transcript, TranscriptMessage,
-    TranscriptRead, UserPromptSubmitHook, Workspace, WorktreeStartPoint,
+    TranscriptRead, UserPromptSubmitHook, Workspace, WorktreeRemoval, WorktreeStartPoint,
 };
 pub use pull_request::{PullRequest, PullRequestLens, PullRequestList};
 pub use repository::{display_name, identity_key, worktree_dir_slug, Clone, Repository};
 pub use send_target::{SendTarget, WorktreeSpec};
 pub use session_listing::SessionListing;
 pub use session_page::{SessionPage, SessionPageCursor};
+pub use session_removal::{DiskItem, KeepReason, KeptItem, SessionRemoval};
 pub use turn::{
     transition, turn_input_for_agent_event, OrphanedSend, Transition, TurnInput, TurnState,
 };
