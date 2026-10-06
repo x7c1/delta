@@ -94,11 +94,10 @@ server re-adopts them, so they stay listed as open: scope a status assertion to
 the spec's own card (`focusedSessionNode`) rather than counting across the
 navigator. They also fill the windowed list ahead of any closed card, which
 may then be unmounted until scrolled to; a failed launch the page itself
-started is the exception, since the navigator pins it to the top. Because a hard
-kill (SIGKILL, Ctrl-C) can skip teardown, the fixture also **sweeps at
-startup**: it kills any leftover `delta-e2e-fake-*` tmux server and removes any
-`delta-e2e-fake.*` temp dir from a crashed run, so leaks are bounded to one
-run. Diagnostics are preserved under `packages/apps/web/test-results/e2e-fake/`,
+started is the exception, since the navigator pins it to the top. Teardown
+kills the server and the per-run tmux server but keeps the run's temp dir; the
+cleanup happens at the start of the next run (see "Test-run residue" below).
+Diagnostics are preserved under `packages/apps/web/test-results/e2e-fake/`,
 all uploaded by CI on failure: each *boot* of the server gets its own
 `boot-<N>/` directory, holding one log file per server generation
 (`server.log`, `server.2.log`, … across restarts) plus the fake transcripts
@@ -110,6 +109,30 @@ dir is emptied once per run instead, by the suite's `globalSetup`
 never masquerade as this one's. Nothing the e2e-fake run touches collides with
 `make dev` or the mock suite. It needs tmux, the Playwright chromium browser
 (see above), and built workspace libraries (`make build`).
+
+**Test-run residue.** Every harness that boots a real tmux leaves something
+behind: a run directory (the server's data directory, with its database) and a
+tmux socket file, which `tmux kill-server` does not remove. One script,
+`scripts/sweep-test-residue.sh <context>`, cleans it up at the **start** of each
+run, once per invocation — for this lane from `globalSetup.ts`, never from the
+per-worker fixture. Its contexts are `e2e-fake` (sockets `delta-e2e-fake-<pid>`,
+run directories `$TMPDIR/delta-e2e-fake.*`), `e2e-real` (the real-claude
+smoke, `delta-e2e-real-*` / `delta-e2e-real.*`), and the socket-only
+`fake-test` and `canary` (the Rust `full_loop` test and the real-claude
+canaries, whose directories are cleaned on drop). A run whose owner is alive —
+the pid ending the socket name, or the `owner.pid` the harness writes into its
+run directory — is never touched. For dead runs the sweep kills the tmux
+server and unlinks its socket, **keeps the newest run directory** as evidence
+and removes the older ones; a directory without `owner.pid` counts as dead.
+So after a run, its directory (database, `server.log` for the smoke) stays in
+`$TMPDIR` for inspection until a newer run of the same context has finished
+and the one after it starts. In e2e-fake every boot of the server (`boot-<N>/`
+above) gets its own run directory, so after a run in which a failed test made
+the fixture reboot, the next run keeps only the last boot's directory and
+removes the earlier ones. Only those prefixes are ever matched: the
+production and dev sockets (`io.github.x7c1.delta*`) and a developer's live
+server are never candidates. `make check` runs the script's own test
+(`make sweep-test-residue-test`).
 
 **Writing a scenario.** Scenarios are JSON files in
 `packages/apps/web/e2e-fake/scenarios/`, executed step by step by the fake:

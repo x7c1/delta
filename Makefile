@@ -169,7 +169,8 @@ lint:
 #   check-backend-fmt → check-backend-build → { check-backend-test, check-backend-clippy, check-gen }
 #   check-frontend-build → { check-frontend-typecheck, check-frontend-test, check-frontend-lint, check-e2e }
 #   { check-backend-build, check-frontend-build } → { check-e2e-fake, check-embedded, check-desktop-build }
-#   vendor-codex-schema-check, vendor-codex-schema-test, e2e-real-gate-test, gen-check-test (no prerequisites)
+#   vendor-codex-schema-check, vendor-codex-schema-test, e2e-real-gate-test,
+#   sweep-test-residue-test, gen-check-test (no prerequisites)
 #
 # Without -j, make walks the same graph left to right, which is the serial
 # order the gate always had. The cargo steps share backend/target and take
@@ -182,7 +183,8 @@ lint:
 # ordering, not the behaviour.
 CHECK_STEPS := \
 	check-backend-test check-backend-clippy check-gen \
-	vendor-codex-schema-check vendor-codex-schema-test e2e-real-gate-test gen-check-test \
+	vendor-codex-schema-check vendor-codex-schema-test e2e-real-gate-test sweep-test-residue-test \
+	gen-check-test \
 	check-frontend-typecheck check-frontend-test check-frontend-lint \
 	check-e2e check-e2e-fake check-embedded check-desktop-build
 
@@ -263,6 +265,11 @@ e2e-real-gate:
 .PHONY: e2e-real-gate-test
 e2e-real-gate-test:
 	bash scripts/tests/e2e-real-gate.test.sh
+
+## sweep-test-residue-test: exercise the test-residue sweep against a planted temp tree with a stub tmux (never the host's sockets; part of `make check`)
+.PHONY: sweep-test-residue-test
+sweep-test-residue-test:
+	bash scripts/tests/sweep-test-residue.test.sh
 
 ## e2e-real-codex: run the real-codex canaries against the real `codex app-server` — one safe turn end-to-end + the thread-metadata wire fields + the worktree sandbox git grant + schema drift detection (local only; only the turn consumes Codex quota; never in CI). DELTA_CODEX_BIN overrides the binary.
 .PHONY: e2e-real-codex

@@ -322,6 +322,28 @@ impl Drop for ClaudeSession {
 
 // --- Helpers -------------------------------------------------------------------
 
+/// Clean up the residue of previous `canary` runs before this one starts:
+/// `scripts/sweep-test-residue.sh canary` kills dead runs' tmux servers and
+/// unlinks their sockets (`tmux kill-server` leaves the file behind, and a
+/// crashed run leaves the server too), never touching a run whose owner pid
+/// is alive. Its output goes to stderr so the harness captures it.
+fn sweep_test_residue() {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../scripts/sweep-test-residue.sh");
+    let out = std::process::Command::new(&script)
+        .arg("canary")
+        .output()
+        .unwrap_or_else(|err| panic!("run {}: {err}", script.display()));
+    eprint!("{}", String::from_utf8_lossy(&out.stdout));
+    eprint!("{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{} failed: {}",
+        script.display(),
+        out.status
+    );
+}
+
 /// Whether a usable `tmux` and `claude` are on `PATH`.
 fn prerequisites_available() -> bool {
     let check = |bin: &str, arg: &str| {
@@ -440,6 +462,7 @@ where
         eprintln!("skipping {name}: tmux or claude is not available");
         return;
     }
+    sweep_test_residue();
     match canary().await {
         Ok(()) => {}
         Err(first) => {

@@ -14,8 +14,8 @@ export const REPO_ROOT = path.resolve(HERE, '../../../../../..');
 /**
  * Where the run's backend diagnostics are preserved.
  *
- * The per-run state (server logs, fake transcripts) lives in a temp dir
- * deleted on teardown, which is useless once CI tears the runner down. The
+ * The per-run state (database, fake transcripts) lives in a temp dir that a
+ * later run's sweep removes, and is useless once CI tears the runner down. The
  * fixture mirrors the diagnostics to this stable, repo-relative path that the
  * CI upload step references. It is also the suite's Playwright `outputDir`
  * (playwright.fake.config.ts), so Playwright's own traces/videos/screenshots
