@@ -87,7 +87,7 @@ Mention the `.icns` inset rule in one sentence so nobody "fixes" it.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On macOS: `make desktop` installs; the Dock, Finder, Cmd-Tab and the
+- [x] On macOS: `make desktop` installs; the Dock, Finder, Cmd-Tab and the
       `.dmg` window show the new icon at Dock size with margins like the
       neighbouring apps; `make desktop-dev` shows the badged icon in the
       Dock, distinguishable from the installed one. The browser tab at
