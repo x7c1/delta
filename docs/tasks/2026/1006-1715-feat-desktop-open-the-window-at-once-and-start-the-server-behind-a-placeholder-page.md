@@ -10,7 +10,7 @@ check_command: "make check && git grep -q 'Starting Delta' -- backend/crates/app
 assignee: null
 branch: task/1006-1715-feat-desktop-open-the-window-at-once-and-start-the-server-behind-a-placeholder-page
 created_at: 2026-10-06T09:39:05Z
-updated_at: 2026-10-06T10:30:17Z
+updated_at: 2026-10-06T10:31:27Z
 ---
 
 # feat(desktop): open the window at once and start the server behind a placeholder page
@@ -90,7 +90,7 @@ a sentence there describes the wait.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On macOS: set `SHELL` to a script that sleeps 7 seconds and then
+- [x] On macOS: set `SHELL` to a script that sleeps 7 seconds and then
       `exec`s the real shell with its arguments, launch the dev build; the
       window appears within a second showing the placeholder and switches to
       the app when the server is up. With `tmux` hidden from `PATH`, the
