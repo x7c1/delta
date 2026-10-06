@@ -107,8 +107,10 @@ pub struct CodexLaunchConfig {
     /// clears this.
     pub args: Vec<String>,
     /// Extra environment variables set on the child, on top of the inherited
-    /// environment. Empty by default; a test uses it to hand the fake its
-    /// scenario without mutating the parent process's (shared) environment.
+    /// environment. Empty by default; the server fills it with its
+    /// configuration's `child_env` (the desktop app's login-shell `PATH` and
+    /// locale), and a test uses it to hand the fake its scenario without
+    /// mutating the parent process's (shared) environment.
     pub env: Vec<(String, String)>,
 }
 

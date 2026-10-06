@@ -7,9 +7,10 @@ pub const FALLBACK_LANG: &str = "en_US.UTF-8";
 /// first one set (and non-empty) wins.
 const CHARSET_LOCALE_VARS: [&str; 3] = ["LC_ALL", "LC_CTYPE", "LANG"];
 
-/// The variable to set so the process has a UTF-8 locale, or `None` when one
-/// of [`CHARSET_LOCALE_VARS`] is already set. `lookup` reads a variable; an
-/// empty value counts as unset, as it does for the C library.
+/// The variable to give the commands Delta starts so they have a UTF-8 locale,
+/// or `None` when one of [`CHARSET_LOCALE_VARS`] is already set. `lookup` reads
+/// the value a command would see; an empty value counts as unset, as it does
+/// for the C library.
 pub fn locale_fallback(
     lookup: impl Fn(&str) -> Option<OsString>,
 ) -> Option<(&'static str, &'static str)> {

@@ -60,28 +60,61 @@ query($q: String!, $first: Int!) {
 /// PR tab opens cheaply on a host with `gh` configured. Per-lens
 /// search calls are not cached here (the use case owns that
 /// memoisation).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Gh {
     /// Memoises the `gh auth status` answer. Async-locked so a
     /// concurrent burst of PR-tab opens only spawns one subprocess.
     auth_status: OnceCell<bool>,
+    /// Environment variables set on every `gh` command, on top of the
+    /// inherited environment (the server configuration's `child_env`). `gh`
+    /// itself is also looked up on this `PATH` when it carries one.
+    env: Vec<(String, String)>,
 }
 
 impl Gh {
-    /// Build a fresh gateway. The first `is_authenticated` call lazily
-    /// runs `gh auth status` and memoises the result.
-    pub fn new() -> Self {
+    /// Build a fresh gateway running every `gh` command with `env` set. The
+    /// first `is_authenticated` call lazily runs `gh auth status` and
+    /// memoises the result.
+    pub fn new(env: Vec<(String, String)>) -> Self {
         Self {
             auth_status: OnceCell::new(),
+            env,
         }
+    }
+
+    /// The command `gh <args>`, with [`Self::env`] set. Every `gh` this
+    /// gateway runs starts here, so none can miss the environment.
+    fn gh(&self, args: &[&str]) -> Command {
+        let mut command = Command::new("gh");
+        command
+            .args(args)
+            .envs(self.env.iter().map(|(name, value)| (name, value)));
+        command
     }
 
     /// Resolve the auth-status cache, populating it on first miss.
     async fn check_auth(&self) -> bool {
         *self
             .auth_status
-            .get_or_init(|| async { run_auth_status().await })
+            .get_or_init(|| self.run_auth_status())
             .await
+    }
+
+    /// Run `gh auth status` and report whether gh considers itself
+    /// authenticated.
+    ///
+    /// A missing binary (`NotFound`) and any other I/O error both collapse
+    /// to `false` so a host without gh installed still answers the
+    /// availability question rather than erroring — the use case represents
+    /// that as "PR tab disabled" rather than as a 5xx.
+    async fn run_auth_status(&self) -> bool {
+        match self.gh(&["auth", "status"]).output().await {
+            Ok(output) => output.status.success(),
+            Err(err) => {
+                tracing::debug!(error = %err, "gh auth status failed; treating gh as unavailable");
+                false
+            }
+        }
     }
 }
 
@@ -106,8 +139,8 @@ impl GhCli for Gh {
         let search_query = search_query_for(lens, cutoff);
         let q_arg = format!("q={search_query}");
         let doc_arg = format!("query={SEARCH_GRAPHQL}");
-        let output = Command::new("gh")
-            .args([
+        let output = self
+            .gh(&[
                 "api", "graphql", "-F", &first_arg, "-f", &q_arg, "-f", &doc_arg,
             ])
             .output()
@@ -139,8 +172,8 @@ impl GhCli for Gh {
         // rejects such an owner/name via `check_path_segment`); `destination` is
         // in any case an absolute path derived from a registered clone root.
         let slug = format!("{owner}/{name}");
-        let output = Command::new("gh")
-            .args(["repo", "clone", "--", &slug, destination])
+        let output = self
+            .gh(&["repo", "clone", "--", &slug, destination])
             .output()
             .await
             .map_err(Error::from)?;
@@ -188,26 +221,24 @@ fn freshness_cutoff(today: NaiveDate) -> NaiveDate {
     today - Duration::days(PR_FRESHNESS_DAYS)
 }
 
-/// Run `gh auth status` and report whether gh considers itself
-/// authenticated.
-///
-/// A missing binary (`NotFound`) and any other I/O error both collapse
-/// to `false` so a host without gh installed still answers the
-/// availability question rather than erroring — the use case represents
-/// that as "PR tab disabled" rather than as a 5xx.
-async fn run_auth_status() -> bool {
-    match Command::new("gh").args(["auth", "status"]).output().await {
-        Ok(output) => output.status.success(),
-        Err(err) => {
-            tracing::debug!(error = %err, "gh auth status failed; treating gh as unavailable");
-            false
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_gh_command_carries_the_given_environment() {
+        let gh = Gh::new(vec![("PATH".to_owned(), "/opt/homebrew/bin".to_owned())]);
+
+        let command = gh.gh(&["auth", "status"]);
+
+        let envs: Vec<_> = command.as_std().get_envs().collect();
+        assert_eq!(
+            envs,
+            [("PATH".as_ref(), Some("/opt/homebrew/bin".as_ref()))]
+        );
+        let args: Vec<_> = command.as_std().get_args().collect();
+        assert_eq!(args, ["auth", "status"]);
+    }
 
     /// A fixed reference date used across the query-builder tests so
     /// assertions do not depend on the wall clock.

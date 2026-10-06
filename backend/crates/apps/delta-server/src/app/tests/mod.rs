@@ -129,6 +129,7 @@ pub(super) fn test_config() -> Config {
         port: 7878,
         hook_endpoint_changed: false,
         launch: delta_usecase::LaunchConfig::default(),
+        child_env: Vec::new(),
     }
 }
 

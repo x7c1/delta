@@ -10,9 +10,11 @@
 //!
 //! Startup, in order:
 //!
-//! 1. adopt the login shell's `PATH` and locale ([`login_env`]), so `tmux`,
+//! 1. read the login shell's `PATH` and locale ([`login_env`]), so `tmux`,
 //!    `claude` and `codex` are found and run in a UTF-8 locale when launched
-//!    from Finder or a desktop file;
+//!    from Finder or a desktop file. They become the configuration's
+//!    `child_env`, which the server sets on every command it starts, and the
+//!    link opener gets them too;
 //! 2. build the server configuration the CLI builds, under the app's bundle
 //!    identifier: the server derives its data directory
 //!    (`<platform data dir>/<identifier>`, the directory Tauri names the app
@@ -52,6 +54,8 @@ mod login_env;
 #[cfg(target_os = "macos")]
 mod macos_title_bar;
 
+use std::sync::Arc;
+
 use tauri::webview::NewWindowResponse;
 use tauri::{App, AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
@@ -65,7 +69,10 @@ const WINDOW_TITLE: &str = "Delta";
 
 fn main() {
     serve::init_tracing();
-    let path_not_imported = login_env::import_login_shell_env();
+    let login_env::LoginEnv {
+        vars: child_env,
+        path_not_imported,
+    } = login_env::read_login_env();
 
     let context = tauri::generate_context!();
     let identifier = context.config().identifier.clone();
@@ -100,8 +107,8 @@ fn main() {
         // Tauri panics on an error returned from here, so every failure is
         // reported (and exits 1) inside the hook instead.
         .setup(move |app| {
-            let started =
-                start_server(app, &runtime, &identifier).and_then(|port| open_window(app, port));
+            let started = start_server(app, &runtime, &identifier, child_env.clone())
+                .and_then(|port| open_window(app, port, child_env));
             if let Err(err) = started {
                 report_startup_failure(app.handle(), &err, path_not_imported.as_ref());
             }
@@ -174,9 +181,15 @@ fn focus_running_window(app: &AppHandle) {
 }
 
 /// Build the configuration and state, and start serving. Returns the port the
-/// server listens on.
-fn start_server(app: &App, runtime: &Runtime, identifier: &str) -> anyhow::Result<u16> {
+/// server listens on. `child_env` is set on every command the server starts.
+fn start_server(
+    app: &App,
+    runtime: &Runtime,
+    identifier: &str,
+    child_env: Vec<(String, String)>,
+) -> anyhow::Result<u16> {
     let mut config = config::config_from_env_for(identifier)?;
+    config.child_env = child_env;
     tracing::info!(
         identifier = %config.identifier,
         data_dir = %config.data_dir,
@@ -196,7 +209,7 @@ fn start_server(app: &App, runtime: &Runtime, identifier: &str) -> anyhow::Resul
         "delta-desktop hook endpoint settled"
     );
 
-    delta_server::log_claude_version(&config.launch.claude_bin);
+    delta_server::log_claude_version(&config.launch.claude_bin, &config.child_env);
     let state = runtime.block_on(AppState::build(&config))?;
 
     let handle = app.handle().clone();
@@ -242,14 +255,18 @@ fn quit_after_erase(handle: &AppHandle, message: String) {
         .show(move |_| exit_handle.exit(0));
 }
 
-fn open_window(app: &App, port: u16) -> anyhow::Result<()> {
+/// Open the window on the server's port. Links handed to the default browser
+/// are opened with `opener_env` set on the opener.
+fn open_window(app: &App, port: u16, opener_env: Vec<(String, String)>) -> anyhow::Result<()> {
     let url = format!("http://127.0.0.1:{port}/").parse()?;
+    let opener_env: Arc<[(String, String)]> = opener_env.into();
+    let navigation_env = Arc::clone(&opener_env);
     let builder = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::External(url))
         .title(WINDOW_TITLE)
         .inner_size(1280.0, 800.0)
-        .on_navigation(move |url| load_in_window(url, port))
+        .on_navigation(move |url| load_in_window(url, port, &navigation_env))
         .on_new_window(move |url, _features| {
-            open_in_browser(&url, links::classify(&url, port));
+            open_in_browser(&url, links::classify(&url, port), &opener_env);
             NewWindowResponse::Deny
         });
     #[cfg(target_os = "macos")]
@@ -263,19 +280,21 @@ fn open_window(app: &App, port: u16) -> anyhow::Result<()> {
 
 /// Whether a navigation stays in the window; one that does not is opened in the
 /// default browser or refused.
-fn load_in_window(url: &Url, port: u16) -> bool {
+fn load_in_window(url: &Url, port: u16, opener_env: &[(String, String)]) -> bool {
     let kind = links::classify(url, port);
     if kind == links::LinkKind::OwnOrigin {
         return true;
     }
-    open_in_browser(url, kind);
+    open_in_browser(url, kind, opener_env);
     false
 }
 
 /// Open a web link in the default browser; refuse and log anything else.
-fn open_in_browser(url: &Url, kind: links::LinkKind) {
+fn open_in_browser(url: &Url, kind: links::LinkKind, opener_env: &[(String, String)]) {
     match kind {
-        links::LinkKind::OwnOrigin | links::LinkKind::Web => links::open_externally(url),
+        links::LinkKind::OwnOrigin | links::LinkKind::Web => {
+            links::open_externally(url, opener_env)
+        }
         links::LinkKind::NotWeb => {
             tracing::warn!(url = %url, "refused to open a link that is not a web link");
         }

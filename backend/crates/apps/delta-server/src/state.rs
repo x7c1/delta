@@ -64,6 +64,10 @@ pub struct AppState {
     /// Delta's dedicated tmux socket, so the PTY bridge attaches on the same
     /// server the sessions live on (`tmux -L <socket> attach-session`).
     tmux_socket: Arc<str>,
+    /// The environment variables the PTY bridge sets on its `tmux attach`
+    /// client: the configuration's [`Config::child_env`]. Empty unless
+    /// [`Self::with_child_env`] sets it.
+    child_env: Arc<[(String, String)]>,
     /// The per-run bearer token every browser request must present, enforced by
     /// [`crate::auth_guard`]. Minted (or handed in) once for the server's
     /// lifetime — see `config::config_from_env` — and never rotated. Held as an
@@ -119,7 +123,8 @@ impl AppState {
             &config.hook_secret,
             StorageInventory::from_config(config),
         )
-        .with_comms_log(comms_log);
+        .with_comms_log(comms_log)
+        .with_child_env(config.child_env.clone());
         state
             .readopt_surviving_sessions(config.hook_endpoint_changed)
             .await;
@@ -190,6 +195,7 @@ impl AppState {
             events,
             async_events: Arc::new(std::sync::Mutex::new(Some(async_rx))),
             tmux_socket: Arc::from(tmux_socket),
+            child_env: Arc::from([]),
             auth_token: Arc::from(auth_token),
             hook_secret: Arc::from(hook_secret),
             storage: Arc::new(storage),
@@ -216,6 +222,18 @@ impl AppState {
         self
     }
 
+    /// Set `env` on the commands the transport layer starts itself (the PTY
+    /// bridge's `tmux attach`), as the gateways the interactor was wired with
+    /// set it on theirs.
+    ///
+    /// Separate from [`Self::from_interactor`] for the same reason as
+    /// [`Self::with_comms_log`]: every test that builds its state from an
+    /// interactor runs with the inherited environment.
+    pub fn with_child_env(mut self, env: Vec<(String, String)>) -> Self {
+        self.child_env = env.into();
+        self
+    }
+
     /// Watch one session's comms log: buffered frames, then the live tail.
     ///
     /// What the `/comms` route pumps into its socket, and — since it is the whole
@@ -228,6 +246,12 @@ impl AppState {
     /// Delta's dedicated tmux socket name (`tmux -L <socket>`).
     pub fn tmux_socket(&self) -> &str {
         &self.tmux_socket
+    }
+
+    /// The environment variables set on the commands the server starts; see
+    /// [`Self::with_child_env`].
+    pub fn child_env(&self) -> &[(String, String)] {
+        &self.child_env
     }
 
     /// The per-run bearer token every browser request must present. Read by

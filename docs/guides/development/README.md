@@ -161,6 +161,15 @@ identifier): a second launch focuses the running window and exits, so it cannot
 start a rival server on the same database and tmux socket, nor take over the
 hook port the running copy holds.
 
+At startup the shell reads `PATH`, `LANG` and `LC_*` from the user's login
+shell (`src/login_env/`) and hands them to the server as values, in the
+configuration's `child_env`; the composition root passes them to every gateway
+that starts a process, which sets them on each command. Nothing writes the
+process environment. `delta-server` on its own leaves `child_env` empty, so its
+commands inherit the terminal's environment. See
+[the desktop app's `PATH` and locale](local-run.md#the-desktop-app) for what the
+user sees.
+
 The crate is left out of the workspace's `default-members`, so `cargo build`,
 `cargo test` and `cargo clippy` in `backend/` (and `make build` / `make test` /
 `make lint`) never build it or need the Linux libraries above. Name it to build

@@ -3,7 +3,6 @@
 //! branch).
 
 use delta_usecase::{BranchDeletion, WorktreeRemoval};
-use tokio::process::Command;
 
 use super::{command_error, Git};
 use crate::error::Error;
@@ -19,6 +18,14 @@ const DIRTY_WORKTREE_REFUSAL: &str = "contains modified or untracked files";
 const UNMERGED_BRANCH_REFUSAL: &str = "is not fully merged";
 
 impl Git {
+    /// The command `git -C <repo>` under the C locale. `LC_ALL` is set after
+    /// the gateway's environment, so it wins over a locale there.
+    fn untranslated_git(&self, repo: &str) -> tokio::process::Command {
+        let mut command = self.git(repo);
+        command.env("LC_ALL", "C");
+        command
+    }
+
     /// Run `git -C <repo> <args>` under the C locale, returning the captured
     /// output — for a command whose refusal is told apart from other failures
     /// by git's message, which a translated git would word differently.
@@ -27,13 +34,7 @@ impl Git {
         repo: &str,
         args: &[&str],
     ) -> std::result::Result<std::process::Output, Error> {
-        Ok(Command::new("git")
-            .env("LC_ALL", "C")
-            .arg("-C")
-            .arg(repo)
-            .args(args)
-            .output()
-            .await?)
+        Ok(self.untranslated_git(repo).args(args).output().await?)
     }
 
     /// `git worktree remove <path>`, never `--force`: git's own refusal of a
@@ -117,6 +118,25 @@ mod tests {
     use super::*;
     use crate::git::testing::{canonical, git_ok, init_repo_with_commit};
 
+    #[test]
+    fn the_c_locale_wins_over_the_gateway_environment() {
+        let git = Git::new(vec![
+            ("PATH".to_owned(), "/opt/homebrew/bin".to_owned()),
+            ("LC_ALL".to_owned(), "ja_JP.UTF-8".to_owned()),
+        ]);
+
+        let command = git.untranslated_git("/repo");
+
+        let envs: Vec<_> = command.as_std().get_envs().collect();
+        assert_eq!(
+            envs,
+            [
+                ("LC_ALL".as_ref(), Some("C".as_ref())),
+                ("PATH".as_ref(), Some("/opt/homebrew/bin".as_ref())),
+            ]
+        );
+    }
+
     /// A repository at a fresh temp dir with one commit and a linked worktree
     /// on a new branch `branch` at `<worktrees>/wt`. Returns the repo root and
     /// the worktree path; keep the two temp dirs alive for the test.
@@ -153,7 +173,7 @@ mod tests {
         let (repo, worktrees) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (repo_root, wt_path) = repo_with_worktree(&repo, &worktrees, "delta-s1").await;
         let wt_canonical = canonical(&wt_path).await;
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         let outcome = git.remove_worktree(&repo_root, &wt_path).await.unwrap();
 
@@ -179,7 +199,7 @@ mod tests {
         tokio::fs::write(&untracked, "work in progress")
             .await
             .unwrap();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         let outcome = git.remove_worktree(&repo_root, &wt_path).await.unwrap();
 
@@ -202,7 +222,7 @@ mod tests {
         let (repo, worktrees) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (repo_root, _) = repo_with_worktree(&repo, &worktrees, "delta-s1").await;
         let stray = tempfile::tempdir().unwrap();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         let result = git
             .remove_worktree(&repo_root, stray.path().to_str().unwrap())
@@ -223,7 +243,7 @@ mod tests {
         tokio::fs::write(std::path::Path::new(&wt_path).join("notes.txt"), "work")
             .await
             .unwrap();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         git.force_remove_worktree(&repo_root, &wt_path)
             .await
@@ -249,7 +269,7 @@ mod tests {
         // deletion for the branch being checked out.
         git_ok(&wt_path, &["commit", "-q", "--allow-empty", "-m", "work"]).await;
         git_ok(&repo_root, &["worktree", "remove", &wt_path]).await;
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         let outcome = git
             .delete_branch_if_merged(&repo_root, "delta-s1")
@@ -265,7 +285,7 @@ mod tests {
         let (repo, worktrees) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (repo_root, wt_path) = repo_with_worktree(&repo, &worktrees, "delta-s1").await;
         git_ok(&repo_root, &["worktree", "remove", &wt_path]).await;
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         let deleted = git
             .delete_branch_if_merged(&repo_root, "delta-s1")

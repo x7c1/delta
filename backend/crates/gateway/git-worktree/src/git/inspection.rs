@@ -92,7 +92,7 @@ mod tests {
         let (repo, worktrees) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let (repo_root, wt_path) = repo_with_worktree(&repo, &worktrees).await;
 
-        let inspection = Git::new()
+        let inspection = Git::new(Vec::new())
             .inspect_worktree(&wt_path)
             .await
             .unwrap()
@@ -111,7 +111,7 @@ mod tests {
         let (_, wt_path) = repo_with_worktree(&repo, &worktrees).await;
         std::fs::write(std::path::Path::new(&wt_path).join("notes.txt"), "work").unwrap();
 
-        let inspection = Git::new()
+        let inspection = Git::new(Vec::new())
             .inspect_worktree(&wt_path)
             .await
             .unwrap()
@@ -129,7 +129,7 @@ mod tests {
         let admin = std::path::Path::new(&repo_root).join(".git/worktrees/wt");
         std::fs::remove_dir_all(admin).unwrap();
         let plain = tempfile::tempdir().unwrap();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         assert_eq!(git.inspect_worktree(&wt_path).await.unwrap(), None);
         assert_eq!(
@@ -147,7 +147,7 @@ mod tests {
         let nested = repo.path().join("sub");
         std::fs::create_dir(&nested).unwrap();
 
-        let inspection = Git::new()
+        let inspection = Git::new(Vec::new())
             .inspect_worktree(nested.to_str().unwrap())
             .await
             .unwrap();

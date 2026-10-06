@@ -270,6 +270,7 @@ impl ClaudeSession {
                 .tmux_conf()
                 .to_string_lossy()
                 .into_owned(),
+            Vec::new(),
         );
         let tmux_name = "canary";
         tmux.create_session(tmux_name, &workdir.to_string_lossy(), &command)

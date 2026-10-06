@@ -108,6 +108,7 @@ fn config_from_vars_for(
         port: port_from_vars(&text).unwrap_or(DEFAULT_PORT),
         hook_endpoint_changed: false,
         launch: launch_from_vars(&text),
+        child_env: Vec::new(),
     }
 }
 

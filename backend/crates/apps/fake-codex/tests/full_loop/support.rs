@@ -177,11 +177,12 @@ pub(crate) fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (R
                 .join("tmux.conf")
                 .to_string_lossy()
                 .into_owned(),
+            Vec::new(),
         )) as Box<dyn TmuxDriver>,
         Box::new(JsonlTranscript::new()) as Box<dyn Transcript>,
         Box::new(store) as Box<dyn delta_usecase::SessionStore>,
         Box::new(FsWorkspace::new()) as Box<dyn Workspace>,
-        Box::new(Git::new()) as Box<dyn GitWorktree>,
+        Box::new(Git::new(Vec::new())) as Box<dyn GitWorktree>,
         scenario.dir.join("sessions").to_string_lossy().into_owned(),
         std::env::temp_dir()
             .join("delta-codex-full-loop-worktrees")

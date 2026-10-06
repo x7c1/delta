@@ -49,8 +49,7 @@ pub async fn pty_handler(
     upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
     let session_id = SessionId::from(query.session_id);
-    let tmux_socket = state.tmux_socket().to_owned();
-    upgrade.on_upgrade(move |socket| bridge(socket, state, session_id, tmux_socket))
+    upgrade.on_upgrade(move |socket| bridge(socket, state, session_id))
 }
 
 /// Bridge a browser WebSocket to a tmux pane through a PTY.
@@ -60,12 +59,7 @@ pub async fn pty_handler(
 /// completes would leave that record behind with no bridge to release it —
 /// telling the launch watchdog forever that somebody is watching a pane nobody
 /// is. When nothing resolves, the socket is logged and closed.
-async fn bridge(
-    mut socket: WebSocket,
-    state: AppState,
-    session_id: SessionId,
-    tmux_socket: String,
-) {
+async fn bridge(mut socket: WebSocket, state: AppState, session_id: SessionId) {
     // A bound session resolves its pane, and so does a fresh spawn whose pane is
     // up but unbound; anything else resolves nothing, and the bridge closes the
     // socket cleanly rather than attach to a pane that does not exist.
@@ -111,7 +105,8 @@ async fn bridge(
         }
     }
 
-    if let Err(err) = run_bridge(socket, attached.pane, &tmux_socket).await {
+    let attach = attach_command(state.tmux_socket(), &attached.pane, state.child_env());
+    if let Err(err) = run_bridge(socket, attach).await {
         tracing::error!(error = %err, "pty bridge terminated with error");
     }
 }
@@ -150,17 +145,16 @@ fn attach_args<'a>(tmux_socket: &'a str, pane: &'a str) -> [&'a str; 6] {
     ]
 }
 
-async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyhow::Result<()> {
-    let pty_system = portable_pty::native_pty_system();
-    let pair = pty_system.openpty(PtySize {
-        rows: 24,
-        cols: 80,
-        pixel_width: 0,
-        pixel_height: 0,
-    })?;
-
+/// The `tmux attach` client for `pane`, with `env` (the server
+/// configuration's `child_env`) set on top of the inherited environment, so
+/// `tmux` is found on the same `PATH` and runs under the same locale as the
+/// tmux driver's commands.
+fn attach_command(tmux_socket: &str, pane: &str, env: &[(String, String)]) -> CommandBuilder {
     let mut cmd = CommandBuilder::new("tmux");
-    cmd.args(attach_args(tmux_socket, &pane));
+    cmd.args(attach_args(tmux_socket, pane));
+    for (name, value) in env {
+        cmd.env(name, value);
+    }
     // Pin the attach client's TERM instead of inheriting the server's. The
     // terminal on the other side of this PTY is always the browser's xterm.js
     // (an xterm-compatible emulator), so xterm-256color describes it correctly
@@ -170,7 +164,19 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
     // support clear") and exits at once, leaving the bridge writing keystrokes
     // into a dead client.
     cmd.env("TERM", "xterm-256color");
-    let mut child = pair.slave.spawn_command(cmd)?;
+    cmd
+}
+
+async fn run_bridge(socket: WebSocket, attach: CommandBuilder) -> anyhow::Result<()> {
+    let pty_system = portable_pty::native_pty_system();
+    let pair = pty_system.openpty(PtySize {
+        rows: 24,
+        cols: 80,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
+
+    let mut child = pair.slave.spawn_command(attach)?;
     // Close this process's copy of the slave now that the child holds its own.
     // The read thread below only returns once the master reports the pane gone
     // (EOF or EIO), and on Linux that happens when the LAST slave descriptor
@@ -326,6 +332,28 @@ mod tests {
         assert_eq!(
             attach_args("delta", "%3"),
             ["-u", "-L", "delta", "attach-session", "-t", "%3"]
+        );
+    }
+
+    #[test]
+    fn the_attach_client_carries_the_given_environment_and_a_pinned_term() {
+        let env = vec![
+            ("PATH".to_owned(), "/opt/homebrew/bin:/usr/bin".to_owned()),
+            ("LANG".to_owned(), "en_US.UTF-8".to_owned()),
+            ("TERM".to_owned(), "dumb".to_owned()),
+        ];
+
+        let cmd = attach_command("delta", "%3", &env);
+
+        assert_eq!(
+            cmd.get_env("PATH"),
+            Some("/opt/homebrew/bin:/usr/bin".as_ref())
+        );
+        assert_eq!(cmd.get_env("LANG"), Some("en_US.UTF-8".as_ref()));
+        assert_eq!(cmd.get_env("TERM"), Some("xterm-256color".as_ref()));
+        assert_eq!(
+            cmd.get_argv(),
+            &["tmux", "-u", "-L", "delta", "attach-session", "-t", "%3"]
         );
     }
 

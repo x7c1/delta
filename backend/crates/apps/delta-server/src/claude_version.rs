@@ -12,7 +12,9 @@
 //! session activity.
 //!
 //! Honours `DELTA_CLAUDE_BIN` by accepting the resolved binary path from the
-//! caller (which has already applied the env override).
+//! caller (which has already applied the env override), and runs it with the
+//! configuration's `child_env` set, so it resolves and reports the same
+//! `claude` the sessions launch.
 //!
 //! Kept in its own module so the spawn, output handling, and warn-on-failure
 //! branches stay readable in isolation and can be unit-tested without booting
@@ -34,13 +36,14 @@
 
 use std::process::Command;
 
-/// Spawn `<bin> --version` once and log the result. See the module docs for
-/// the format and failure semantics.
+/// Spawn `<bin> --version` once, with `env` set on top of the inherited
+/// environment, and log the result. See the module docs for the format and
+/// failure semantics.
 ///
 /// Never panics, never returns an error: a spawn failure or non-zero exit is
 /// logged at warn level and the caller continues.
-pub fn log_claude_version(bin: &str) {
-    let output = match Command::new(bin).arg("--version").output() {
+pub fn log_claude_version(bin: &str, env: &[(String, String)]) {
+    let output = match version_command(bin, env).output() {
         Ok(output) => output,
         Err(err) => {
             tracing::warn!(
@@ -68,6 +71,15 @@ pub fn log_claude_version(bin: &str) {
     let version = String::from_utf8_lossy(&output.stdout);
     let version = version.trim();
     tracing::info!(bin, version, "claude --version: {version}");
+}
+
+/// The command `<bin> --version`, with `env` set.
+fn version_command(bin: &str, env: &[(String, String)]) -> Command {
+    let mut command = Command::new(bin);
+    command
+        .arg("--version")
+        .envs(env.iter().map(|(name, value)| (name, value)));
+    command
 }
 
 #[cfg(test)]
@@ -110,8 +122,22 @@ mod tests {
         // No assertion on log output — `tracing` captures depend on a global
         // subscriber that other tests in the binary may have installed. The
         // contract here is "does not panic, does not return an error".
-        log_claude_version(stub.to_str().expect("utf-8 path"));
+        log_claude_version(stub.to_str().expect("utf-8 path"), &[]);
         let _ = std::fs::remove_file(&stub);
+    }
+
+    /// The probe runs with the given environment: the stub prints its `LANG`.
+    #[test]
+    fn the_probe_runs_with_the_given_environment() {
+        let stub = write_stub("#!/bin/sh\nprintf '%s' \"$LANG\"\n");
+        let env = [("LANG".to_owned(), "delta-test.UTF-8".to_owned())];
+
+        let output = version_command(stub.to_str().expect("utf-8 path"), &env)
+            .output()
+            .expect("the stub runs");
+        let _ = std::fs::remove_file(&stub);
+
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "delta-test.UTF-8");
     }
 
     /// Missing-binary path: pointing at a path that does not exist must hit
@@ -120,7 +146,7 @@ mod tests {
     /// or when only `fake-claude` is available).
     #[test]
     fn missing_binary_does_not_panic() {
-        log_claude_version("/does/not/exist/claude-binary-for-version-probe");
+        log_claude_version("/does/not/exist/claude-binary-for-version-probe", &[]);
     }
 
     /// Non-zero exit: a stub that writes to stderr and exits non-zero must
@@ -128,7 +154,7 @@ mod tests {
     #[test]
     fn nonzero_exit_does_not_panic() {
         let stub = write_stub("#!/bin/sh\necho 'boom' 1>&2\nexit 2\n");
-        log_claude_version(stub.to_str().expect("utf-8 path"));
+        log_claude_version(stub.to_str().expect("utf-8 path"), &[]);
         let _ = std::fs::remove_file(&stub);
     }
 }
