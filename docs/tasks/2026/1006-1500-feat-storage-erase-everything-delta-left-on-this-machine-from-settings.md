@@ -10,7 +10,7 @@ check_command: "make check && git grep -q 'EraseEverything' -- backend/crates/ga
 assignee: null
 branch: task/1006-1500-feat-storage-erase-everything-delta-left-on-this-machine-from-settings
 created_at: 2026-10-06T06:08:03Z
-updated_at: 2026-10-06T07:25:37Z
+updated_at: 2026-10-06T07:27:32Z
 ---
 
 # feat(storage): erase everything Delta left on this machine, from Settings
@@ -191,7 +191,7 @@ the page:
 
 ### Before merge (verified outside the check command)
 
-- [ ] On the development machine with a scratch `DELTA_DATA_DIR` and
+- [x] On the development machine with a scratch `DELTA_DATA_DIR` and
       `DELTA_WORKTREE_BASE`: start `delta-server`, create one worktree
       session and leave it clean, another and leave an uncommitted file in
       it, then erase from Settings. Afterwards the data directory, the tmux
