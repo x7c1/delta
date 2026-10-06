@@ -76,6 +76,26 @@ pub(crate) fn interactor_with_git_and_worktree_base(
     )
 }
 
+/// Build a test interactor with a specific [`FakeWorkspace`] and
+/// [`FakeGitWorktree`], for the Settings → Storage worktree tests, which
+/// script the directories under the worktree base and what git says of each.
+pub(crate) fn interactor_with_workspace_and_git(
+    workspace: FakeWorkspace,
+    git_worktree: FakeGitWorktree,
+) -> TestInteractor {
+    Interactor::new(
+        FakeTmux::default(),
+        FakeTranscript::default(),
+        FakeStore::default(),
+        workspace,
+        git_worktree,
+        TEST_WORKDIR_BASE,
+        TEST_WORKTREE_BASE,
+        TEST_SETTINGS_JSON,
+        TEST_SETTINGS_PATH,
+    )
+}
+
 /// Build a test interactor with both a specific [`FakeGitWorktree`] and a
 /// shared [`FakeGhCli`], for the PR-tab use-case tests that need to
 /// script both the local-clone registry (via the store + gateway-resolved

@@ -25,6 +25,11 @@ pub(crate) struct FakeWorkspace {
     pub(crate) fail_create_dir: Mutex<bool>,
     /// Paths that "exist" as directories; `resolve_existing_dir` accepts these.
     pub(crate) existing_dirs: Mutex<Vec<String>>,
+    /// Scripted `list_dirs` children, keyed by the listed path: the bare names
+    /// of its subdirectories. A path absent from the map lists no children.
+    pub(crate) children: Mutex<Vec<(String, Vec<String>)>>,
+    /// The paths `remove_dir_tree` was asked to delete, in order.
+    pub(crate) removed_trees: Mutex<Vec<String>>,
 }
 
 impl FakeWorkspace {
@@ -32,6 +37,15 @@ impl FakeWorkspace {
     /// can assert the *canonical* path (not the raw input) reaches the launch.
     pub(crate) fn canonical(path: &str) -> String {
         format!("/canon{path}")
+    }
+
+    /// Script `list_dirs(dir)` to list subdirectories named `names`.
+    pub(crate) fn with_children(self, dir: &str, names: &[&str]) -> Self {
+        self.children.lock().unwrap().push((
+            dir.to_owned(),
+            names.iter().map(|name| (*name).to_owned()).collect(),
+        ));
+        self
     }
 }
 
@@ -70,12 +84,36 @@ impl Workspace for FakeWorkspace {
         path: &str,
         _include_hidden: bool,
     ) -> Result<crate::ports::DirListing> {
-        // A minimal listing: only used to exercise the browse use case's default
-        // and delegation. The path is canonicalized like `resolve_existing_dir`.
+        // A minimal listing: the scripted children, if any. The path is
+        // canonicalized like `resolve_existing_dir`, and so are the entries'
+        // paths, so a caller that must keep the spelling it was configured
+        // with is caught relying on the canonical one.
+        let canonical = Self::canonical(path);
+        let entries = self
+            .children
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(dir, _)| dir == path)
+            .map(|(_, names)| {
+                names
+                    .iter()
+                    .map(|name| crate::ports::DirEntry {
+                        name: name.clone(),
+                        path: format!("{canonical}/{name}"),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(crate::ports::DirListing {
-            path: Self::canonical(path),
+            path: canonical,
             parent: None,
-            entries: Vec::new(),
+            entries,
         })
+    }
+
+    async fn remove_dir_tree(&self, path: &str) -> Result<()> {
+        self.removed_trees.lock().unwrap().push(path.to_owned());
+        Ok(())
     }
 }

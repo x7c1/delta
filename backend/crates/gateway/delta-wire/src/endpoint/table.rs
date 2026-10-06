@@ -13,12 +13,14 @@ use crate::hooks::{
 use crate::rest::{
     WireCloneRepositoryRequest, WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
     WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
-    WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse,
-    WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
+    WireDeleteSnapshotRequest, WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOption,
+    WireLaunchOptionsResponse, WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
     WirePermissionDecisionRequest, WirePromptTemplate, WirePromptTemplatesResponse,
-    WireProvidersResponse, WirePullRequestsResponse, WireQuestionAnswerRequest,
-    WireQuestionCancelRequest, WireRepositoriesResponse, WireSendResponse, WireSendsResponse,
-    WireSessionsResponse, WireStorageResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
+    WireProvidersResponse, WirePrunePreviewResponse, WirePruneSessionsRequest,
+    WirePruneSessionsResponse, WirePullRequestsResponse, WireQuestionAnswerRequest,
+    WireQuestionCancelRequest, WireRemoveWorktreeRequest, WireRepositoriesResponse,
+    WireSendResponse, WireSendsResponse, WireSessionsResponse, WireStorageResponse,
+    WireStorageWorktreesResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
     WireUpdatePromptTemplateRequest, WireVersionResponse, WireWorkdirListResponse,
     WireWorkdirRecentResponse,
 };
@@ -95,6 +97,21 @@ declare_endpoints! {
     /// kept). The agent's own transcript and state are never touched. Refused
     /// while the session is open or still starting.
     DeleteSession: DELETE "/api/sessions/{id}";
+
+    /// Previews the bulk session removal: the closed sessions
+    /// `PruneSessions` would remove now for the criteria in the query
+    /// (`older_than_days`, and `statuses` as a comma-separated list), without
+    /// removing anything.
+    PreviewPruneSessions: GET "/api/sessions/prune", response = WirePrunePreviewResponse;
+
+    /// Removes, in bulk, every closed session whose most recent activity is
+    /// at least `older_than_days` days old and that ended one of the
+    /// `statuses` ways, each exactly as `DeleteSession` removes one — so a
+    /// worktree holding work or an unmerged branch is kept and reported.
+    /// Open and still-starting sessions are skipped, not failed on.
+    PruneSessions: POST "/api/sessions/prune",
+        request = WirePruneSessionsRequest,
+        response = WirePruneSessionsResponse;
 
     /// Interrupts the session's in-flight turn.
     InterruptSession: POST "/api/sessions/{id}/interrupt";
@@ -240,6 +257,21 @@ declare_endpoints! {
     /// socket name — with the database's and its snapshots' sizes read at
     /// request time. Read-only, and never carries a secret.
     GetStorage: GET "/api/storage", response = WireStorageResponse;
+
+    /// Every directory under the worktree base, with whether a listed session
+    /// still works in it, the repository git reports for it, and whether it
+    /// has uncommitted or untracked changes.
+    ListOrphanWorktrees: GET "/api/storage/worktrees", response = WireStorageWorktreesResponse;
+
+    /// Removes one directory under the worktree base that no listed session
+    /// works in. Refuses a dirty worktree, or one git no longer knows, unless
+    /// `force` is set; then prunes the repository's worktree list and forgets
+    /// Claude Code's trust entry for the path.
+    RemoveOrphanWorktree: DELETE "/api/storage/worktrees", request = WireRemoveWorktreeRequest;
+
+    /// Deletes one of the migration snapshots `GetStorage` lists; any other
+    /// path is refused.
+    DeleteSnapshot: DELETE "/api/storage/snapshots", request = WireDeleteSnapshotRequest;
 
     // Streams. Each upgrades to a WebSocket, so the declared response type is
     // the shape of one frame on the socket rather than a response body.

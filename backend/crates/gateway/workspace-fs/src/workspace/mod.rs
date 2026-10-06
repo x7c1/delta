@@ -3,11 +3,13 @@
 //! Split by responsibility: this module holds the struct and the [`Workspace`]
 //! trait wiring, `create_dir` the owner-only directory creation (a scratch
 //! working directory, and the settings file's directory), `settings` the
-//! hardened settings-file write, and `browse` the read-only directory queries
-//! the picker needs.
+//! hardened settings-file write, `browse` the read-only directory queries the
+//! picker needs, and `remove_dir` the deletion of a leftover worktree
+//! directory.
 
 mod browse;
 mod create_dir;
+mod remove_dir;
 mod settings;
 
 use async_trait::async_trait;
@@ -61,5 +63,9 @@ impl Workspace for FsWorkspace {
         include_hidden: bool,
     ) -> std::result::Result<DirListing, delta_usecase::Error> {
         Ok(self.list(path, include_hidden).await?)
+    }
+
+    async fn remove_dir_tree(&self, path: &str) -> std::result::Result<(), delta_usecase::Error> {
+        Ok(self.remove_tree(path).await?)
     }
 }

@@ -177,6 +177,45 @@ impl FakeStore {
         Ok(())
     }
 
+    /// Mirrors `SqliteStore::list_prunable_sessions`: recency at or before
+    /// `cutoff`, status in `statuses`, oldest first.
+    pub(super) async fn list_prunable_sessions(
+        &self,
+        cutoff: &str,
+        statuses: &[SessionStatus],
+    ) -> Result<Vec<SessionId>> {
+        let g = self.inner.lock().unwrap();
+        Ok(recency_ordered_rows(&g)
+            .into_iter()
+            .rev()
+            .filter(|row| row_recency(row).as_str() <= cutoff && statuses.contains(&row.0.status))
+            .map(|(session, _)| session.id)
+            .collect())
+    }
+
+    /// Test seam: back-date (or forward-date) a session's `created_at`, the
+    /// recency a message-less session sorts and prunes on.
+    pub(crate) fn set_session_created_at(&self, id: &SessionId, created_at: &str) {
+        let mut g = self.inner.lock().unwrap();
+        let session = g
+            .sessions
+            .iter_mut()
+            .find(|s| &s.id == id)
+            .expect("set_session_created_at on an unknown session");
+        session.created_at = created_at.to_owned();
+    }
+
+    /// Test seam: set a session's row status directly.
+    pub(crate) fn set_session_status(&self, id: &SessionId, status: SessionStatus) {
+        let mut g = self.inner.lock().unwrap();
+        let session = g
+            .sessions
+            .iter_mut()
+            .find(|s| &s.id == id)
+            .expect("set_session_status on an unknown session");
+        session.status = status;
+    }
+
     pub(super) async fn delete_session(&self, id: &SessionId) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         // Mirror the real store's cascade: every child row goes with the

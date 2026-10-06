@@ -131,6 +131,28 @@ const OPEN_CWD_COMMAND_NOT_FOUND_CODE: &str = "open_cwd_command_not_found";
 /// generic error message on this code.
 const OPEN_CWD_SPAWN_FAILED_CODE: &str = "open_cwd_spawn_failed";
 
+/// Stable machine-readable code for a Storage worktree removal aimed at a path
+/// that is not a directory directly under the worktree base. The Storage list
+/// only offers what it listed there, so a client meets this from a
+/// hand-crafted request.
+const WORKTREE_OUTSIDE_BASE_CODE: &str = "worktree_outside_base";
+
+/// Stable machine-readable code for a Storage worktree removal aimed at a
+/// worktree a listed session still works in. The list offers no control on
+/// such a row, so a client meets this from a stale list (a session started
+/// there since).
+const WORKTREE_IN_USE_CODE: &str = "worktree_in_use";
+
+/// Stable machine-readable code for a Storage worktree removal without
+/// `force` aimed at a worktree with uncommitted or untracked changes. The
+/// way past it is the forced removal, which destroys those changes.
+const WORKTREE_DIRTY_CODE: &str = "worktree_dirty";
+
+/// Stable machine-readable code for a Storage worktree removal without
+/// `force` aimed at a directory git no longer knows as a worktree. The way
+/// past it is the forced removal, which deletes the directory tree.
+const WORKTREE_NOT_REGISTERED_CODE: &str = "worktree_not_registered";
+
 /// An error rendered as an HTTP response.
 ///
 /// This is the single place that maps failures onto status codes, keeping the
@@ -145,6 +167,9 @@ pub(crate) enum ApiError {
     /// A request targeting a resource that does not exist (`404`), where the
     /// use case reports absence as `None` rather than an [`delta_usecase::Error`].
     NotFound(String),
+    /// A failure outside any use case — a file the server itself manages
+    /// could not be changed (`500`).
+    Internal(String),
 }
 
 impl From<delta_usecase::Error> for ApiError {
@@ -159,6 +184,7 @@ impl IntoResponse for ApiError {
         let (status, message, code) = match self {
             ApiError::BadRequest(message) => (StatusCode::BAD_REQUEST, message, None),
             ApiError::NotFound(message) => (StatusCode::NOT_FOUND, message, None),
+            ApiError::Internal(message) => (StatusCode::INTERNAL_SERVER_ERROR, message, None),
             ApiError::UseCase(err) => {
                 let (status, code) = match &err {
                     // No session yet means nothing to act on for the caller.
@@ -337,6 +363,20 @@ impl IntoResponse for ApiError {
                     Error::LaunchOptionIsBuiltin(_) => {
                         (StatusCode::CONFLICT, Some(LAUNCH_OPTION_BUILTIN_CODE))
                     }
+                    // A Storage worktree removal the target's state forbids:
+                    // outside the base, still worked in by a session, or —
+                    // without `force` — holding work or unknown to git. Each a
+                    // 409 with its own code, since each asks the user for a
+                    // different thing (nothing, remove the session, confirm
+                    // the loss).
+                    Error::WorktreeOutsideBase(_) => {
+                        (StatusCode::CONFLICT, Some(WORKTREE_OUTSIDE_BASE_CODE))
+                    }
+                    Error::WorktreeInUse(_) => (StatusCode::CONFLICT, Some(WORKTREE_IN_USE_CODE)),
+                    Error::WorktreeDirty(_) => (StatusCode::CONFLICT, Some(WORKTREE_DIRTY_CODE)),
+                    Error::WorktreeNotRegistered(_) => {
+                        (StatusCode::CONFLICT, Some(WORKTREE_NOT_REGISTERED_CODE))
+                    }
                     // Everything else is an internal failure. The two launch
                     // preparation failures only land here defensively: both
                     // happen long after the send was accepted, so they reach
@@ -431,5 +471,28 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(code.as_deref(), Some("session_hooks_unreachable"));
+    }
+
+    /// Each Storage worktree refusal is a conflict with its own code, since
+    /// each asks the user for something different.
+    #[tokio::test]
+    async fn the_worktree_refusals_render_conflicts_with_their_own_codes() {
+        use delta_usecase::Error;
+        for (err, expected) in [
+            (
+                Error::WorktreeOutsideBase("/x".into()),
+                "worktree_outside_base",
+            ),
+            (Error::WorktreeInUse("/w/a".into()), "worktree_in_use"),
+            (Error::WorktreeDirty("/w/a".into()), "worktree_dirty"),
+            (
+                Error::WorktreeNotRegistered("/w/a".into()),
+                "worktree_not_registered",
+            ),
+        ] {
+            let (status, code) = rendered(err).await;
+            assert_eq!(status, StatusCode::CONFLICT);
+            assert_eq!(code.as_deref(), Some(expected));
+        }
     }
 }

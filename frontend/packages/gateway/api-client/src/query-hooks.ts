@@ -14,6 +14,7 @@ import type {
   CreateLaunchOptionRequest,
   CreateCloneRootRequest,
   CreatePromptTemplateRequest,
+  DeleteSnapshotRequest,
   GitBranchesResponse,
   GitRepoResponse,
   LaunchOption,
@@ -24,7 +25,11 @@ import type {
   PromptTemplate,
   PromptTemplatesResponse,
   ProvidersResponse,
+  PrunePreviewResponse,
+  PruneSessionsRequest,
+  PruneSessionsResponse,
   PullRequestsResponse,
+  RemoveWorktreeRequest,
   RepositoriesResponse,
   CloneRoot,
   CloneRootsResponse,
@@ -33,6 +38,7 @@ import type {
   SendsResponse,
   SessionsResponse,
   StorageResponse,
+  StorageWorktreesResponse,
   ThreadsResponse,
   UpdateLaunchOptionRequest,
   UpdatePromptTemplateRequest,
@@ -821,6 +827,106 @@ export function useStorageQuery(
     queryFn: () => client.getStorage(),
     enabled,
     staleTime: STORAGE_STALE_TIME_MS,
+  });
+}
+
+/**
+ * The directories under the worktree base (`GET /api/storage/worktrees`), for
+ * the Storage category's Worktrees block. `enabled` gates the fetch to while
+ * the category is shown. Each answer runs `git` once per directory, so it is
+ * kept fresh as long as the storage inventory is; a removal invalidates it.
+ */
+export function useStorageWorktreesQuery(
+  client: ApiClient,
+  enabled: boolean,
+): UseQueryResult<StorageWorktreesResponse> {
+  return useQuery({
+    queryKey: queryKeys.storageWorktrees,
+    queryFn: () => client.getStorageWorktrees(),
+    enabled,
+    staleTime: STORAGE_STALE_TIME_MS,
+  });
+}
+
+/**
+ * Remove one leftover worktree (`DELETE /api/storage/worktrees`). Invalidates
+ * the worktree list, so the removed row goes — and, after a refusal, so the
+ * row shows what the server found (a worktree that gained changes, or one a
+ * session started in since).
+ */
+export function useRemoveStorageWorktreeMutation(
+  client: ApiClient,
+): UseMutationResult<void, Error, RemoveWorktreeRequest> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RemoveWorktreeRequest) => client.removeStorageWorktree(body),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.storageWorktrees });
+    },
+  });
+}
+
+/**
+ * Delete one migration snapshot (`DELETE /api/storage/snapshots`).
+ * Invalidates the storage inventory, which lists the snapshots.
+ */
+export function useDeleteSnapshotMutation(
+  client: ApiClient,
+): UseMutationResult<void, Error, DeleteSnapshotRequest> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: DeleteSnapshotRequest) => client.deleteSnapshot(body),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.storage });
+    },
+  });
+}
+
+/**
+ * The bulk session removal's preview (`GET /api/sessions/prune`): how many
+ * closed sessions `criteria` would take now. `enabled` gates the fetch to
+ * while the Storage category is shown. Never cached as fresh: the answer
+ * changes as sessions close and age, and it is what the confirmation names.
+ */
+export function usePrunePreviewQuery(
+  client: ApiClient,
+  criteria: PruneSessionsRequest,
+  enabled: boolean,
+): UseQueryResult<PrunePreviewResponse> {
+  const statuses = criteria.statuses ?? [];
+  return useQuery({
+    queryKey: queryKeys.prunePreview(criteria.older_than_days, statuses),
+    queryFn: () => client.previewPruneSessions(criteria),
+    enabled,
+    staleTime: 0,
+  });
+}
+
+/**
+ * Remove old closed sessions in bulk (`POST /api/sessions/prune`).
+ *
+ * The server broadcasts `session_removed` for each one, which every tab
+ * applies; the invalidations here refresh the acting tab's session list, the
+ * database size in the storage inventory, the worktree list (a removed
+ * session's clean worktree is gone, a dirty one is now a leftover) and every
+ * preview, without waiting on the socket.
+ */
+export function usePruneSessionsMutation(
+  client: ApiClient,
+): UseMutationResult<PruneSessionsResponse, Error, PruneSessionsRequest> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PruneSessionsRequest) => client.pruneSessions(body),
+    onSettled: () => {
+      for (const queryKey of [
+        queryKeys.sessions,
+        queryKeys.storage,
+        queryKeys.storageWorktrees,
+        queryKeys.prunePreviewAll,
+      ]) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
+    },
   });
 }
 

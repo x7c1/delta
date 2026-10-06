@@ -4,7 +4,7 @@
 use async_trait::async_trait;
 
 use crate::error::Result;
-use crate::ports::{BranchDeletion, WorktreeRemoval};
+use crate::ports::{BranchDeletion, WorktreeInspection, WorktreeRemoval};
 
 /// Where a new session's worktree should start from, and whether it gets its
 /// own `delta-<id>` branch or works on an existing branch directly.
@@ -237,6 +237,31 @@ pub trait GitWorktree: Send + Sync {
     /// not an error (there is nothing to forget); a config file that does not
     /// parse is an error and is left untouched.
     async fn forget_dir_trusted(&self, dir: &str) -> Result<()>;
+
+    /// What git says about the directory `path` as a linked worktree: the
+    /// repository it belongs to and whether it holds uncommitted work, or
+    /// `None` when git does not know it as a worktree.
+    ///
+    /// `None` covers a directory whose repository has forgotten it (a
+    /// `git worktree prune` ran after the directory was left behind), whose
+    /// repository is gone, that is not a git working tree at all, or that
+    /// merely lies inside some other working tree. Otherwise `repo_root` is
+    /// the repository's main working tree (the first entry of
+    /// `git worktree list --porcelain`) and `dirty` is whether
+    /// `git status --porcelain` lists anything — modified, staged or untracked
+    /// files, exactly what `git worktree remove` refuses over. Any other
+    /// failure (`git` missing) is an error.
+    async fn inspect_worktree(&self, path: &str) -> Result<Option<WorktreeInspection>>;
+
+    /// Remove the linked worktree at `path` from the repository at
+    /// `repo_root` **even when it holds work**: `git -C <repo_root> worktree
+    /// remove --force <path>`.
+    ///
+    /// Only for a removal the user explicitly asked for with the loss of the
+    /// worktree's changes spelled out; every automatic removal goes through
+    /// [`Self::remove_worktree`]. The worktree's branch is left alone. Any
+    /// failure is an error.
+    async fn force_remove_worktree(&self, repo_root: &str, path: &str) -> Result<()>;
 }
 
 #[async_trait]
@@ -314,5 +339,13 @@ impl GitWorktree for Box<dyn GitWorktree> {
 
     async fn forget_dir_trusted(&self, dir: &str) -> Result<()> {
         (**self).forget_dir_trusted(dir).await
+    }
+
+    async fn inspect_worktree(&self, path: &str) -> Result<Option<WorktreeInspection>> {
+        (**self).inspect_worktree(path).await
+    }
+
+    async fn force_remove_worktree(&self, repo_root: &str, path: &str) -> Result<()> {
+        (**self).force_remove_worktree(repo_root, path).await
     }
 }

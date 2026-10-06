@@ -182,6 +182,10 @@ impl Workspace for NoopWorkspace {
             entries: Vec::new(),
         })
     }
+
+    async fn remove_dir_tree(&self, _path: &str) -> delta_usecase::Result<()> {
+        Ok(())
+    }
 }
 
 /// A no-op `GitWorktree` so the end-to-end flow (which never requests a
@@ -273,6 +277,21 @@ impl GitWorktree for NoopGitWorktree {
     }
 
     async fn forget_dir_trusted(&self, _dir: &str) -> delta_usecase::Result<()> {
+        Ok(())
+    }
+
+    async fn inspect_worktree(
+        &self,
+        _path: &str,
+    ) -> delta_usecase::Result<Option<delta_usecase::WorktreeInspection>> {
+        Ok(None)
+    }
+
+    async fn force_remove_worktree(
+        &self,
+        _repo_root: &str,
+        _path: &str,
+    ) -> delta_usecase::Result<()> {
         Ok(())
     }
 }

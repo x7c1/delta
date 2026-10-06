@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use delta_attribution::SubagentLaunch;
 use delta_model::{
     AgentProvider, LaunchOption, Message, MessageUuid, PermissionRequest, PromptTemplate, Send,
-    Session, SessionId, Thread, ThreadId,
+    Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 
 use crate::error::Result;
@@ -257,6 +257,23 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// (the browser always sends the same string the server sent it, so no
     /// normalisation is needed at this layer).
     async fn cwd_exists(&self, path: &str) -> Result<bool>;
+
+    /// The ids of the sessions whose most recent activity is at or before
+    /// `cutoff` and whose row status is one of `statuses`, oldest first.
+    ///
+    /// "Most recent activity" is the session list's recency key,
+    /// `COALESCE(last_activity_at, created_at)`; `cutoff` is an ISO-8601 UTC
+    /// timestamp in the form [`delta_model::iso8601_utc`] writes, so the two
+    /// compare as text. An empty `statuses` matches nothing.
+    ///
+    /// Backs the bulk removal of old sessions. The row status is all this
+    /// knows: whether a matching session is open or still starting is
+    /// process-runtime state, which the caller checks before removing any.
+    async fn list_prunable_sessions(
+        &self,
+        cutoff: &str,
+        statuses: &[SessionStatus],
+    ) -> Result<Vec<SessionId>>;
 
     /// One row per `(repo_root, clone_path)` pair in the session history, for
     /// the Repository tab.
@@ -908,6 +925,14 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn cwd_exists(&self, path: &str) -> Result<bool> {
         (**self).cwd_exists(path).await
+    }
+
+    async fn list_prunable_sessions(
+        &self,
+        cutoff: &str,
+        statuses: &[SessionStatus],
+    ) -> Result<Vec<SessionId>> {
+        (**self).list_prunable_sessions(cutoff, statuses).await
     }
 
     async fn repository_clone_rows(

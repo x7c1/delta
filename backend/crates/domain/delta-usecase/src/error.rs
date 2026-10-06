@@ -250,6 +250,34 @@ pub enum Error {
     #[error("a worktree requires a selected working directory")]
     WorktreeRequiresWorkdir,
 
+    /// A worktree removal from Settings → Storage named a path that is not a
+    /// directory directly under the worktree base. Only what Delta lists
+    /// there is removable from Storage, so anything else is refused before
+    /// git or the filesystem is touched. Surfaced as `409`.
+    #[error("not a directory directly under the worktree base: {0}")]
+    WorktreeOutsideBase(String),
+
+    /// A worktree removal from Settings → Storage named a worktree a listed
+    /// session still works in. Removing it would pull the working copy out
+    /// from under that session; removing the session is the way to clean it
+    /// up. Surfaced as `409`.
+    #[error("a listed session still works in this worktree: {0}")]
+    WorktreeInUse(String),
+
+    /// A worktree removal without `force` named a worktree with uncommitted
+    /// or untracked changes. Delta never destroys work unasked, so the same
+    /// removal goes through only when the user confirms the loss (`force`).
+    /// Surfaced as `409`.
+    #[error("the worktree has uncommitted or untracked changes: {0}")]
+    WorktreeDirty(String),
+
+    /// A worktree removal without `force` named a directory git no longer
+    /// knows as a worktree (its repository forgot it or is gone), so git
+    /// cannot say whether it holds work. Removed only as a plain directory
+    /// tree, when the user confirms the loss (`force`). Surfaced as `409`.
+    #[error("git does not know this directory as a worktree: {0}")]
+    WorktreeNotRegistered(String),
+
     /// A git operation (detection or worktree creation) failed. Surfaced as a
     /// `500`: the request was well-formed, but the underlying `git` invocation
     /// errored.

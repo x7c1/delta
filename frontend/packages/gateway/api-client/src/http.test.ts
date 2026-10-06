@@ -150,6 +150,68 @@ describe('ApiClient', () => {
     } satisfies Partial<ApiError>);
   });
 
+  it('previews and runs the bulk session removal with the same criteria', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ count: 1, session_ids: ['a'] }))
+      .mockResolvedValueOnce(
+        jsonResponse({ removed: 1, removed_ids: ['a'], skipped: [], kept: [] }),
+      );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+    const criteria = { older_than_days: 30, statuses: ['ended' as const, 'failed' as const] };
+
+    await expect(client.previewPruneSessions(criteria)).resolves.toEqual({
+      count: 1,
+      session_ids: ['a'],
+    });
+    await client.pruneSessions(criteria);
+
+    expect(fetchFn).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost/api/sessions/prune?older_than_days=30&statuses=ended%2Cfailed',
+      undefined,
+    );
+    expect(fetchFn).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost/api/sessions/prune',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(criteria) }),
+    );
+  });
+
+  it('removes a worktree and a snapshot with a JSON body on DELETE', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(noContent())
+      .mockResolvedValueOnce(noContent())
+      .mockResolvedValueOnce(
+        jsonResponse({ error: 'dirty', code: 'worktree_dirty' }, 409),
+      );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await client.removeStorageWorktree({ path: '/w/a', force: true });
+    await client.deleteSnapshot({ path: '/d/delta.db.bak-v3' });
+
+    expect(fetchFn).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost/api/storage/worktrees',
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ path: '/w/a', force: true }),
+      }),
+    );
+    expect(fetchFn).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost/api/storage/snapshots',
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ path: '/d/delta.db.bak-v3' }),
+      }),
+    );
+    await expect(
+      client.removeStorageWorktree({ path: '/w/b' }),
+    ).rejects.toMatchObject({ status: 409, code: 'worktree_dirty' } satisfies Partial<ApiError>);
+  });
+
   it('fetches a session thread tree by id', async () => {
     const fetchFn = vi
       .fn()

@@ -15,6 +15,13 @@ import type {
   MessagesResponse,
   PendingPermission,
   PendingQuestion,
+  PrunePreviewResponse,
+  PruneSessionsRequest,
+  PruneSessionsResponse,
+  PruneStatus,
+  RemoveWorktreeRequest,
+  DeleteSnapshotRequest,
+  StorageWorktreesResponse,
   RunningSubagent,
   NewSessionResponse,
   Send,
@@ -55,6 +62,13 @@ import {
 } from './fixtures';
 import { launchOptionChoiceGroup } from './launchOptionChoiceGroup';
 import { isDangerousLaunchOption } from './launchOptionDanger';
+
+/** Both prune statuses: what a prune request that names none means. */
+const PRUNE_STATUSES: PruneStatus[] = ['ended', 'failed'];
+
+function isPruneStatus(value: string): value is PruneStatus {
+  return (PRUNE_STATUSES as string[]).includes(value);
+}
 
 /** Discriminate a `POST /api/sends` body: new-session spawn vs thread target. */
 function isNewSessionSend(body: SendRequest): body is SendToNewSession {
@@ -1217,8 +1231,140 @@ export function createMockApi(): MockApi {
     // debug); the mock returns a fixed dev-shaped string so mock-mode e2e can
     // assert on it without depending on the host's git sha.
     http.get('*/api/version', () => HttpResponse.json({ version: MOCK_VERSION })),
-    http.get('*/api/storage', () => HttpResponse.json(mockStorage)),
+    http.get('*/api/storage', () =>
+      HttpResponse.json({ ...mockStorage, snapshots: store.snapshots }),
+    ),
+
+    // The directories under the worktree base, and removing one. The refusals
+    // mirror the server's, each with its stable code, so the Storage block's
+    // confirmation paths are drivable in mock mode.
+    http.get('*/api/storage/worktrees', () => {
+      const body: StorageWorktreesResponse = { worktrees: store.storageWorktrees };
+      return HttpResponse.json(body);
+    }),
+    http.delete('*/api/storage/worktrees', async ({ request }) => {
+      const body = (await request.json()) as RemoveWorktreeRequest;
+      const force = body.force ?? false;
+      const worktree = store.storageWorktrees.find((w) => w.path === body.path);
+      const refuse = (error: string, code: string) =>
+        HttpResponse.json({ error: `${error}: ${body.path}`, code }, { status: 409 });
+      if (!worktree) {
+        return refuse(
+          'not a directory directly under the worktree base',
+          'worktree_outside_base',
+        );
+      }
+      if (worktree.in_use) {
+        return refuse('a listed session still works in this worktree', 'worktree_in_use');
+      }
+      if (worktree.dirty === true && !force) {
+        return refuse(
+          'the worktree has uncommitted or untracked changes',
+          'worktree_dirty',
+        );
+      }
+      if (worktree.repo_root === null && !force) {
+        return refuse(
+          'git does not know this directory as a worktree',
+          'worktree_not_registered',
+        );
+      }
+      store.storageWorktrees = store.storageWorktrees.filter((w) => w !== worktree);
+      return new HttpResponse(null, { status: 204 });
+    }),
+
+    // Delete a migration snapshot: only one the inventory lists.
+    http.delete('*/api/storage/snapshots', async ({ request }) => {
+      const body = (await request.json()) as DeleteSnapshotRequest;
+      if (!store.snapshots.some((snapshot) => snapshot.path === body.path)) {
+        return HttpResponse.json(
+          { error: `not a listed migration snapshot: ${body.path}` },
+          { status: 404 },
+        );
+      }
+      store.snapshots = store.snapshots.filter((snapshot) => snapshot.path !== body.path);
+      return new HttpResponse(null, { status: 204 });
+    }),
+
+    // The bulk session removal and its preview. Like the single removal, each
+    // removed session rides on its emitted `session_removed`.
+    http.get('*/api/sessions/prune', ({ request }) => {
+      const params = new URL(request.url).searchParams;
+      const days = Number(params.get('older_than_days'));
+      const statusParam = params.get('statuses');
+      const statuses =
+        statusParam === null
+          ? PRUNE_STATUSES
+          : statusParam.split(',').filter((value) => value.length > 0);
+      if (
+        params.get('older_than_days') === null ||
+        !Number.isInteger(days) ||
+        days < 0 ||
+        !statuses.every(isPruneStatus)
+      ) {
+        return HttpResponse.json({ error: 'malformed prune query' }, { status: 400 });
+      }
+      const ids = pruneMatches(days, statuses as PruneStatus[])
+        .filter((entry) => !isLive(entry))
+        .map((entry) => entry.session.id);
+      const body: PrunePreviewResponse = { count: ids.length, session_ids: ids };
+      return HttpResponse.json(body);
+    }),
+    http.post('*/api/sessions/prune', async ({ request }) => {
+      const body = (await request.json()) as PruneSessionsRequest;
+      if (!Number.isInteger(body.older_than_days) || body.older_than_days < 0) {
+        return HttpResponse.json({ error: 'malformed prune request' }, { status: 422 });
+      }
+      const response: PruneSessionsResponse = {
+        removed: 0,
+        removed_ids: [],
+        skipped: [],
+        kept: [],
+      };
+      for (const entry of pruneMatches(body.older_than_days, body.statuses ?? PRUNE_STATUSES)) {
+        if (isLive(entry)) {
+          response.skipped.push({
+            session_id: entry.session.id,
+            reason: entry.open ? 'open' : 'starting',
+            detail: null,
+          });
+          continue;
+        }
+        response.removed_ids.push(entry.session.id);
+        emitServerEvent({ kind: 'session_removed', session_id: entry.session.id });
+      }
+      response.removed = response.removed_ids.length;
+      return HttpResponse.json(response);
+    }),
   ];
+
+  /** Whether a session is open or still starting: never removed. */
+  const isLive = (entry: MockStore['sessions'][number]) =>
+    entry.open || entry.spawning === true || entry.session.status === 'spawning';
+
+  /**
+   * The stored sessions the bulk removal's criteria match, oldest first —
+   * open ones included, as the server's row query includes them. "Old" is the
+   * session list's recency key: last activity, else `created_at`.
+   */
+  const pruneMatches = (olderThanDays: number, statuses: readonly PruneStatus[]) => {
+    const cutoff = new Date(Date.now() - olderThanDays * 86_400_000)
+      .toISOString()
+      .replace(/\.\d{3}Z$/, 'Z');
+    const recency = (entry: MockStore['sessions'][number]) =>
+      lastActivityAt(entry.threads.map((t) => t.id)) ?? entry.session.created_at;
+    return store.sessions
+      .filter((entry) => {
+        const status: PruneStatus | null =
+          entry.session.status === 'failed'
+            ? 'failed'
+            : entry.session.status === 'spawning'
+              ? null
+              : 'ended';
+        return status !== null && statuses.includes(status) && recency(entry) <= cutoff;
+      })
+      .sort((a, b) => recency(a).localeCompare(recency(b)));
+  };
 
   /** Resolve every open (queued/dispatched) send of a session to `status`. */
   const resolveOpenSends = (

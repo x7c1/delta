@@ -59,6 +59,8 @@ fn api_router(state: AppState) -> Router {
         .bind(endpoint::OpenSession, api::open_session)
         .bind(endpoint::CloseSession, api::close_session)
         .bind(endpoint::DeleteSession, api::delete_session)
+        .bind(endpoint::PreviewPruneSessions, api::preview_prune_sessions)
+        .bind(endpoint::PruneSessions, api::prune_sessions)
         .bind(endpoint::InterruptSession, api::interrupt)
         .bind(endpoint::ListThreads, api::list_threads)
         .bind(endpoint::ListSends, api::list_sends)
@@ -91,6 +93,9 @@ fn api_router(state: AppState) -> Router {
         .bind(endpoint::DeletePromptTemplate, api::delete_prompt_template)
         .bind(endpoint::GetVersion, api::get_version)
         .bind(endpoint::GetStorage, api::get_storage)
+        .bind(endpoint::ListOrphanWorktrees, api::list_orphan_worktrees)
+        .bind(endpoint::RemoveOrphanWorktree, api::remove_orphan_worktree)
+        .bind(endpoint::DeleteSnapshot, api::delete_snapshot)
         // Streams.
         .bind(endpoint::SessionEventStream, ws::ws_handler)
         .bind(endpoint::PtyStream, pty::pty_handler)

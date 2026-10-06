@@ -63,6 +63,11 @@ export {
   useOpenCwdMutation,
   useVersionQuery,
   useStorageQuery,
+  useStorageWorktreesQuery,
+  useRemoveStorageWorktreeMutation,
+  useDeleteSnapshotMutation,
+  usePrunePreviewQuery,
+  usePruneSessionsMutation,
   useProvidersQuery,
 } from './query-hooks';
 export {

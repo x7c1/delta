@@ -14,10 +14,13 @@ mod permissions;
 mod prompt_templates;
 mod providers;
 mod pull_requests;
+mod session_prune;
 mod sessions;
 mod static_web;
 mod status_line;
 mod storage;
+mod storage_snapshots;
+mod storage_worktrees;
 mod workdir;
 
 use super::{router, AppState};
@@ -47,6 +50,48 @@ pub(super) const TEST_TRANSCRIPT_ROOT: &str = "/tmp";
 /// router-driving request can attach a valid bearer token in one call.
 pub(super) fn bearer() -> String {
     format!("Bearer {TEST_AUTH_TOKEN}")
+}
+
+/// Drive one request with an optional JSON body through the router and read
+/// back its status and body: JSON, `null` when empty, or a string when it is
+/// not JSON.
+pub(super) async fn request_json(
+    state: &AppState,
+    method: &str,
+    uri: &str,
+    body: Option<&str>,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    use tower::ServiceExt;
+
+    let mut request = axum::http::Request::builder()
+        .header("host", "127.0.0.1")
+        .header("authorization", bearer())
+        .method(method)
+        .uri(uri);
+    if body.is_some() {
+        request = request.header("content-type", "application/json");
+    }
+    let body = body.map_or_else(axum::body::Body::empty, |body| {
+        axum::body::Body::from(body.to_owned())
+    });
+    let response = router(state.clone())
+        .oneshot(request.body(body).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    // An extractor's rejection (a malformed query or body) is plain text, not
+    // the JSON error body; it is returned as a string.
+    let value = if bytes.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or_else(|_| {
+            serde_json::Value::String(String::from_utf8_lossy(&bytes).into_owned())
+        })
+    };
+    (status, value)
 }
 
 /// The `?hs=<secret>` query string carrying [`TEST_HOOK_SECRET`], appended to a

@@ -79,6 +79,19 @@ export type { ErrorBody } from './generated/ErrorBody';
 export type { VersionResponse } from './generated/VersionResponse';
 export type { StorageFile } from './generated/StorageFile';
 export type { StorageResponse } from './generated/StorageResponse';
+export type { StorageWorktree } from './generated/StorageWorktree';
+export type { StorageWorktreesResponse } from './generated/StorageWorktreesResponse';
+export type { RemoveWorktreeRequest } from './generated/RemoveWorktreeRequest';
+export type { DeleteSnapshotRequest } from './generated/DeleteSnapshotRequest';
+export type { PruneStatus } from './generated/PruneStatus';
+export type { PruneSessionsRequest } from './generated/PruneSessionsRequest';
+export type { PruneSessionsResponse } from './generated/PruneSessionsResponse';
+export type { PrunePreviewResponse } from './generated/PrunePreviewResponse';
+export type { SkippedSession } from './generated/SkippedSession';
+export type { SkipReason } from './generated/SkipReason';
+export type { KeptItem } from './generated/KeptItem';
+export type { KeepReason } from './generated/KeepReason';
+export type { DiskItemKind } from './generated/DiskItemKind';
 
 export type {
   TextBlock,

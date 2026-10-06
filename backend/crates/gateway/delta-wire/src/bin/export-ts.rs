@@ -23,14 +23,15 @@ use std::path::PathBuf;
 use delta_wire::rest::{
     WireCloneRepositoryRequest, WireCloneRootsResponse, WireCreateCloneRootRequest,
     WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
-    WireErrorBody, WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOptionsResponse,
-    WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
+    WireDeleteSnapshotRequest, WireErrorBody, WireGitBranchesResponse, WireGitRepoResponse,
+    WireLaunchOptionsResponse, WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
     WirePermissionDecisionRequest, WirePromptTemplatesResponse, WireProvidersResponse,
+    WirePrunePreviewResponse, WirePruneSessionsRequest, WirePruneSessionsResponse,
     WirePullRequestsResponse, WireQuestionAnswerRequest, WireQuestionCancelRequest,
-    WireRepositoriesResponse, WireSendResponse, WireSendsResponse, WireSessionsResponse,
-    WireStorageResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
-    WireUpdatePromptTemplateRequest, WireVersionResponse, WireWorkdirListResponse,
-    WireWorkdirRecentResponse,
+    WireRemoveWorktreeRequest, WireRepositoriesResponse, WireSendResponse, WireSendsResponse,
+    WireSessionsResponse, WireStorageResponse, WireStorageWorktreesResponse, WireThreadsResponse,
+    WireUpdateLaunchOptionRequest, WireUpdatePromptTemplateRequest, WireVersionResponse,
+    WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 use delta_wire::{event_kinds, export_config, WireCommsFrame, WireSessionEvent};
 use ts_rs::TS;
@@ -92,6 +93,12 @@ fn main() {
     WireErrorBody::export_all(&config).expect("export ErrorBody.ts");
     WireVersionResponse::export_all(&config).expect("export VersionResponse.ts");
     WireStorageResponse::export_all(&config).expect("export StorageResponse.ts");
+    WireStorageWorktreesResponse::export_all(&config).expect("export StorageWorktreesResponse.ts");
+    WireRemoveWorktreeRequest::export_all(&config).expect("export RemoveWorktreeRequest.ts");
+    WireDeleteSnapshotRequest::export_all(&config).expect("export DeleteSnapshotRequest.ts");
+    WirePruneSessionsRequest::export_all(&config).expect("export PruneSessionsRequest.ts");
+    WirePruneSessionsResponse::export_all(&config).expect("export PruneSessionsResponse.ts");
+    WirePrunePreviewResponse::export_all(&config).expect("export PrunePreviewResponse.ts");
 
     let event_kinds_path = out_dir.join("event-kinds.ts");
     std::fs::write(&event_kinds_path, render_event_kinds())

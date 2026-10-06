@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use delta_attribution::SubagentLaunch;
 use delta_model::{
     AgentProvider, LaunchOption, Message, MessageUuid, PermissionRequest, PromptTemplate, Send,
-    Session, SessionId, Thread, ThreadId,
+    Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 use delta_usecase::{
     CloneRoot, NewSession, RecentWorkdir, RememberedPane, RepositoryCloneRow, SessionPageCursor,
@@ -134,6 +134,14 @@ impl SessionStore for SqliteStore {
 
     async fn cwd_exists(&self, path: &str) -> std::result::Result<bool, delta_usecase::Error> {
         self.cwd_exists(path).await
+    }
+
+    async fn list_prunable_sessions(
+        &self,
+        cutoff: &str,
+        statuses: &[SessionStatus],
+    ) -> std::result::Result<Vec<SessionId>, delta_usecase::Error> {
+        self.list_prunable_sessions(cutoff, statuses).await
     }
 
     async fn repository_clone_rows(
