@@ -10,7 +10,7 @@ check_command: "make check && git grep -q 'PruneSessions' -- backend/crates/gate
 assignee: null
 branch: task/1006-0920-feat-storage-clean-up-old-sessions-leftover-worktrees-and-snapshots
 created_at: 2026-10-06T00:17:48Z
-updated_at: 2026-10-06T04:26:57Z
+updated_at: 2026-10-06T04:28:17Z
 ---
 
 # feat(storage): clean up old sessions, leftover worktrees and snapshots from Settings → Storage
@@ -150,10 +150,14 @@ explicit, per-item worktree removal below may force.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On the development machine, against a server built from this branch
-      with a few fake-claude sessions in Delta-created worktrees: prune with
-      a cutoff of 0 days removes the closed ones and reports the kept
-      worktree of the dirty one; the Worktrees list shows that worktree as
-      dirty and its forced removal (typing the directory name) deletes it;
-      deleting a snapshot removes the file and the inventory no longer
-      lists it.
+- [x] On the development machine (macOS), against a server built from this
+      branch with fake-claude sessions in Delta-created worktrees: the prune
+      preview with a cutoff of 0 days counted the closed session; the prune
+      removed it, reported its worktree (made dirty with an untracked file)
+      and branch as kept, and skipped the still-open session with the reason
+      `open`; `GET /api/storage/worktrees` listed that worktree as dirty and
+      the open session's as in use; the forced removal of the dirty orphan
+      answered 204 and the directory was gone; deleting a planted
+      `delta.db.bak-v9` answered 204, the file was gone and the inventory no
+      longer listed it. The typed-name gate in front of the forced removal
+      is exercised by the Playwright mock spec rather than by this API run.
