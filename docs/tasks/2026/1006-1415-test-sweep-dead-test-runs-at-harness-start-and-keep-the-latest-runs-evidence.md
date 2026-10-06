@@ -10,7 +10,7 @@ check_command: "make check && test -x scripts/sweep-test-residue.sh && test -f s
 assignee: null
 branch: task/1006-1415-test-sweep-dead-test-runs-at-harness-start-and-keep-the-latest-runs-evidence
 created_at: 2026-10-06T05:16:44Z
-updated_at: 2026-10-06T05:48:11Z
+updated_at: 2026-10-06T05:58:20Z
 ---
 
 # test: sweep dead test runs at harness start and keep the latest run's evidence
@@ -138,11 +138,13 @@ candidates; this task adds no cleanup for them.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On the development machine, run `make e2e-fake` three times: after
+- [x] On the development machine, run `make e2e-fake` three times: after
       the second run the first and second runs' `delta-e2e-fake.*`
       directories remain in `$TMPDIR` (the sweep keeps the newest dead run,
       and the live run adds its own); after the third run exactly two
       remain, the second and third, and the first is gone. After each run
-      no `delta-e2e-fake-*` socket file remains in the tmux socket
-      directory. With `make dev` running alongside, its
-      `io.github.x7c1.delta.dev` session is still alive afterwards.
+      the only `delta-e2e-fake-*` file in the tmux socket directory is the
+      finished run's own socket (which `kill-server` leaves behind), and the
+      next run's sweep removes it. A tmux server on another socket running
+      alongside (the `make dev` one, or a scratch one) is still alive
+      afterwards.
