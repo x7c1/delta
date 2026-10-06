@@ -852,6 +852,7 @@ dependencies = [
  "delta-bootstrap",
  "delta-server",
  "glib",
+ "gtk",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

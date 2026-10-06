@@ -105,8 +105,10 @@ first (see below).
 Only one copy of the app runs at a time. Launching it while it is already
 running brings the open window forward and starts nothing else.
 
-Closing the window quits the app and stops the Delta server. What happens to
-the sessions that were open depends on the agent:
+Closing the window quits the app and stops the Delta server; so does Cmd-Q on
+macOS and Ctrl-Q on Linux. While the terminal has focus, Ctrl-Q on Linux goes
+to the terminal instead (click outside it first to quit). Nothing is asked on
+the way out. What happens to the sessions that were open depends on the agent:
 
 - **Claude Code sessions keep running.** They run on Delta's own tmux server
   (socket `io.github.x7c1.delta`), not inside the app process, so they carry on

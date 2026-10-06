@@ -242,7 +242,8 @@ to it instead.
   the strip drags the window and handles double-click, so clicks there do not
   reach the page. In full screen, where macOS hides the bar, the app sets the
   variable to 0 and lets those clicks through, so the page fills the screen.
-  The browser and the Linux app set neither and show no strip.
+  The browser sets neither; the Linux app marks only `tauri-linux` (see
+  Quitting), and neither shows a strip.
 - **Links.** The window never leaves Delta's own page. A link that would open
   a new tab — every link in a message, including a footnote marker, and a
   session's pull-request number in the navigator — opens in a new tab of your
@@ -262,6 +263,14 @@ to it instead.
   the error itself is in the log.
 - **Quitting.** Closing the window stops the server. The tmux server keeps
   running, so open sessions survive and are resumed on the next launch.
+  Cmd-Q (macOS, from the default application menu) and Ctrl-Q (Linux) quit the
+  same way. On Linux the app has no menu: it catches Ctrl+Q on its window
+  itself, except while the terminal has focus, where Ctrl-Q goes on to the
+  pane (it is XON there). The Linux app marks `<html data-shell="tauri-linux">`
+  before the page's scripts run, and the page appends ` [terminal focused]` to
+  the document title while the terminal has focus; the app follows the title
+  (the window's own title stays "Delta"). The browser version leaves the title
+  alone.
 
 ## Shut down
 

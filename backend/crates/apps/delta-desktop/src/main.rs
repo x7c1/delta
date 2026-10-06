@@ -54,6 +54,11 @@
 //! Closing the window ends the process and the server with it. The tmux server
 //! on Delta's socket is left running, so the Claude Code sessions open in it
 //! keep running, and the next launch re-adopts them before it serves anything.
+//! Quitting from the keyboard goes the same way: Cmd-Q from macOS's default
+//! application menu, and Ctrl-Q on Linux, which has no menu and gets the
+//! shortcut from the shell (`quit_shortcut.rs`) — except while the terminal has
+//! focus, where Ctrl-Q goes on to the pane. No menu is installed: replacing
+//! macOS's default one would lose its Edit menu and Cmd-C/V/X/A in the page.
 //!
 //! Erasing everything from Settings → Storage ends it the other way round: the
 //! server stops on its own and returns what it kept ([`serve::ServerStopped`]).
@@ -67,6 +72,8 @@ mod login_env;
 #[cfg(target_os = "macos")]
 mod macos_title_bar;
 mod placeholder;
+#[cfg(any(target_os = "linux", test))]
+mod quit_shortcut;
 mod started_server;
 mod window_size;
 
@@ -375,10 +382,19 @@ fn open_window(app: &App, started_server: Arc<StartedServer>) -> anyhow::Result<
         });
     #[cfg(target_os = "macos")]
     let builder = macos_title_bar::style(builder);
+    #[cfg(target_os = "linux")]
+    let terminal_focus = quit_shortcut::TerminalFocus::default();
+    #[cfg(target_os = "linux")]
+    let builder = quit_shortcut::style(builder, terminal_focus.clone());
     let window = builder.build()?;
     window_size::fit_window_size(app.handle(), &window, WINDOW_LABEL);
     #[cfg(target_os = "macos")]
     macos_title_bar::install_drag_strip(&window)?;
+    // Without the shortcut the app still quits by closing the window.
+    #[cfg(target_os = "linux")]
+    if let Err(err) = quit_shortcut::install(&window, terminal_focus) {
+        tracing::warn!("could not install the Ctrl-Q shortcut: {err:#}");
+    }
     Ok(())
 }
 

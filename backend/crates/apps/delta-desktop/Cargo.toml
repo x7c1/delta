@@ -29,9 +29,11 @@ tracing = { workspace = true }
 # The macOS title bar (src/macos_title_bar.rs) talks to AppKit directly; these
 # are the versions Tauri itself builds on.
 # The window's app ID is set through GLib's program name (see
-# `set_window_app_id` in src/main.rs); this is the version Tauri builds on.
+# `set_window_app_id` in src/main.rs), and Ctrl-Q is caught on the GTK window
+# (src/quit_shortcut.rs); these are the versions Tauri builds on.
 [target.'cfg(target_os = "linux")'.dependencies]
 glib = "0.18"
+gtk = "0.18"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

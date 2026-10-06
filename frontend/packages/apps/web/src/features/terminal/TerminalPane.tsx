@@ -8,6 +8,7 @@ import { Panel } from '@delta/ui-kit';
 import '@xterm/xterm/css/xterm.css';
 import { isMockMode, wsUrl } from '../../config';
 import { useThemeContext } from '../../hooks/themeContext';
+import { reportTerminalFocus } from '../../shell';
 import { useNavStore } from '../../store/navStore';
 import {
   terminalBackground,
@@ -371,6 +372,10 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
   term.unicode.activeVersion = '11';
   term.open(el);
   fit.fit();
+  // In the Linux desktop shell Ctrl-Q quits unless the terminal has focus, so
+  // the shell is told when it does (a no-op anywhere else).
+  el.addEventListener('focusin', () => reportTerminalFocus(true));
+  el.addEventListener('focusout', () => reportTerminalFocus(false));
 
   // Pass { stream: true } so that an incomplete multi-byte UTF-8 sequence
   // split across WebSocket frame boundaries is held in the decoder's internal
@@ -431,6 +436,10 @@ function disposeEntry(entry: PaneEntry): void {
   }
   entry.observer.disconnect();
   entry.connection.close();
+  // Removing the focused terminal takes focus away without a `focusout`.
+  if (entry.el.contains(document.activeElement)) {
+    reportTerminalFocus(false);
+  }
   entry.term.dispose();
   entry.el.remove();
 }
