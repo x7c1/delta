@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+import { bundleBudget } from './bundle-budget';
 
 // The Delta server the dev server proxies to. DELTA_PORT lets a non-default
 // backend be targeted — used by the fake-mode e2e suite, which boots its
@@ -52,8 +53,26 @@ const contentSecurityPolicy =
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
   "style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; object-src 'none'";
 
+// Delta's bundle budget for the single JavaScript chunk, in kB. It replaces
+// Vite's 500 kB default, a public-web heuristic for code sent over the network
+// where first paint matters and some code may never run. Neither premise holds
+// here: delta-server and the desktop app serve the SPA from 127.0.0.1 with
+// immutable caching, so ~1 MB loads in milliseconds, and the terminal (xterm)
+// and the Markdown renderer are used in every session, so a lazy boundary would
+// only turn one request into two and add a loading state. The bundle is
+// therefore deliberately not split.
+//
+// The budget still guards against regressions: the app is ~943 kB today, a
+// dependency bump will not cross 1200 kB, pulling in one more heavy library
+// will. The one constant feeds both Vite's warning limit and `bundleBudget`,
+// which fails the build above it, so the two cannot drift apart.
+const BUNDLE_BUDGET_KB = 1200;
+
 export default defineConfig({
-  plugins: [react(), injectAuthToken()],
+  plugins: [react(), injectAuthToken(), bundleBudget(BUNDLE_BUDGET_KB)],
+  build: {
+    chunkSizeWarningLimit: BUNDLE_BUDGET_KB,
+  },
   server: {
     headers: {
       'Content-Security-Policy': contentSecurityPolicy,
