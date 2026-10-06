@@ -45,6 +45,9 @@
 //! Links the page follows never take the window away from Delta; [`links`]
 //! says where they go instead.
 //!
+//! The window opens at the size it was left at, maximized if it was; the first
+//! time, at a size taken from the screen ([`window_size`]).
+//!
 //! Only one copy runs at a time: launching the app again focuses the running
 //! window and exits (see [`focus_running_window`]).
 //!
@@ -65,6 +68,7 @@ mod login_env;
 mod macos_title_bar;
 mod placeholder;
 mod started_server;
+mod window_size;
 
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
@@ -72,6 +76,7 @@ use std::sync::Arc;
 use tauri::webview::NewWindowResponse;
 use tauri::{App, AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+use tauri_plugin_window_state::StateFlags;
 use tokio::runtime::{self, Runtime};
 
 use delta_server::{config, serve, AppState};
@@ -112,6 +117,14 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             focus_running_window(app);
         }))
+        // Remembers the window's size and whether it is maximized; see
+        // `window_size`. After single-instance, so a second launch exits before
+        // this loads anything, and the running window is only brought forward.
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(StateFlags::SIZE | StateFlags::MAXIMIZED)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .manage(erase::EraseExit::default())
         .register_uri_scheme_protocol(placeholder::SCHEME, |_context, request| {
@@ -152,6 +165,9 @@ fn main() {
         RunEvent::ExitRequested {
             code: None, api, ..
         } if handle.state::<erase::EraseExit>().is_marked() => api.prevent_exit(),
+        // Plugins see `Exit` before this callback, so the window-state
+        // plugin's file is already written when the erase removes the config
+        // directory it lives in.
         RunEvent::Exit if handle.state::<erase::EraseExit>().is_marked() => {
             erase::remove_app_dirs(handle);
         }
@@ -343,7 +359,11 @@ fn open_window(app: &App, started_server: Arc<StartedServer>) -> anyhow::Result<
     let navigation_server = Arc::clone(&started_server);
     let builder = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::CustomProtocol(url))
         .title(WINDOW_TITLE)
-        .inner_size(1280.0, 800.0)
+        .inner_size(
+            window_size::FALLBACK_SIZE.width,
+            window_size::FALLBACK_SIZE.height,
+        )
+        .min_inner_size(window_size::MIN_SIZE.width, window_size::MIN_SIZE.height)
         .on_navigation(move |url| load_in_window(url, &navigation_server))
         .on_new_window(move |url, _features| {
             open_in_browser(
@@ -355,8 +375,8 @@ fn open_window(app: &App, started_server: Arc<StartedServer>) -> anyhow::Result<
         });
     #[cfg(target_os = "macos")]
     let builder = macos_title_bar::style(builder);
-    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     let window = builder.build()?;
+    window_size::fit_window_size(app.handle(), &window, WINDOW_LABEL);
     #[cfg(target_os = "macos")]
     macos_title_bar::install_drag_strip(&window)?;
     Ok(())
