@@ -10,7 +10,7 @@ check_command: "make check && git grep -q 'connect_key_press_event' -- backend/c
 assignee: null
 branch: task/1006-1930-feat-desktop-quit-with-ctrl-q-on-linux-when-the-terminal-does-not-have-focus
 created_at: 2026-10-06T11:38:32Z
-updated_at: 2026-10-06T12:10:26Z
+updated_at: 2026-10-06T12:11:28Z
 ---
 
 # feat(desktop): quit with Ctrl-Q on Linux when the terminal does not have focus
@@ -76,5 +76,5 @@ has no `.menu()`, `.on_menu_event()` or key code).
       terminal focused it does not quit and the pane receives it; after
       quitting, `tmux -L io.github.x7c1.delta.dev ls` still lists the
       session and the next launch re-adopts it; no menu bar appears.
-- [ ] On macOS: Cmd-Q, Cmd-C/V/X/A in the page and in the terminal still
+- [x] On macOS: Cmd-Q, Cmd-C/V/X/A in the page and in the terminal still
       work as before.
