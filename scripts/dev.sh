@@ -114,16 +114,23 @@ DEV_DATA_DIR="${DELTA_DATA_DIR:-$(platform_data_dir)/$DELTA_IDENTIFIER}"
 DELTA_DB="$DEV_DATA_DIR/delta.db"
 
 # The dev desktop shell. `tauri.conf.json` keeps the installed app's identifier
-# for `make desktop` and releases; the dev build overrides only the identifier,
-# through the TAURI_CONFIG environment variable, which tauri-build and
-# `generate_context!` merge over the config files at compile time. A plain
-# `cargo build` honours it, so the dev build needs neither the Tauri CLI nor a
-# second config file, and the identifier — hence the app data directory, webview
-# storage and single-instance scope — is baked into the binary. tauri-build declares
-# `rerun-if-env-changed=TAURI_CONFIG`, so switching between this build and a
-# plain one (`make check`) recompiles the shell rather than reusing a binary
-# with the other identifier.
-DESKTOP_DEV_TAURI_CONFIG="{\"identifier\":\"$DEV_NAME\"}"
+# and icons for `make desktop` and releases; the dev build overrides the
+# identifier and the icon list through the TAURI_CONFIG environment variable,
+# which tauri-build and `generate_context!` merge over the config files at
+# compile time. A plain `cargo build` honours it, so the dev build needs neither
+# the Tauri CLI nor a second config file, and the identifier — hence the app
+# data directory, webview storage and single-instance scope — is baked into the
+# binary. tauri-build declares `rerun-if-env-changed=TAURI_CONFIG`, so switching
+# between this build and a plain one (`make check`) recompiles the shell rather
+# than reusing a binary with the other identifier.
+#
+# The icons are `icons-dev/`, the set with the dev badge (scripts/gen-icons.sh):
+# the debug binary embeds its `.icns` as the app icon macOS's Dock shows (the
+# dev binary is not an `.app` bundle) and its first PNG, hence icon.png first,
+# as the window icon (Linux). The paths are relative to the crate directory, as
+# in tauri.conf.json, and replace its list as a whole.
+DESKTOP_DEV_ICONS='"icons-dev/icon.png","icons-dev/32x32.png","icons-dev/128x128.png","icons-dev/128x128@2x.png","icons-dev/icon.icns","icons-dev/icon.ico"'
+DESKTOP_DEV_TAURI_CONFIG="{\"identifier\":\"$DEV_NAME\",\"bundle\":{\"icon\":[$DESKTOP_DEV_ICONS]}}"
 DESKTOP_DEV_BIN="${CARGO_TARGET_DIR:-$BACKEND_DIR/target}/debug/delta-desktop"
 
 # delta-server and the frontend dev server each log to a per-run timestamped file

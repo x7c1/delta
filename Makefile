@@ -101,6 +101,11 @@ desktop-build: web-dist
 
 # --- Generated code -----------------------------------------------------------
 
+## icons: regenerate the desktop app icons (icons/, the dev build's badged icons-dev/) and the web favicon from assets/icon/delta.svg (needs the Tauri CLI and python3; the outputs are committed)
+.PHONY: icons
+icons:
+	scripts/gen-icons.sh
+
 ## gen: regenerate the TypeScript wire bindings (@delta/wire-gen) from the Rust wire contract
 .PHONY: gen
 gen:
