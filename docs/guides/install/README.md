@@ -150,29 +150,20 @@ created on this machine and holds none of your work, then stops:
 
 It never deletes work: a worktree with uncommitted or untracked changes, an
 unmerged branch, and a branch Delta did not create are kept, and a browser is
-left showing them with the reason. The desktop app quits as soon as the server
-has stopped, so read the worktrees the block says will stay before you
-confirm. The details are in
+left showing them with the reason. The desktop app closes its window, lists
+what was kept in a message dialog, and quits when you dismiss it. As it quits
+it removes its own files too — the
+[webview storage](#where-the-app-keeps-its-data) and every other directory it
+keeps under its identifier, such as `~/.config/io.github.x7c1.delta` and
+`~/.cache/io.github.x7c1.delta` on Ubuntu — so nothing is left under
+`io.github.x7c1.delta`. The details are in
 [the API guide](../api/settings.md#post-apistorageerase).
 
 What it does not remove is left to you:
 
 1. Remove the app: delete `/Applications/Delta.app` on macOS, or run
    `sudo apt remove delta-desktop` on Ubuntu.
-2. Delete the webview storage. On macOS:
-
-   ```sh
-   rm -rf ~/Library/WebKit/io.github.x7c1.delta ~/Library/Caches/io.github.x7c1.delta
-   ```
-
-   On Ubuntu it is inside the data directory, which the erase therefore leaves
-   in place holding only the webview storage; delete the directory:
-
-   ```sh
-   rm -rf ~/.local/share/io.github.x7c1.delta
-   ```
-
-3. Decide about what was kept. A kept worktree holds work: commit or copy what
+2. Decide about what was kept. A kept worktree holds work: commit or copy what
    you want, then remove it from **Settings → Storage → Worktrees**, which asks
    you to confirm by typing, or with `git worktree remove`. Then
    `git branch --list 'delta-*'` in its repository lists Delta's branches, and
@@ -183,13 +174,15 @@ What it does not remove is left to you:
    trust entry stays under `projects` in `~/.claude.json`, keyed by its path;
    the file belongs to Claude Code and holds your other settings too, so remove
    only the keys you no longer want.
-4. Claude Code's and Codex's own files — the conversations under `~/.claude`
+3. Claude Code's and Codex's own files — the conversations under `~/.claude`
    and `~/.codex` — belong to those tools, not to Delta, and stay.
 
 If the app does not start any more, take the same steps by hand: end the tmux
-server and delete its socket, then the data directory, the worktrees under
-`~/.delta/worktrees/` (running `git worktree prune` in each repository
-afterwards), and their trust entries:
+server and delete its socket, then the data directory, the
+[webview storage](#where-the-app-keeps-its-data), on Ubuntu also
+`~/.config/io.github.x7c1.delta` and `~/.cache/io.github.x7c1.delta`, the
+worktrees under `~/.delta/worktrees/` (running `git worktree prune` in each
+repository afterwards), and their trust entries:
 
 ```sh
 tmux -L io.github.x7c1.delta kill-server

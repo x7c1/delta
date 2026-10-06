@@ -43,4 +43,51 @@ impl EraseReport {
             _ => None,
         })
     }
+
+    /// Everything kept, each with why: first what the removed sessions kept,
+    /// then the kept leftovers.
+    pub fn kept_items(&self) -> impl Iterator<Item = &KeptItem> {
+        self.kept
+            .iter()
+            .map(|kept| &kept.kept)
+            .chain(&self.kept_leftovers)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::session_removal::KeepReason;
+
+    #[test]
+    fn kept_items_lists_the_sessions_items_then_the_leftovers() {
+        let worktree = KeptItem {
+            item: DiskItem::Worktree("/w/a".into()),
+            reason: KeepReason::Dirty,
+        };
+        let branch = KeptItem {
+            item: DiskItem::Branch("feature".into()),
+            reason: KeepReason::Unmerged,
+        };
+        let leftover = KeptItem {
+            item: DiskItem::Worktree("/w/b".into()),
+            reason: KeepReason::NotRegistered,
+        };
+        let report = EraseReport {
+            kept: [&worktree, &branch]
+                .into_iter()
+                .map(|kept| SessionKeptItem {
+                    session_id: SessionId::from("sess-1"),
+                    kept: kept.clone(),
+                })
+                .collect(),
+            kept_leftovers: vec![leftover.clone()],
+            ..EraseReport::default()
+        };
+
+        let kept: Vec<_> = report.kept_items().collect();
+
+        assert_eq!(kept, [&worktree, &branch, &leftover]);
+    }
 }

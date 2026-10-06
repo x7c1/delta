@@ -39,14 +39,21 @@
 //! Closing the window ends the process and the server with it. The tmux server
 //! on Delta's socket is left running, so the Claude Code sessions open in it
 //! keep running, and the next launch re-adopts them before it serves anything.
+//!
+//! Erasing everything from Settings → Storage ends it the other way round: the
+//! server stops on its own and returns what it kept ([`serve::ServerStopped`]).
+//! The shell then closes the window, shows what was kept in a message dialog,
+//! and quits when it is dismissed; as the process ends ([`RunEvent::Exit`]) it
+//! removes its own files under the identifier ([`erase`]).
 
+mod erase;
 mod links;
 mod login_env;
 #[cfg(target_os = "macos")]
 mod macos_title_bar;
 
 use tauri::webview::NewWindowResponse;
-use tauri::{App, AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{App, AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tokio::runtime::Runtime;
 
@@ -73,7 +80,7 @@ fn main() {
         }
     };
 
-    let result = tauri::Builder::default()
+    let app = tauri::Builder::default()
         // Registered first, so a second launch is caught before anything else
         // runs: the plugin hands its arguments to the running instance and
         // exits, and its `setup` below — which would start a second server on
@@ -89,6 +96,7 @@ fn main() {
             focus_running_window(app);
         }))
         .plugin(tauri_plugin_dialog::init())
+        .manage(erase::EraseExit::default())
         // Tauri panics on an error returned from here, so every failure is
         // reported (and exits 1) inside the hook instead.
         .setup(move |app| {
@@ -101,11 +109,26 @@ fn main() {
             app.manage(runtime);
             Ok(())
         })
-        .run(context);
-    if let Err(err) = result {
-        tracing::error!("delta-desktop failed: {err:#}");
-        std::process::exit(1);
-    }
+        .build(context);
+    let app = match app {
+        Ok(app) => app,
+        Err(err) => {
+            tracing::error!("delta-desktop failed: {err:#}");
+            std::process::exit(1);
+        }
+    };
+    app.run(|handle, event| match event {
+        // The erase closes the window before its dialog is up; closing the
+        // last window must not end the app before the dialog is dismissed
+        // (`code` is `None` for an exit the window's closing asked for).
+        RunEvent::ExitRequested {
+            code: None, api, ..
+        } if handle.state::<erase::EraseExit>().is_marked() => api.prevent_exit(),
+        RunEvent::Exit if handle.state::<erase::EraseExit>().is_marked() => {
+            erase::remove_app_dirs(handle);
+        }
+        _ => {}
+    });
 }
 
 /// Make the identifier the window's app ID, so the desktop tells this build's
@@ -179,11 +202,15 @@ fn start_server(app: &App, runtime: &Runtime, identifier: &str) -> anyhow::Resul
     let handle = app.handle().clone();
     runtime.spawn(async move {
         match serve::serve(state, listener).await {
-            // Erased from Settings → Storage: the server has deleted its data
-            // directory, and the app has nothing left to show.
-            Ok(stopped @ serve::ServerStopped::Erased(_)) => {
+            Ok(stopped) => {
                 stopped.log();
-                handle.exit(0);
+                match stopped {
+                    // Erased from Settings → Storage: the server has deleted
+                    // its data directory, and the app has nothing left to show.
+                    serve::ServerStopped::Erased(report) => {
+                        quit_after_erase(&handle, erase::report_message(report.kept_items()));
+                    }
+                }
             }
             Err(err) => {
                 tracing::error!("delta-server stopped: {err:#}");
@@ -192,6 +219,27 @@ fn start_server(app: &App, runtime: &Runtime, identifier: &str) -> anyhow::Resul
         }
     });
     Ok(config.port)
+}
+
+/// Close the window, show what the erase kept, and exit 0 once the dialog is
+/// dismissed. The exit is marked as an erase first, which `main`'s run loop
+/// acts on.
+fn quit_after_erase(handle: &AppHandle, message: String) {
+    handle.state::<erase::EraseExit>().mark();
+    if let Some(window) = handle.get_webview_window(WINDOW_LABEL) {
+        // Destroyed rather than closed: the webview must be gone before the
+        // process ends, and nothing may veto it.
+        if let Err(err) = window.destroy() {
+            tracing::warn!("could not close the window after the erase: {err}");
+        }
+    }
+    let exit_handle = handle.clone();
+    handle
+        .dialog()
+        .message(message)
+        .title("Delta erased everything")
+        .kind(MessageDialogKind::Info)
+        .show(move |_| exit_handle.exit(0));
 }
 
 fn open_window(app: &App, port: u16) -> anyhow::Result<()> {
