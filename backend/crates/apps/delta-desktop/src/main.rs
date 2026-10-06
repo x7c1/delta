@@ -178,9 +178,17 @@ fn start_server(app: &App, runtime: &Runtime, identifier: &str) -> anyhow::Resul
 
     let handle = app.handle().clone();
     runtime.spawn(async move {
-        if let Err(err) = serve::serve(state, listener).await {
-            tracing::error!("delta-server stopped: {err:#}");
-            handle.exit(1);
+        match serve::serve(state, listener).await {
+            // Erased from Settings → Storage: the server has deleted its data
+            // directory, and the app has nothing left to show.
+            Ok(stopped @ serve::ServerStopped::Erased(_)) => {
+                stopped.log();
+                handle.exit(0);
+            }
+            Err(err) => {
+                tracing::error!("delta-server stopped: {err:#}");
+                handle.exit(1);
+            }
         }
     });
     Ok(config.port)

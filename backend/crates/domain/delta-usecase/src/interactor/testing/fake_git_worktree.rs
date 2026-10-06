@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use tokio::sync::Notify;
 
+use super::CallJournal;
 use crate::error::Result;
 use crate::ports::{
     BranchDeletion, GitWorktree, RemoteBranches, WorktreeInspection, WorktreeRemoval,
@@ -195,9 +196,18 @@ pub(crate) struct FakeGitWorktree {
     pub(crate) inspections: Mutex<Vec<(String, WorktreeInspection)>>,
     /// The `(repo_root, path)` of every `force_remove_worktree` call, in order.
     pub(crate) force_removed: Mutex<Vec<(String, String)>>,
+    /// `remove_worktree <path>`, in order, in a log a test may share with
+    /// other fakes (see [`CallJournal`]).
+    pub(crate) journal: CallJournal,
 }
 
 impl FakeGitWorktree {
+    /// Record `remove_worktree` into `journal` as well.
+    pub(crate) fn with_journal(mut self, journal: &CallJournal) -> Self {
+        self.journal = journal.clone();
+        self
+    }
+
     /// Register `dir` as a git repository rooted at `root`.
     pub(crate) fn with_repo(self, dir: &str, root: &str) -> Self {
         self.repo_roots
@@ -449,6 +459,7 @@ impl GitWorktree for FakeGitWorktree {
     }
 
     async fn remove_worktree(&self, repo_root: &str, path: &str) -> Result<WorktreeRemoval> {
+        self.journal.record(format!("remove_worktree {path}"));
         self.removed_worktrees
             .lock()
             .unwrap()

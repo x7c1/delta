@@ -3,10 +3,15 @@ import type { DiskItemKind } from "./DiskItemKind";
 import type { KeepReason } from "./KeepReason";
 
 /**
- * A worktree, branch or trust entry that removing `session_id` kept on disk,
- * and why.
+ * A worktree, branch or trust entry that removing a session, or erasing
+ * everything, kept on disk, and why.
  */
-export type KeptItem = { session_id: string, kind: DiskItemKind, 
+export type KeptItem = { 
+/**
+ * The removed session the item belonged to; `null` for a leftover
+ * directory under the worktree base, which belongs to no session.
+ */
+session_id: string | null, kind: DiskItemKind, 
 /**
  * The worktree's path, the branch's name, or the trusted directory.
  */

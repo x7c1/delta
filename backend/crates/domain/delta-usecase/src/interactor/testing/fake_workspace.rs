@@ -30,6 +30,10 @@ pub(crate) struct FakeWorkspace {
     pub(crate) children: Mutex<Vec<(String, Vec<String>)>>,
     /// The paths `remove_dir_tree` was asked to delete, in order.
     pub(crate) removed_trees: Mutex<Vec<String>>,
+    /// Directories `remove_empty_dir` finds non-empty (it leaves them).
+    pub(crate) non_empty_dirs: Mutex<Vec<String>>,
+    /// The directories `remove_empty_dir` removed, in order.
+    pub(crate) removed_empty_dirs: Mutex<Vec<String>>,
 }
 
 impl FakeWorkspace {
@@ -115,5 +119,22 @@ impl Workspace for FakeWorkspace {
     async fn remove_dir_tree(&self, path: &str) -> Result<()> {
         self.removed_trees.lock().unwrap().push(path.to_owned());
         Ok(())
+    }
+
+    async fn remove_empty_dir(&self, path: &str) -> Result<bool> {
+        if self
+            .non_empty_dirs
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|d| d == path)
+        {
+            return Ok(false);
+        }
+        self.removed_empty_dirs
+            .lock()
+            .unwrap()
+            .push(path.to_owned());
+        Ok(true)
     }
 }

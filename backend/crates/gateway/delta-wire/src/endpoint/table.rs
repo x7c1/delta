@@ -13,16 +13,16 @@ use crate::hooks::{
 use crate::rest::{
     WireCloneRepositoryRequest, WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
     WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
-    WireDeleteSnapshotRequest, WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOption,
-    WireLaunchOptionsResponse, WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
-    WirePermissionDecisionRequest, WirePromptTemplate, WirePromptTemplatesResponse,
-    WireProvidersResponse, WirePrunePreviewResponse, WirePruneSessionsRequest,
-    WirePruneSessionsResponse, WirePullRequestsResponse, WireQuestionAnswerRequest,
-    WireQuestionCancelRequest, WireRemoveWorktreeRequest, WireRepositoriesResponse,
-    WireSendResponse, WireSendsResponse, WireSessionsResponse, WireStorageResponse,
-    WireStorageWorktreesResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
-    WireUpdatePromptTemplateRequest, WireVersionResponse, WireWorkdirListResponse,
-    WireWorkdirRecentResponse,
+    WireDeleteSnapshotRequest, WireEraseResponse, WireGitBranchesResponse, WireGitRepoResponse,
+    WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse, WireNewSessionResponse,
+    WireOpenCwdRequest, WirePermissionDecisionRequest, WirePromptTemplate,
+    WirePromptTemplatesResponse, WireProvidersResponse, WirePrunePreviewResponse,
+    WirePruneSessionsRequest, WirePruneSessionsResponse, WirePullRequestsResponse,
+    WireQuestionAnswerRequest, WireQuestionCancelRequest, WireRemoveWorktreeRequest,
+    WireRepositoriesResponse, WireSendResponse, WireSendsResponse, WireSessionsResponse,
+    WireStorageResponse, WireStorageWorktreesResponse, WireThreadsResponse,
+    WireUpdateLaunchOptionRequest, WireUpdatePromptTemplateRequest, WireVersionResponse,
+    WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 use crate::{WireCommsFrame, WireSessionEvent};
 
@@ -272,6 +272,15 @@ declare_endpoints! {
     /// Deletes one of the migration snapshots `GetStorage` lists; any other
     /// path is refused.
     DeleteSnapshot: DELETE "/api/storage/snapshots", request = WireDeleteSnapshotRequest;
+
+    /// Erases everything this Delta created on the machine that holds no
+    /// work: closes every session, stops its tmux server, removes the
+    /// sessions with their clean worktrees and merged branches, removes the
+    /// clean leftover worktrees, and then stops the server, which deletes its
+    /// data directory. Takes no body; answers with what was removed and what
+    /// was kept, and `409 erase_in_progress` while an erase is already
+    /// running.
+    EraseEverything: POST "/api/storage/erase", response = WireEraseResponse;
 
     // Streams. Each upgrades to a WebSocket, so the declared response type is
     // the shape of one frame on the socket rather than a response body.

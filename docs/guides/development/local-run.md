@@ -244,3 +244,10 @@ port 7878), the frontend dev server (port 5173), and every `delta-<n>` tmux
 session the server spawned. To also delete the SQLite overlay in the dev data
 directory so the next start recreates an empty schema, run `make reset`
 instead.
+
+**Settings → Storage → Erase everything** also stops the server, after closing
+its sessions and removing their clean worktrees, and deletes its files in the
+data directory, the directory itself only once nothing else is left in it
+(see [the install guide](../install/README.md#removing-everything)); it is the
+user's way out, while `scripts/dev.sh --reset` (`make reset`) remains the
+developer's quick reset.

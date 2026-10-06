@@ -96,6 +96,7 @@ fn api_router(state: AppState) -> Router {
         .bind(endpoint::ListOrphanWorktrees, api::list_orphan_worktrees)
         .bind(endpoint::RemoveOrphanWorktree, api::remove_orphan_worktree)
         .bind(endpoint::DeleteSnapshot, api::delete_snapshot)
+        .bind(endpoint::EraseEverything, api::erase_everything)
         // Streams.
         .bind(endpoint::SessionEventStream, ws::ws_handler)
         .bind(endpoint::PtyStream, pty::pty_handler)

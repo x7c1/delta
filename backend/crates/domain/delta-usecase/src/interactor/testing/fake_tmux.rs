@@ -8,6 +8,8 @@ use tokio::sync::Notify;
 use crate::error::Result;
 use crate::ports::TmuxDriver;
 
+use super::CallJournal;
+
 /// A hold on the fake's `create_session`, so a test can act in the window in
 /// which a launch has been prepared but its pane does not exist yet.
 ///
@@ -142,9 +144,20 @@ pub(crate) struct FakeTmux {
     /// between "prepared" and "pane up". `None` (the default) means no wait at
     /// all, so every other test is unaffected.
     pub(crate) gate: Option<TmuxGate>,
+    /// How many times `kill_server` was called.
+    pub(crate) servers_killed: Mutex<usize>,
+    /// `kill_session <name>` and `kill_server`, in order, in a log a test may
+    /// share with other fakes (see [`CallJournal`]).
+    pub(crate) journal: CallJournal,
 }
 
 impl FakeTmux {
+    /// Record `kill_session` and `kill_server` into `journal` as well.
+    pub(crate) fn with_journal(mut self, journal: &CallJournal) -> Self {
+        self.journal = journal.clone();
+        self
+    }
+
     /// Hold every `create_session` on `gate` until the test opens it, so the
     /// prepared→pane window can be observed.
     pub(crate) fn with_gate(mut self, gate: &TmuxGate) -> Self {
@@ -245,6 +258,7 @@ impl TmuxDriver for FakeTmux {
     }
 
     async fn kill_session(&self, name: &str) -> Result<()> {
+        self.journal.record(format!("kill_session {name}"));
         self.killed.lock().unwrap().push(name.to_owned());
         self.live.lock().unwrap().retain(|n| n != name);
         // A killed session's panes stop showing anything, so anything read out
@@ -256,6 +270,14 @@ impl TmuxDriver for FakeTmux {
             .lock()
             .unwrap()
             .retain(|pane, _| pane != name && !pane.starts_with(&prefix));
+        Ok(())
+    }
+
+    async fn kill_server(&self) -> Result<()> {
+        self.journal.record("kill_server");
+        *self.servers_killed.lock().unwrap() += 1;
+        self.live.lock().unwrap().clear();
+        self.pane_content.lock().unwrap().clear();
         Ok(())
     }
 

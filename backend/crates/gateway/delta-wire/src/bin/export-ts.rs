@@ -23,15 +23,16 @@ use std::path::PathBuf;
 use delta_wire::rest::{
     WireCloneRepositoryRequest, WireCloneRootsResponse, WireCreateCloneRootRequest,
     WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
-    WireDeleteSnapshotRequest, WireErrorBody, WireGitBranchesResponse, WireGitRepoResponse,
-    WireLaunchOptionsResponse, WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
-    WirePermissionDecisionRequest, WirePromptTemplatesResponse, WireProvidersResponse,
-    WirePrunePreviewResponse, WirePruneSessionsRequest, WirePruneSessionsResponse,
-    WirePullRequestsResponse, WireQuestionAnswerRequest, WireQuestionCancelRequest,
-    WireRemoveWorktreeRequest, WireRepositoriesResponse, WireSendResponse, WireSendsResponse,
-    WireSessionsResponse, WireStorageResponse, WireStorageWorktreesResponse, WireThreadsResponse,
-    WireUpdateLaunchOptionRequest, WireUpdatePromptTemplateRequest, WireVersionResponse,
-    WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireDeleteSnapshotRequest, WireEraseResponse, WireErrorBody, WireGitBranchesResponse,
+    WireGitRepoResponse, WireLaunchOptionsResponse, WireMessagesResponse, WireNewSessionResponse,
+    WireOpenCwdRequest, WirePermissionDecisionRequest, WirePromptTemplatesResponse,
+    WireProvidersResponse, WirePrunePreviewResponse, WirePruneSessionsRequest,
+    WirePruneSessionsResponse, WirePullRequestsResponse, WireQuestionAnswerRequest,
+    WireQuestionCancelRequest, WireRemoveWorktreeRequest, WireRepositoriesResponse,
+    WireSendResponse, WireSendsResponse, WireSessionsResponse, WireStorageResponse,
+    WireStorageWorktreesResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
+    WireUpdatePromptTemplateRequest, WireVersionResponse, WireWorkdirListResponse,
+    WireWorkdirRecentResponse,
 };
 use delta_wire::{event_kinds, export_config, WireCommsFrame, WireSessionEvent};
 use ts_rs::TS;
@@ -98,6 +99,7 @@ fn main() {
     WireDeleteSnapshotRequest::export_all(&config).expect("export DeleteSnapshotRequest.ts");
     WirePruneSessionsRequest::export_all(&config).expect("export PruneSessionsRequest.ts");
     WirePruneSessionsResponse::export_all(&config).expect("export PruneSessionsResponse.ts");
+    WireEraseResponse::export_all(&config).expect("export EraseResponse.ts");
     WirePrunePreviewResponse::export_all(&config).expect("export PrunePreviewResponse.ts");
 
     let event_kinds_path = out_dir.join("event-kinds.ts");

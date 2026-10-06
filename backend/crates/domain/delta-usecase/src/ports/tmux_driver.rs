@@ -59,6 +59,15 @@ pub trait TmuxDriver: Send + Sync {
     /// but the live pane and process are gone.
     async fn kill_session(&self, name: &str) -> Result<()>;
 
+    /// Stop Delta's whole tmux server, ending every session on it, and remove
+    /// the socket file tmux leaves behind.
+    ///
+    /// Equivalent to `tmux -L <socket> kill-server` followed by unlinking the
+    /// socket. A server that is not running is not an error — there is nothing
+    /// to stop — and neither is a socket file that is already gone, so a second
+    /// call succeeds. Used by `Interactor::erase_everything`.
+    async fn kill_server(&self) -> Result<()>;
+
     /// The text currently displayed in `pane`, as the pane's visible lines.
     ///
     /// Equivalent to `tmux capture-pane -p -t <pane>`. Read-only: it types
@@ -104,6 +113,10 @@ impl TmuxDriver for Box<dyn TmuxDriver> {
 
     async fn kill_session(&self, name: &str) -> Result<()> {
         (**self).kill_session(name).await
+    }
+
+    async fn kill_server(&self) -> Result<()> {
+        (**self).kill_server().await
     }
 
     async fn capture_pane(&self, pane: &str) -> Result<String> {

@@ -107,6 +107,10 @@ impl TmuxDriver for RecordingTmux {
         Ok(())
     }
 
+    async fn kill_server(&self) -> Result<()> {
+        Ok(())
+    }
+
     async fn capture_pane(&self, _pane: &str) -> Result<String> {
         Ok(String::new())
     }

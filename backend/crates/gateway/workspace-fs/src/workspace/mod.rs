@@ -68,4 +68,11 @@ impl Workspace for FsWorkspace {
     async fn remove_dir_tree(&self, path: &str) -> std::result::Result<(), delta_usecase::Error> {
         Ok(self.remove_tree(path).await?)
     }
+
+    async fn remove_empty_dir(
+        &self,
+        path: &str,
+    ) -> std::result::Result<bool, delta_usecase::Error> {
+        Ok(self.remove_empty(path).await?)
+    }
 }

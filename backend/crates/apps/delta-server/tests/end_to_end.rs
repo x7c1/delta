@@ -103,6 +103,10 @@ impl TmuxDriver for FakeTmux {
         Ok(())
     }
 
+    async fn kill_server(&self) -> delta_usecase::Result<()> {
+        Ok(())
+    }
+
     async fn capture_pane(&self, _pane: &str) -> delta_usecase::Result<String> {
         Ok(String::new())
     }
@@ -141,6 +145,10 @@ impl TmuxDriver for SharedTmux {
 
     async fn kill_session(&self, name: &str) -> delta_usecase::Result<()> {
         self.0.kill_session(name).await
+    }
+
+    async fn kill_server(&self) -> delta_usecase::Result<()> {
+        self.0.kill_server().await
     }
 
     async fn capture_pane(&self, pane: &str) -> delta_usecase::Result<String> {
@@ -185,6 +193,10 @@ impl Workspace for NoopWorkspace {
 
     async fn remove_dir_tree(&self, _path: &str) -> delta_usecase::Result<()> {
         Ok(())
+    }
+
+    async fn remove_empty_dir(&self, _path: &str) -> delta_usecase::Result<bool> {
+        Ok(false)
     }
 }
 

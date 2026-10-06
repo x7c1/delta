@@ -92,7 +92,12 @@ impl DataLayout {
     /// directory, so a launch in a real repository never overwrites that
     /// repository's own `.claude/settings.json`.
     pub fn session_settings(&self, port: u16) -> PathBuf {
-        self.dir.join(SETTINGS_DIR).join(format!("{port}.json"))
+        self.settings_dir().join(format!("{port}.json"))
+    }
+
+    /// The directory holding one session settings file per port.
+    pub fn settings_dir(&self) -> PathBuf {
+        self.dir.join(SETTINGS_DIR)
     }
 
     /// The configuration file Delta's tmux server is started with (`tmux -f`).

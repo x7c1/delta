@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Button, ErrorBoundary } from '@delta/ui-kit';
 import { ApiProvider } from './data/apiContext';
 import { NotificationSnackbar } from './features/notifications/NotificationSnackbar';
+import { ErasedGate } from './features/settings/storage/ErasedGate';
 import { WorkspaceScreen } from './features/workspace/WorkspaceScreen';
 import { ThemeProvider } from './hooks/themeContext';
 import { VisualEffectsProvider } from './hooks/visualEffectsContext';
@@ -76,14 +77,19 @@ export function App() {
             <ErrorBoundary label="app" fallback={() => <AppCrash />}>
               <div className="flex h-full flex-col bg-surface-elevated text-fg">
                 {isMacosShell() && <ShellTitleBarStrip />}
-                <div className="min-h-0 flex-1">
-                  <WorkspaceScreen />
-                </div>
-                {/* App-wide snackbar, for failures and for outcomes the user
-                    asked for alike. Rendered as a fixed overlay
-                    outside the workspace layout so a bottom-anchored
-                    notification never affects transcript scrolling. */}
-                <NotificationSnackbar />
+                {/* Once Settings → Storage erases everything, the server has
+                    stopped: the gate swaps the workspace (and its live
+                    channels' reconnection UI) for the static report. */}
+                <ErasedGate>
+                  <div className="min-h-0 flex-1">
+                    <WorkspaceScreen />
+                  </div>
+                  {/* App-wide snackbar, for failures and for outcomes the user
+                      asked for alike. Rendered as a fixed overlay
+                      outside the workspace layout so a bottom-anchored
+                      notification never affects transcript scrolling. */}
+                  <NotificationSnackbar />
+                </ErasedGate>
               </div>
             </ErrorBoundary>
           </VisualEffectsProvider>

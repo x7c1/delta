@@ -92,6 +92,8 @@ export type { SkipReason } from './generated/SkipReason';
 export type { KeptItem } from './generated/KeptItem';
 export type { KeepReason } from './generated/KeepReason';
 export type { DiskItemKind } from './generated/DiskItemKind';
+export type { EraseResponse } from './generated/EraseResponse';
+export type { ErasedItems } from './generated/ErasedItems';
 
 export type {
   TextBlock,

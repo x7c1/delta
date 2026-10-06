@@ -63,6 +63,14 @@ pub trait Workspace: Send + Sync {
     /// for work. Symlinks inside the tree are removed, never followed. A path
     /// that does not exist is not an error (there is nothing left to remove).
     async fn remove_dir_tree(&self, path: &str) -> Result<()>;
+
+    /// Delete the directory `path` only if it is empty, returning whether it
+    /// was deleted.
+    ///
+    /// A directory that still holds anything is left as it is (`false`), and
+    /// so is a path that does not exist. Used to tidy away the worktree base
+    /// once erasing everything has emptied it, never to delete content.
+    async fn remove_empty_dir(&self, path: &str) -> Result<bool>;
 }
 
 #[async_trait]
@@ -87,5 +95,9 @@ impl Workspace for Box<dyn Workspace> {
 
     async fn remove_dir_tree(&self, path: &str) -> Result<()> {
         (**self).remove_dir_tree(path).await
+    }
+
+    async fn remove_empty_dir(&self, path: &str) -> Result<bool> {
+        (**self).remove_empty_dir(path).await
     }
 }

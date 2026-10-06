@@ -26,6 +26,8 @@ mod session_prune;
 pub(crate) use session_prune::{preview_prune_sessions, prune_sessions};
 mod storage;
 pub(crate) use storage::get_storage;
+mod storage_erase;
+pub(crate) use storage_erase::erase_everything;
 mod storage_snapshots;
 pub(crate) use storage_snapshots::delete_snapshot;
 mod storage_worktrees;

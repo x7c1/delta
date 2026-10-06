@@ -22,8 +22,9 @@ kinds of traffic, and this directory has one page per area:
     opening a known directory in an external editor.
   - **[settings.md](settings.md)** — provider availability and capabilities, the
     launch-option and prompt-template registries, the server version, the
-    storage inventory (where the server keeps its files), and removing leftover
-    worktrees and migration snapshots.
+    storage inventory (where the server keeps its files), removing leftover
+    worktrees and migration snapshots, and erasing everything Delta left on the
+    machine.
 - **[live-channels.md](live-channels.md)** — the browser live channels: a
   WebSocket event stream (`/ws`) carrying `SessionEvent`s, a PTY bridge
   (`/pty`) attaching an xterm.js terminal to a session's tmux pane, and a

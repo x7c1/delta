@@ -9,6 +9,7 @@
 //! gateway crates; the composition root wires them together.
 
 mod agent;
+mod erase_report;
 mod error;
 mod interactor;
 mod launch_config;
@@ -35,9 +36,10 @@ pub use agent::{
     SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability, TerminalCapability,
     TranscriptCapability, TurnStatus,
 };
+pub use erase_report::EraseReport;
 pub use error::{Error, Result};
 pub use interactor::{
-    AttachablePane, BoxedInteractor, ExternalHandler, ExternalHandlerId, Interactor,
+    AttachablePane, BoxedInteractor, CoreRelease, ExternalHandler, ExternalHandlerId, Interactor,
     PendingPermission, PendingQuestion, PermissionDecision, PermissionWait, ReadoptionSummary,
     RunningSubagent, SessionLiveState, VSCODE_HANDLER_ID,
 };

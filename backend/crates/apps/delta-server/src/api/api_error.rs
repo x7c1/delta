@@ -153,6 +153,11 @@ const WORKTREE_DIRTY_CODE: &str = "worktree_dirty";
 /// past it is the forced removal, which deletes the directory tree.
 const WORKTREE_NOT_REGISTERED_CODE: &str = "worktree_not_registered";
 
+/// Stable machine-readable code for `POST /api/storage/erase` while an erase
+/// is already running (or has finished and the server is stopping). Nothing
+/// is done twice; the first request's response carries the report.
+const ERASE_IN_PROGRESS_CODE: &str = "erase_in_progress";
+
 /// An error rendered as an HTTP response.
 ///
 /// This is the single place that maps failures onto status codes, keeping the
@@ -170,6 +175,8 @@ pub(crate) enum ApiError {
     /// A failure outside any use case — a file the server itself manages
     /// could not be changed (`500`).
     Internal(String),
+    /// An erase was asked for while one is already running (`409`).
+    EraseInProgress,
 }
 
 impl From<delta_usecase::Error> for ApiError {
@@ -185,6 +192,11 @@ impl IntoResponse for ApiError {
             ApiError::BadRequest(message) => (StatusCode::BAD_REQUEST, message, None),
             ApiError::NotFound(message) => (StatusCode::NOT_FOUND, message, None),
             ApiError::Internal(message) => (StatusCode::INTERNAL_SERVER_ERROR, message, None),
+            ApiError::EraseInProgress => (
+                StatusCode::CONFLICT,
+                "an erase is already in progress".to_owned(),
+                Some(ERASE_IN_PROGRESS_CODE),
+            ),
             ApiError::UseCase(err) => {
                 let (status, code) = match &err {
                     // No session yet means nothing to act on for the caller.

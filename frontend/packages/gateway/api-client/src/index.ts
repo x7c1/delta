@@ -68,6 +68,7 @@ export {
   useDeleteSnapshotMutation,
   usePrunePreviewQuery,
   usePruneSessionsMutation,
+  useEraseEverythingMutation,
   useProvidersQuery,
 } from './query-hooks';
 export {

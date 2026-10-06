@@ -2,11 +2,13 @@
 //! request for `GET /api/storage`.
 //!
 //! Split by method: this module holds the struct, its constructors and the
-//! helpers both methods share, `report` the inventory itself, and
-//! `delete_snapshot` the deletion of a listed migration snapshot.
+//! helpers the methods share, `report` the inventory itself,
+//! `delete_snapshot` the deletion of a listed migration snapshot, and `erase`
+//! the deletion of the data directory's files when everything is erased.
 
 mod delete_snapshot;
 pub(crate) use delete_snapshot::SnapshotDeletionError;
+mod erase;
 mod report;
 #[cfg(test)]
 mod testing;
@@ -32,6 +34,9 @@ pub struct StorageInventory {
     layout: DataLayout,
     port: u16,
     worktree_base: PathBuf,
+    /// The directory holding the worktree base when the base is the default
+    /// (`~/.delta`), which erasing removes once it is empty.
+    worktree_base_parent: Option<String>,
     transcript_root: PathBuf,
 }
 
@@ -51,6 +56,7 @@ impl StorageInventory {
             layout: DataLayout::new(data_dir),
             port,
             worktree_base: worktree_base.into(),
+            worktree_base_parent: None,
             transcript_root: transcript_root.into(),
         }
     }
@@ -62,6 +68,9 @@ impl StorageInventory {
             layout: config.data_layout(),
             port: config.port,
             worktree_base: PathBuf::from(&config.worktree_base),
+            worktree_base_parent: crate::config::default_worktree_base_parent(
+                &config.worktree_base,
+            ),
             transcript_root: PathBuf::from(&config.transcript_root),
         }
     }

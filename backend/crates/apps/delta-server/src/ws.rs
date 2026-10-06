@@ -36,10 +36,17 @@ pub async fn ws_handler(
 /// the task — with its broadcast subscription — ends right away instead of
 /// leaking until the next send to the dead socket fails. The stream carries no
 /// client-to-server messages, so anything else received is ignored.
+///
+/// The socket also ends when the server is asked to stop (an erase): the task
+/// holds the state, and with it the store, which the server must close before
+/// it deletes the database.
 async fn pump_events(mut socket: WebSocket, state: AppState) {
     let mut rx = state.subscribe();
+    let stopping = state.stopping();
+    tokio::pin!(stopping);
     loop {
         tokio::select! {
+            () = &mut stopping => break,
             event = rx.recv() => match event {
                 Ok(event) => {
                     let payload = match serde_json::to_string(&WireSessionEvent::from(event)) {

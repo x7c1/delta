@@ -25,6 +25,7 @@ import type {
   PromptTemplate,
   PromptTemplatesResponse,
   ProvidersResponse,
+  EraseResponse,
   PrunePreviewResponse,
   PruneSessionsRequest,
   PruneSessionsResponse,
@@ -918,6 +919,38 @@ export function usePruneSessionsMutation(
   return useMutation({
     mutationFn: (body: PruneSessionsRequest) => client.pruneSessions(body),
     onSettled: () => {
+      for (const queryKey of [
+        queryKeys.sessions,
+        queryKeys.storage,
+        queryKeys.storageWorktrees,
+        queryKeys.prunePreviewAll,
+      ]) {
+        void queryClient.invalidateQueries({ queryKey });
+      }
+    },
+  });
+}
+
+/**
+ * Erase everything this Delta created on the machine that holds no work
+ * (`POST /api/storage/erase`). The server stops right after it answers, so a
+ * success invalidates nothing: there is nothing left to refetch from, and
+ * `onErased` replaces the app with the report. It is a mutation-level
+ * callback, not one passed to `mutate`, so it still runs when the user has
+ * left the Storage category while the erase was running.
+ *
+ * A failure can come after sessions were already closed and removed, so it
+ * refreshes the same views a bulk removal does.
+ */
+export function useEraseEverythingMutation(
+  client: ApiClient,
+  onErased: (report: EraseResponse) => void,
+): UseMutationResult<EraseResponse, Error, void> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => client.eraseEverything(),
+    onSuccess: onErased,
+    onError: () => {
       for (const queryKey of [
         queryKeys.sessions,
         queryKeys.storage,

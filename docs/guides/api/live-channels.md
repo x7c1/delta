@@ -28,7 +28,10 @@ the right session; the exception is the [repository-clone
 events](#repository-clones), which announce a workspace-level job that has no
 session behind it and are keyed by repository instead. Which session the user is
 looking at (focus) is purely client-side; the server emits no focus event. There
-is no client→server message protocol on this socket.
+is no client→server message protocol on this socket. The server closes the
+socket when it stops after
+[erasing everything](settings.md#post-apistorageerase); no event announces it,
+and there is nothing left to reconnect to.
 
 Nothing here is replayed, and delivery is not guaranteed. A socket that connects
 mid-session receives only what happens from then on, and a subscriber that falls
