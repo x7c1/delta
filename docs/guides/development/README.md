@@ -323,6 +323,12 @@ dependency-cruiser) is covered by `make check` — which also runs both Playwrig
 suites — or by the individual `make build` / `make test` / `make lint` targets
 when a faster loop is wanted.
 
+The `@delta/web` build fails when any JavaScript chunk exceeds 1200 kB
+(`BUNDLE_BUDGET_KB` in `frontend/packages/apps/web/vite.config.ts`, whose
+comment explains why the SPA is deliberately one unsplit chunk), so
+`make check`, CI and `make web-dist` all catch a dependency that bloats the
+bundle.
+
 ### Generated wire bindings (`@delta/wire-gen`)
 
 `frontend/packages/gateway/wire-gen` contains TypeScript generated from the
