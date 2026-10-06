@@ -45,6 +45,15 @@ parsing and hook handling. It is two layers, cheapest first:
    the backend with the same per-run isolation as the fake lane (temp
    database, per-run tmux socket, dedicated ports 7897/5197).
 
+Both layers clean up after earlier runs when they start, under the rule
+described in [e2e.md](e2e.md) ("Test-run residue"): each canary test sweeps
+the `canary` context (dead `delta-canary-<name>-<pid>` tmux servers and their
+socket files), and the smoke sweeps `e2e-real` right after taking the per-host
+lock. The smoke keeps its run directory on teardown: the newest
+finished run's `delta-e2e-real.*` directory in `$TMPDIR` — its database and
+`server.log` — is kept as evidence until a later run of the smoke sweeps it,
+and a run still in progress is never touched.
+
 The suite drives the **real, authenticated `claude` CLI and consumes the local
 user's subscription quota** — every canary uses the smallest workable prompt
 (a handful of real turns per run), assertions are structural only (never about

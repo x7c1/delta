@@ -44,6 +44,7 @@ async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
         eprintln!("skipping: tmux is not available on PATH");
         return;
     }
+    sweep_test_residue();
 
     let temp = tempfile::tempdir().expect("create temp dir");
     let scenario_path = temp.path().join("scenario.json");
@@ -212,6 +213,28 @@ async fn wait_for<T>(
     Err(format!(
         "timed out waiting on {path}; last body: {last_body}"
     ))
+}
+
+/// Clean up the residue of previous `fake-test` runs before this one starts:
+/// `scripts/sweep-test-residue.sh fake-test` kills dead runs' tmux servers and
+/// unlinks their sockets (`tmux kill-server` leaves the file behind, and a
+/// crashed run leaves the server too), never touching a run whose owner pid
+/// is alive. Its output goes to stderr so the harness captures it.
+fn sweep_test_residue() {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../scripts/sweep-test-residue.sh");
+    let out = std::process::Command::new(&script)
+        .arg("fake-test")
+        .output()
+        .unwrap_or_else(|err| panic!("run {}: {err}", script.display()));
+    eprint!("{}", String::from_utf8_lossy(&out.stdout));
+    eprint!("{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{} failed: {}",
+        script.display(),
+        out.status
+    );
 }
 
 /// Whether a usable `tmux` is on `PATH`.

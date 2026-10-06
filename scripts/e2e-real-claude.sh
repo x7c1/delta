@@ -84,6 +84,10 @@ if [ "${DELTA_E2E_REAL_LOCK_HELD:-}" != "1" ] && command -v flock >/dev/null 2>&
   flock -n 9 || die "another real-claude suite run is in flight (lock: $LOCK_FILE)"
 fi
 
+# Clean up previous smoke runs: dead runs' tmux servers and sockets go, the
+# newest dead run directory stays as evidence, live runs are never touched.
+"$SCRIPT_DIR/sweep-test-residue.sh" e2e-real
+
 log "This suite drives the REAL claude CLI: it consumes subscription quota."
 
 # --- Layer 1: Rust contract canaries (no server, no browser). -----------------
@@ -99,6 +103,9 @@ log "Building delta-server ..."
 (cd "$BACKEND_DIR" && cargo build -p delta-server)
 
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/delta-e2e-real.XXXXXX")"
+# The owner the next run's sweep checks: while this script is alive its run
+# directory is never touched; afterwards it is a dead run's evidence.
+printf '%s\n' "$$" >"$RUN_DIR/owner.pid"
 # The session's working directory lives INSIDE the repository (not under
 # /tmp): a host that develops Delta has already trusted this repository, so
 # the real claude never raises a first-run trust prompt for a directory under
@@ -126,7 +133,9 @@ teardown() {
   # dies with it; other sockets (the app's or `make dev`'s, the fake lane) are
   # untouched.
   tmux -L "$TMUX_SOCKET" kill-server 2>/dev/null || true
-  rm -rf "$RUN_DIR" "$WORKDIR"
+  # $RUN_DIR stays behind: its database and server log are the evidence of
+  # this run, removed by a later run's sweep (scripts/sweep-test-residue.sh).
+  rm -rf "$WORKDIR"
   # Best-effort removal of the transcript claude wrote for this run's
   # session under ~/.claude/projects (the project directory is the munged
   # working-directory path). The killed claude flushes its transcript once
@@ -151,7 +160,8 @@ log "Server log: $RUN_DIR/server.log"
 # from inside a Claude Code session.
 #
 # The run directory is the server's data directory: the database, the session
-# settings and the tmux configuration land in it and go with it on teardown.
+# settings and the tmux configuration land in it and outlive the run as its
+# evidence, until a later run's sweep removes them.
 DELTA_PORT="$BACKEND_PORT" \
   DELTA_DATA_DIR="$RUN_DIR" \
   DELTA_TMUX_SOCKET="$TMUX_SOCKET" \
@@ -161,6 +171,9 @@ DELTA_PORT="$BACKEND_PORT" \
       -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_EXECPATH -u CLAUDE_EFFORT -u AI_AGENT \
   "$BACKEND_DIR/target/debug/delta-server" >"$RUN_DIR/server.log" 2>&1 &
 SERVER_PID=$!
+# Recorded so a later sweep can kill this server if the script dies without
+# its teardown (SIGKILL) and leaves it holding the port.
+printf '%s\n' "$SERVER_PID" >"$RUN_DIR/server.pids"
 
 for _ in $(seq 1 100); do
   if curl -sf "http://127.0.0.1:$BACKEND_PORT/health" >/dev/null 2>&1; then

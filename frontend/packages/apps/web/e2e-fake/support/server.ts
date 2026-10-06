@@ -26,10 +26,10 @@ import { ARTIFACT_DIR, REPO_ROOT } from './paths';
  * ## Per-run isolation (mirrors the retired bash locals)
  *
  * - the server's data directory is a fresh temp dir (`delta-e2e-fake.<rand>/`,
- *   handed over as `DELTA_DATA_DIR`), removed on teardown: the SQLite
- *   database, the session settings, the tmux configuration and the spawn
- *   workdirs land in it, beside the scripted-claude and scripted-codex
- *   wrappers and a pid file;
+ *   handed over as `DELTA_DATA_DIR`): the SQLite database, the session
+ *   settings, the tmux configuration and the spawn workdirs land in it,
+ *   beside the scripted-claude and scripted-codex wrappers, the server pid
+ *   file and an `owner.pid` naming this worker;
  * - tmux runs on a unique per-run socket (`delta-e2e-fake-<pid>`), killed on
  *   teardown, so a leftover or parallel run never collides;
  * - the fake's transcripts live under the temp dir too, and are copied into
@@ -50,15 +50,13 @@ import { ARTIFACT_DIR, REPO_ROOT } from './paths';
  * `boot-2/` next to `boot-1/`, and the artifact dir itself is emptied once per
  * run, by `globalSetup.ts`, never here.
  *
- * ## Startup sweep
+ * ## Teardown keeps the run directory; the next run sweeps it
  *
- * A Node teardown is not guaranteed to run when the Playwright process dies
- * hard (SIGKILL, a Ctrl-C storm), which would leak the per-run tmux server and
- * temp dir. The teardown path is best-effort; the *guarantee* is at startup:
- * before booting, {@link sweepStaleRuns} kills any leftover `delta-e2e-fake-*`
- * tmux server and removes any `delta-e2e-fake.*` temp dir (killing the server
- * process each recorded, via its pid file). Leaks are therefore bounded to one
- * crashed run and cleaned by the next.
+ * Teardown kills the server and the per-run tmux server but leaves the run
+ * directory in place: its database is the evidence a failure investigation
+ * reads. Cleanup happens at the start of the next run instead, through the
+ * sweep in `globalSetup.ts` (once per invocation, never per worker), which
+ * also covers a teardown that never ran (SIGKILL, a Ctrl-C storm).
  */
 
 /** The default backend port; kept in sync with `playwright.fake.config.ts`. */
@@ -72,7 +70,10 @@ const BACKEND_PORT = Number(process.env.E2E_FAKE_BACKEND_PORT ?? 7899);
  */
 const AUTH_TOKEN = 'delta-e2e-fake-auth-token';
 
-/** Recognisable prefixes so the startup sweep can find a previous run's leaks. */
+/**
+ * Recognisable prefixes so `scripts/sweep-test-residue.sh e2e-fake` can find a
+ * previous run's leftovers; keep them in sync with that script.
+ */
 const TMP_PREFIX = 'delta-e2e-fake.';
 const SOCKET_PREFIX = 'delta-e2e-fake-';
 
@@ -130,98 +131,11 @@ export interface ServerHandle {
    * a failure cannot leak the setting into the specs that follow.
    */
   restart(env?: Record<string, string>): Promise<void>;
-  /** Kill the server and tmux, copy transcripts out, and remove the temp dir. */
+  /**
+   * Kill the server and tmux and copy transcripts out. The run directory is
+   * left behind as evidence; the next run's sweep removes it.
+   */
   teardown(): Promise<void>;
-}
-
-/** Whether `pid` is still alive. */
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Best-effort check that `pid` is a delta-server (Linux `/proc` only). */
-function looksLikeServer(pid: number): boolean {
-  try {
-    const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
-    return cmdline.includes('delta-server');
-  } catch {
-    // No /proc (macOS) or the process is gone: fall back to killing it — the
-    // pid was recorded by a previous e2e-fake run whose temp dir we are about
-    // to delete, so a surviving process of that run is stale regardless.
-    return true;
-  }
-}
-
-/** The directory tmux keeps its named sockets in, for the current user. */
-function tmuxSocketDir(): string {
-  const base = process.env.TMUX_TMPDIR ?? '/tmp';
-  const uid = typeof process.getuid === 'function' ? process.getuid() : 0;
-  return path.join(base, `tmux-${uid}`);
-}
-
-/**
- * Kill any leftover tmux server and temp dir from a previously crashed run.
- * Best-effort throughout: a failure to clean one leak must not block this run.
- */
-function sweepStaleRuns(): void {
-  // Stale tmux servers: one named socket file per leaked run.
-  const socketDir = tmuxSocketDir();
-  let sockets: string[] = [];
-  try {
-    sockets = fs.readdirSync(socketDir);
-  } catch {
-    sockets = [];
-  }
-  for (const name of sockets) {
-    if (!name.startsWith(SOCKET_PREFIX)) {
-      continue;
-    }
-    const child = spawn('tmux', ['-L', name, 'kill-server'], {
-      stdio: 'ignore',
-    });
-    child.on('error', () => {
-      /* tmux missing or already dead — nothing to clean. */
-    });
-  }
-
-  // Stale temp dirs: kill each recorded server pid, then remove the dir.
-  const tmpBase = os.tmpdir();
-  let entries: string[] = [];
-  try {
-    entries = fs.readdirSync(tmpBase);
-  } catch {
-    entries = [];
-  }
-  for (const name of entries) {
-    if (!name.startsWith(TMP_PREFIX)) {
-      continue;
-    }
-    const dir = path.join(tmpBase, name);
-    try {
-      const pids = fs
-        .readFileSync(path.join(dir, 'server.pids'), 'utf8')
-        .split('\n')
-        .map((line) => Number(line.trim()))
-        .filter((pid) => Number.isInteger(pid) && pid > 0);
-      for (const pid of pids) {
-        if (isAlive(pid) && looksLikeServer(pid)) {
-          try {
-            process.kill(pid, 'SIGKILL');
-          } catch {
-            /* already gone */
-          }
-        }
-      }
-    } catch {
-      /* no pid file recorded — nothing to kill for this leak. */
-    }
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 }
 
 /**
@@ -278,15 +192,15 @@ function logTail(logPath: string): string {
 }
 
 /**
- * Boot a fresh server for this worker: sweep prior leaks, lay down the per-run
- * temp dir and the two scripted-agent wrappers (claude and codex), spawn
- * generation 1, and wait for `/health`. Returns the handle the fixture hands to
- * specs.
+ * Boot a fresh server for this worker: lay down the per-run temp dir and the
+ * two scripted-agent wrappers (claude and codex), spawn generation 1, and wait
+ * for `/health`. Returns the handle the fixture hands to specs.
  */
 export async function bootServer(): Promise<ServerHandle> {
-  sweepStaleRuns();
-
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), TMP_PREFIX));
+  // The sweep at the start of a later run leaves this directory alone while
+  // this worker is alive, and treats it as a dead run's evidence afterwards.
+  fs.writeFileSync(path.join(runDir, 'owner.pid'), `${process.pid}\n`);
   const transcripts = path.join(runDir, 'transcripts');
   const pidFile = path.join(runDir, 'server.pids');
   const tmuxSocket = `${SOCKET_PREFIX}${process.pid}`;
@@ -425,9 +339,10 @@ export async function bootServer(): Promise<ServerHandle> {
     },
     async teardown(): Promise<void> {
       await killChild();
-      // Copy the fake transcripts out of the soon-to-be-deleted temp dir into
-      // this boot's directory under the artifact dir CI uploads (best-effort —
-      // a run that never spawned claude leaves none).
+      // Copy the fake transcripts out of the temp dir into this boot's
+      // directory under the artifact dir CI uploads (best-effort — a run that
+      // never spawned claude leaves none). The temp dir itself stays behind
+      // until the next run's sweep, which may remove it.
       try {
         fs.cpSync(transcripts, path.join(bootDir, 'transcripts'), {
           recursive: true,
@@ -445,7 +360,6 @@ export async function bootServer(): Promise<ServerHandle> {
         tmux.on('error', () => resolve());
         tmux.on('exit', () => resolve());
       });
-      fs.rmSync(runDir, { recursive: true, force: true });
     },
   };
 }
