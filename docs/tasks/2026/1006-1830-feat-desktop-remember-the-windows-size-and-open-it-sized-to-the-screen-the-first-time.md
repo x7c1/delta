@@ -10,7 +10,7 @@ check_command: "make check && grep -q 'tauri-plugin-window-state' backend/crates
 assignee: null
 branch: task/1006-1830-feat-desktop-remember-the-windows-size-and-open-it-sized-to-the-screen-the-first-time
 created_at: 2026-10-06T10:40:36Z
-updated_at: 2026-10-06T11:24:13Z
+updated_at: 2026-10-06T11:27:03Z
 ---
 
 # feat(desktop): remember the window's size and open it sized to the screen the first time
@@ -76,7 +76,7 @@ window state file to the list.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On macOS with the dev build: with no state file, the window opens
+- [x] On macOS with the dev build: with no state file, the window opens
       centred at about 80 % of the work area. Resize it, maximize it, quit;
       relaunch restores the size and the maximized state. The installed app
       (no `.dev`) keeps its own state. A second launch while running only
