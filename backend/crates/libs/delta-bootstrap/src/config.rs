@@ -104,6 +104,22 @@ pub struct Config {
     /// watchdog waits. Defaults are production values; tests and alternative
     /// installs override the binary and shrink the deadlines.
     pub launch: delta_usecase::LaunchConfig,
+    /// Environment variables set on every child process Delta spawns — `tmux`
+    /// (and through its server, the agent in each pane), `codex`, `git`, `gh`,
+    /// the opener and the startup `claude --version` probe — on top of the
+    /// environment the server inherited, so these values win over inherited
+    /// ones. Bare names are also resolved against this `PATH` when it carries
+    /// one, by the spawns and by the binary detector alike.
+    ///
+    /// Empty by default: the CLI server and `make dev` leave it so, and their
+    /// children inherit the terminal's environment. Only the desktop shell
+    /// fills it, with the login shell's `PATH` and locale variables (`LANG`,
+    /// `LC_*`), because an app launched from Finder or a desktop file inherits
+    /// none of them. The set is deliberately that small: variables a user's rc
+    /// files export, such as API keys or proxy settings, are not imported
+    /// implicitly. A user who wants an agent to see a variable sets it
+    /// explicitly, never by accident.
+    pub child_env: Vec<(String, String)>,
 }
 
 impl Config {
@@ -148,6 +164,7 @@ mod tests {
             port: 4000,
             hook_endpoint_changed: false,
             launch: delta_usecase::LaunchConfig::default(),
+            child_env: Vec::new(),
         };
         let layout = config.data_layout();
         let data_dir = std::path::Path::new("/data/delta");

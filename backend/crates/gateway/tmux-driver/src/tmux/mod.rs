@@ -41,19 +41,34 @@ pub struct Tmux {
     /// [`create_session`](delta_usecase::TmuxDriver::create_session) before the
     /// server starts.
     conf_path: String,
+    /// Environment variables set on every `tmux` command, on top of the
+    /// inherited environment.
+    ///
+    /// The `new-session` that boots the server fixes the server's global
+    /// environment, which every pane inherits, so these are what the agent in a
+    /// pane sees as well (the server configuration's `child_env`: the desktop
+    /// app's login-shell `PATH` and locale). `tmux` itself is also looked up on
+    /// this `PATH` when it carries one.
+    env: Vec<(String, String)>,
 }
 
 impl Tmux {
     /// Create a driver bound to a dedicated tmux socket, starting that socket's
-    /// server with the configuration written to `conf_path`.
-    pub fn new(socket: impl Into<String>, conf_path: impl Into<String>) -> Self {
+    /// server with the configuration written to `conf_path`, and running every
+    /// command with `env` set.
+    pub fn new(
+        socket: impl Into<String>,
+        conf_path: impl Into<String>,
+        env: Vec<(String, String)>,
+    ) -> Self {
         Self {
             socket: socket.into(),
             conf_path: conf_path.into(),
+            env,
         }
     }
 
-    /// Run `tmux -L <socket> -f <conf> <args>`, returning the captured output.
+    /// The command `tmux -L <socket> -f <conf> <args>`, with [`Self::env`] set.
     ///
     /// The `-L <socket>` prefix pins every command to Delta's own tmux server.
     /// The `-f <conf>` prefix makes that server load Delta's fixed config instead
@@ -62,15 +77,21 @@ impl Tmux {
     /// [`create_session`](delta_usecase::TmuxDriver::create_session)) and is
     /// harmlessly ignored on every other command, so passing it on all of them
     /// guarantees whichever call boots the server uses Delta's config.
-    async fn output(&self, args: &[&str]) -> std::result::Result<std::process::Output, Error> {
-        Ok(Command::new(TMUX_BIN)
+    fn command(&self, args: &[&str]) -> Command {
+        let mut command = Command::new(TMUX_BIN);
+        command
             .arg("-L")
             .arg(&self.socket)
             .arg("-f")
             .arg(&self.conf_path)
             .args(args)
-            .output()
-            .await?)
+            .envs(self.env.iter().map(|(name, value)| (name, value)));
+        command
+    }
+
+    /// Run [`Self::command`], returning the captured output.
+    async fn output(&self, args: &[&str]) -> std::result::Result<std::process::Output, Error> {
+        Ok(self.command(args).output().await?)
     }
 
     /// Run `tmux <args>`, erroring on a non-zero exit.
@@ -158,8 +179,44 @@ mod tests {
 
     #[test]
     fn conf_path_is_the_one_the_caller_chose() {
-        let tmux = Tmux::new("delta", "/data/delta/tmux.conf");
+        let tmux = Tmux::new("delta", "/data/delta/tmux.conf", Vec::new());
         assert_eq!(tmux.socket, "delta");
         assert_eq!(tmux.conf_path, "/data/delta/tmux.conf");
+    }
+
+    #[test]
+    fn every_command_carries_the_given_environment() {
+        let env = vec![
+            ("PATH".to_owned(), "/opt/homebrew/bin:/usr/bin".to_owned()),
+            ("LANG".to_owned(), "en_US.UTF-8".to_owned()),
+        ];
+        let tmux = Tmux::new("delta", "/data/delta/tmux.conf", env);
+
+        let command = tmux.command(&["new-session", "-d"]);
+
+        let envs: Vec<_> = command
+            .as_std()
+            .get_envs()
+            .map(|(name, value)| (name.to_owned(), value.map(ToOwned::to_owned)))
+            .collect();
+        assert_eq!(
+            envs,
+            vec![
+                ("LANG".into(), Some("en_US.UTF-8".into())),
+                ("PATH".into(), Some("/opt/homebrew/bin:/usr/bin".into())),
+            ]
+        );
+        let args: Vec<_> = command.as_std().get_args().collect();
+        assert_eq!(
+            args,
+            [
+                "-L",
+                "delta",
+                "-f",
+                "/data/delta/tmux.conf",
+                "new-session",
+                "-d"
+            ]
+        );
     }
 }

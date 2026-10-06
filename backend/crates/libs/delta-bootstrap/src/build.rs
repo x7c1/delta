@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use binary_detector::PathBinaryDetector;
-use codex_agent::{CodexAdapterFactory, CodexLaunchConfig};
+use codex_agent::CodexAdapterFactory;
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{
@@ -20,6 +20,15 @@ use crate::ensure_tmux_available::ensure_tmux_available;
 use crate::{
     all_launch_option_presets, AppInteractor, Config, Error, GatewayLaunchOptionVocabulary, Result,
 };
+
+mod child_path;
+use child_path::child_path;
+
+mod codex_launch_for;
+use codex_launch_for::codex_launch_for;
+
+#[cfg(test)]
+mod testing;
 
 /// Construct the wired [`AppInteractor`] from configuration.
 ///
@@ -60,10 +69,15 @@ use crate::{
 ///
 /// Host requirements: `tmux` must be resolvable before anything else is wired.
 /// See [`ensure_tmux_available()`] for why that is checked here rather than
-/// left to the first launch. The probe reads the process's real `PATH` and
-/// takes no substitute detector, so every caller needs tmux installed — the
-/// tests that wire this root (the server's route tests among them) as much as
-/// a real boot.
+/// left to the first launch. The probe searches the `PATH` the spawns run with
+/// ([`child_path()`]) and takes no substitute detector, so every caller needs
+/// tmux installed — the tests that wire this root (the server's route tests
+/// among them) as much as a real boot.
+///
+/// Child environment: [`Config::child_env`] is handed to every gateway that
+/// spawns a process — the tmux driver, git, gh, the external opener and the
+/// Codex app-server launch — and its `PATH` to the binary detector, so no
+/// spawn site reads global state for it.
 ///
 /// [`SessionStore::restore_all_dispatched`]: delta_usecase::SessionStore::restore_all_dispatched
 /// [`launch_option_catalog`]: crate::launch_option_catalog()
@@ -73,7 +87,8 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     // the startup tmux check below is the first thing it serves; the same
     // instance is injected into the interactor for the provider-availability
     // endpoint, so both read one memo.
-    let binary_detector: Arc<dyn BinaryDetector> = Arc::new(PathBinaryDetector::new());
+    let binary_detector: Arc<dyn BinaryDetector> =
+        Arc::new(PathBinaryDetector::new(child_path(config)));
     ensure_tmux_available(binary_detector.as_ref()).await?;
     let layout = config.data_layout();
     let store = SqliteStore::open(&layout.database().to_string_lossy())?;
@@ -89,11 +104,13 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     let tmux = Tmux::new(
         config.tmux_socket.clone(),
         layout.tmux_conf().to_string_lossy().into_owned(),
+        config.child_env.clone(),
     );
     let workspace = FsWorkspace::new();
-    let git_worktree = Git::new();
-    let gh_cli: Arc<dyn GhCli> = Arc::new(Gh::new());
-    let external_opener: Arc<dyn ExternalOpener> = Arc::new(SystemOpener::new());
+    let git_worktree = Git::new(config.child_env.clone());
+    let gh_cli: Arc<dyn GhCli> = Arc::new(Gh::new(config.child_env.clone()));
+    let external_opener: Arc<dyn ExternalOpener> =
+        Arc::new(SystemOpener::new(config.child_env.clone()));
     // The factory carries only Codex launch config, so this spawns no `codex
     // app-server` process at startup — a machine without Codex still boots
     // normally; the spawn is deferred to the first Codex session's `connect()`.
@@ -102,7 +119,7 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     // Resolve the Codex launch config once and reuse its binary for both the
     // adapter factory (what a Codex spawn launches) and the availability probe
     // (what `/api/providers` reports), so the two can never diverge.
-    let codex_launch = codex_launch_from_env();
+    let codex_launch = codex_launch_for(config);
     let codex_bin = codex_launch.codex_bin.clone();
     // The comms log is injected here rather than resolved inside the adapter: it
     // is an observability gateway the transport layer owns (it is also what
@@ -142,27 +159,6 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     Ok(interactor)
 }
 
-/// The Codex launch configuration sourced from the environment.
-///
-/// `DELTA_CODEX_BIN` substitutes the `codex` command the shared app-server is
-/// spawned from (default the bare `codex`, resolved via `PATH`), mirroring
-/// `DELTA_CLAUDE_BIN` for the Claude launch. Only the binary is configurable in
-/// this slice; the default `app-server` argument is kept.
-///
-/// Read here in the composition root — rather than threaded through [`Config`]
-/// — so every existing `Config` construction stays untouched. Reading the
-/// variable has no side effect: the resulting config is only stored on the
-/// factory and no process is spawned until a Codex session needs one.
-fn codex_launch_from_env() -> CodexLaunchConfig {
-    let mut codex = CodexLaunchConfig::default();
-    if let Ok(bin) = std::env::var("DELTA_CODEX_BIN") {
-        if !bin.is_empty() {
-            codex.codex_bin = bin;
-        }
-    }
-    codex
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,23 +166,7 @@ mod tests {
     use delta_model::AgentProvider;
     use delta_usecase::NullCommsLog;
 
-    use crate::DEFAULT_IDENTIFIER;
-
-    /// A configuration whose data directory is `dir`.
-    fn test_config(dir: &tempfile::TempDir) -> Config {
-        Config {
-            identifier: DEFAULT_IDENTIFIER.into(),
-            data_dir: dir.path().to_string_lossy().into_owned(),
-            worktree_base: "/tmp/delta-worktrees".into(),
-            tmux_socket: DEFAULT_IDENTIFIER.into(),
-            auth_token: "test-token".into(),
-            hook_secret: "test-hook-secret".into(),
-            transcript_root: "/tmp".into(),
-            port: 7878,
-            hook_endpoint_changed: false,
-            launch: delta_usecase::LaunchConfig::default(),
-        }
-    }
+    use super::testing::test_config;
 
     /// The database file `config` opens.
     fn database(config: &Config) -> String {

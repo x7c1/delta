@@ -53,11 +53,13 @@ const OPENER: &str = "xdg-open";
 /// Open `url` with the operating system's default opener without blocking.
 ///
 /// The opener runs as a child with the URL as its only argument, never through
-/// a shell. A waiter thread reaps it and logs a non-zero exit; a failed spawn
-/// is logged here.
-pub fn open_externally(url: &Url) {
+/// a shell, with `env` (the login shell's `PATH` and locale) set on top of the
+/// inherited environment. A waiter thread reaps it and logs a non-zero exit; a
+/// failed spawn is logged here.
+pub fn open_externally(url: &Url, env: &[(String, String)]) {
     let spawned = Command::new(OPENER)
         .arg(url.as_str())
+        .envs(env.iter().map(|(name, value)| (name, value)))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

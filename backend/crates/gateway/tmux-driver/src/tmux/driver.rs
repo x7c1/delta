@@ -193,7 +193,11 @@ mod tests {
             .unwrap()
             .subsec_nanos();
         let socket = format!("delta-test-kill-server-{}-{nanos}", std::process::id());
-        let tmux = Tmux::new(&socket, dir.path().join("tmux.conf").to_string_lossy());
+        let tmux = Tmux::new(
+            &socket,
+            dir.path().join("tmux.conf").to_string_lossy(),
+            Vec::new(),
+        );
         let workdir = dir.path().to_string_lossy().into_owned();
         tmux.create_session("t", &workdir, &["sleep".to_owned(), "30".to_owned()])
             .await

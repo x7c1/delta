@@ -115,6 +115,7 @@ mod tests {
         Tmux {
             socket: "delta-test".to_owned(),
             conf_path: conf_path.to_string_lossy().into_owned(),
+            env: Vec::new(),
         }
     }
 

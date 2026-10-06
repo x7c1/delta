@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
     // string for post-hoc debugging. Pure observability: a missing or failing
     // binary warns and continues — see `docs/guides/compatibility.md`
     // (subdomain 3) and the `claude_version` module docs for the contract.
-    delta_server::log_claude_version(&config.launch.claude_bin);
+    delta_server::log_claude_version(&config.launch.claude_bin, &config.child_env);
 
     // The startup failures the user has to act on get a clear line and exit 1
     // with no backtrace (see `user_facing_startup_error`); every other failure

@@ -13,11 +13,11 @@ use async_trait::async_trait;
 /// Reports whether a launch binary is resolvable on this host.
 ///
 /// The gateway resolves `bin` the same way spawn's `Command::new(bin)` would:
-/// a bare command name is looked up on `PATH`; an explicit path (absolute or
-/// containing a separator) is checked for existence and execute permission. A
-/// missing binary is reported as `false` rather than surfacing an error, so the
-/// availability endpoint always answers rather than 5xx-ing on a host that
-/// happens to be missing a provider.
+/// a bare command name is looked up on the `PATH` the spawns run with; an
+/// explicit path (absolute or containing a separator) is checked for existence
+/// and execute permission. A missing binary is reported as `false` rather than
+/// surfacing an error, so the availability endpoint always answers rather than
+/// 5xx-ing on a host that happens to be missing a provider.
 ///
 /// Implementations are expected to be cheap and deterministic-friendly for
 /// tests. The production gateway memoises per-binary for the process lifetime

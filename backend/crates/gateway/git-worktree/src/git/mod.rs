@@ -49,34 +49,44 @@ pub struct Git {
     config_path: PathBuf,
     /// Serializes Delta's own trust-config writes within this single process.
     trust_lock: Mutex<()>,
-}
-
-impl Default for Git {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// Environment variables set on every `git` command, on top of the
+    /// inherited environment (the server configuration's `child_env`). `git`
+    /// itself is also looked up on this `PATH` when it carries one.
+    env: Vec<(String, String)>,
 }
 
 impl Git {
-    /// Create a new git worktree gateway, defaulting the trust-config path to
-    /// `$HOME/.claude.json` (falling back to `.claude.json` in the current
-    /// directory if `HOME` is unset, which only happens in degenerate
-    /// environments).
-    pub fn new() -> Self {
+    /// Create a new git worktree gateway running every `git` command with `env`
+    /// set, defaulting the trust-config path to `$HOME/.claude.json` (falling
+    /// back to `.claude.json` in the current directory if `HOME` is unset,
+    /// which only happens in degenerate environments).
+    pub fn new(env: Vec<(String, String)>) -> Self {
         let config_path = match std::env::var_os("HOME") {
             Some(home) => PathBuf::from(home).join(".claude.json"),
             None => PathBuf::from(".claude.json"),
         };
-        Self::with_config_path(config_path)
+        Self::with_config_path(config_path, env)
     }
 
     /// Create a gateway with an explicit trust-config path. Used by tests to
     /// target a temp file instead of the real `~/.claude.json`.
-    pub fn with_config_path(config_path: PathBuf) -> Self {
+    pub fn with_config_path(config_path: PathBuf, env: Vec<(String, String)>) -> Self {
         Self {
             config_path,
             trust_lock: Mutex::new(()),
+            env,
         }
+    }
+
+    /// The command `git -C <repo>`, with [`Self::env`] set. Every `git` this
+    /// gateway runs starts here, so none can miss the environment.
+    fn git(&self, repo: &str) -> Command {
+        let mut command = Command::new("git");
+        command
+            .envs(self.env.iter().map(|(name, value)| (name, value)))
+            .arg("-C")
+            .arg(repo);
+        command
     }
 
     /// Run `git -C <repo> <args>`, returning the captured output.
@@ -85,12 +95,7 @@ impl Git {
         repo: &str,
         args: &[&str],
     ) -> std::result::Result<std::process::Output, Error> {
-        Ok(Command::new("git")
-            .arg("-C")
-            .arg(repo)
-            .args(args)
-            .output()
-            .await?)
+        Ok(self.git(repo).args(args).output().await?)
     }
 
     /// Run `git -C <repo> <args>`, erroring on a non-zero exit with git's
@@ -489,11 +494,26 @@ mod tests {
     use super::testing::{canonical, git_ok, init_repo_with_commit};
     use super::*;
 
+    #[test]
+    fn every_git_command_carries_the_given_environment() {
+        let git = Git::new(vec![("PATH".to_owned(), "/opt/homebrew/bin".to_owned())]);
+
+        let command = git.git("/repo");
+
+        let envs: Vec<_> = command.as_std().get_envs().collect();
+        assert_eq!(
+            envs,
+            [("PATH".as_ref(), Some("/opt/homebrew/bin".as_ref()))]
+        );
+        let args: Vec<_> = command.as_std().get_args().collect();
+        assert_eq!(args, ["-C", "/repo"]);
+    }
+
     #[tokio::test]
     async fn repo_root_reports_the_toplevel_for_a_git_dir() {
         let tmp = tempfile::tempdir().unwrap();
         init_repo_with_commit(tmp.path()).await;
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         let root = git
             .repo_root(tmp.path().to_str().unwrap())
@@ -536,7 +556,7 @@ mod tests {
             .output()
             .await
             .unwrap();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
         let url = git
             .origin_url(repo)
             .await
@@ -551,7 +571,7 @@ mod tests {
         // non-zero, which the gateway translates to `None`.
         let tmp = tempfile::tempdir().unwrap();
         init_repo_with_commit(tmp.path()).await;
-        let git = Git::new();
+        let git = Git::new(Vec::new());
         let url = git.origin_url(tmp.path().to_str().unwrap()).await.unwrap();
         assert!(url.is_none(), "no origin remote means no origin url");
     }
@@ -559,7 +579,7 @@ mod tests {
     #[tokio::test]
     async fn origin_url_is_none_outside_a_git_repo() {
         let tmp = tempfile::tempdir().unwrap();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
         let url = git.origin_url(tmp.path().to_str().unwrap()).await.unwrap();
         assert!(
             url.is_none(),
@@ -571,7 +591,7 @@ mod tests {
     async fn current_branch_reports_the_local_branch_name() {
         let tmp = tempfile::tempdir().unwrap();
         init_repo_with_commit(tmp.path()).await;
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         let branch = git
             .current_branch(tmp.path().to_str().unwrap())
@@ -585,7 +605,7 @@ mod tests {
     async fn current_branch_is_none_outside_a_git_repo() {
         // A bare temp directory with no git repo above it.
         let tmp = tempfile::tempdir().unwrap();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         let branch = git
             .current_branch(tmp.path().to_str().unwrap())
@@ -616,7 +636,7 @@ mod tests {
             "detach failed: {}",
             String::from_utf8_lossy(&status.stderr)
         );
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         let branch = git.current_branch(repo).await.unwrap();
         assert!(branch.is_none(), "a detached HEAD reports no branch");
@@ -626,7 +646,7 @@ mod tests {
     async fn repo_root_is_none_outside_a_git_repo() {
         // A bare temp directory with no git repo above it.
         let tmp = tempfile::tempdir().unwrap();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         let root = git.repo_root(tmp.path().to_str().unwrap()).await.unwrap();
         assert!(root.is_none(), "a non-git directory has no repo root");
@@ -637,7 +657,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         init_repo_with_commit(tmp.path()).await;
         let repo_root = tmp.path().to_str().unwrap().to_owned();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         // Create the worktree outside the repo dir so it is a sibling path.
         let worktree_dir = tempfile::tempdir().unwrap();
@@ -698,7 +718,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         init_repo_with_commit(tmp.path()).await;
         let repo_root = tmp.path().to_str().unwrap().to_owned();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         // A worktree path two levels under a base that does not exist yet.
         let base = tempfile::tempdir().unwrap();
@@ -732,7 +752,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         init_repo_with_commit(tmp.path()).await;
         let repo_root = tmp.path().to_str().unwrap().to_owned();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         let worktree_dir = tempfile::tempdir().unwrap();
         let worktree_path = worktree_dir
@@ -790,7 +810,7 @@ mod tests {
             String::from_utf8_lossy(&status.stderr)
         );
 
-        let git = Git::new();
+        let git = Git::new(Vec::new());
         let remote = git.fetch_remote_branches(&clone_path).await.unwrap();
 
         assert!(
@@ -856,7 +876,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         init_repo_with_commit(tmp.path()).await;
         let repo_root = tmp.path().to_str().unwrap().to_owned();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         // Check `feature` out in a secondary worktree.
         let wt_dir = tempfile::tempdir().unwrap();
@@ -880,7 +900,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         init_repo_with_commit(tmp.path()).await;
         let repo_root = tmp.path().to_str().unwrap().to_owned();
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         // `main` is checked out in the main working tree (the repo root itself).
         let found = git
@@ -898,7 +918,7 @@ mod tests {
         let repo_root = tmp.path().to_str().unwrap().to_owned();
         // A local branch that exists but is not checked out anywhere.
         git_ok(&repo_root, &["branch", "idle"]).await;
-        let git = Git::new();
+        let git = Git::new(Vec::new());
 
         let found = git
             .worktree_path_for_branch(&repo_root, "idle")
@@ -923,7 +943,7 @@ mod tests {
         // Create the local branch so the "existing local branch" path is taken.
         git_ok(&clone_path, &["branch", "feature", "origin/feature"]).await;
 
-        let git = Git::new();
+        let git = Git::new(Vec::new());
         let wt_dir = tempfile::tempdir().unwrap();
         let wt_path = wt_dir
             .path()
@@ -952,7 +972,7 @@ mod tests {
         let clone_path = clone_into(origin_path, clone_parent.path()).await;
         // No local `feature` branch yet: the tracking-branch path is taken.
 
-        let git = Git::new();
+        let git = Git::new(Vec::new());
         let wt_dir = tempfile::tempdir().unwrap();
         let wt_path = wt_dir
             .path()
@@ -984,7 +1004,7 @@ mod tests {
     async fn forget_dir_trusted_removes_only_that_project_entry() {
         let tmp = tempfile::tempdir().unwrap();
         let config = tmp.path().join(".claude.json");
-        let git = Git::with_config_path(config.clone());
+        let git = Git::with_config_path(config.clone(), Vec::new());
         git.ensure_dir_trusted("/worktrees/a").await.unwrap();
         git.ensure_dir_trusted("/worktrees/b").await.unwrap();
 

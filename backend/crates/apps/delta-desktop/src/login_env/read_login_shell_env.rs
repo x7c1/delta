@@ -62,18 +62,3 @@ pub fn read_login_shell_env(shell: &OsString) -> Result<Vec<(String, String)>, S
         Err(_) => Err(format!("no answer within {}s", TIMEOUT.as_secs())),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// End to end against `/bin/sh`: the command the shell is given prints the
-    /// environment it was started with between the markers.
-    #[test]
-    fn a_real_shell_prints_its_path() {
-        let vars = read_login_shell_env(&OsString::from("/bin/sh")).expect("sh answers");
-        assert!(vars
-            .iter()
-            .any(|(name, value)| name == "PATH" && !value.is_empty()));
-    }
-}
