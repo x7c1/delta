@@ -10,7 +10,7 @@ check_command: "make check && git grep -q 'remove_worktree' -- backend/crates/do
 assignee: null
 branch: task/1006-0750-feat-sessions-remove-a-deleted-sessions-worktree-and-branch-when-they-hold-no-work
 created_at: 2026-10-05T22:46:51Z
-updated_at: 2026-10-05T23:58:13Z
+updated_at: 2026-10-06T00:07:38Z
 ---
 
 # feat(sessions): remove a deleted session's worktree and branch when they hold no work
@@ -134,10 +134,11 @@ stay as they are, checked before anything is touched):
 
 ### Before merge (verified outside the check command)
 
-- [ ] On the development machine, remove a closed session that ran in a
-      Delta-created worktree with no uncommitted changes: the worktree
-      directory is gone, `git worktree list` in the repository no longer
-      shows it, the `delta-<id>` branch is gone, and `~/.claude.json` has
-      no `projects` key for the path. Then remove one whose worktree has an
-      uncommitted file: the directory and branch remain and the server log
-      says they were kept.
+- [x] On the development machine (macOS), with a server built from this branch,
+      a scripted fake-claude session in a temporary repository's Delta-created
+      worktree was closed and removed: `DELETE` answered 204, the worktree
+      directory was gone, `git worktree list` no longer showed it, the
+      `delta-<id>` branch was gone, and the (temporary `HOME`) `~/.claude.json`
+      had no `projects` key for the path. A second session whose worktree held
+      an untracked file was removed the same way: 204, the directory and the
+      `delta-<id>` branch remained, and the server log reported them as kept.
