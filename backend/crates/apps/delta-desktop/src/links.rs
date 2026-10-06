@@ -6,18 +6,24 @@
 //! only window away from Delta. The window builder therefore sorts both
 //! new-window requests and navigations with [`classify`]:
 //!
-//! - a navigation within the app's own origin (`http://127.0.0.1:<port>`)
-//!   stays in the window;
-//! - a new-window request, even one for the app's own origin (a relative or
-//!   footnote link), and a navigation to any other `http` / `https` URL are
-//!   handed to the operating system's default opener ([`open_externally`]), so
-//!   they open in the user's default browser;
+//! - a navigation within the app's own origin — the server's
+//!   `http://127.0.0.1:<port>` once it listens, and the placeholder page the
+//!   window shows until then ([`placeholder`]) — stays in the window;
+//! - a new-window request for an `http` / `https` URL, even one for the app's
+//!   own origin (a relative or footnote link), and a navigation to any other
+//!   `http` / `https` URL are handed to the operating system's default opener
+//!   ([`open_externally`]), so they open in the user's default browser;
 //! - every other scheme is refused, so text in a message cannot open local
 //!   files or other applications.
+//!
+//! While the server is still starting its port is unknown, so no `http` URL is
+//! the app's own yet: every one goes to the browser.
 
 use std::process::{Command, Stdio};
 
 use tauri::Url;
+
+use crate::placeholder;
 
 /// The loopback host the server is bound to and the window loads from.
 const APP_HOST: &str = "127.0.0.1";
@@ -25,7 +31,7 @@ const APP_HOST: &str = "127.0.0.1";
 /// The kind of URL the page asked to navigate to or open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkKind {
-    /// The app's own origin.
+    /// The app's own origin: the server's, or the placeholder page's.
     OwnOrigin,
     /// Any other `http` / `https` URL.
     Web,
@@ -33,10 +39,14 @@ pub enum LinkKind {
     NotWeb,
 }
 
-/// Classify `url` for an app served on `127.0.0.1:<port>`.
-pub fn classify(url: &Url, port: u16) -> LinkKind {
+/// Classify `url` for an app served on `127.0.0.1:<port>`, or still starting
+/// (`port` is `None`) behind the placeholder page.
+pub fn classify(url: &Url, port: Option<u16>) -> LinkKind {
+    if placeholder::is_placeholder(url) {
+        return LinkKind::OwnOrigin;
+    }
     match url.scheme() {
-        "http" if url.host_str() == Some(APP_HOST) && url.port() == Some(port) => {
+        "http" if port.is_some() && url.host_str() == Some(APP_HOST) && url.port() == port => {
             LinkKind::OwnOrigin
         }
         "http" | "https" => LinkKind::Web,
@@ -91,7 +101,11 @@ mod tests {
     const PORT: u16 = 51234;
 
     fn classify_str(url: &str) -> LinkKind {
-        classify(&url.parse().expect("test URLs are valid"), PORT)
+        classify_while(url, Some(PORT))
+    }
+
+    fn classify_while(url: &str, port: Option<u16>) -> LinkKind {
+        classify(&url.parse().expect("test URLs are valid"), port)
     }
 
     #[test]
@@ -101,6 +115,28 @@ mod tests {
             "http://127.0.0.1:51234/sessions/42?tab=log#end",
         ] {
             assert_eq!(classify_str(url), LinkKind::OwnOrigin, "{url}");
+        }
+    }
+
+    #[test]
+    fn the_placeholder_is_own_origin_before_and_after_the_start() {
+        let url = placeholder::url().expect("the placeholder URL is valid");
+        for port in [None, Some(PORT)] {
+            assert_eq!(
+                classify(&url, port),
+                LinkKind::OwnOrigin,
+                "{url} with port {port:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn before_the_start_no_http_url_is_own_origin() {
+        for url in ["http://127.0.0.1:51234/", "http://127.0.0.1:7878/"] {
+            assert_eq!(classify_while(url, None), LinkKind::Web, "{url}");
+        }
+        for url in ["file:///etc/passwd", "delta://example.com/starting"] {
+            assert_eq!(classify_while(url, None), LinkKind::NotWeb, "{url}");
         }
     }
 

@@ -176,6 +176,12 @@ which names the dev environment's data directory and tmux socket, and sets
 `DELTA_PORT` to 7878, so the data and port rules that follow from them apply
 to it instead.
 
+- **Startup.** The window opens at once on a page that says "Starting
+  Delta…", and switches to Delta when the server is up: once your login shell
+  has answered (below), the database is open and the sessions that survived
+  the last quit are re-adopted. The app logs both moments at `info` (`window
+  shown on the placeholder page`, then `window navigating to the server` with
+  the port), so the time a launch spent on that page can be read from the log.
 - **Data.** The app passes its bundle identifier to the server, which keeps
   everything it writes in the data directory that identifier names, created on
   first run: `~/Library/Application Support/io.github.x7c1.delta/` on macOS and
@@ -205,8 +211,10 @@ to it instead.
   commands up on that `PATH`. They win over the environment the app was started with, so a launch from
   a terminal gets the login shell's values too. The variables are deliberately
   only these: anything else your rc files export (API keys, proxies) is not
-  passed on. If the shell does not answer within a few seconds, the commands
-  keep the environment the app was started with and the app logs a warning.
+  passed on. The server starts once the shell has answered, so a slow shell
+  keeps the window on the starting page longer; if it does not answer within
+  eight seconds, the commands keep the environment the app was started with
+  and the app logs a warning.
   When neither the login shell nor the app's own environment sets `LC_ALL`,
   `LC_CTYPE` or `LANG`, the app passes `LANG=en_US.UTF-8` as well, so every
   command sees a UTF-8 locale. The browser version (`delta-server`, `make dev`)
@@ -234,7 +242,10 @@ to it instead.
   nothing either and the log says the opener could not start.
 - **Startup errors.** The failures you have to act on — a database the binary
   refuses to open, a missing `tmux`, and a hook state file that cannot be read
-  or written — are shown in a dialog, and the app exits after it is dismissed.
+  or written — are shown in a dialog over the starting page, and the app exits
+  after it is dismissed. Any other startup failure shows a generic dialog
+  ("Delta could not start. See the log for details.") over the same page, and
+  the error itself is in the log.
 - **Quitting.** Closing the window stops the server. The tmux server keeps
   running, so open sessions survive and are resumed on the next launch.
 

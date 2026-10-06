@@ -10,27 +10,37 @@
 //!
 //! Startup, in order:
 //!
-//! 1. read the login shell's `PATH` and locale ([`login_env`]), so `tmux`,
+//! 1. open the window at once, on a static placeholder page the shell serves
+//!    itself ([`placeholder`]), so a launch shows a window within a moment
+//!    however long the steps below take. Everything after this runs on a
+//!    background thread, while the main thread runs the event loop;
+//! 2. read the login shell's `PATH` and locale ([`login_env`]), so `tmux`,
 //!    `claude` and `codex` are found and run in a UTF-8 locale when launched
 //!    from Finder or a desktop file. They become the configuration's
 //!    `child_env`, which the server sets on every command it starts, and the
 //!    link opener gets them too;
-//! 2. build the server configuration the CLI builds, under the app's bundle
+//! 3. build the server configuration the CLI builds, under the app's bundle
 //!    identifier: the server derives its data directory
 //!    (`<platform data dir>/<identifier>`, the directory Tauri names the app
 //!    data directory) and its tmux socket from it and creates the directory,
 //!    so the dev build (`io.github.x7c1.delta.dev`) keeps apart from the
 //!    installed app with no further settings;
-//! 3. settle the hook secret and the port against the hook state file in the
+//! 4. settle the hook secret and the port against the hook state file in the
 //!    data directory: reuse the secret recorded there, and bind the port the
 //!    previous launch recorded, falling back to a free `127.0.0.1:0` port when
 //!    it is taken (an explicit `DELTA_PORT` wins and is not recorded). Both are
 //!    written into the configuration before the state is built, since the hook
 //!    URLs rendered into each session's settings carry them, and keeping them
 //!    stable is what lets a session that survived a restart still reach Delta;
-//! 4. build the state and serve on a tokio runtime the shell owns, then open the
-//!    window. The startup failures the user has to act on are shown in a
-//!    message dialog; either way a failed start exits 1.
+//! 5. build the state and serve on a tokio runtime the shell owns, then record
+//!    the port where the window's link handlers read it ([`started_server`])
+//!    and navigate the window from the placeholder to the server, on the main
+//!    thread. The startup failures the user has to act on are shown in a
+//!    message dialog over the placeholder, any other one in a generic dialog
+//!    pointing to the log; a failed start exits 1 once it is dismissed.
+//!
+//! Steps 1 and 5 are each logged at `info`, so the time a launch spent behind
+//! the placeholder can be read from the log.
 //!
 //! Links the page follows never take the window away from Delta; [`links`]
 //! says where they go instead.
@@ -53,15 +63,19 @@ mod links;
 mod login_env;
 #[cfg(target_os = "macos")]
 mod macos_title_bar;
+mod placeholder;
+mod started_server;
 
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
 
 use tauri::webview::NewWindowResponse;
 use tauri::{App, AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-use tokio::runtime::Runtime;
+use tokio::runtime::{self, Runtime};
 
 use delta_server::{config, serve, AppState};
+use started_server::StartedServer;
 
 /// The window's label and title.
 const WINDOW_LABEL: &str = "main";
@@ -69,10 +83,6 @@ const WINDOW_TITLE: &str = "Delta";
 
 fn main() {
     serve::init_tracing();
-    let login_env::LoginEnv {
-        vars: child_env,
-        path_not_imported,
-    } = login_env::read_login_env();
 
     let context = tauri::generate_context!();
     let identifier = context.config().identifier.clone();
@@ -104,16 +114,27 @@ fn main() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .manage(erase::EraseExit::default())
+        .register_uri_scheme_protocol(placeholder::SCHEME, |_context, request| {
+            placeholder::respond(&request)
+        })
         // Tauri panics on an error returned from here, so every failure is
         // reported (and exits 1) inside the hook instead.
         .setup(move |app| {
-            let started = start_server(app, &runtime, &identifier, child_env.clone())
-                .and_then(|port| open_window(app, port, child_env));
-            if let Err(err) = started {
-                report_startup_failure(app.handle(), &err, path_not_imported.as_ref());
-            }
+            let started_server = Arc::new(StartedServer::default());
+            let runtime_handle = runtime.handle().clone();
             // The runtime serves for the app's whole lifetime.
             app.manage(runtime);
+            if let Err(err) = open_window(app, Arc::clone(&started_server)) {
+                report_startup_failure(app.handle(), &err, None);
+                return Ok(());
+            }
+            tracing::info!(
+                "delta-desktop window shown on the placeholder page; starting the server"
+            );
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                start_in_background(&handle, &runtime_handle, &identifier, &started_server)
+            });
             Ok(())
         })
         .build(context);
@@ -162,8 +183,9 @@ fn set_window_app_id(identifier: &str) {
 /// the window that is already open. The CLI server is not affected.
 fn focus_running_window(app: &AppHandle) {
     let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
-        // The running instance has no window yet (it is still starting, or its
-        // start failed and a dialog is up); there is nothing to focus.
+        // Not expected in practice: `setup` builds the window before anything
+        // else, and a start that could not build it shows a dialog and exits.
+        // The erase destroys the window, then also shows a dialog and exits.
         tracing::info!(
             "delta-desktop was launched again; the running instance has no window to focus"
         );
@@ -180,11 +202,69 @@ fn focus_running_window(app: &AppHandle) {
     }
 }
 
+/// Read the login shell's environment and start the server, off the main
+/// thread; then show the server in the window, or report why it did not start,
+/// on the main thread.
+fn start_in_background(
+    handle: &AppHandle,
+    runtime: &runtime::Handle,
+    identifier: &str,
+    started_server: &StartedServer,
+) {
+    let login_env::LoginEnv {
+        vars,
+        path_not_imported,
+    } = login_env::read_login_env();
+    // A panic would otherwise end only this thread and leave the window on the
+    // placeholder for good; the panic itself is already logged by the hook.
+    let started = panic::catch_unwind(AssertUnwindSafe(|| {
+        start_server(handle, runtime, identifier, vars.clone())
+    }))
+    .unwrap_or_else(|_| Err(anyhow::anyhow!("the server's start panicked")));
+    let main_handle = handle.clone();
+    let on_main_thread = match started {
+        Ok(port) => {
+            started_server.record(port, vars);
+            handle.run_on_main_thread(move || show_server(&main_handle, port))
+        }
+        Err(err) => handle.run_on_main_thread(move || {
+            report_startup_failure(&main_handle, &err, path_not_imported.as_ref())
+        }),
+    };
+    if let Err(err) = on_main_thread {
+        // The event loop is gone: the app is already quitting.
+        tracing::warn!("could not hand the end of the start to the main thread: {err}");
+    }
+}
+
+/// Navigate the window from the placeholder to the server on `port`. A failure
+/// is reported like any other failed start.
+fn show_server(handle: &AppHandle, port: u16) {
+    let Some(window) = handle.get_webview_window(WINDOW_LABEL) else {
+        tracing::info!(port, "the window was closed before the server was up");
+        return;
+    };
+    let navigated = server_url(port).and_then(|url| Ok(window.navigate(url)?));
+    match navigated {
+        Ok(()) => tracing::info!(port, "delta-desktop window navigating to the server"),
+        Err(err) => report_startup_failure(
+            handle,
+            &err.context("could not show the server in the window"),
+            None,
+        ),
+    }
+}
+
+/// The server's root URL on the loopback `port`.
+fn server_url(port: u16) -> anyhow::Result<Url> {
+    Ok(format!("http://127.0.0.1:{port}/").parse()?)
+}
+
 /// Build the configuration and state, and start serving. Returns the port the
 /// server listens on. `child_env` is set on every command the server starts.
 fn start_server(
-    app: &App,
-    runtime: &Runtime,
+    handle: &AppHandle,
+    runtime: &runtime::Handle,
     identifier: &str,
     child_env: Vec<(String, String)>,
 ) -> anyhow::Result<u16> {
@@ -212,7 +292,7 @@ fn start_server(
     delta_server::log_claude_version(&config.launch.claude_bin, &config.child_env);
     let state = runtime.block_on(AppState::build(&config))?;
 
-    let handle = app.handle().clone();
+    let handle = handle.clone();
     runtime.spawn(async move {
         match serve::serve(state, listener).await {
             Ok(stopped) => {
@@ -255,18 +335,22 @@ fn quit_after_erase(handle: &AppHandle, message: String) {
         .show(move |_| exit_handle.exit(0));
 }
 
-/// Open the window on the server's port. Links handed to the default browser
-/// are opened with `opener_env` set on the opener.
-fn open_window(app: &App, port: u16, opener_env: Vec<(String, String)>) -> anyhow::Result<()> {
-    let url = format!("http://127.0.0.1:{port}/").parse()?;
-    let opener_env: Arc<[(String, String)]> = opener_env.into();
-    let navigation_env = Arc::clone(&opener_env);
-    let builder = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::External(url))
+/// Open the window on the placeholder page. Its link handlers read the
+/// server's port and the link opener's environment from `started_server`,
+/// which the background start fills in.
+fn open_window(app: &App, started_server: Arc<StartedServer>) -> anyhow::Result<()> {
+    let url = placeholder::url()?;
+    let navigation_server = Arc::clone(&started_server);
+    let builder = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::CustomProtocol(url))
         .title(WINDOW_TITLE)
         .inner_size(1280.0, 800.0)
-        .on_navigation(move |url| load_in_window(url, port, &navigation_env))
+        .on_navigation(move |url| load_in_window(url, &navigation_server))
         .on_new_window(move |url, _features| {
-            open_in_browser(&url, links::classify(&url, port), &opener_env);
+            open_in_browser(
+                &url,
+                links::classify(&url, started_server.port()),
+                started_server.opener_env(),
+            );
             NewWindowResponse::Deny
         });
     #[cfg(target_os = "macos")]
@@ -280,18 +364,27 @@ fn open_window(app: &App, port: u16, opener_env: Vec<(String, String)>) -> anyho
 
 /// Whether a navigation stays in the window; one that does not is opened in the
 /// default browser or refused.
-fn load_in_window(url: &Url, port: u16, opener_env: &[(String, String)]) -> bool {
+fn load_in_window(url: &Url, started_server: &StartedServer) -> bool {
+    let port = started_server.port();
+    if placeholder::is_return_after_start(url, port) {
+        tracing::info!(url = %url, "refused to go back to the placeholder page");
+        return false;
+    }
     let kind = links::classify(url, port);
     if kind == links::LinkKind::OwnOrigin {
         return true;
     }
-    open_in_browser(url, kind, opener_env);
+    open_in_browser(url, kind, started_server.opener_env());
     false
 }
 
-/// Open a web link in the default browser; refuse and log anything else.
+/// Open a web link in the default browser; refuse and log anything else,
+/// including the placeholder page, which only the window can show.
 fn open_in_browser(url: &Url, kind: links::LinkKind, opener_env: &[(String, String)]) {
     match kind {
+        links::LinkKind::OwnOrigin if placeholder::is_placeholder(url) => {
+            tracing::warn!(url = %url, "refused to open the placeholder page in the browser");
+        }
         links::LinkKind::OwnOrigin | links::LinkKind::Web => {
             links::open_externally(url, opener_env)
         }
@@ -301,10 +394,12 @@ fn open_in_browser(url: &Url, kind: links::LinkKind, opener_env: &[(String, Stri
     }
 }
 
-/// Show a user-facing startup error in a message dialog and exit 1 when it is
-/// dismissed; log any other error and exit 1 straight away. A missing command
-/// is explained by the login shell's `PATH` not having been read, when it was
-/// not.
+/// Show a user-facing startup error in a dialog
+/// ([`show_startup_failure_dialog`]). Any other error is logged and, when the
+/// window exists, a generic dialog points to the log so that "Starting Delta…"
+/// does not vanish unexplained; without a window it exits 1 straight away. A
+/// missing command is explained by the login shell's `PATH` not having been
+/// read, when it was not.
 fn report_startup_failure(
     handle: &AppHandle,
     err: &anyhow::Error,
@@ -317,17 +412,33 @@ fn report_startup_failure(
                 None => message,
             };
             tracing::error!("delta-desktop: {message}");
-            let exit_handle = handle.clone();
-            handle
-                .dialog()
-                .message(message)
-                .title("Delta could not start")
-                .kind(MessageDialogKind::Error)
-                .show(move |_| exit_handle.exit(1));
+            show_startup_failure_dialog(handle, message);
         }
         None => {
             tracing::error!("delta-desktop could not start: {err:#}");
-            handle.exit(1);
+            if handle.get_webview_window(WINDOW_LABEL).is_some() {
+                show_startup_failure_dialog(
+                    handle,
+                    "Delta could not start. See the log for details.".to_owned(),
+                );
+            } else {
+                handle.exit(1);
+            }
         }
     }
+}
+
+/// Show a startup failure in an error dialog, over the window when there is
+/// one, and exit 1 when it is dismissed.
+fn show_startup_failure_dialog(handle: &AppHandle, message: String) {
+    let mut dialog = handle
+        .dialog()
+        .message(message)
+        .title("Delta could not start")
+        .kind(MessageDialogKind::Error);
+    if let Some(window) = handle.get_webview_window(WINDOW_LABEL) {
+        dialog = dialog.parent(&window);
+    }
+    let exit_handle = handle.clone();
+    dialog.show(move |_| exit_handle.exit(1));
 }

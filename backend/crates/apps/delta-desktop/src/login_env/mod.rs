@@ -9,8 +9,10 @@
 //! - it has no `LANG` / `LC_*`, so `tmux`, Claude Code, git and the other
 //!   commands the sessions run fall back to the ASCII-only `C` locale.
 //!
-//! At startup the app asks the user's login shell for its environment and
-//! keeps `PATH`, `LANG` and every `LC_*` from it as a [`LoginEnv`]. When no
+//! At startup, before the server starts, the app asks the user's login shell
+//! for its environment and keeps `PATH`, `LANG` and every `LC_*` from it as a
+//! [`LoginEnv`], so the sessions the server re-adopts or launches always get
+//! these values. When no
 //! locale that decides the character set (`LC_ALL`, `LC_CTYPE`, `LANG`) is set
 //! by the shell or inherited, [`FALLBACK_LANG`](locale_fallback::FALLBACK_LANG)
 //! is added so every command sees a UTF-8 locale. The process environment is
@@ -24,7 +26,8 @@
 //! write to stdout around it is ignored. A shell that does not answer within
 //! [`TIMEOUT`](read_login_shell_env::TIMEOUT), exits without printing the
 //! markers, or cannot be spawned yields no pairs from the shell, so the
-//! commands keep the inherited environment, with a warning; the locale fallback
+//! commands keep the inherited environment, with a warning. The timeout bounds
+//! how long the server's start waits for the shell. The locale fallback
 //! applies either way. Why the `PATH` was not read is returned as a
 //! [`PathNotImported`], so a startup that then stops on a missing command can
 //! say so in its dialog.
