@@ -213,6 +213,20 @@ identifier already gives it `make dev`'s data directory and tmux socket.
 How the two environments relate is in
 [local-run.md](local-run.md#two-environments-the-installed-app-and-the-dev-environment).
 
+The icons come from one source, `assets/icon/delta.svg`. `make icons`
+(`scripts/gen-icons.sh`, which needs the Tauri CLI and python3) derives the
+installed app's `icons/`, the dev build's `icons-dev/` and the web app's
+`public/favicon.svg` and `favicon-32.png` from it; the outputs are committed, so
+rerun it after changing the SVG and commit what it writes. `icons-dev/` is the
+same set with a badge — an orange disc with a "D" in the bottom-right corner —
+and the dev build selects it through the same `TAURI_CONFIG` override, so the
+icons compiled into the debug binary carry the badge: on macOS, where the dev
+binary is not an `.app` bundle, the Dock and the app switcher show its embedded
+`icons-dev/icon.icns`; on Linux its window icon is `icons-dev/icon.png` (the
+first PNG in the list). The `.icns` (macOS) is deliberately the source shrunk to 80 %
+on a transparent canvas, because the Dock expects that margin and a full-bleed
+icon looks larger than its neighbours; the other formats are full-bleed.
+
 `check-desktop-build` builds the shell with `TAURI_CONFIG` unset, i.e. the
 installed app's configuration, into the same `backend/target/debug/delta-desktop`.
 tauri-build reruns when `TAURI_CONFIG` changes, so after `make check` the next
