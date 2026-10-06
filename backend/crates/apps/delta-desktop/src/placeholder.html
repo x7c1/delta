@@ -1,0 +1,47 @@
+<!doctype html>
+<!--
+  The page the desktop window shows while the server starts (see
+  placeholder.rs). Static on purpose: no script, and no spinner that would
+  keep spinning over a failure dialog. The colours are the SPA's light and dark
+  themes (frontend/packages/apps/web/src/index.css): the app's background
+  `--delta-color-surface-elevated` and the muted text `--delta-color-fg-muted`.
+  The page follows the OS colour scheme because a user whose OS is dark would
+  otherwise see a light page for up to eight seconds and then the dark app; a
+  user who saved the opposite theme in the app still sees one switch, because
+  this page cannot read the app's `localStorage`.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Delta</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgb(248 250 252);
+        color: rgb(71 85 105);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 14px;
+        cursor: default;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: rgb(45 45 48);
+          color: rgb(161 161 170);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <p>Starting Delta…</p>
+  </body>
+</html>
