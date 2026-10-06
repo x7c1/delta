@@ -30,6 +30,8 @@ interface FakeTerminal {
   rows: number;
   cols: number;
   unicode: { activeVersion: string };
+  /** The input xterm keeps focus in, appended on `open` as xterm does. */
+  textarea?: HTMLTextAreaElement;
 }
 
 const fakeTerminals: FakeTerminal[] = [];
@@ -40,12 +42,16 @@ vi.mock('@xterm/xterm', () => {
     rows = 24;
     cols = 80;
     unicode = { activeVersion: '6' };
+    textarea?: HTMLTextAreaElement;
     constructor(opts: { theme?: { background?: string } }) {
       this.options = { ...opts };
       fakeTerminals.push(this);
     }
     loadAddon(): void {}
-    open(): void {}
+    open(parent: HTMLElement): void {
+      this.textarea = document.createElement('textarea');
+      parent.appendChild(this.textarea);
+    }
     write(): void {}
     onData(): void {}
     onResize(): void {}
@@ -114,6 +120,7 @@ vi.mock('../../config', () => ({
 
 // Import after the mocks above so TerminalPane resolves them.
 import { TerminalPane } from './TerminalPane';
+import { LINUX_SHELL, TERMINAL_FOCUSED_TITLE_SUFFIX } from '../../shell';
 
 function installMatchMediaStub(prefersDark: boolean) {
   const mql = {
@@ -463,5 +470,67 @@ describe('TerminalPane holding a bridge on an unfocused session', () => {
 
     expect(ptyCloses.get('s1')).toBeUndefined();
     expect(connectPtyMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('TerminalPane reporting its focus to the Linux shell', () => {
+  beforeEach(() => {
+    fakeTerminals.length = 0;
+    connectPtyMock.mockClear();
+    installMatchMediaStub(false);
+    document.title = 'Delta';
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete document.documentElement.dataset.shell;
+    document.title = '';
+  });
+
+  function pane(paneState: 'open' | 'closed') {
+    return (
+      <ThemeProvider>
+        <TerminalPane
+          sessionId={'s1' as SessionId}
+          paneState={paneState}
+          hasTerminal
+        />
+      </ThemeProvider>
+    );
+  }
+
+  function terminalInput(): HTMLTextAreaElement {
+    const textarea = fakeTerminals[0]?.textarea;
+    if (!textarea) {
+      throw new Error('the terminal was not opened');
+    }
+    return textarea;
+  }
+
+  it('marks the title while the terminal has focus, and clears it on blur', () => {
+    document.documentElement.dataset.shell = LINUX_SHELL;
+    render(pane('open'));
+
+    act(() => terminalInput().focus());
+    expect(document.title).toBe(`Delta${TERMINAL_FOCUSED_TITLE_SUFFIX}`);
+
+    act(() => terminalInput().blur());
+    expect(document.title).toBe('Delta');
+  });
+
+  it('clears the mark when the focused terminal is torn down', () => {
+    document.documentElement.dataset.shell = LINUX_SHELL;
+    const { rerender } = render(pane('open'));
+    act(() => terminalInput().focus());
+
+    rerender(pane('closed'));
+    expect(document.title).toBe('Delta');
+  });
+
+  it('leaves the title alone outside the Linux shell', () => {
+    render(pane('open'));
+
+    act(() => terminalInput().focus());
+    expect(document.title).toBe('Delta');
   });
 });
