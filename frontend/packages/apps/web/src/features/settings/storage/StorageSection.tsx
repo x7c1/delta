@@ -1,9 +1,12 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useStorageQuery } from '@delta/api-client';
-import type { StorageFile, StorageResponse } from '@delta/wire-gen';
+import type { StorageResponse } from '@delta/wire-gen';
 import { Button, Spinner } from '@delta/ui-kit';
 import { useApiClient } from '../../../data/apiContext';
-import { exactBytes, formatBytes } from './formatBytes';
+import { PruneSessionsBlock } from './PruneSessionsBlock';
+import { SnapshotList } from './SnapshotList';
+import { CopyButton, PathText, Size } from './StorageParts';
+import { WorktreesBlock } from './WorktreesBlock';
 
 /**
  * Storage category content: where this running Delta keeps its files on this
@@ -11,9 +14,12 @@ import { exactBytes, formatBytes } from './formatBytes';
  * names the directories *this* install actually uses rather than the
  * documented defaults.
  *
- * Read-only: one row per location, each with a copy control. `active` gates
- * the fetch to while the category is shown; the query refetches on a later
- * visit once its answer is stale, so the sizes follow the files on disk.
+ * One row per location, each with a copy control; the database's migration
+ * snapshots can be deleted from under its row. Below the inventory, the
+ * cleanup blocks: removing old sessions in bulk, and the worktrees left under
+ * the worktree base. `active` gates every fetch to while the category is
+ * shown; the queries refetch on a later visit once their answers are stale,
+ * so the sizes follow the files on disk.
  */
 export function StorageSection({ active }: { active: boolean }) {
   const client = useApiClient();
@@ -47,6 +53,9 @@ export function StorageSection({ active }: { active: boolean }) {
       ) : (
         <StorageInventory storage={storageQuery.data} />
       )}
+
+      <PruneSessionsBlock active={active} />
+      <WorktreesBlock active={active} />
     </section>
   );
 }
@@ -71,7 +80,7 @@ function StorageInventory({ storage }: { storage: StorageResponse }) {
           bytes={storage.database.bytes}
           testId="storage-database"
         >
-          <Snapshots snapshots={storage.snapshots} />
+          <SnapshotList snapshots={storage.snapshots} />
         </StorageRow>
         <StorageRow label="Hook state" value={storage.hook_state} />
         <StorageRow
@@ -91,37 +100,6 @@ function StorageInventory({ storage }: { storage: StorageResponse }) {
         />
       </ul>
     </>
-  );
-}
-
-/**
- * The database's migration snapshots, under its row. Said in one line when
- * there are none, so the absence reads as a fact rather than a missing row.
- */
-function Snapshots({ snapshots }: { snapshots: StorageFile[] }) {
-  if (snapshots.length === 0) {
-    return (
-      <p
-        className="text-caption text-fg-subtle"
-        data-testid="storage-no-snapshots"
-      >
-        No migration snapshots.
-      </p>
-    );
-  }
-  return (
-    <div>
-      <p className="text-caption text-fg-muted">Migration snapshots</p>
-      <ul className="mt-1 flex flex-col gap-1" data-testid="storage-snapshots">
-        {snapshots.map((snapshot) => (
-          <li key={snapshot.path} className="flex items-center gap-2">
-            <PathText value={snapshot.path} />
-            <Size bytes={snapshot.bytes} />
-            <CopyButton value={snapshot.path} label="snapshot path" />
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }
 
@@ -149,73 +127,5 @@ function StorageRow({ label, value, bytes, testId, children }: StorageRowProps) 
       </div>
       {children}
     </li>
-  );
-}
-
-/**
- * A path in monospace, truncated from the left on overflow so the file name —
- * the part that tells two paths apart — stays visible. The `rtl` container
- * puts the ellipsis at the start; the `<bdi>` keeps the path itself reading
- * left to right, leading `/` included.
- */
-function PathText({ value }: { value: string }) {
-  return (
-    <span
-      className="min-w-0 flex-1 truncate text-left font-mono text-code text-fg [direction:rtl]"
-      title={value}
-    >
-      <bdi>{value}</bdi>
-    </span>
-  );
-}
-
-function Size({ bytes }: { bytes: number }) {
-  return (
-    <span
-      className="shrink-0 text-caption tabular-nums text-fg-subtle"
-      title={exactBytes(bytes)}
-    >
-      {formatBytes(bytes)}
-    </span>
-  );
-}
-
-/** How long the copy control says "Copied" (or "Copy failed") after a click. */
-const COPY_FEEDBACK_MS = 1500;
-
-type CopyState = 'idle' | 'copied' | 'failed';
-
-function CopyButton({ value, label }: { value: string; label: string }) {
-  const [state, setState] = useState<CopyState>('idle');
-
-  useEffect(() => {
-    if (state === 'idle') {
-      return;
-    }
-    const timer = window.setTimeout(() => setState('idle'), COPY_FEEDBACK_MS);
-    return () => window.clearTimeout(timer);
-  }, [state]);
-
-  // Started inside a promise so a webview without `navigator.clipboard`, where
-  // the call throws synchronously, also ends in "Copy failed" rather than no change.
-  const copy = () => {
-    Promise.resolve()
-      .then(() => navigator.clipboard.writeText(value))
-      .then(
-        () => setState('copied'),
-        () => setState('failed'),
-      );
-  };
-
-  return (
-    <Button
-      size="sm"
-      variant="ghost"
-      className="shrink-0"
-      onClick={copy}
-      aria-label={`Copy ${label}`}
-    >
-      {state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy'}
-    </Button>
   );
 }

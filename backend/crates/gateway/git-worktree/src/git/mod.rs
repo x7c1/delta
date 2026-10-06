@@ -1,9 +1,11 @@
 //! [`Git`]: the concrete [`GitWorktree`].
 //!
 //! Split by responsibility: this module holds the struct, the shared `git`
-//! invocation helpers and the [`GitWorktree`] trait wiring, and `removal` the
-//! worktree removal and branch deletion.
+//! invocation helpers and the [`GitWorktree`] trait wiring, `removal` the
+//! worktree removal and branch deletion, and `inspection` what git says about
+//! a directory as a worktree.
 
+mod inspection;
 mod removal;
 #[cfg(test)]
 mod testing;
@@ -15,7 +17,8 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use delta_usecase::{
-    BranchDeletion, GitWorktree, RemoteBranches, WorktreeRemoval, WorktreeStartPoint,
+    BranchDeletion, GitWorktree, RemoteBranches, WorktreeInspection, WorktreeRemoval,
+    WorktreeStartPoint,
 };
 
 use crate::error::Error;
@@ -459,6 +462,23 @@ impl GitWorktree for Git {
         // read-modify-write of the one config file.
         let _guard = self.trust_lock.lock().await;
         crate::trust::forget_dir_trusted(&self.config_path, dir)
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
+    async fn inspect_worktree(
+        &self,
+        path: &str,
+    ) -> std::result::Result<Option<WorktreeInspection>, delta_usecase::Error> {
+        self.inspect(path).await.map_err(delta_usecase::Error::from)
+    }
+
+    async fn force_remove_worktree(
+        &self,
+        repo_root: &str,
+        path: &str,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        self.remove_worktree_forcibly(repo_root, path)
             .await
             .map_err(delta_usecase::Error::from)
     }

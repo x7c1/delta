@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use delta_attribution::SubagentLaunch;
 use delta_model::{
     AgentProvider, LaunchOption, Message, MessageUuid, PermissionRequest, PromptTemplate, Send,
-    Session, SessionId, Thread, ThreadId,
+    Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 
 use crate::error::Result;
@@ -109,6 +109,14 @@ impl SessionStore for FakeStore {
 
     async fn cwd_exists(&self, path: &str) -> Result<bool> {
         self.cwd_exists(path).await
+    }
+
+    async fn list_prunable_sessions(
+        &self,
+        cutoff: &str,
+        statuses: &[SessionStatus],
+    ) -> Result<Vec<SessionId>> {
+        self.list_prunable_sessions(cutoff, statuses).await
     }
 
     async fn repository_clone_rows(

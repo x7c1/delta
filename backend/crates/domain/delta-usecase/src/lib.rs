@@ -19,8 +19,10 @@ mod repository;
 mod send_target;
 mod session_listing;
 mod session_page;
+mod session_prune;
 mod session_removal;
 mod turn;
+mod worktree_dir;
 
 pub use agent::{
     AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentContentSource, AgentEvent,
@@ -48,17 +50,22 @@ pub use ports::{
     RecentWorkdir, RememberedPane, RemoteBranches, RepositoryCloneRow, SessionEndHook,
     SessionEvent, SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore,
     SpawningSession, StatusSnapshot, StopHook, TmuxDriver, Transcript, TranscriptMessage,
-    TranscriptRead, UserPromptSubmitHook, Workspace, WorktreeRemoval, WorktreeStartPoint,
+    TranscriptRead, UserPromptSubmitHook, Workspace, WorktreeInspection, WorktreeRemoval,
+    WorktreeStartPoint,
 };
 pub use pull_request::{PullRequest, PullRequestLens, PullRequestList};
 pub use repository::{display_name, identity_key, worktree_dir_slug, Clone, Repository};
 pub use send_target::{SendTarget, WorktreeSpec};
 pub use session_listing::SessionListing;
 pub use session_page::{SessionPage, SessionPageCursor};
+pub use session_prune::{
+    PruneCriteria, PruneReport, PruneStatus, SessionKeptItem, SkipReason, SkippedSession,
+};
 pub use session_removal::{DiskItem, KeepReason, KeptItem, SessionRemoval};
 pub use turn::{
     transition, turn_input_for_agent_event, OrphanedSend, Transition, TurnInput, TurnState,
 };
+pub use worktree_dir::WorktreeDir;
 
 // Re-export the domain types the transport layer needs, so the server can
 // depend on the use-case surface without reaching across to delta-model for

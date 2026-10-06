@@ -57,6 +57,22 @@ impl Git {
         }
     }
 
+    /// `git worktree remove --force <path>`: removes the worktree even with
+    /// modified or untracked files, for a removal the user explicitly asked
+    /// for. Any non-zero exit is an error.
+    pub(super) async fn remove_worktree_forcibly(
+        &self,
+        repo_root: &str,
+        path: &str,
+    ) -> std::result::Result<(), Error> {
+        self.run(
+            repo_root,
+            "worktree remove --force",
+            &["worktree", "remove", "--force", path],
+        )
+        .await
+    }
+
     /// `git branch -d <branch>`, never `-D`: git's refusal of an unmerged
     /// branch keeps its commits.
     pub(super) async fn delete_merged_branch(
@@ -197,6 +213,31 @@ mod tests {
             "a path that is not a worktree is a failure, got {result:?}"
         );
         assert!(stray.path().exists(), "and nothing is deleted");
+    }
+
+    #[tokio::test]
+    async fn force_remove_worktree_removes_a_worktree_with_an_untracked_file() {
+        let (repo, worktrees) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (repo_root, wt_path) = repo_with_worktree(&repo, &worktrees, "delta-s1").await;
+        let wt_canonical = canonical(&wt_path).await;
+        tokio::fs::write(std::path::Path::new(&wt_path).join("notes.txt"), "work")
+            .await
+            .unwrap();
+        let git = Git::new();
+
+        git.force_remove_worktree(&repo_root, &wt_path)
+            .await
+            .expect("a forced removal does not refuse a dirty worktree");
+
+        assert!(
+            !std::path::Path::new(&wt_path).exists(),
+            "the directory is gone"
+        );
+        assert!(
+            !listed_worktrees(&repo_root).await.contains(&wt_canonical),
+            "git worktree list no longer shows it"
+        );
+        git_ok(&repo_root, &["show-ref", "--verify", "refs/heads/delta-s1"]).await;
     }
 
     #[tokio::test]

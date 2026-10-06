@@ -22,8 +22,14 @@ mod api_error;
 pub(crate) use api_error::ApiError;
 pub(crate) mod clone_root_path;
 mod session_cursor;
+mod session_prune;
+pub(crate) use session_prune::{preview_prune_sessions, prune_sessions};
 mod storage;
 pub(crate) use storage::get_storage;
+mod storage_snapshots;
+pub(crate) use storage_snapshots::delete_snapshot;
+mod storage_worktrees;
+pub(crate) use storage_worktrees::{list_orphan_worktrees, remove_orphan_worktree};
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;

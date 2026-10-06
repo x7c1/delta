@@ -55,6 +55,14 @@ pub trait Workspace: Send + Sync {
     /// [`crate::Error::InvalidWorkdir`] / [`crate::Error::WorkdirPermission`]
     /// rather than an opaque I/O failure.
     async fn list_dirs(&self, path: &str, include_hidden: bool) -> Result<DirListing>;
+
+    /// Delete the directory `path` and everything under it.
+    ///
+    /// Only for a leftover worktree directory git no longer knows, which the
+    /// user explicitly asked to remove with its contents: nothing here checks
+    /// for work. Symlinks inside the tree are removed, never followed. A path
+    /// that does not exist is not an error (there is nothing left to remove).
+    async fn remove_dir_tree(&self, path: &str) -> Result<()>;
 }
 
 #[async_trait]
@@ -75,5 +83,9 @@ impl Workspace for Box<dyn Workspace> {
 
     async fn list_dirs(&self, path: &str, include_hidden: bool) -> Result<DirListing> {
         (**self).list_dirs(path, include_hidden).await
+    }
+
+    async fn remove_dir_tree(&self, path: &str) -> Result<()> {
+        (**self).remove_dir_tree(path).await
     }
 }

@@ -5,6 +5,7 @@ import type {
   CreateCloneRootRequest,
   CreatePromptTemplateRequest,
   CreateSendRequest,
+  DeleteSnapshotRequest,
   GitBranchesResponse,
   GitRepoResponse,
   LaunchOption,
@@ -17,9 +18,13 @@ import type {
   PromptTemplate,
   PromptTemplatesResponse,
   ProvidersResponse,
+  PrunePreviewResponse,
+  PruneSessionsRequest,
+  PruneSessionsResponse,
   PullRequestsResponse,
   QuestionAnswerRequest,
   QuestionCancelRequest,
+  RemoveWorktreeRequest,
   RepositoriesResponse,
   CloneRoot,
   CloneRootsResponse,
@@ -28,6 +33,7 @@ import type {
   SendsResponse,
   SessionsResponse,
   StorageResponse,
+  StorageWorktreesResponse,
   ThreadsResponse,
   UpdateLaunchOptionRequest,
   UpdatePromptTemplateRequest,
@@ -146,6 +152,14 @@ export interface ApiClientOptions {
  * the only thing that says which — it names the offending field or key path —
  * so callers show it verbatim on the failed send instead of their generic
  * "could not be sent" copy.
+ *
+ * `worktree_outside_base`, `worktree_in_use`, `worktree_dirty` and
+ * `worktree_not_registered` are the refusals of a Settings → Storage worktree
+ * removal (`DELETE /api/storage/worktrees`): the path is not a directory
+ * directly under the worktree base; a listed session still works in it; or,
+ * without `force`, it has uncommitted or untracked changes, or git no longer
+ * knows it as a worktree. The last two are what the forced removal, confirmed
+ * by the user, gets past.
  */
 export type ApiErrorCode =
   | 'resume_unavailable'
@@ -164,7 +178,11 @@ export type ApiErrorCode =
   | 'open_cwd_unknown_handler'
   | 'open_cwd_command_not_found'
   | 'open_cwd_spawn_failed'
-  | 'launch_option_rejected';
+  | 'launch_option_rejected'
+  | 'worktree_outside_base'
+  | 'worktree_in_use'
+  | 'worktree_dirty'
+  | 'worktree_not_registered';
 
 /** An error raised when the server responds with a non-2xx status. */
 export class ApiError extends Error {
@@ -312,8 +330,9 @@ export class ApiClient {
   /**
    * `DELETE /api/sessions/{id}` — remove a closed session from Delta (204).
    *
-   * Deletes the session's rows and nothing on disk: the git worktree and the
-   * agent's own transcript and state files stay. Refused with a `409` — an
+   * Deletes the session's rows, and the git worktree and `delta-<id>` branch
+   * Delta created for it when they hold no work; the agent's own transcript and
+   * state files stay. Refused with a `409` — an
    * {@link ApiError} carrying `session_open` or `session_spawning` — while the
    * session is open or still starting; the navigator offers the action only on
    * a closed card, so that only answers a stale one.
@@ -798,6 +817,76 @@ export class ApiClient {
    */
   getStorage(): Promise<StorageResponse> {
     return this.request<StorageResponse>('/api/storage');
+  }
+
+  /**
+   * `GET /api/storage/worktrees` — every directory under the worktree base,
+   * with whether a listed session still works in it (`in_use`), the repository
+   * git reports for it, and whether it has uncommitted or untracked changes
+   * (`repo_root` and `dirty` are `null` when git no longer knows it).
+   */
+  getStorageWorktrees(): Promise<StorageWorktreesResponse> {
+    return this.request<StorageWorktreesResponse>('/api/storage/worktrees');
+  }
+
+  /**
+   * `DELETE /api/storage/worktrees` — remove one directory under the worktree
+   * base that no listed session works in (204). Without `force` a dirty
+   * worktree, or one git no longer knows, is refused with a `409` carrying
+   * `worktree_dirty` / `worktree_not_registered`; with it, what is in the
+   * directory is lost.
+   */
+  removeStorageWorktree(body: RemoveWorktreeRequest): Promise<void> {
+    return this.requestNoContent('/api/storage/worktrees', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * `DELETE /api/storage/snapshots` — delete one of the migration snapshots
+   * `GET /api/storage` lists (204). Any other path is a `404`.
+   */
+  deleteSnapshot(body: DeleteSnapshotRequest): Promise<void> {
+    return this.requestNoContent('/api/storage/snapshots', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * `GET /api/sessions/prune` — the closed sessions
+   * {@link pruneSessions} would remove now for the same criteria, without
+   * removing anything. Open and still-starting sessions are never counted.
+   * `statuses` omitted means both.
+   */
+  previewPruneSessions(
+    criteria: PruneSessionsRequest,
+  ): Promise<PrunePreviewResponse> {
+    const query = [`older_than_days=${encodeURIComponent(criteria.older_than_days)}`];
+    if (criteria.statuses !== undefined) {
+      query.push(`statuses=${encodeURIComponent(criteria.statuses.join(','))}`);
+    }
+    return this.request<PrunePreviewResponse>(
+      `/api/sessions/prune?${query.join('&')}`,
+    );
+  }
+
+  /**
+   * `POST /api/sessions/prune` — remove every closed session whose most recent
+   * activity is at least `older_than_days` days old and that ended one of the
+   * `statuses` ways, each as {@link deleteSession} removes one. Reports how
+   * many were removed, the ones skipped and why, and the worktrees, branches
+   * and trust entries the removed sessions kept on disk.
+   */
+  pruneSessions(body: PruneSessionsRequest): Promise<PruneSessionsResponse> {
+    return this.request<PruneSessionsResponse>('/api/sessions/prune', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
   }
 
   /**

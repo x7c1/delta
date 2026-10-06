@@ -9,7 +9,8 @@ use tokio::sync::Notify;
 
 use crate::error::Result;
 use crate::ports::{
-    BranchDeletion, GitWorktree, RemoteBranches, WorktreeRemoval, WorktreeStartPoint,
+    BranchDeletion, GitWorktree, RemoteBranches, WorktreeInspection, WorktreeRemoval,
+    WorktreeStartPoint,
 };
 
 /// A hold on the fake's worktree build, so a test can observe the window in
@@ -189,6 +190,11 @@ pub(crate) struct FakeGitWorktree {
     pub(crate) pruned: Mutex<Vec<String>>,
     /// The dirs passed to `forget_dir_trusted`, in order.
     pub(crate) forgotten: Mutex<Vec<String>>,
+    /// Scripted `inspect_worktree` answers, keyed by path. A path absent from
+    /// the map is not a worktree git knows (`None`).
+    pub(crate) inspections: Mutex<Vec<(String, WorktreeInspection)>>,
+    /// The `(repo_root, path)` of every `force_remove_worktree` call, in order.
+    pub(crate) force_removed: Mutex<Vec<(String, String)>>,
 }
 
 impl FakeGitWorktree {
@@ -294,11 +300,25 @@ impl FakeGitWorktree {
         self
     }
 
+    /// Script `inspect_worktree(path)` to report a worktree of `repo_root`,
+    /// with or without uncommitted work.
+    pub(crate) fn with_inspection(self, path: &str, repo_root: &str, dirty: bool) -> Self {
+        self.inspections.lock().unwrap().push((
+            path.to_owned(),
+            WorktreeInspection {
+                repo_root: repo_root.to_owned(),
+                dirty,
+            },
+        ));
+        self
+    }
+
     /// True iff no removal-side call (`remove_worktree`,
-    /// `delete_branch_if_merged`, `prune_worktrees`, `forget_dir_trusted`)
-    /// was made.
+    /// `force_remove_worktree`, `delete_branch_if_merged`, `prune_worktrees`,
+    /// `forget_dir_trusted`) was made.
     pub(crate) fn removal_untouched(&self) -> bool {
         self.removed_worktrees.lock().unwrap().is_empty()
+            && self.force_removed.lock().unwrap().is_empty()
             && self.deleted_branches.lock().unwrap().is_empty()
             && self.pruned.lock().unwrap().is_empty()
             && self.forgotten.lock().unwrap().is_empty()
@@ -465,6 +485,24 @@ impl GitWorktree for FakeGitWorktree {
 
     async fn forget_dir_trusted(&self, dir: &str) -> Result<()> {
         self.forgotten.lock().unwrap().push(dir.to_owned());
+        Ok(())
+    }
+
+    async fn inspect_worktree(&self, path: &str) -> Result<Option<WorktreeInspection>> {
+        Ok(self
+            .inspections
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, inspection)| inspection.clone()))
+    }
+
+    async fn force_remove_worktree(&self, repo_root: &str, path: &str) -> Result<()> {
+        self.force_removed
+            .lock()
+            .unwrap()
+            .push((repo_root.to_owned(), path.to_owned()));
         Ok(())
     }
 }

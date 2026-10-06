@@ -327,6 +327,98 @@ a client hearing it must drop the session rather than re-render it as closed.
   `spawning`.
 - **500** — the delete failed in the store.
 
+### `POST /api/sessions/prune`
+
+Remove old closed sessions in bulk, for the Settings dialog's Storage
+category. Each matching session is removed exactly as
+[`DELETE /api/sessions/{id}`](#delete-apisessionsid) removes one, so its rule on
+the worktree and branch Delta created applies unchanged: a worktree with
+uncommitted or untracked files, an unmerged branch, and the rest of what that
+section keeps are kept here too.
+
+Body:
+
+```json
+{ "older_than_days": 30, "statuses": ["ended", "failed"] }
+```
+
+- `older_than_days` (required, an integer ≥ 0) — a session matches when its most
+  recent activity is at least this many days ago. Its most recent activity is
+  the session list's recency key: the time of its last message, or its creation
+  when it has none (`COALESCE(last_activity_at, created_at)`). `0` matches every
+  closed session regardless of age.
+- `statuses` (optional, default both) — how the session ended. `ended` is a
+  session whose launch bound and that is now closed. It matches the rows whose
+  `status` is `active` as well as `ended`: a row keeps `active` after its
+  session closes (whether a session is open is not stored in the row), so the
+  open ones among them are told apart only when the removal runs, and skipped
+  as below. `failed` matches the rows whose `status` is `failed`, a launch that
+  ended without binding. An empty list matches nothing.
+
+An open or still-starting session is never removed, even when its row matches:
+the single removal's two refusals stand, and the bulk removal reports such a
+session as skipped instead of failing. A session whose removal fails for any
+other reason is skipped too, and the rest are still removed. `session_removed`
+is broadcast for each removed session, as the single route does.
+
+- **200**:
+
+  ```json
+  {
+    "removed": 2,
+    "removed_ids": ["0198c0de-…", "0198c0df-…"],
+    "skipped": [
+      { "session_id": "0198c0e0-…", "reason": "open", "detail": null }
+    ],
+    "kept": [
+      {
+        "session_id": "0198c0df-…",
+        "kind": "worktree",
+        "target": "/home/u/.delta/worktrees/x7c1-delta-0198c0df-…",
+        "reason": "dirty",
+        "detail": null
+      },
+      {
+        "session_id": "0198c0df-…",
+        "kind": "branch",
+        "target": "delta-0198c0df-…",
+        "reason": "worktree_kept",
+        "detail": null
+      }
+    ]
+  }
+  ```
+
+  `removed_ids` are oldest first. `skipped[].reason` is `open`, `starting`,
+  `gone` (removed by something else in the meantime) or `failed`, with the error
+  in `detail`. `kept` lists what the removed sessions left on disk: `kind` is
+  `worktree`, `branch` or `trust_entry` (Claude Code's entry for a directory in
+  `~/.claude.json`), `target` the path or branch name, and `reason` one of
+  `dirty`, `unmerged`, `not_created_by_delta`, `worktree_kept`,
+  `in_use_by_another_session` or `failed` (with the error in `detail`).
+- **400** / **422** — the body is malformed, or `older_than_days` is missing or
+  negative.
+- **500** — the query for the matching sessions failed; nothing was removed.
+
+### `GET /api/sessions/prune`
+
+Preview [`POST /api/sessions/prune`](#post-apisessionsprune): the sessions it
+would remove now, without removing anything, so the browser can say how many
+before the user confirms. The criteria travel in the query string:
+`older_than_days` (required) and `statuses`, a comma-separated list
+(`?older_than_days=30&statuses=ended,failed`; absent means both). Open and
+still-starting sessions are not counted, since the removal would skip them.
+
+- **200**:
+
+  ```json
+  { "count": 2, "session_ids": ["0198c0de-…", "0198c0df-…"] }
+  ```
+
+  `session_ids` are oldest first.
+- **400** — `older_than_days` is missing or negative, or `statuses` names an
+  unknown status.
+
 ### `POST /api/sessions/{id}/interrupt`
 
 Abort the session's in-flight turn without closing it.

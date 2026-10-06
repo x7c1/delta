@@ -56,5 +56,7 @@ mod user_prompt_submit_hook;
 pub use user_prompt_submit_hook::UserPromptSubmitHook;
 mod workspace;
 pub use workspace::Workspace;
+mod worktree_inspection;
+pub use worktree_inspection::WorktreeInspection;
 mod worktree_removal;
 pub use worktree_removal::WorktreeRemoval;

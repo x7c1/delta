@@ -12,6 +12,7 @@ mod commands;
 mod enqueue_send;
 mod hooks;
 mod permissions;
+mod prune_sessions;
 mod queries;
 mod questions;
 mod readopt;

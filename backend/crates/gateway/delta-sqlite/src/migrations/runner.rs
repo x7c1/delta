@@ -103,12 +103,14 @@ pub(crate) fn migrate(
 /// refuses `VACUUM INTO` onto an existing path, and a retry after a failed
 /// migration would otherwise be unable to start at all; the file that is already
 /// there is the correct pre-migration snapshot, because the failed attempt rolled
-/// back. Backups are never deleted automatically — their main value is the
-/// migration that appeared to succeed and is found to be wrong days later, which
-/// is exactly when an auto-cleanup would have removed the only copy. The one
-/// thing that does remove them is `scripts/dev.sh --reset` (`make reset`), which
-/// deletes them together with the database they were taken from — leaving them
-/// behind would make them look like snapshots of the database the reset created.
+/// back. Backups are kept until the user deletes them from Settings → Storage
+/// (`DELETE /api/storage/snapshots`) — nothing removes them on its own, because
+/// their main value is the migration that appeared to succeed and is found to be
+/// wrong days later, which is exactly when an auto-cleanup would have removed
+/// the only copy. The one other thing that removes them is
+/// `scripts/dev.sh --reset` (`make reset`), which deletes them together with the
+/// database they were taken from — leaving them behind would make them look like
+/// snapshots of the database the reset created.
 fn back_up(conn: &Connection, db_path: Option<&str>, from_version: u32) -> Result<()> {
     if from_version == 0 {
         info!("skipping pre-migration backup: replaying the ladder onto a fresh database");

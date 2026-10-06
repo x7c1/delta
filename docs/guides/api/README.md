@@ -12,16 +12,18 @@ kinds of traffic, and this directory has one page per area:
 - The **browser REST surface** (`/api/*`) — the request/response queries and
   commands the browser issues to hydrate state and drive a session — split by
   area:
-  - **[sessions.md](sessions.md)** — listing, creating, opening, closing and
-    interrupting sessions, plus reading threads and messages.
+  - **[sessions.md](sessions.md)** — listing, creating, opening, closing,
+    removing (one at a time or old ones in bulk) and interrupting sessions,
+    plus reading threads and messages.
   - **[sends.md](sends.md)** — enqueueing and managing sends, and answering the
     permission requests and questions the agent raises mid-turn.
   - **[workdirs.md](workdirs.md)** — the new-session dialog's sources: working
     directories, git detection, repositories and clone roots, pull requests, and
     opening a known directory in an external editor.
   - **[settings.md](settings.md)** — provider availability and capabilities, the
-    launch-option and prompt-template registries, the server version, and the
-    storage inventory (where the server keeps its files).
+    launch-option and prompt-template registries, the server version, the
+    storage inventory (where the server keeps its files), and removing leftover
+    worktrees and migration snapshots.
 - **[live-channels.md](live-channels.md)** — the browser live channels: a
   WebSocket event stream (`/ws`) carrying `SessionEvent`s, a PTY bridge
   (`/pty`) attaching an xterm.js terminal to a session's tmux pane, and a

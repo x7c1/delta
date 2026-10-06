@@ -250,6 +250,45 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub(super) async fn list_prunable_sessions(
+        &self,
+        cutoff: &str,
+        statuses: &[SessionStatus],
+    ) -> std::result::Result<Vec<SessionId>, delta_usecase::Error> {
+        // No status matches nothing; short-circuit rather than building an
+        // `IN ()`, which SQLite rejects.
+        if statuses.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().await;
+        // The recency key is the session list's, so "old" means what the
+        // navigator's ordering says it means; ISO-8601 UTC timestamps compare
+        // correctly as text. `?1` is the cut-off, `?2..` the statuses.
+        let placeholders = (2..=statuses.len() + 1)
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT id FROM session \
+                 WHERE COALESCE(last_activity_at, created_at) <= ?1 \
+                   AND status IN ({placeholders}) \
+                 ORDER BY COALESCE(last_activity_at, created_at) ASC, created_at ASC, id ASC"
+            ))
+            .map_err(Error::from)?;
+        let params = std::iter::once(cutoff).chain(statuses.iter().map(|status| status.as_str()));
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(params), |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(Error::from)?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(SessionId::from(row.map_err(Error::from)?));
+        }
+        Ok(ids)
+    }
+
     pub(super) async fn mark_session_failed(
         &self,
         id: &SessionId,

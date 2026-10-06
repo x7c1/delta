@@ -47,7 +47,7 @@ It holds:
   checkpoint.
 - `delta.db.bak-v<N>`, a snapshot of the database taken before an upgrade step
   that rewrites data (see [Updating](#updating)). Snapshots are kept until you
-  delete them.
+  delete them from Settings → Storage.
 - `delta-hook-state.json`, the hook state file (see below).
 - `sessions/`, the working directories of sessions started without a
   repository or a chosen folder.

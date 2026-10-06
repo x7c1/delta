@@ -6,7 +6,10 @@ The REST routes behind the Settings screen and the provider selector: which
 agent providers this host can launch and what each of them can do, the registry
 of custom launch options a session can be started with, the registry of prompt
 templates the composer inserts from, the server's own version string for the
-browser footer, and the inventory of where the server keeps its files.
+browser footer, the inventory of where the server keeps its files, and the
+cleanup of leftover worktrees and migration snapshots (removing old sessions in
+bulk, the Storage category's third cleanup, is in
+[sessions.md](sessions.md#post-apisessionsprune)).
 Applying a launch option to a session is part of a `new_session` send
 ([sends.md](sends.md#post-apisends)); conventions and error semantics are in
 [README.md](README.md).
@@ -445,7 +448,8 @@ out the snapshots. `snapshots` lists the migration runner's `delta.db.bak-v<N>`
 copies beside the database in ascending `<N>`, and is empty when there are none.
 A file that does not exist counts as zero bytes and is not an error. The
 response never carries the hook secret or the auth token. Read-only: nothing
-here deletes or moves a file.
+here deletes or moves a file. The snapshots are kept until the user deletes
+them with [`DELETE /api/storage/snapshots`](#delete-apistoragesnapshots).
 
 - **200**:
 
@@ -473,3 +477,93 @@ here deletes or moves a file.
     "transcript_root": "/home/u/.claude/projects"
   }
   ```
+
+### `GET /api/storage/worktrees`
+
+List every directory directly under the worktree base, sorted by name, with
+what Delta and git know of each:
+
+- `path` — spelled under the configured worktree base, as Delta spells the
+  worktrees it creates there.
+- `in_use` — a session Delta still lists works in it: it is some session's
+  working directory or requested directory, or some message's working
+  directory — the check
+  [`DELETE /api/sessions/{id}`](sessions.md#delete-apisessionsid) uses to keep a
+  worktree another session works in. Such a worktree is cleaned up by removing
+  its session, not from here.
+- `repo_root` — the repository's main working tree as git reports it, or `null`
+  when git no longer knows the directory as a worktree (its repository pruned
+  it or is gone, or it was never one).
+- `dirty` — whether `git status --porcelain` lists anything (modified, staged or
+  untracked files), or `null` when git does not know the directory.
+
+The directories nothing works in are the leftovers: worktrees kept because they
+held work when their session was removed, or left by versions that did not
+clean up. A worktree base that does not exist yet lists nothing.
+
+- **200**:
+
+  ```json
+  {
+    "worktrees": [
+      {
+        "path": "/home/u/.delta/worktrees/x7c1-delta-0198c0df-…",
+        "in_use": false,
+        "repo_root": "/home/u/src/delta",
+        "dirty": true
+      },
+      {
+        "path": "/home/u/.delta/worktrees/x7c1-delta-0198c0e0-…",
+        "in_use": true,
+        "repo_root": "/home/u/src/delta",
+        "dirty": false
+      }
+    ]
+  }
+  ```
+
+- **500** — the directory, the store or `git` could not be read.
+
+### `DELETE /api/storage/worktrees`
+
+Remove one directory under the worktree base that no listed session works in.
+
+```json
+{ "path": "/home/u/.delta/worktrees/x7c1-delta-0198c0df-…", "force": false }
+```
+
+`path` is spelled as [`GET /api/storage/worktrees`](#get-apistorageworktrees)
+lists it. `force` (optional, default `false`) is the user's confirmation that
+what is in the directory may be lost. A clean worktree is removed with
+`git worktree remove` without `--force`, so git's own check still guards any
+work that appeared since it was listed. With `force`, a worktree with changes is
+removed with `git worktree remove --force`, and a directory git no longer knows
+is deleted as a plain directory tree. The worktree's branch is never touched.
+After the removal `git worktree prune` runs in the repository (when git named
+one), and the `projects` entry Delta seeded for the path in `~/.claude.json` is
+removed; a failure there is logged and does not fail the request.
+
+- **204 No Content** — the directory is gone.
+- **409** — refused, with nothing touched: the path is not a directory directly
+  under the worktree base (`code: "worktree_outside_base"`); a listed session
+  still works in it (`code: "worktree_in_use"`); or, without `force`, it has
+  uncommitted or untracked changes (`code: "worktree_dirty"`) or git no longer
+  knows it as a worktree (`code: "worktree_not_registered"`).
+- **500** — `git` or the filesystem failed.
+
+### `DELETE /api/storage/snapshots`
+
+Delete one migration snapshot.
+
+```json
+{ "path": "/home/u/.local/share/io.github.x7c1.delta/delta.db.bak-v3" }
+```
+
+`path` must be one of the `snapshots` [`GET /api/storage`](#get-apistorage) lists
+right now, spelled exactly as listed; any other path — the database itself, a
+file beside it, a path that leaves the data directory — is refused and nothing
+is deleted.
+
+- **204 No Content** — the snapshot is gone.
+- **404** — the path is not a listed snapshot.
+- **500** — the file could not be deleted.

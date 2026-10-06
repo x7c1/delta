@@ -68,6 +68,17 @@ export const queryKeys = {
   version: ['version'] as const,
   /** Where the server keeps its files (`GET /api/storage`), for Settings → Storage. */
   storage: ['storage'] as const,
+  /** The directories under the worktree base (`GET /api/storage/worktrees`). */
+  storageWorktrees: ['storage-worktrees'] as const,
+  /**
+   * The bulk session removal's preview (`GET /api/sessions/prune`), keyed by
+   * its criteria. {@link queryKeys.prunePreviewAll} prefixes every entry, for
+   * invalidating them all at once.
+   */
+  prunePreview: (olderThanDays: number, statuses: readonly string[]) =>
+    ['prune-preview', olderThanDays, statuses.join(',')] as const,
+  /** Prefix of every {@link queryKeys.prunePreview} entry. */
+  prunePreviewAll: ['prune-preview'] as const,
   /**
    * Per-provider launch availability (`GET /api/providers`) for the new-session
    * selector. A single cache entry: the answer is host-level, not per-session.

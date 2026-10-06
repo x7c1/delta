@@ -827,3 +827,65 @@ async fn relocate_transcript_repoints_an_active_session() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn list_prunable_sessions_honours_the_cutoff_on_the_recency_key() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    session_active_at(&store, "sess-new", "2026-03-01T00:00:00Z").await;
+    session_active_at(&store, "sess-old", "2026-01-01T00:00:00Z").await;
+    session_active_at(&store, "sess-edge", "2026-02-01T00:00:00Z").await;
+    // Message-less, so it keys on its own just-now `created_at`: never old.
+    store
+        .register_session(new_session_with("sess-quiet"))
+        .await
+        .unwrap();
+
+    let ids = store
+        .list_prunable_sessions("2026-02-01T00:00:00Z", &[SessionStatus::Active])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        ids,
+        vec![SessionId::from("sess-old"), SessionId::from("sess-edge")],
+        "at or before the cut-off, oldest first; a session active exactly at the cut-off is old enough"
+    );
+}
+
+#[tokio::test]
+async fn list_prunable_sessions_honours_the_status_filter() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let active = session_active_at(&store, "sess-active", "2026-01-02T00:00:00Z").await;
+    let failed = SessionId::from("sess-failed");
+    store
+        .insert_spawning_session(spawning_session(&failed, "/work"))
+        .await
+        .unwrap();
+    store.mark_session_failed(&failed, None).await.unwrap();
+    let spawning = SessionId::from("sess-spawning");
+    store
+        .insert_spawning_session(spawning_session(&spawning, "/work"))
+        .await
+        .unwrap();
+    // A cut-off in the future makes every row old enough, so only the status
+    // decides.
+    let cutoff = "2999-01-01T00:00:00Z";
+
+    let only_failed = store
+        .list_prunable_sessions(cutoff, &[SessionStatus::Failed])
+        .await
+        .unwrap();
+    let both = store
+        .list_prunable_sessions(cutoff, &[SessionStatus::Active, SessionStatus::Failed])
+        .await
+        .unwrap();
+    let none = store.list_prunable_sessions(cutoff, &[]).await.unwrap();
+
+    assert_eq!(only_failed, vec![failed.clone()]);
+    assert_eq!(
+        both,
+        vec![active, failed],
+        "oldest first: the active session's activity predates the failed row's creation"
+    );
+    assert!(none.is_empty(), "no status matches nothing");
+}

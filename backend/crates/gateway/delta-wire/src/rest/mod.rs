@@ -14,10 +14,18 @@ mod clone_root_create_request;
 pub use clone_root_create_request::WireCreateCloneRootRequest;
 mod clone_roots_response;
 pub use clone_roots_response::{WireCloneRoot, WireCloneRootsResponse};
+mod delete_snapshot_request;
+pub use delete_snapshot_request::WireDeleteSnapshotRequest;
+mod disk_item_kind;
+pub use disk_item_kind::WireDiskItemKind;
 mod error_body;
 pub use error_body::WireErrorBody;
 mod git_response;
 pub use git_response::{WireGitBranchesResponse, WireGitRepoResponse};
+mod keep_reason;
+pub use keep_reason::WireKeepReason;
+mod kept_item;
+pub use kept_item::WireKeptItem;
 mod launch_option_create_request;
 pub use launch_option_create_request::WireCreateLaunchOptionRequest;
 mod launch_option_update_request;
@@ -43,12 +51,22 @@ pub use providers_response::{
     WireLaunchOptionStyle, WireProviderAvailability, WireProviderCapabilities,
     WireProvidersResponse,
 };
+mod prune_preview_response;
+pub use prune_preview_response::WirePrunePreviewResponse;
+mod prune_sessions_request;
+pub use prune_sessions_request::WirePruneSessionsRequest;
+mod prune_sessions_response;
+pub use prune_sessions_response::WirePruneSessionsResponse;
+mod prune_status;
+pub use prune_status::WirePruneStatus;
 mod pull_requests_response;
 pub use pull_requests_response::{WirePullRequest, WirePullRequestsResponse};
 mod question_answer_request;
 pub use question_answer_request::WireQuestionAnswerRequest;
 mod question_cancel_request;
 pub use question_cancel_request::WireQuestionCancelRequest;
+mod remove_worktree_request;
+pub use remove_worktree_request::WireRemoveWorktreeRequest;
 mod repositories_response;
 pub use repositories_response::{
     WireRepositoriesResponse, WireRepositoryClone, WireRepositoryEntry,
@@ -63,10 +81,18 @@ pub use sends_response::{
 };
 mod sessions_response;
 pub use sessions_response::{WireSessionListItem, WireSessionsResponse};
+mod skip_reason;
+pub use skip_reason::WireSkipReason;
+mod skipped_session;
+pub use skipped_session::WireSkippedSession;
 mod storage_file;
 pub use storage_file::WireStorageFile;
 mod storage_response;
 pub use storage_response::WireStorageResponse;
+mod storage_worktree;
+pub use storage_worktree::WireStorageWorktree;
+mod storage_worktrees_response;
+pub use storage_worktrees_response::WireStorageWorktreesResponse;
 mod threads_response;
 pub use threads_response::WireThreadsResponse;
 mod version_response;
