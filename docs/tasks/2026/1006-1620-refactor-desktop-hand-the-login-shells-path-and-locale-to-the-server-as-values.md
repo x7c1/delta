@@ -10,7 +10,7 @@ check_command: "make check && ! git grep -n 'set_var' -- backend/crates/apps/del
 assignee: null
 branch: task/1006-1620-refactor-desktop-hand-the-login-shells-path-and-locale-to-the-server-as-values
 created_at: 2026-10-06T08:22:43Z
-updated_at: 2026-10-06T09:27:28Z
+updated_at: 2026-10-06T09:29:05Z
 ---
 
 # refactor(desktop): hand the login shell's PATH and locale to the server as values instead of writing the process environment
@@ -126,7 +126,7 @@ to every spawn.** The desktop binary stops writing the process environment.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On macOS, launch the dev build from Finder (`open` on the built
+- [x] On macOS, launch the dev build from Finder (`open` on the built
       `.app`, or Spotlight), start a Claude Code session and run `echo $PATH;
       locale` in its terminal: the `PATH` is the login shell's (Homebrew or
       `~/.local/bin` present) and the locale is UTF-8. Launch it from a
