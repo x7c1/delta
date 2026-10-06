@@ -606,8 +606,10 @@ In order:
 7. The response is sent, and the server stops serving (the `/ws` stream closes).
 8. Once the store is closed, `delta.db`, `delta.db-wal`, `delta.db-shm`, the hook
    state file and the data directory itself are deleted — the directory only
-   when nothing else is left in it. `delta-server` then exits `0`, and so does
-   the desktop app.
+   when nothing else is left in it. `delta-server` then exits `0`. The desktop
+   app instead shows what was kept in a dialog and exits `0` when it is
+   dismissed, removing its own files under its identifier as it quits (see
+   [the install guide](../install/README.md#removing-everything)).
 
 - **200**:
 

@@ -248,6 +248,8 @@ instead.
 **Settings → Storage → Erase everything** also stops the server, after closing
 its sessions and removing their clean worktrees, and deletes its files in the
 data directory, the directory itself only once nothing else is left in it
-(see [the install guide](../install/README.md#removing-everything)); it is the
-user's way out, while `scripts/dev.sh --reset` (`make reset`) remains the
-developer's quick reset.
+(see [the install guide](../install/README.md#removing-everything)). In
+`make desktop-dev` the shell then shows what was kept, quits, and removes its
+own directories under the dev identifier (`io.github.x7c1.delta.dev`), never
+the installed app's. It is the user's way out, while `scripts/dev.sh --reset`
+(`make reset`) remains the developer's quick reset.
