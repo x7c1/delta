@@ -10,7 +10,7 @@ check_command: "make check && git grep -q 'chunkSizeWarningLimit' -- frontend/pa
 assignee: null
 branch: task/1006-1340-build-web-replace-vites-default-chunk-size-warning-with-deltas-own-bundle-budget
 created_at: 2026-10-06T04:37:28Z
-updated_at: 2026-10-06T05:04:48Z
+updated_at: 2026-10-06T05:06:45Z
 ---
 
 # build(web): replace Vite's default chunk-size warning with Delta's own bundle budget
@@ -86,6 +86,6 @@ can cite them.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On the development machine, `make desktop-dev-build` (which runs
+- [x] On the development machine, `make desktop-dev-build` (which runs
       `make web-dist`) completes without the warning and the built app loads
       the SPA, terminal and Markdown exactly as before.
