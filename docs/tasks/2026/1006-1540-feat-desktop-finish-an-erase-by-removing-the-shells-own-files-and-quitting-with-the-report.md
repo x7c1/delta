@@ -10,7 +10,7 @@ check_command: "make check && git grep -q 'RunEvent::Exit' -- backend/crates/app
 assignee: null
 branch: task/1006-1540-feat-desktop-finish-an-erase-by-removing-the-shells-own-files-and-quitting-with-the-report
 created_at: 2026-10-06T07:38:19Z
-updated_at: 2026-10-06T08:11:59Z
+updated_at: 2026-10-06T08:13:40Z
 ---
 
 # feat(desktop): finish an erase by removing the shell's own files and quitting with the report
@@ -82,7 +82,7 @@ the page and the shell, as the first task designed it.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On macOS with the dev build (`make desktop-dev`): open a session so the
+- [x] On macOS with the dev build (`make desktop-dev`): open a session so the
       webview has storage, erase from Settings; the dialog lists what was
       kept, and after dismissing it the app has quit and
       `~/Library/WebKit/io.github.x7c1.delta.dev`,
