@@ -3,7 +3,8 @@
 //! A thin wrapper around [`delta_server`]: it builds configuration from the
 //! environment, constructs the shared [`AppState`], and serves the router on
 //! `127.0.0.1` only — Delta is a local tool and never listens on a public
-//! interface. All testable logic lives in the library crate.
+//! interface. It exits `0` once the server stops (an erase from Settings →
+//! Storage stops it). All testable logic lives in the library crate.
 
 use delta_server::{config, serve, AppState};
 
@@ -41,7 +42,10 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let listener = serve::bind_loopback(config.port).await?;
-    serve::serve(state, listener).await
+    // The server serves until something asks it to stop; every reason it
+    // can stop for is a clean exit.
+    serve::serve(state, listener).await?.log();
+    Ok(())
 }
 
 /// Settle the hook secret kept in the data directory, then build the state.

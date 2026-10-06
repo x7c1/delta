@@ -6,6 +6,7 @@ import type {
   CreatePromptTemplateRequest,
   CreateSendRequest,
   DeleteSnapshotRequest,
+  EraseResponse,
   GitBranchesResponse,
   GitRepoResponse,
   LaunchOption,
@@ -182,7 +183,8 @@ export type ApiErrorCode =
   | 'worktree_outside_base'
   | 'worktree_in_use'
   | 'worktree_dirty'
-  | 'worktree_not_registered';
+  | 'worktree_not_registered'
+  | 'erase_in_progress';
 
 /** An error raised when the server responds with a non-2xx status. */
 export class ApiError extends Error {
@@ -854,6 +856,15 @@ export class ApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+  }
+
+  /**
+   * `POST /api/storage/erase` — erase everything this Delta created on the
+   * machine that holds no work, and stop the server. Answers with what was
+   * removed and what was kept; `409 erase_in_progress` while an erase runs.
+   */
+  eraseEverything(): Promise<EraseResponse> {
+    return this.request<EraseResponse>('/api/storage/erase', { method: 'POST' });
   }
 
   /**

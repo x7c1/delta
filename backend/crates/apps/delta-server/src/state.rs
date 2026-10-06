@@ -1,9 +1,11 @@
 //! Shared application state.
 
+use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use delta_bootstrap::{AppInteractor, Config};
 use delta_usecase::{
@@ -11,6 +13,7 @@ use delta_usecase::{
 };
 
 use crate::comms_log::{CommsLogHub, CommsSubscription};
+use crate::serve::ServerStopped;
 use crate::storage_inventory::StorageInventory;
 
 /// Capacity of the per-process event broadcast channel.
@@ -83,6 +86,14 @@ pub struct AppState {
     /// composition root as their [`CommsLogSink`]), so a frame an adapter emits
     /// and a frame the browser reads are two views of one buffer.
     comms_log: Arc<CommsLogHub>,
+    /// Why the server is to stop, once something has asked it to: empty while
+    /// it serves. [`crate::serve::serve`] shuts down gracefully when this is
+    /// set, and the browser event stream ends its sockets.
+    stop: Arc<watch::Sender<Option<ServerStopped>>>,
+    /// Set by the first `POST /api/storage/erase` and never cleared once that
+    /// erase succeeds — the server stops right after — so a second erase is
+    /// refused rather than run twice.
+    erasing: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -187,6 +198,8 @@ impl AppState {
             // `build` (and any test that wants live frames) replaces it via
             // `with_comms_log`.
             comms_log: Arc::new(CommsLogHub::new()),
+            stop: Arc::new(watch::Sender::new(None)),
+            erasing: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -236,6 +249,42 @@ impl AppState {
     /// Where this server keeps its files, for `GET /api/storage`.
     pub fn storage(&self) -> &StorageInventory {
         &self.storage
+    }
+
+    /// Claim the one erase this server runs, returning `false` when one is
+    /// already running (or has run and the server is stopping).
+    pub(crate) fn begin_erase(&self) -> bool {
+        self.erasing
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    /// Give the claim back after an erase that failed, so the user can try
+    /// again.
+    pub(crate) fn abandon_erase(&self) {
+        self.erasing.store(false, Ordering::SeqCst);
+    }
+
+    /// Ask the server to stop serving, for `reason`.
+    ///
+    /// Graceful: a response in flight — the erase's own — is still sent.
+    pub(crate) fn stop(&self, reason: ServerStopped) {
+        self.stop.send_replace(Some(reason));
+    }
+
+    /// Resolves once [`Self::stop`] has been called.
+    pub(crate) fn stopping(&self) -> impl Future<Output = ()> + Send + 'static {
+        let mut stop = self.stop.subscribe();
+        async move {
+            // An error means every sender is gone, which only happens once
+            // the server is torn down: stopping either way.
+            let _ = stop.wait_for(Option::is_some).await;
+        }
+    }
+
+    /// Take why the server was asked to stop, if it was.
+    pub(crate) fn take_stop_reason(&self) -> Option<ServerStopped> {
+        self.stop.send_replace(None)
     }
 
     /// The wired Interactor.

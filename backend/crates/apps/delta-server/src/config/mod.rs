@@ -111,6 +111,23 @@ fn config_from_vars_for(
     }
 }
 
+/// `~/.delta` when `worktree_base` is the default `~/.delta/worktrees`: the
+/// directory erasing everything also removes once it is empty. `None` for a
+/// base the user chose (`DELTA_WORKTREE_BASE`), whose parent is theirs.
+pub(crate) fn default_worktree_base_parent(worktree_base: &str) -> Option<String> {
+    default_base_parent(worktree_base, std::env::var_os("HOME"))
+}
+
+fn default_base_parent(worktree_base: &str, home: Option<OsString>) -> Option<String> {
+    let default = default_worktree_base(home);
+    if worktree_base != default {
+        return None;
+    }
+    std::path::Path::new(&default)
+        .parent()
+        .map(|parent| parent.to_string_lossy().into_owned())
+}
+
 /// Give `config` the hook secret kept in its data directory, and return the
 /// state file it came from.
 ///

@@ -97,3 +97,34 @@ test('a migration snapshot is deleted after a confirmation naming it', async ({ 
   await expect(snapshots.getByTitle(first.path, { exact: true })).toHaveCount(0);
   await expect(snapshots.getByTitle(second.path, { exact: true })).toBeVisible();
 });
+
+test('erasing everything asks for the word, then leaves only the report', async ({ page }) => {
+  const section = await openStorage(page);
+  const block = section.getByTestId('storage-erase');
+  const kept = mockStorageWorktrees.filter(
+    (worktree) => worktree.dirty === true || worktree.repo_root === null,
+  );
+  for (const worktree of kept) {
+    await expect(block.getByTestId('storage-erase-kept')).toContainText(
+      worktree.path.slice(worktree.path.lastIndexOf('/') + 1),
+    );
+  }
+
+  await block.getByRole('button', { name: 'Erase everything…' }).click();
+  const confirm = block.getByRole('button', { name: 'Erase everything and stop Delta' });
+  await expect(confirm).toBeDisabled();
+  await block.getByLabel('Word to confirm').fill('erase');
+  await confirm.click();
+
+  const report = page.getByTestId('erased-page');
+  await expect(report).toBeVisible();
+  await expect(report.getByTestId('erased-removed')).toContainText(MOCK_DATA_DIR);
+  for (const worktree of kept) {
+    await expect(report.getByTestId('erased-kept')).toContainText(worktree.path);
+  }
+  await expect(report.getByRole('status')).toHaveText('Delta has stopped. Close this tab.');
+  // The whole app is gone: no settings dialog, no navigator and its
+  // connection indicator to start reconnecting over the report.
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByTestId('connection-indicator')).toHaveCount(0);
+});

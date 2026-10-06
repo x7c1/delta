@@ -19,6 +19,7 @@ mod sessions;
 mod static_web;
 mod status_line;
 mod storage;
+mod storage_erase;
 mod storage_snapshots;
 mod storage_worktrees;
 mod workdir;

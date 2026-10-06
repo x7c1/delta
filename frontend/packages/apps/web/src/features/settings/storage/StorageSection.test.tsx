@@ -6,6 +6,7 @@ import { setupServer } from 'msw/node';
 import { createHandlers, MOCK_DATA_DIR, mockStorage } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../../data/apiContext';
+import { ErasedGate } from './ErasedGate';
 import { StorageSection } from './StorageSection';
 import { formatBytes } from './formatBytes';
 
@@ -23,7 +24,9 @@ function renderSection(active = true) {
   return render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <StorageSection active={active} />
+        <ErasedGate>
+          <StorageSection active={active} />
+        </ErasedGate>
       </ApiProvider>
     </QueryClientProvider>,
   );

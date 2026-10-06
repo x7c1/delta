@@ -95,6 +95,31 @@ impl Tmux {
     }
 }
 
+/// Where tmux puts the socket of the server named `socket` (`tmux -L`):
+/// `${TMUX_TMPDIR:-/tmp}/tmux-<uid>/<socket>`.
+///
+/// tmux leaves this file behind when its server is killed, so stopping the
+/// server for good means unlinking it here (checked on tmux 3.6a). An empty
+/// `TMUX_TMPDIR` counts as unset, as it does for tmux.
+fn socket_path(
+    tmux_tmpdir: Option<std::ffi::OsString>,
+    uid: u32,
+    socket: &str,
+) -> std::path::PathBuf {
+    let tmpdir = tmux_tmpdir.filter(|dir| !dir.is_empty()).map_or_else(
+        || std::path::PathBuf::from("/tmp"),
+        std::path::PathBuf::from,
+    );
+    tmpdir.join(format!("tmux-{uid}")).join(socket)
+}
+
+/// Whether a failed tmux command's `stderr` says there is no server to talk
+/// to: none was ever started on the socket (`error connecting to …`), or the
+/// one there has gone (`no server running on …`).
+fn is_no_server(stderr: &str) -> bool {
+    stderr.starts_with("no server running") || stderr.starts_with("error connecting to")
+}
+
 #[cfg(test)]
 mod tests {
     use delta_usecase::pane_for;
@@ -104,6 +129,31 @@ mod tests {
     #[test]
     fn pane_for_derives_first_pane_of_session() {
         assert_eq!(pane_for("delta-1"), "delta-1:0.0");
+    }
+
+    #[test]
+    fn the_socket_lives_under_tmux_tmpdir_or_tmp_per_user() {
+        assert_eq!(
+            socket_path(None, 501, "delta"),
+            std::path::PathBuf::from("/tmp/tmux-501/delta")
+        );
+        assert_eq!(
+            socket_path(Some("".into()), 501, "delta"),
+            std::path::PathBuf::from("/tmp/tmux-501/delta")
+        );
+        assert_eq!(
+            socket_path(Some("/run/user/501".into()), 501, "delta"),
+            std::path::PathBuf::from("/run/user/501/tmux-501/delta")
+        );
+    }
+
+    #[test]
+    fn a_missing_or_gone_server_is_told_apart_from_a_failure() {
+        assert!(is_no_server("no server running on /tmp/tmux-501/delta"));
+        assert!(is_no_server(
+            "error connecting to /tmp/tmux-501/delta (No such file or directory)"
+        ));
+        assert!(!is_no_server("unknown command: kill-servr"));
     }
 
     #[test]

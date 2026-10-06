@@ -4,7 +4,6 @@ import {
   usePruneSessionsMutation,
 } from '@delta/api-client';
 import type {
-  KeptItem,
   PruneSessionsResponse,
   PruneStatus,
   SkippedSession,
@@ -12,6 +11,7 @@ import type {
 import { Button } from '@delta/ui-kit';
 import { useApiClient } from '../../../data/apiContext';
 import { ConfirmPanel } from './ConfirmPanel';
+import { KeptItemList, withDetail } from './KeptItemList';
 import { errorMessage } from './StorageParts';
 
 /** The age the block starts from, in days. */
@@ -173,33 +173,12 @@ export function PruneSessionsBlock({ active }: { active: boolean }) {
   );
 }
 
-/** What a kept item's reason says, after "kept because". */
-const KEEP_REASON_TEXT: Record<KeptItem['reason'], string> = {
-  dirty: 'it has uncommitted or untracked files',
-  unmerged: 'it is not merged',
-  not_created_by_delta: 'Delta did not create it',
-  worktree_kept: 'its worktree was kept',
-  in_use_by_another_session: 'another session works in it',
-  failed: 'removing it failed',
-};
-
-const KIND_TEXT: Record<KeptItem['kind'], string> = {
-  worktree: 'Worktree',
-  branch: 'Branch',
-  trust_entry: 'Trust entry for',
-};
-
 const SKIP_REASON_TEXT: Record<SkippedSession['reason'], string> = {
   open: 'it is open',
   starting: 'it is still starting',
   gone: 'it was already removed',
   failed: 'removing it failed',
 };
-
-/** A reason with the server's detail appended, when it carried one. */
-function withDetail(text: string, detail: string | null): string {
-  return detail ? `${text}: ${detail}` : text;
-}
 
 /** The outcome of a bulk removal: counts, then what was skipped and kept. */
 function PruneResult({ result }: { result: PruneSessionsResponse }) {
@@ -226,14 +205,7 @@ function PruneResult({ result }: { result: PruneSessionsResponse }) {
       {result.kept.length > 0 && (
         <>
           <p className="text-fg-muted">Kept on disk:</p>
-          <ul className="flex flex-col gap-0.5 text-fg-muted" data-testid="storage-prune-kept">
-            {result.kept.map((kept) => (
-              <li key={`${kept.session_id}:${kept.kind}:${kept.target}`}>
-                {KIND_TEXT[kept.kind]} <span className="font-mono">{kept.target}</span>,
-                because {withDetail(KEEP_REASON_TEXT[kept.reason], kept.detail)}.
-              </li>
-            ))}
-          </ul>
+          <KeptItemList kept={result.kept} testId="storage-prune-kept" />
         </>
       )}
     </div>

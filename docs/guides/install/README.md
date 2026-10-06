@@ -137,61 +137,79 @@ session; their conversations stay in Delta and resume on the next send.
 
 ## Removing everything
 
-Follow these steps in order. Steps 1 to 4 delete everything listed in
-[Where the app keeps its data](#where-the-app-keeps-its-data).
+Start in the app: **Settings → Storage → Erase everything** removes what Delta
+created on this machine and holds none of your work, then stops:
 
-1. Quit the app, then end its sessions and delete the tmux socket, which
-   `kill-server` leaves behind:
+- every session, and Delta's tmux server with its socket file;
+- the clean worktrees under `~/.delta/worktrees/`, their `~/.claude.json`
+  trust entries, and the merged `delta-<session id>` branches (then
+  `~/.delta/worktrees/` and `~/.delta` themselves, once they are empty);
+- Delta's files in the [data directory](#where-the-app-keeps-its-data), the
+  [hook state file](#the-hook-state-file) included, then the directory itself
+  once nothing else is left in it.
 
-   ```sh
-   tmux -L io.github.x7c1.delta kill-server
-   rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/io.github.x7c1.delta"
-   ```
+It never deletes work: a worktree with uncommitted or untracked changes, an
+unmerged branch, and a branch Delta did not create are kept, and a browser is
+left showing them with the reason. The desktop app quits as soon as the server
+has stopped, so read the worktrees the block says will stay before you
+confirm. The details are in
+[the API guide](../api/settings.md#post-apistorageerase).
 
-2. Remove the app: delete `/Applications/Delta.app` on macOS, or run
+What it does not remove is left to you:
+
+1. Remove the app: delete `/Applications/Delta.app` on macOS, or run
    `sudo apt remove delta-desktop` on Ubuntu.
-3. Delete the data directory. This also removes the
-   [hook state file](#the-hook-state-file), and on Ubuntu the webview storage.
-4. On macOS, delete the webview storage:
+2. Delete the webview storage. On macOS:
 
    ```sh
    rm -rf ~/Library/WebKit/io.github.x7c1.delta ~/Library/Caches/io.github.x7c1.delta
    ```
 
-5. If you ever ran a version from before the settings and the tmux
-   configuration moved into the data directory, delete what it left in the
-   system temp directory — `/tmp` on Ubuntu, `$TMPDIR` on macOS (a per-user
-   directory under `/var/folders/`; run `echo $TMPDIR` to see yours). On macOS:
+   On Ubuntu it is inside the data directory, which the erase therefore leaves
+   in place holding only the webview storage; delete the directory:
 
    ```sh
-   rm -rf "$TMPDIR"/delta-[0-9]* "$TMPDIR"/delta-tmux-io.github.x7c1.delta.conf
+   rm -rf ~/.local/share/io.github.x7c1.delta
    ```
 
-   On Ubuntu:
+3. Decide about what was kept. A kept worktree holds work: commit or copy what
+   you want, then remove it from **Settings → Storage → Worktrees**, which asks
+   you to confirm by typing, or with `git worktree remove`. Then
+   `git branch --list 'delta-*'` in its repository lists Delta's branches, and
+   `git branch -D <branch>` deletes one you no longer want. A session started
+   from an existing branch, such as a pull request's, used that branch, which
+   Delta never deletes; if the repository had no local branch of that name,
+   Delta created one, and it does not start with `delta-`. A kept worktree's
+   trust entry stays under `projects` in `~/.claude.json`, keyed by its path;
+   the file belongs to Claude Code and holds your other settings too, so remove
+   only the keys you no longer want.
+4. Claude Code's and Codex's own files — the conversations under `~/.claude`
+   and `~/.codex` — belong to those tools, not to Delta, and stay.
 
-   ```sh
-   rm -rf /tmp/delta-[0-9]* /tmp/delta-tmux-io.github.x7c1.delta.conf
-   ```
+If the app does not start any more, take the same steps by hand: end the tmux
+server and delete its socket, then the data directory, the worktrees under
+`~/.delta/worktrees/` (running `git worktree prune` in each repository
+afterwards), and their trust entries:
 
-6. Optionally remove the git worktrees. For a session that asked for one, Delta
-   creates a worktree under `~/.delta/worktrees/` on a new branch named
-   `delta-<session id>` in the repository it came from. Removing a session in
-   Delta already removes its worktree and that branch when they hold no work,
-   so what is left either holds work, belongs to a session still listed, or
-   belongs to a session removed by an earlier version that did not clean up.
-   Delete `~/.delta/worktrees/`, then in each of those repositories run
-   `git worktree prune` so git forgets the removed worktrees, and delete the
-   branches you no longer want. `git branch --list 'delta-*'` lists them, and
-   `git branch -D <branch>` deletes one. A session started from an existing
-   branch, such as a pull request's, uses that branch instead; if the
-   repository had no local branch of that name, Delta created one, and it does
-   not start with `delta-`.
-7. Optionally remove the trust entries. For each worktree, Delta adds an entry
-   keyed by the worktree's path under `projects` in `~/.claude.json`, so Claude
-   Code does not ask whether to trust the folder. The file belongs to Claude
-   Code and holds your other settings too, so do not delete it. Look for the
-   keys under `projects` that start with your `~/.delta/worktrees/` path and
-   remove the ones you no longer want.
+```sh
+tmux -L io.github.x7c1.delta kill-server
+rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/io.github.x7c1.delta"
+```
+
+If you ever ran a version from before the settings and the tmux configuration
+moved into the data directory, delete what it left in the system temp
+directory — `/tmp` on Ubuntu, `$TMPDIR` on macOS (a per-user directory under
+`/var/folders/`; run `echo $TMPDIR` to see yours). On macOS:
+
+```sh
+rm -rf "$TMPDIR"/delta-[0-9]* "$TMPDIR"/delta-tmux-io.github.x7c1.delta.conf
+```
+
+On Ubuntu:
+
+```sh
+rm -rf /tmp/delta-[0-9]* /tmp/delta-tmux-io.github.x7c1.delta.conf
+```
 
 If you ran a version before v0.5.0, it used older names that the current app
 never touches, and these may also exist: `~/Library/WebKit/delta-app/` and

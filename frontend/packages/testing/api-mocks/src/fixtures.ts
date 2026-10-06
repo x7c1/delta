@@ -699,6 +699,12 @@ export interface MockStore {
    * `DELETE /api/storage/snapshots` takes one out.
    */
   snapshots: StorageFile[];
+  /**
+   * Whether `POST /api/storage/erase` has run. The real server stops once it
+   * answers; the mock keeps serving but refuses a second erase as the server
+   * does while one is in progress.
+   */
+  erased: boolean;
 }
 
 /**
@@ -905,6 +911,7 @@ export function seedData(): MockStore {
     clonedRepos: [],
     storageWorktrees: structuredClone(mockStorageWorktrees),
     snapshots: structuredClone(mockStorage.snapshots),
+    erased: false,
   };
 }
 

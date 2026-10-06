@@ -2,7 +2,8 @@
 
 use std::fmt;
 
-/// Why a [`DiskItem`] was kept when its session was removed.
+/// Why a [`DiskItem`] was kept when its session was removed, or when erasing
+/// everything met it as a leftover under the worktree base.
 ///
 /// [`DiskItem`]: crate::DiskItem
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +22,9 @@ pub enum KeepReason {
     WorktreeKept,
     /// Another session Delta still lists works in the same directory.
     InUseByAnotherSession,
+    /// The directory is under the worktree base but git no longer knows it as
+    /// a worktree, so nothing can say it holds no work.
+    NotRegistered,
     /// The operation failed for a reason other than git's refusal (the
     /// repository is gone, `git` is missing, the config file is unreadable).
     /// Carries the error message.
@@ -35,6 +39,7 @@ impl fmt::Display for KeepReason {
             Self::NotCreatedByDelta => f.write_str("Delta did not create it"),
             Self::WorktreeKept => f.write_str("its worktree was kept"),
             Self::InUseByAnotherSession => f.write_str("another session works in it"),
+            Self::NotRegistered => f.write_str("git does not know it as a worktree"),
             Self::Failed(error) => write!(f, "removing it failed: {error}"),
         }
     }

@@ -6,12 +6,51 @@
 //! on a public interface, so the only listener offered here is a loopback one.
 
 use std::net::{Ipv4Addr, SocketAddr};
+use std::time::Duration;
 
+use delta_usecase::EraseReport;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
 use crate::config::hook_state::{HookStateError, HookStateFile};
 use crate::{router, AppState};
+
+/// How long [`serve`] waits, after it stopped serving, for the session actors
+/// to run down and the store to close before it deletes the database anyway.
+const STORE_CLOSE_LIMIT: Duration = Duration::from_secs(10);
+
+/// Why [`serve`] returned: the server only stops when something asked it to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerStopped {
+    /// `POST /api/storage/erase` erased everything Delta created that holds
+    /// no work, and the server then deleted its data directory. Carries what
+    /// was removed and what was kept. The process should exit `0`.
+    Erased(EraseReport),
+}
+
+impl ServerStopped {
+    /// Log why the server stopped — for an erase, every item removed and kept —
+    /// for the shell to call before it exits.
+    pub fn log(&self) {
+        match self {
+            Self::Erased(report) => {
+                tracing::info!(
+                    sessions = report.removed_sessions.len(),
+                    "erased everything Delta created that holds no work; the server has stopped"
+                );
+                for item in &report.removed {
+                    tracing::info!("removed {item}");
+                }
+                for kept in &report.kept {
+                    tracing::info!(session_id = %kept.session_id, "kept {}", kept.kept);
+                }
+                for kept in &report.kept_leftovers {
+                    tracing::info!("kept {kept}");
+                }
+            }
+        }
+    }
+}
 
 /// Install the global `tracing` subscriber: `RUST_LOG` when set, `info`
 /// otherwise.
@@ -108,11 +147,18 @@ pub fn user_facing_startup_error(err: &anyhow::Error) -> Option<String> {
 }
 
 /// Rewrite the session settings file, start the background loops `state`
-/// needs, and serve the [`router`] on `listener` until the server stops.
+/// needs, and serve the [`router`] on `listener` until something asks the
+/// server to stop, returning why.
 ///
 /// The listener's port must be the one the configuration `state` was built from
 /// names, because the hook URLs rendered into each session's settings carry it.
-pub async fn serve(state: AppState, listener: TcpListener) -> anyhow::Result<()> {
+///
+/// Stopping is graceful: the request that asked for it still gets its
+/// response. Then the background loops are aborted and the state dropped, and
+/// for an erase, once the store has closed — the session actors hold it until
+/// they have run down — the data directory is deleted (see
+/// `StorageInventory::delete_data_dir`).
+pub async fn serve(state: AppState, listener: TcpListener) -> anyhow::Result<ServerStopped> {
     // Rewrite the session settings file now, so a restart leaves it matching
     // this run's hook URLs instead of a stale copy (see
     // `refresh_session_settings`). Not fatal: every spawn and resume writes it
@@ -123,20 +169,54 @@ pub async fn serve(state: AppState, listener: TcpListener) -> anyhow::Result<()>
 
     // Continuously tail the transcript so assistant replies that Claude Code
     // flushes after the `Stop` hook still reach the browser within ~0.5s.
-    state.spawn_transcript_tail();
+    let tail = state.spawn_transcript_tail();
 
     // Drain the interactor's async event seam into the broadcast, so a producer
     // that emits after its driving call returned still reaches browsers. This is
     // the only consumer of that seam, so without it those events go nowhere; for
     // who emits on it, see `Interactor::emit_async_event`.
-    state.spawn_async_event_drain();
+    let drain = state.spawn_async_event_drain();
 
-    let app = router(state);
+    let app = router(state.clone());
     let addr = listener.local_addr()?;
     tracing::info!(%addr, "delta-server listening (loopback only)");
 
-    axum::serve(listener, app).await?;
-    Ok(())
+    axum::serve(listener, app)
+        .with_graceful_shutdown(state.stopping())
+        .await?;
+    let reason = state
+        .take_stop_reason()
+        .ok_or_else(|| anyhow::anyhow!("the server stopped serving without being asked to"))?;
+    tracing::info!("delta-server stopped serving");
+
+    for task in std::iter::once(tail).chain(drain) {
+        task.abort();
+        // Aborted on purpose; awaiting is only to know the task has dropped
+        // what it held (the interactor, for the tail).
+        let _ = task.await;
+    }
+    match &reason {
+        ServerStopped::Erased(_) => delete_data_dir_once_closed(state).await,
+    }
+    Ok(reason)
+}
+
+/// Drop the last state this function holds, wait for the store to close (why:
+/// `StorageInventory::delete_data_dir`), and delete the data directory.
+///
+/// A store still open after [`STORE_CLOSE_LIMIT`] is logged, and the directory
+/// deleted all the same — the user asked for it.
+async fn delete_data_dir_once_closed(state: AppState) {
+    let storage = state.storage().clone();
+    let release = state.interactor().core_release();
+    drop(state);
+    if !release.released_within(STORE_CLOSE_LIMIT).await {
+        tracing::warn!(
+            limit_secs = STORE_CLOSE_LIMIT.as_secs(),
+            "the store was still open after the server stopped; deleting the data directory anyway"
+        );
+    }
+    storage.delete_data_dir();
 }
 
 #[cfg(test)]

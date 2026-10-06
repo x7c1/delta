@@ -215,3 +215,13 @@ fn adopting_the_persisted_secret_replaces_the_minted_one_and_flags_a_change() {
     assert_eq!(overridden.hook_secret, "hs");
     assert!(overridden.hook_endpoint_changed);
 }
+
+#[test]
+fn only_the_default_worktree_base_names_its_parent_for_erasing() {
+    let home = || Some(OsString::from("/home/u"));
+    assert_eq!(
+        default_base_parent("/home/u/.delta/worktrees", home()).as_deref(),
+        Some("/home/u/.delta")
+    );
+    assert_eq!(default_base_parent("/srv/worktrees", home()), None);
+}

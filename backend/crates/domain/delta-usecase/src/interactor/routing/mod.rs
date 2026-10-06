@@ -10,6 +10,7 @@
 
 mod commands;
 mod enqueue_send;
+mod erase_everything;
 mod hooks;
 mod permissions;
 mod prune_sessions;
@@ -24,6 +25,8 @@ pub use readoption_summary::ReadoptionSummary;
 
 #[cfg(test)]
 mod testing;
+#[cfg(test)]
+mod tests;
 
 use delta_model::SessionId;
 use tokio::sync::oneshot;

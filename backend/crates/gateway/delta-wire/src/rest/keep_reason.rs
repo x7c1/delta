@@ -4,7 +4,8 @@ use delta_usecase::KeepReason;
 use serde::Serialize;
 use ts_rs::TS;
 
-/// Why removing a session left a worktree, branch or trust entry in place.
+/// Why removing a session, or erasing everything, left a worktree, branch or
+/// trust entry in place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(rename = "KeepReason")]
@@ -19,6 +20,8 @@ pub enum WireKeepReason {
     WorktreeKept,
     /// Another listed session works in the worktree.
     InUseByAnotherSession,
+    /// Git does not know the directory as a worktree.
+    NotRegistered,
     /// The operation failed; `detail` carries the error.
     Failed,
 }
@@ -31,6 +34,7 @@ impl From<&KeepReason> for WireKeepReason {
             KeepReason::NotCreatedByDelta => Self::NotCreatedByDelta,
             KeepReason::WorktreeKept => Self::WorktreeKept,
             KeepReason::InUseByAnotherSession => Self::InUseByAnotherSession,
+            KeepReason::NotRegistered => Self::NotRegistered,
             KeepReason::Failed(_) => Self::Failed,
         }
     }

@@ -6,10 +6,11 @@ The REST routes behind the Settings screen and the provider selector: which
 agent providers this host can launch and what each of them can do, the registry
 of custom launch options a session can be started with, the registry of prompt
 templates the composer inserts from, the server's own version string for the
-browser footer, the inventory of where the server keeps its files, and the
+browser footer, the inventory of where the server keeps its files, the
 cleanup of leftover worktrees and migration snapshots (removing old sessions in
 bulk, the Storage category's third cleanup, is in
-[sessions.md](sessions.md#post-apisessionsprune)).
+[sessions.md](sessions.md#post-apisessionsprune)), and erasing everything Delta
+left on the machine, which stops the server.
 Applying a launch option to a session is part of a `new_session` send
 ([sends.md](sends.md#post-apisends)); conventions and error semantics are in
 [README.md](README.md).
@@ -567,3 +568,85 @@ is deleted.
 - **204 No Content** — the snapshot is gone.
 - **404** — the path is not a listed snapshot.
 - **500** — the file could not be deleted.
+
+### `POST /api/storage/erase`
+
+Erase everything this Delta created on the machine that holds no work, then
+stop the server. Takes no body. The rule is the one removing a single session
+follows, applied to everything: **Delta never destroys the user's work — it
+removes what it created, and only when that holds no work.** There is no
+`force`; a worktree kept here is removed, if the user wants that, one at a time
+with [`DELETE /api/storage/worktrees`](#delete-apistorageworktrees) or with git.
+
+In order:
+
+1. Every session that is open or still starting is closed, as
+   [`POST /api/sessions/{id}/close`](sessions.md#post-apisessionsidclose) closes
+   one: a launch in progress is cancelled, a terminal-less agent's process
+   stopped. Nothing is refused for being open.
+2. Delta's tmux server is killed (`tmux -L <socket> kill-server`, where no
+   server running is not an error) and the socket file tmux leaves behind,
+   `${TMUX_TMPDIR:-/tmp}/tmux-<uid>/<socket>`, is deleted — before any worktree
+   is touched, so no agent process still holds one.
+3. Every session is removed as
+   [`DELETE /api/sessions/{id}`](sessions.md#delete-apisessionsid) removes one: a
+   clean worktree Delta created goes, one with uncommitted or untracked changes
+   is kept; a `delta-<id>` branch is deleted when merged, and an unmerged one,
+   or a branch Delta did not create, is kept.
+4. Every directory left under the worktree base is removed as
+   [`DELETE /api/storage/worktrees`](#delete-apistorageworktrees) removes one
+   without `force`: a clean worktree git knows goes, a dirty one or one git does
+   not know is kept. Their branches are never touched. The worktree base is then
+   removed when it is empty, and so is `~/.delta` when the base is the default
+   `~/.delta/worktrees`.
+5. The `~/.claude.json` trust entry goes with each removed worktree; the file
+   itself is Claude Code's and is never deleted.
+6. In the data directory, `sessions/`, `settings/`, `tmux.conf` and the
+   migration snapshots are deleted.
+7. The response is sent, and the server stops serving (the `/ws` stream closes).
+8. Once the store is closed, `delta.db`, `delta.db-wal`, `delta.db-shm`, the hook
+   state file and the data directory itself are deleted — the directory only
+   when nothing else is left in it. `delta-server` then exits `0`, and so does
+   the desktop app.
+
+- **200**:
+
+  ```json
+  {
+    "removed": {
+      "sessions": 12,
+      "worktrees": ["/home/u/.delta/worktrees/x7c1-delta-0198c0df-…"],
+      "branches": ["delta-0198c0df-…"],
+      "data_dir": "/home/u/.local/share/io.github.x7c1.delta"
+    },
+    "kept": [
+      {
+        "session_id": "0198c0e0-…",
+        "kind": "worktree",
+        "target": "/home/u/.delta/worktrees/x7c1-delta-0198c0e0-…",
+        "reason": "dirty",
+        "detail": null
+      },
+      {
+        "session_id": null,
+        "kind": "worktree",
+        "target": "/home/u/.delta/worktrees/stray",
+        "reason": "not_registered",
+        "detail": null
+      }
+    ]
+  }
+  ```
+
+  `removed.worktrees` lists the removed sessions' worktrees, then the leftovers;
+  `removed.data_dir` is the data directory step 8 empties after this response.
+  `kept` is shaped as the bulk session removal's
+  ([sessions.md](sessions.md#post-apisessionsprune)): the items a removed session
+  kept carry its `session_id`, a leftover under the worktree base carries
+  `null`, and `reason` may also be `not_registered` (git does not know the
+  directory as a worktree). A failure on one item never fails the erase: it is
+  logged, and the item is kept with `reason: "failed"`.
+- **409** — an erase is already running, or has run and the server is stopping
+  (`code: "erase_in_progress"`); nothing is done twice.
+- **500** — the sessions or the worktree base could not be listed; nothing
+  after that step ran, and another erase may be tried.

@@ -10,6 +10,7 @@ use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace}
 use crate::session_prune::{
     PruneCriteria, PruneReport, SessionKeptItem, SkipReason, SkippedSession,
 };
+use crate::session_removal::DiskItem;
 
 impl<T, X, S, W, G> Interactor<T, X, S, W, G>
 where
@@ -58,11 +59,29 @@ where
         criteria: &PruneCriteria,
         now: SystemTime,
     ) -> Result<PruneReport> {
+        let matching = self.matching_sessions(criteria, now).await?;
+        Ok(self.remove_sessions(matching, &mut Vec::new()).await)
+    }
+
+    /// Remove each of `session_ids` through the single removal
+    /// ([`Self::delete_session`]), skipping — never failing on — one that is
+    /// open, still starting, already gone, or whose removal failed (logged at
+    /// `warn`). The worktrees, branches and trust entries the removals took
+    /// with them are appended to `removed_items`, in order.
+    ///
+    /// The loop behind both [`Self::prune_sessions`] and
+    /// [`Self::erase_everything`].
+    pub(super) async fn remove_sessions(
+        &self,
+        session_ids: Vec<SessionId>,
+        removed_items: &mut Vec<DiskItem>,
+    ) -> PruneReport {
         let mut report = PruneReport::default();
-        for session_id in self.matching_sessions(criteria, now).await? {
+        for session_id in session_ids {
             match self.delete_session(&session_id).await {
                 Ok(removal) => {
-                    tracing::info!(%session_id, "pruned session; {removal}");
+                    tracing::info!(%session_id, "removed session; {removal}");
+                    removed_items.extend(removal.removed);
                     report
                         .kept
                         .extend(removal.kept.into_iter().map(|kept| SessionKeptItem {
@@ -74,13 +93,13 @@ where
                 Err(err) => {
                     let reason = skip_reason(err);
                     if let SkipReason::Failed(error) = &reason {
-                        tracing::warn!(%session_id, error, "pruning a session failed; skipping it");
+                        tracing::warn!(%session_id, error, "removing a session failed; skipping it");
                     }
                     report.skipped.push(SkippedSession { session_id, reason });
                 }
             }
         }
-        Ok(report)
+        report
     }
 
     /// The stored rows matching `criteria` at `now`, oldest first.

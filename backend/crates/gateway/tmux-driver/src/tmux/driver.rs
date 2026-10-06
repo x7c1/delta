@@ -9,7 +9,8 @@ use super::commands::{
     capture_pane_args, clear_input_commands, input_commands, key_command, new_session_args,
     submit_command, KEY_SETTLE, SUBMIT_ENTER_DELAY,
 };
-use super::Tmux;
+use super::{is_no_server, socket_path, Tmux};
+use crate::error::Error;
 
 #[async_trait]
 impl TmuxDriver for Tmux {
@@ -123,11 +124,89 @@ impl TmuxDriver for Tmux {
             .map_err(delta_usecase::Error::from)
     }
 
+    async fn kill_server(&self) -> std::result::Result<(), delta_usecase::Error> {
+        let output = self
+            .output(&["kill-server"])
+            .await
+            .map_err(delta_usecase::Error::from)?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            if !is_no_server(&stderr) {
+                return Err(Error::Command {
+                    status: output.status.to_string(),
+                    stderr,
+                }
+                .into());
+            }
+        }
+        // tmux leaves its socket file behind; nothing else would remove it.
+        // SAFETY: `getuid` has no preconditions and cannot fail.
+        let uid = unsafe { libc::getuid() };
+        let path = socket_path(std::env::var_os("TMUX_TMPDIR"), uid, &self.socket);
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(Error::Socket {
+                path: path.display().to_string(),
+                source,
+            }
+            .into()),
+        }
+    }
+
     async fn capture_pane(&self, pane: &str) -> std::result::Result<String, delta_usecase::Error> {
         let args = capture_pane_args(pane);
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
         self.captured(&borrowed)
             .await
             .map_err(delta_usecase::Error::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+    use crate::TMUX_BIN;
+
+    /// Whether a `tmux` binary is on `PATH`; the test below needs a real one.
+    fn tmux_available() -> bool {
+        std::process::Command::new(TMUX_BIN)
+            .arg("-V")
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+
+    /// Killing the server ends it and removes the socket file tmux leaves
+    /// behind; killing it again, with nothing running and no socket left, is
+    /// not an error.
+    #[tokio::test]
+    async fn kill_server_stops_the_server_and_removes_its_socket() {
+        if !tmux_available() {
+            eprintln!("skipping: tmux is not installed");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let socket = format!("delta-test-kill-server-{}-{nanos}", std::process::id());
+        let tmux = Tmux::new(&socket, dir.path().join("tmux.conf").to_string_lossy());
+        let workdir = dir.path().to_string_lossy().into_owned();
+        tmux.create_session("t", &workdir, &["sleep".to_owned(), "30".to_owned()])
+            .await
+            .unwrap();
+        // SAFETY: `getuid` has no preconditions and cannot fail.
+        let uid = unsafe { libc::getuid() };
+        let path = socket_path(std::env::var_os("TMUX_TMPDIR"), uid, &socket);
+        assert!(path.exists(), "the running server's socket is at {path:?}");
+
+        tmux.kill_server().await.unwrap();
+
+        assert!(!path.exists(), "the socket file is gone");
+        assert!(!tmux.has_session("t").await.unwrap(), "no server answers");
+        tmux.kill_server().await.unwrap();
     }
 }

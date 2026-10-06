@@ -96,6 +96,28 @@ pub(crate) fn interactor_with_workspace_and_git(
     )
 }
 
+/// Build a test interactor with a specific [`FakeTmux`], [`FakeWorkspace`] and
+/// [`FakeGitWorktree`], for erasing everything, which drives all three — and
+/// whose tests share one [`CallJournal`](super::CallJournal) between the tmux
+/// and git fakes to assert the order of their calls.
+pub(crate) fn interactor_with_tmux_workspace_and_git(
+    tmux: FakeTmux,
+    workspace: FakeWorkspace,
+    git_worktree: FakeGitWorktree,
+) -> TestInteractor {
+    Interactor::new(
+        tmux,
+        FakeTranscript::default(),
+        FakeStore::default(),
+        workspace,
+        git_worktree,
+        TEST_WORKDIR_BASE,
+        TEST_WORKTREE_BASE,
+        TEST_SETTINGS_JSON,
+        TEST_SETTINGS_PATH,
+    )
+}
+
 /// Build a test interactor with both a specific [`FakeGitWorktree`] and a
 /// shared [`FakeGhCli`], for the PR-tab use-case tests that need to
 /// script both the local-clone registry (via the store + gateway-resolved

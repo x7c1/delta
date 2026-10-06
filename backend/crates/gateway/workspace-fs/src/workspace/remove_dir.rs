@@ -1,4 +1,5 @@
-//! Deleting a directory tree the user asked to remove with its contents.
+//! Deleting a directory tree the user asked to remove with its contents, and
+//! a directory only when it is empty.
 
 use std::io::ErrorKind;
 
@@ -20,6 +21,32 @@ impl FsWorkspace {
             Err(err) => return Err(err.into()),
         }
         Ok(())
+    }
+
+    /// Delete `path` when it is an empty directory, as
+    /// [`delta_usecase::Workspace::remove_empty_dir`] describes, returning
+    /// whether it did: a directory with anything in it, a missing path, and
+    /// anything that is not a real directory (a symlink to one included) are
+    /// left alone.
+    pub(super) async fn remove_empty(&self, path: &str) -> Result<bool, Error> {
+        match tokio::fs::symlink_metadata(path).await {
+            Ok(meta) if meta.file_type().is_dir() => {}
+            Ok(_) => return Ok(false),
+            Err(err) if err.kind() == ErrorKind::NotFound => return Ok(false),
+            Err(err) => return Err(err.into()),
+        }
+        match tokio::fs::remove_dir(path).await {
+            Ok(()) => Ok(true),
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    ErrorKind::DirectoryNotEmpty | ErrorKind::NotFound
+                ) =>
+            {
+                Ok(false)
+            }
+            Err(err) => Err(err.into()),
+        }
     }
 }
 
@@ -64,5 +91,27 @@ mod tests {
             target.join("keep.txt").exists(),
             "the link's target is untouched"
         );
+    }
+
+    #[tokio::test]
+    async fn removes_only_an_empty_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let (empty, full) = (dir.path().join("empty"), dir.path().join("full"));
+        std::fs::create_dir(&empty).unwrap();
+        std::fs::create_dir(&full).unwrap();
+        std::fs::write(full.join("notes.txt"), "work").unwrap();
+        let link = dir.path().join("link");
+        std::fs::create_dir(dir.path().join("target")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("target"), &link).unwrap();
+        let ws = FsWorkspace::new();
+
+        assert!(ws.remove_empty_dir(empty.to_str().unwrap()).await.unwrap());
+        assert!(!ws.remove_empty_dir(full.to_str().unwrap()).await.unwrap());
+        assert!(!ws.remove_empty_dir(link.to_str().unwrap()).await.unwrap());
+        assert!(!ws.remove_empty_dir(empty.to_str().unwrap()).await.unwrap());
+
+        assert!(!empty.exists());
+        assert!(full.join("notes.txt").exists());
+        assert!(link.exists() && dir.path().join("target").exists());
     }
 }

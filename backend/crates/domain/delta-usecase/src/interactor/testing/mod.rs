@@ -4,6 +4,7 @@
 //! get their own file, with the transcript-line builders, hook builders, send
 //! targets, and the interactor factory grouped by purpose.
 
+mod call_journal;
 mod factory;
 mod fake_agent;
 mod fake_binary_detector;
@@ -21,13 +22,15 @@ mod spawning;
 mod targets;
 mod transcript_lines;
 
+pub(crate) use call_journal::CallJournal;
 pub(crate) use factory::{
     interactor, interactor_with_codex_factory, interactor_with_codex_factory_and_event_sink,
     interactor_with_event_sink, interactor_with_failing_create_session_and_event_sink,
     interactor_with_failing_tmux, interactor_with_gh_and_event_sink, interactor_with_git,
     interactor_with_git_and_codex_factory, interactor_with_git_and_codex_factory_and_event_sink,
     interactor_with_git_and_event_sink, interactor_with_git_and_gh,
-    interactor_with_git_and_worktree_base, interactor_with_tmux, interactor_with_transcript_root,
+    interactor_with_git_and_worktree_base, interactor_with_tmux,
+    interactor_with_tmux_workspace_and_git, interactor_with_transcript_root,
     interactor_with_workspace_and_git, TestInteractor, SEED_TRANSCRIPT_PATH, TEST_SETTINGS_JSON,
     TEST_SETTINGS_PATH, TEST_WORKDIR_BASE, TEST_WORKTREE_BASE, TICK_BOUND,
 };

@@ -21,6 +21,7 @@ import type {
   PruneStatus,
   RemoveWorktreeRequest,
   DeleteSnapshotRequest,
+  EraseResponse,
   StorageWorktreesResponse,
   RunningSubagent,
   NewSessionResponse,
@@ -1284,6 +1285,50 @@ export function createMockApi(): MockApi {
       }
       store.snapshots = store.snapshots.filter((snapshot) => snapshot.path !== body.path);
       return new HttpResponse(null, { status: 204 });
+    }),
+
+    // Erase everything: every session goes, and of the worktrees only the
+    // clean ones git knows; the rest are kept with the reason the server
+    // gives. A second erase is refused, as the real server refuses one while
+    // it stops.
+    http.post('*/api/storage/erase', () => {
+      if (store.erased) {
+        return HttpResponse.json(
+          { error: 'an erase is already in progress', code: 'erase_in_progress' },
+          { status: 409 },
+        );
+      }
+      store.erased = true;
+      const response: EraseResponse = {
+        removed: {
+          sessions: store.sessions.length,
+          worktrees: [],
+          branches: [],
+          data_dir: mockStorage.data_dir,
+        },
+        kept: [],
+      };
+      for (const worktree of store.storageWorktrees) {
+        if (worktree.dirty === true || worktree.repo_root === null) {
+          response.kept.push({
+            session_id: null,
+            kind: 'worktree',
+            target: worktree.path,
+            reason: worktree.repo_root === null ? 'not_registered' : 'dirty',
+            detail: null,
+          });
+        } else {
+          response.removed.worktrees.push(worktree.path);
+        }
+      }
+      store.storageWorktrees = store.storageWorktrees.filter(
+        (worktree) => !response.removed.worktrees.includes(worktree.path),
+      );
+      store.sessions = [];
+      store.sends = [];
+      store.messagesByThread = {};
+      store.snapshots = [];
+      return HttpResponse.json(response);
     }),
 
     // The bulk session removal and its preview. Like the single removal, each

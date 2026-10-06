@@ -13,6 +13,13 @@ pub enum Error {
     #[error("tmux exited with status {status}: {stderr}")]
     Command { status: String, stderr: String },
 
+    /// The socket file a killed server left behind could not be removed.
+    #[error("failed to remove the tmux socket {path}: {source}")]
+    Socket {
+        path: String,
+        source: std::io::Error,
+    },
+
     /// Delta's fixed tmux config could not be written before the server started.
     #[error("failed to write tmux config {path}: {source}")]
     Config {

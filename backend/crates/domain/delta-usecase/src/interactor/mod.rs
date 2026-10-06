@@ -14,6 +14,7 @@ mod answer_question;
 mod cancel_question;
 mod cancel_send;
 mod context;
+mod core_release;
 mod echo_deadline;
 mod enqueue;
 mod hooks;
@@ -39,6 +40,7 @@ mod sync;
 mod turn_input;
 mod workdir;
 
+pub use core_release::CoreRelease;
 pub use hooks::PermissionWait;
 pub use open_cwd::{ExternalHandler, ExternalHandlerId, VSCODE_HANDLER_ID};
 pub use permission_decision::PermissionDecision;
@@ -364,6 +366,15 @@ where
         });
         let sessions = SessionRegistry::new(&core);
         Self { core, sessions }
+    }
+
+    /// A handle that tells when this interactor's shared core — every port,
+    /// the store's connection included — has been dropped, for a caller that
+    /// drops the interactor and must then wait for the session actors to run
+    /// down before touching the files the ports held open.
+    pub fn core_release(&self) -> CoreRelease {
+        let core: Arc<dyn std::any::Any + Send + Sync> = self.core.clone();
+        CoreRelease::new(Arc::downgrade(&core))
     }
 
     /// Replace the launch configuration (binary to spawn, watchdog deadlines).
