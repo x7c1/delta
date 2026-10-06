@@ -70,6 +70,10 @@ The webview that draws the UI keeps its own storage:
 - **Ubuntu.** Inside the data directory, in `localstorage/`, `storage/`,
   `CacheStorage/` and `WebKitCache/`.
 
+The app remembers its window's size and whether it was maximized in
+`.window-state.json`, written as it quits: in the data directory on macOS, and
+in `~/.config/io.github.x7c1.delta/` on Ubuntu.
+
 tmux keeps the socket of Delta's tmux server, `io.github.x7c1.delta`, in
 `/tmp/tmux-<uid>/` on both platforms (under `$TMUX_TMPDIR` instead, if you set
 it). The socket file stays there after the server ends.
