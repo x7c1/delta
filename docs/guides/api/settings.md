@@ -7,11 +7,11 @@ agent providers this host can launch and what each of them can do, the registry
 of custom launch options a session can be started with, the registry of prompt
 templates the composer inserts from, the server's own version string for the
 browser footer, the newer published release it last found and the desktop
-app's download of it, the inventory of where the server keeps its files, the
-cleanup of leftover worktrees and migration snapshots (removing old sessions
-in bulk, the Storage category's third cleanup, is in
-[sessions.md](sessions.md#post-apisessionsprune)), and erasing everything Delta
-left on the machine, which stops the server.
+app's download and install of it and restart into it, the inventory of where
+the server keeps its files, the cleanup of leftover worktrees and migration
+snapshots (removing old sessions in bulk, the Storage category's third
+cleanup, is in [sessions.md](sessions.md#post-apisessionsprune)), and erasing
+everything Delta left on the machine, which stops the server.
 Applying a launch option to a session is part of a `new_session` send
 ([sends.md](sends.md#post-apisends)); conventions and error semantics are in
 [README.md](README.md).
@@ -468,6 +468,11 @@ and whether `newer` has an asset this platform may download:
 | `rebuild` | the desktop app, built locally | a hint that it is updated by rebuilding it (`make desktop`) |
 | `none` | the CLI server (the browser version), a desktop app built by the release workflow that could not set up its HTTPS client (`update_unavailable` below), or one whose `newer` has nothing this platform may download (`update_unsupported` below) | the notice and its link only |
 
+`installs` is `true` when this app installs a ready download itself
+([`POST /api/latest-release/install`](#post-apilatest-releaseinstall)): a
+desktop app built by the release workflow, on Linux. Everywhere else it is
+`false`, and a ready download stays as it is.
+
 `download` is the state of `newer`'s download once one has been asked for, and
 `null` otherwise (including a download of an older release than `newer`):
 
@@ -475,9 +480,42 @@ and whether `newer` has an asset this platform may download:
   the transfer is running; `total_bytes` is `null` when the answer did not
   state a size.
 - `{ "state": "ready", "version" }` — downloaded and its sha256 verified,
-  waiting for a later step to apply it.
+  waiting to be installed.
 - `{ "state": "failed", "version", "error" }` — nothing was kept; `error`
   names the cause with its whole chain.
+
+`install` is the state of `newer`'s install once one has been asked for, and
+`null` otherwise — including after the user dismissed the password dialog,
+which leaves the download `ready`:
+
+- `{ "state": "installing", "version" }` — the update helper runs, including
+  while the system asks for an administrator's password.
+- `{ "state": "installed", "version" }` — installed over the running app,
+  or the helper found that version or a newer one installed already (from a
+  terminal, say) and installed nothing;
+  [`POST /api/latest-release/restart`](#post-apilatest-releaserestart) starts
+  the new version. The download stays `ready`.
+- `{ "state": "rejected", "version", "error" }` — the helper rejected the
+  file itself: not a regular file, not matching the release's digest (or the
+  release stating none), or not `delta-desktop` at the requested version;
+  `error` is the helper's one-line reason. The server removed the
+  file and `download` is `null` again, so the next step is
+  [downloading the release again](#post-apilatest-releasedownload), which
+  clears this state. There is no `manual_command`: a file that failed the
+  check is not to be installed by any means.
+- `{ "state": "failed", "version", "error", "manual_command" }` — the helper
+  could not check or install the file for another reason (GitHub out of
+  reach or refusing the request, `dpkg` or `apt-get` failing); `error` is the
+  helper's one-line reason.
+- `{ "state": "unavailable", "version", "error", "manual_command" }` — Delta
+  cannot install updates itself on this machine: `pkexec` or the helper is
+  missing, no polkit authentication agent is running, or the user is not
+  authorized.
+
+`manual_command` is the command that installs the verified file from the
+user's own terminal, `sudo apt install <absolute path of the .deb>` (the path
+single-quoted when a shell would split or expand it). It depends on nothing
+but the file, so it works even when the in-app install does not.
 
 - **200**:
 
@@ -488,19 +526,16 @@ and whether `newer` has an asset this platform may download:
       "url": "https://github.com/x7c1/delta/releases/tag/v0.6.0"
     },
     "offer": "update",
-    "download": {
-      "state": "downloading",
-      "version": "v0.6.0",
-      "received_bytes": 4194304,
-      "total_bytes": 9437184
-    }
+    "download": { "state": "ready", "version": "v0.6.0" },
+    "installs": true,
+    "install": { "state": "installing", "version": "v0.6.0" }
   }
   ```
 
   or, with nothing to tell:
 
   ```json
-  { "newer": null, "offer": "none", "download": null }
+  { "newer": null, "offer": "none", "download": null, "installs": false, "install": null }
   ```
 
 ### `POST /api/latest-release/download`
@@ -509,7 +544,7 @@ Start downloading this platform's asset of the newer release
 [`GET /api/latest-release`](#get-apilatest-release) reports, in the
 background, and answer the download's state; the footer follows it by polling
 `GET /api/latest-release`. Takes no body. This only downloads and verifies:
-nothing is installed or replaced.
+installing is [`POST /api/latest-release/install`](#post-apilatest-releaseinstall).
 
 - **What is downloaded.** Exactly the release `GET /api/latest-release`
   announced, by the release workflow's asset names: on Linux x86_64
@@ -561,6 +596,85 @@ nothing is installed or replaced.
     is outside the prefix above, or it states no `sha256` digest. `error` says
     which. `GET /api/latest-release` offers no Update for such a release, so
     only a request that bypasses the footer meets this.
+
+At startup the server removes the files in `updates/` whose release is not
+newer than its own version (read from the asset name), so an update that was
+installed and restarted into does not linger; a download of a newer release
+is kept.
+
+### `POST /api/latest-release/install`
+
+Start installing the verified download of the newer release over the
+installed app, in the background, and answer the install's state; the footer
+follows it by polling `GET /api/latest-release`. Takes no body: the file and
+the version are the ready download's, never anything a request names. Linux
+desktop apps built by the release workflow only.
+
+- **How.** The server runs, with no shell,
+
+  ```text
+  pkexec /usr/lib/delta-desktop/delta-update-helper install --version <tag> --file <path of the ready download>
+  ```
+
+  `pkexec` shows the system's password dialog for the polkit action
+  `io.github.x7c1.delta.update`, which allows only that helper and asks for
+  an administrator's password every time. The helper copies the file
+  somewhere only root can change it, checks it against the release's digest
+  on GitHub, checks it is `delta-desktop` at the requested, newer version, and
+  installs it with `apt-get`. The server itself never runs as root. Why it is
+  built this way, and what the helper checks, is in the
+  [security guide](../security.md#updates).
+- **Outcome.** `pkexec`'s exit status decides the state
+  `GET /api/latest-release` then reports as `install`: `0` → `installed`;
+  `30` (the installed app is already the requested version or newer, so the
+  helper installed nothing) → `installed` too; `126` (the user dismissed the
+  dialog) → `null` again, the download still `ready`, no error shown; `127`
+  (not authorized, or no polkit agent), or a missing `pkexec` or helper, or
+  one that cannot be started → `unavailable`; `10`–`19` (the helper rejected
+  the file itself) → `rejected`, the file removed and the download cleared;
+  any other status (the helper's other refusals, each with a status of its
+  own, and `apt-get` failures) → `failed`. `rejected` and `failed` carry the
+  helper's one-line reason from its stderr.
+- **One at a time.** A request while an install runs joins it (nothing is
+  started twice); a request after `failed` or `unavailable` tries again; a
+  request after `rejected` is refused (`update_not_ready`) until the release
+  is downloaded again; a request after the same release is installed answers
+  `installed`.
+
+- **202 Accepted**: an install is running (just started, or already running):
+
+  ```json
+  { "state": "installing", "version": "v0.6.0" }
+  ```
+
+- **200**: this release is already installed:
+
+  ```json
+  { "state": "installed", "version": "v0.6.0" }
+  ```
+
+- **409** — refused, with nothing run, `code` naming the case:
+  - `update_cli_launcher`, `update_local_build`, `update_unavailable` — as for
+    [`POST /api/latest-release/download`](#post-apilatest-releasedownload).
+  - `update_install_unsupported` — the app does not install updates itself on
+    this platform (anything but Linux, for now); `installs` is `false` there.
+  - `update_no_newer_release` — no newer release is known.
+  - `update_not_ready` — no verified download of the newer release is ready:
+    none was asked for, it is still running, it failed, or the helper
+    rejected it.
+
+### `POST /api/latest-release/restart`
+
+Restart the desktop app into the update it installed. Takes no body. The
+server answers, then stops serving; the desktop shell starts a detached
+process that waits for the app's process to exit and then runs the installed
+`/usr/bin/delta-desktop`, and exits. The tmux server is left running, as when
+the window is closed, so every Claude Code session keeps running and the new
+process re-adopts them before it serves anything; Codex sessions, which run
+inside the app process, end as on any quit and resume on the next send.
+
+- **204 No Content**: the server is stopping for the restart.
+- **409** `update_not_installed` — no install has ended `installed`.
 
 ## Storage
 

@@ -7,6 +7,7 @@ members = ["crates/*/*"]
 # delta-desktop` (or `make desktop-dev` / `make desktop`).
 default-members = [
     "crates/apps/delta-server",
+    "crates/apps/delta-update-helper",
     "crates/apps/fake-claude",
     "crates/apps/fake-codex",
     "crates/domain/*",
@@ -33,6 +34,7 @@ workspace-fs = { path = "crates/gateway/workspace-fs" }
 git-worktree = { path = "crates/gateway/git-worktree" }
 gh-cli = { path = "crates/gateway/gh-cli" }
 release-feed = { path = "crates/gateway/release-feed" }
+update-installer = { path = "crates/gateway/update-installer" }
 binary-detector = { path = "crates/gateway/binary-detector" }
 delta-wire = { path = "crates/gateway/delta-wire" }
 codex-agent = { path = "crates/gateway/codex-agent" }

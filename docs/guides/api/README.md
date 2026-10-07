@@ -142,9 +142,11 @@ injects it is dev-server only). The API base needs nothing: the build leaves
     `clone_dest_exists` (the one path a clone could land on is already taken —
     there is no fallback naming), or `launch_option_builtin` (a delete aimed at
     a launch option Delta ships), or one of the `update_*` codes from
-    [`POST /api/latest-release/download`](settings.md#post-apilatest-releasedownload)
-    (this server may not download an update, or there is nothing to
-    download). Nothing is mutated in any of these cases.
+    [`POST /api/latest-release/download`](settings.md#post-apilatest-releasedownload),
+    [`/install`](settings.md#post-apilatest-releaseinstall) and
+    [`/restart`](settings.md#post-apilatest-releaserestart) (this server may
+    not update, or there is nothing to download, install or restart into).
+    Nothing is mutated in any of these cases.
   - `415 Unsupported Media Type` — a request body sent with a non-JSON
     `Content-Type`.
   - `422 Unprocessable Entity` — a syntactically valid JSON body that does not

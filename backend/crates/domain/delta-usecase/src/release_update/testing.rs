@@ -8,10 +8,16 @@ use async_trait::async_trait;
 use semver::Version;
 use tokio::sync::{mpsc, Mutex, Notify};
 
-use super::RELEASE_DOWNLOAD_PREFIX;
-use crate::ports::{AssetDownloadError, AssetDownloader, DownloadProgress, ReleaseAsset};
+use super::{lock, Platform, ReleaseUpdate, UpdateDownload, RELEASE_DOWNLOAD_PREFIX};
+use crate::ports::{
+    AssetDownloadError, AssetDownloader, DownloadProgress, InstallError, ReleaseAsset,
+    UpdateInstaller,
+};
 use crate::release_check::RELEASE_PAGE_PREFIX;
 use crate::NewerRelease;
+
+/// The Linux asset of v0.6.0 the tests download.
+pub(super) const LINUX_DEB: &str = "delta-desktop_0.6.0_amd64.deb";
 
 /// An asset named `name` under the pinned download prefix, with a digest.
 pub(super) fn asset(name: &str) -> ReleaseAsset {
@@ -87,4 +93,85 @@ impl AssetDownloader for GatedDownloader {
         let outcome = self.outcome_rx.lock().await.recv().await.unwrap();
         outcome.map(|()| dir.join(&asset.name))
     }
+}
+
+/// An installer whose every install waits until the test hands it an
+/// outcome with [`Self::finish`], recording what it was asked to install.
+pub(super) struct GatedInstaller {
+    asked: std::sync::Mutex<Vec<(String, PathBuf)>>,
+    outcome_tx: mpsc::UnboundedSender<Result<(), InstallError>>,
+    outcome_rx: Mutex<mpsc::UnboundedReceiver<Result<(), InstallError>>>,
+}
+
+impl GatedInstaller {
+    pub(super) fn new() -> Arc<Self> {
+        let (outcome_tx, outcome_rx) = mpsc::unbounded_channel();
+        Arc::new(Self {
+            asked: std::sync::Mutex::new(Vec::new()),
+            outcome_tx,
+            outcome_rx: Mutex::new(outcome_rx),
+        })
+    }
+
+    /// The `(version, file)` of every install started so far.
+    pub(super) fn asked(&self) -> Vec<(String, PathBuf)> {
+        self.asked.lock().unwrap().clone()
+    }
+
+    /// End the running (or next) install with `outcome`.
+    pub(super) fn finish(&self, outcome: Result<(), InstallError>) {
+        self.outcome_tx.send(outcome).unwrap();
+    }
+}
+
+#[async_trait]
+impl UpdateInstaller for GatedInstaller {
+    async fn install(&self, version: &str, file: &Path) -> Result<(), InstallError> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push((version.to_owned(), file.to_path_buf()));
+        self.outcome_rx.lock().await.recv().await.unwrap()
+    }
+}
+
+/// An update offered on `platform`, into `/data/updates`, through
+/// `downloader` and `installer`.
+pub(super) fn update_on(
+    platform: Platform,
+    downloader: &Arc<GatedDownloader>,
+    installer: &Arc<GatedInstaller>,
+) -> ReleaseUpdate {
+    ReleaseUpdate::offered(
+        platform,
+        PathBuf::from("/data/updates"),
+        Arc::clone(downloader) as Arc<dyn AssetDownloader>,
+        Arc::clone(installer) as Arc<dyn UpdateInstaller>,
+    )
+}
+
+/// An update offered on Linux x86_64 through `downloader`.
+pub(super) fn linux_update(downloader: &Arc<GatedDownloader>) -> ReleaseUpdate {
+    update_on(
+        Platform::new("linux", "x86_64"),
+        downloader,
+        &GatedInstaller::new(),
+    )
+}
+
+/// The newer release v0.6.0, carrying [`LINUX_DEB`].
+pub(super) fn v060() -> NewerRelease {
+    newer_release("0.6.0", vec![asset(LINUX_DEB)])
+}
+
+/// Wait until the background transfer has recorded its outcome.
+pub(super) async fn settled(update: &ReleaseUpdate) -> UpdateDownload {
+    for _ in 0..200 {
+        match lock(&update.download).clone() {
+            Some(UpdateDownload::Downloading { .. }) | None => {}
+            Some(done) => return done,
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    panic!("the download never settled");
 }

@@ -21,8 +21,8 @@ use crate::rest::{
     WireQuestionAnswerRequest, WireQuestionCancelRequest, WireRemoveWorktreeRequest,
     WireRepositoriesResponse, WireSendResponse, WireSendsResponse, WireSessionsResponse,
     WireStorageResponse, WireStorageWorktreesResponse, WireThreadsResponse, WireUpdateDownload,
-    WireUpdateLaunchOptionRequest, WireUpdatePromptTemplateRequest, WireVersionResponse,
-    WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireUpdateInstall, WireUpdateLaunchOptionRequest, WireUpdatePromptTemplateRequest,
+    WireVersionResponse, WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 use crate::{WireCommsFrame, WireSessionEvent};
 
@@ -259,7 +259,8 @@ declare_endpoints! {
     /// from memory; the request never reaches GitHub. Also says what the
     /// browser may offer next to it (`update`, `rebuild` or `none`, by who
     /// launched the server, where it was built, and whether the release has
-    /// an asset this platform may download) and how its download is going.
+    /// an asset this platform may download), how its download is going, and
+    /// whether this app installs it itself and how that install is going.
     GetLatestRelease: GET "/api/latest-release", response = WireLatestReleaseResponse;
 
     /// Starts downloading this platform's asset of the newer release into the
@@ -270,6 +271,23 @@ declare_endpoints! {
     /// workflow and a newer release with this platform's asset is known.
     DownloadLatestRelease: POST "/api/latest-release/download",
         response = WireUpdateDownload;
+
+    /// Starts installing the verified download of the newer release over the
+    /// installed app, through Delta's update helper run as root by `pkexec`
+    /// (the system asks for an administrator's password); the install runs in
+    /// the background and `GetLatestRelease` reports it. Takes no body — the
+    /// file and the version are the ready download's, never the request's;
+    /// answers the install's state. Refused with a `409` and a stable code
+    /// unless this is a desktop app built by the release workflow on Linux
+    /// and a verified download of the newer release is ready.
+    InstallLatestRelease: POST "/api/latest-release/install",
+        response = WireUpdateInstall;
+
+    /// Restarts the desktop app into the update it installed: the server
+    /// answers, then stops, and the desktop shell starts the installed app
+    /// again once this process has exited. Takes no body. Refused with a `409`
+    /// (`update_not_installed`) unless an install has ended `installed`.
+    RestartLatestRelease: POST "/api/latest-release/restart";
 
     /// Where this running Delta keeps its files — the data directory and every
     /// path derived from it, the worktree base, the transcript root, the tmux

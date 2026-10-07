@@ -1,9 +1,11 @@
-//! Downloading the newer release the release check found.
+//! Downloading the newer release the release check found, installing it,
+//! and restarting into it.
 //!
-//! [`ReleaseUpdate`] is the first step of an in-app update: it downloads this
-//! platform's asset of the newer release into the update directory and
-//! verifies its sha256. It does not apply anything; replacing the app and
-//! restarting it are later steps.
+//! [`ReleaseUpdate`] takes an in-app update through its steps: it downloads
+//! this platform's asset of the newer release into the update directory and
+//! verifies its sha256; on Linux it then installs the verified file through
+//! the [`UpdateInstaller`] and lets the app restart into it. Elsewhere the
+//! download is as far as it goes for now.
 //!
 //! # Who may update
 //!
@@ -24,12 +26,27 @@
 //! ([`check_download_url`]), stating a sha256 digest. The [`AssetDownloader`]
 //! verifies the file against that digest.
 //!
-//! # One download at a time
+//! # What is installed
 //!
-//! The transfer runs in the background and its state ([`UpdateDownload`]) is
-//! held here for the browser to read. A request while one runs joins it rather
-//! than starting a second; a request after a failure starts over; a request
-//! after the same release is ready answers ready without downloading again.
+//! Only a verified download of the newer release that is ready: the install
+//! is handed that file and that release's version, never anything a request
+//! names. The installer checks the file again on its own side. When it
+//! rejects the file itself ([`UpdateInstall::Rejected`]), the file is removed
+//! and the release has to be downloaded again: a file that failed the check
+//! is never offered for install, from a terminal included. When Delta cannot
+//! install it ([`UpdateInstall::Unavailable`]) or the install fails for
+//! another reason ([`UpdateInstall::Failed`]), the state carries the command
+//! that installs the file from the user's own terminal
+//! ([`manual_install_command`]). A dismissed password prompt leaves the
+//! download ready, as if nothing had been asked.
+//!
+//! # One at a time
+//!
+//! The transfer and the install each run in the background and their states
+//! ([`UpdateDownload`], [`UpdateInstall`]) are held here for the browser to
+//! read. A request while one runs joins it rather than starting a second; a
+//! request after a failure starts over; a request after the same release is
+//! ready (or installed) answers that without doing it again.
 
 mod asset_choice;
 pub use asset_choice::{
@@ -39,51 +56,70 @@ mod build_origin;
 pub use build_origin::BuildOrigin;
 mod launcher;
 pub use launcher::Launcher;
+mod manual_install;
+pub use manual_install::manual_install_command;
 mod not_offered;
 pub use not_offered::NotOffered;
 mod platform;
 pub use platform::Platform;
 mod update_download;
 pub use update_download::UpdateDownload;
+mod update_install;
+pub use update_install::UpdateInstall;
 mod update_offer;
 pub use update_offer::UpdateOffer;
 mod update_refusal;
 pub use update_refusal::UpdateRefusal;
 
+mod install;
+mod start;
+
 #[cfg(test)]
 mod testing;
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::ports::{AssetDownloader, DownloadProgress};
-use crate::release_check::with_causes;
+use crate::ports::{AssetDownloader, UpdateInstaller};
 use crate::NewerRelease;
 
-/// The update download: whether it is offered, and the state of the last one.
+/// The in-app update: whether it is offered, and the state of the last
+/// download and install.
 pub struct ReleaseUpdate {
     availability: Availability,
     download: Arc<Mutex<Option<UpdateDownload>>>,
+    install: Arc<Mutex<Option<UpdateInstall>>>,
 }
 
 enum Availability {
     NotOffered(NotOffered),
-    Offered {
-        platform: Platform,
-        dir: PathBuf,
-        downloader: Arc<dyn AssetDownloader>,
-    },
+    Offered(Offered),
+}
+
+/// What an app that may update updates with.
+struct Offered {
+    platform: Platform,
+    dir: PathBuf,
+    downloader: Arc<dyn AssetDownloader>,
+    installer: Arc<dyn UpdateInstaller>,
 }
 
 impl ReleaseUpdate {
     /// Updates offered: `platform`'s asset is downloaded into `dir` (the data
-    /// directory's `updates/`) through `downloader`.
-    pub fn offered(platform: Platform, dir: PathBuf, downloader: Arc<dyn AssetDownloader>) -> Self {
-        Self::with(Availability::Offered {
+    /// directory's `updates/`) through `downloader`, and installed through
+    /// `installer` where the app installs updates itself.
+    pub fn offered(
+        platform: Platform,
+        dir: PathBuf,
+        downloader: Arc<dyn AssetDownloader>,
+        installer: Arc<dyn UpdateInstaller>,
+    ) -> Self {
+        Self::with(Availability::Offered(Offered {
             platform,
             dir,
             downloader,
-        })
+            installer,
+        }))
     }
 
     /// Updates not offered, for `reason`: every download is refused.
@@ -95,6 +131,7 @@ impl ReleaseUpdate {
         Self {
             availability,
             download: Arc::new(Mutex::new(None)),
+            install: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -105,8 +142,8 @@ impl ReleaseUpdate {
     pub fn offer(&self, newer: Option<&NewerRelease>) -> UpdateOffer {
         match &self.availability {
             Availability::NotOffered(reason) => reason.offer(),
-            Availability::Offered { platform, .. } => {
-                match newer.map(|newer| downloadable_asset(platform, newer)) {
+            Availability::Offered(offered) => {
+                match newer.map(|newer| downloadable_asset(&offered.platform, newer)) {
                     Some(Ok(_)) => UpdateOffer::Update,
                     Some(Err(_)) | None => UpdateOffer::None,
                 }
@@ -114,142 +151,65 @@ impl ReleaseUpdate {
         }
     }
 
+    /// Whether this app installs a ready download itself ([`Self::install`]),
+    /// so the browser offers Install once the download is ready.
+    pub fn installs(&self) -> bool {
+        self.may_update()
+            .is_ok_and(|offered| offered.platform.installs_in_app())
+    }
+
     /// The state of `newer`'s download, if one was asked for. A download of
     /// another release is not `newer`'s, and reads as none.
     pub fn download_of(&self, newer: Option<&NewerRelease>) -> Option<UpdateDownload> {
         let newer = newer?;
-        self.lock()
+        lock(&self.download)
             .clone()
             .filter(|download| download.version() == newer.display_version())
     }
 
-    /// Start downloading `newer` (the release check's newer release), or
-    /// report the download already running or done.
-    ///
-    /// Refused, with nothing fetched, when updates are not offered, when there
-    /// is no newer release, or when it has no asset this platform may download
-    /// ([`downloadable_asset`]). Otherwise answers the download's
-    /// state: the one running (whichever release it is of), `Ready` when this
-    /// release is already downloaded, or a fresh `Downloading` whose transfer
-    /// now runs in the background (a failed download starts over).
-    pub fn start(&self, newer: Option<NewerRelease>) -> Result<UpdateDownload, UpdateRefusal> {
-        let (platform, dir, downloader) = match &self.availability {
-            Availability::NotOffered(reason) => {
-                return Err(match reason {
-                    NotOffered::CliLauncher => UpdateRefusal::CliLauncher,
-                    NotOffered::LocalBuild => UpdateRefusal::LocalBuild,
-                    NotOffered::NoDownloader => UpdateRefusal::NoDownloader,
-                })
-            }
-            Availability::Offered {
-                platform,
-                dir,
-                downloader,
-            } => (platform, dir, downloader),
-        };
-        let newer = newer.ok_or(UpdateRefusal::NoNewerRelease)?;
-        let version = newer.display_version();
+    /// The state of `newer`'s install, if one was asked for and has not been
+    /// dismissed. An install of another release is not `newer`'s, and reads
+    /// as none.
+    pub fn install_of(&self, newer: Option<&NewerRelease>) -> Option<UpdateInstall> {
+        let newer = newer?;
+        lock(&self.install)
+            .clone()
+            .filter(|install| install.version() == newer.display_version())
+    }
 
-        let mut current = self.lock();
-        match &*current {
-            Some(running @ UpdateDownload::Downloading { .. }) => return Ok(running.clone()),
-            Some(ready @ UpdateDownload::Ready { version: done, .. }) if *done == version => {
-                return Ok(ready.clone())
-            }
-            _ => {}
+    /// The release the app may restart into: the one installed, if an install
+    /// has ended `Installed`. Refused otherwise.
+    pub fn restart(&self) -> Result<String, UpdateRefusal> {
+        match &*lock(&self.install) {
+            Some(UpdateInstall::Installed { version }) => Ok(version.clone()),
+            _ => Err(UpdateRefusal::NotInstalled),
         }
-        let asset = downloadable_asset(platform, &newer)?.clone();
-
-        let started = UpdateDownload::Downloading {
-            version: version.clone(),
-            progress: DownloadProgress {
-                received: 0,
-                total: None,
-            },
-        };
-        *current = Some(started.clone());
-        drop(current);
-
-        tracing::info!(
-            version = %version,
-            asset = %asset.name,
-            url = %asset.download_url,
-            "downloading the newer release of Delta"
-        );
-        let slot = Arc::clone(&self.download);
-        let downloader = Arc::clone(downloader);
-        let dir = dir.clone();
-        tokio::spawn(async move {
-            let progress_slot = Arc::clone(&slot);
-            let report = move |progress: DownloadProgress| {
-                let mut current = progress_slot.lock().expect("update mutex poisoned");
-                if let Some(UpdateDownload::Downloading { progress: held, .. }) = &mut *current {
-                    *held = progress;
-                }
-            };
-            let done = match downloader.download(&asset, &dir, &report).await {
-                Ok(path) => {
-                    tracing::info!(
-                        version = %version,
-                        path = %path.display(),
-                        "downloaded and verified the newer release of Delta"
-                    );
-                    UpdateDownload::Ready { version, path }
-                }
-                Err(err) => {
-                    let cause = with_causes(&err);
-                    tracing::warn!(
-                        version = %version,
-                        url = %asset.download_url,
-                        error = %cause,
-                        "could not download the newer release of Delta"
-                    );
-                    UpdateDownload::Failed { version, cause }
-                }
-            };
-            *slot.lock().expect("update mutex poisoned") = Some(done);
-        });
-        Ok(started)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Option<UpdateDownload>> {
-        self.download.lock().expect("update mutex poisoned")
+    /// What this app updates with, or why it may not update.
+    fn may_update(&self) -> Result<&Offered, UpdateRefusal> {
+        match &self.availability {
+            Availability::NotOffered(reason) => Err(match reason {
+                NotOffered::CliLauncher => UpdateRefusal::CliLauncher,
+                NotOffered::LocalBuild => UpdateRefusal::LocalBuild,
+                NotOffered::NoDownloader => UpdateRefusal::NoDownloader,
+            }),
+            Availability::Offered(offered) => Ok(offered),
+        }
     }
+}
+
+fn lock<T>(slot: &Mutex<T>) -> MutexGuard<'_, T> {
+    slot.lock().expect("update mutex poisoned")
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
-    use super::testing::{asset, newer_release, GatedDownloader};
+    use super::testing::{
+        asset, linux_update, newer_release, update_on, v060, GatedDownloader, GatedInstaller,
+        LINUX_DEB,
+    };
     use super::*;
-    use crate::ports::AssetDownloadError;
-
-    const LINUX_DEB: &str = "delta-desktop_0.6.0_amd64.deb";
-
-    fn linux_update(downloader: &Arc<GatedDownloader>) -> ReleaseUpdate {
-        ReleaseUpdate::offered(
-            Platform::new("linux", "x86_64"),
-            PathBuf::from("/data/updates"),
-            Arc::clone(downloader) as Arc<dyn AssetDownloader>,
-        )
-    }
-
-    fn v060() -> NewerRelease {
-        newer_release("0.6.0", vec![asset(LINUX_DEB)])
-    }
-
-    /// Wait until the background transfer has recorded its outcome.
-    async fn settled(update: &ReleaseUpdate) -> UpdateDownload {
-        for _ in 0..200 {
-            match update.lock().clone() {
-                Some(UpdateDownload::Downloading { .. }) | None => {}
-                Some(done) => return done,
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        panic!("the download never settled");
-    }
 
     #[test]
     fn a_build_that_may_not_update_is_refused_before_anything_else() {
@@ -270,18 +230,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn no_newer_release_is_refused() {
-        let downloader = GatedDownloader::new();
-        let update = linux_update(&downloader);
-        assert_eq!(update.offer(None), UpdateOffer::None);
-        assert!(matches!(
-            update.start(None),
-            Err(UpdateRefusal::NoNewerRelease)
-        ));
-        assert_eq!(downloader.calls(), 0);
-    }
-
     #[test]
     fn update_is_offered_only_for_a_release_this_app_would_download() {
         let downloader = GatedDownloader::new();
@@ -297,100 +245,11 @@ mod tests {
             assert_eq!(update.offer(Some(&release)), UpdateOffer::None);
         }
 
-        let elsewhere = ReleaseUpdate::offered(
+        let elsewhere = update_on(
             Platform::new("windows", "x86_64"),
-            PathBuf::from("/data/updates"),
-            Arc::clone(&downloader) as Arc<dyn AssetDownloader>,
+            &downloader,
+            &GatedInstaller::new(),
         );
         assert_eq!(elsewhere.offer(Some(&v060())), UpdateOffer::None);
-    }
-
-    #[tokio::test]
-    async fn an_asset_outside_the_pinned_prefix_is_refused_before_any_request() {
-        let downloader = GatedDownloader::new();
-        let update = linux_update(&downloader);
-        let mut release = v060();
-        release.assets[0].download_url = format!("https://example.com/{LINUX_DEB}");
-        assert!(matches!(
-            update.start(Some(release)),
-            Err(UpdateRefusal::UntrustedUrl(_))
-        ));
-        tokio::task::yield_now().await;
-        assert_eq!(downloader.calls(), 0);
-        assert_eq!(update.download_of(Some(&v060())), None);
-    }
-
-    #[tokio::test]
-    async fn a_download_runs_once_and_ends_ready() {
-        let downloader = GatedDownloader::new();
-        let update = linux_update(&downloader);
-
-        let started = update.start(Some(v060())).unwrap();
-        assert!(matches!(started, UpdateDownload::Downloading { .. }));
-        // A second request while the first runs joins it.
-        assert!(matches!(
-            update.start(Some(v060())).unwrap(),
-            UpdateDownload::Downloading { .. }
-        ));
-        downloader.finish(Ok(()));
-        let done = settled(&update).await;
-        assert_eq!(
-            done,
-            UpdateDownload::Ready {
-                version: "v0.6.0".into(),
-                path: Path::new("/data/updates").join(LINUX_DEB),
-            }
-        );
-        // Ready for this release: answered without downloading again.
-        assert_eq!(update.start(Some(v060())).unwrap(), done);
-        assert_eq!(downloader.calls(), 1);
-        assert_eq!(update.download_of(Some(&v060())), Some(done));
-        // Not the download of another release.
-        let v070 = newer_release("0.7.0", vec![asset("delta-desktop_0.7.0_amd64.deb")]);
-        assert_eq!(update.download_of(Some(&v070)), None);
-    }
-
-    #[tokio::test]
-    async fn a_failed_download_reports_its_cause_and_a_retry_starts_over() {
-        let downloader = GatedDownloader::new();
-        let update = linux_update(&downloader);
-
-        update.start(Some(v060())).unwrap();
-        downloader.finish(Err(AssetDownloadError::Status(404)));
-        assert_eq!(
-            settled(&update).await,
-            UpdateDownload::Failed {
-                version: "v0.6.0".into(),
-                cause: "the download answered with HTTP status 404".into(),
-            }
-        );
-
-        assert!(matches!(
-            update.start(Some(v060())).unwrap(),
-            UpdateDownload::Downloading { .. }
-        ));
-        downloader.finish(Ok(()));
-        assert!(matches!(
-            settled(&update).await,
-            UpdateDownload::Ready { .. }
-        ));
-        assert_eq!(downloader.calls(), 2);
-    }
-
-    #[tokio::test]
-    async fn progress_is_reported_while_the_transfer_runs() {
-        let downloader = GatedDownloader::new();
-        let update = linux_update(&downloader);
-        update.start(Some(v060())).unwrap();
-        downloader.wait_started().await;
-        assert_eq!(
-            update.download_of(Some(&v060())),
-            Some(UpdateDownload::Downloading {
-                version: "v0.6.0".into(),
-                progress: GatedDownloader::PROGRESS,
-            })
-        );
-        downloader.finish(Ok(()));
-        settled(&update).await;
     }
 }

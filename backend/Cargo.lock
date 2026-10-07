@@ -836,12 +836,14 @@ dependencies = [
  "gh-cli",
  "git-worktree",
  "release-feed",
+ "semver",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "tmux-driver",
  "tokio",
  "tracing",
+ "update-installer",
  "workspace-fs",
 ]
 
@@ -863,8 +865,10 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
+ "tempfile",
  "tokio",
  "tracing",
+ "update-installer",
 ]
 
 [[package]]
@@ -934,6 +938,23 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "delta-update-helper"
+version = "0.5.0"
+dependencies = [
+ "libc",
+ "reqwest",
+ "rustls",
+ "rustls-platform-verifier",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -3397,6 +3418,7 @@ dependencies = [
  "reqwest",
  "rustls",
  "rustls-platform-verifier",
+ "semver",
  "serde",
  "serde_json",
  "sha2",
@@ -5126,6 +5148,17 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+
+[[package]]
+name = "update-installer"
+version = "0.5.0"
+dependencies = [
+ "async-trait",
+ "delta-usecase",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "url"

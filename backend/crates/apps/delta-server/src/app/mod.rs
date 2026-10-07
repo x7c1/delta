@@ -97,6 +97,8 @@ fn api_router(state: AppState) -> Router {
             endpoint::DownloadLatestRelease,
             api::download_latest_release,
         )
+        .bind(endpoint::InstallLatestRelease, api::install_latest_release)
+        .bind(endpoint::RestartLatestRelease, api::restart_latest_release)
         .bind(endpoint::GetStorage, api::get_storage)
         .bind(endpoint::ListOrphanWorktrees, api::list_orphan_worktrees)
         .bind(endpoint::RemoveOrphanWorktree, api::remove_orphan_worktree)

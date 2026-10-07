@@ -1,0 +1,410 @@
+//! [`ReleaseUpdate::install`]: installing a verified download in the background.
+
+use std::io::ErrorKind;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+use super::{
+    lock, manual_install_command, ReleaseUpdate, UpdateDownload, UpdateInstall, UpdateRefusal,
+};
+use crate::ports::InstallError;
+use crate::NewerRelease;
+
+impl ReleaseUpdate {
+    /// Start installing the verified download of `newer`, or report the
+    /// install already running or done.
+    ///
+    /// Refused, with nothing run, when updates are not offered, when this
+    /// platform does not install in the app, when there is no newer release,
+    /// or when no verified download of it is ready. Otherwise answers the
+    /// install's state: the one running, `Installed` when this release is
+    /// already installed, or a fresh `Installing` whose install now runs in
+    /// the background (after a failure, or when Delta could not install,
+    /// it tries again).
+    ///
+    /// The install ends `Installed`, `Rejected`, `Failed` or `Unavailable`;
+    /// a dismissed password prompt clears the state, so the download reads as
+    /// ready again. When the installer rejects the file itself, the file is
+    /// removed and the download cleared, so the next step is downloading the
+    /// release again ([`Self::start`]), never installing that file.
+    pub fn install(&self, newer: Option<NewerRelease>) -> Result<UpdateInstall, UpdateRefusal> {
+        let offered = self.may_update()?;
+        if !offered.platform.installs_in_app() {
+            return Err(UpdateRefusal::InstallUnsupported {
+                platform: offered.platform.to_string(),
+            });
+        }
+        let newer = newer.ok_or(UpdateRefusal::NoNewerRelease)?;
+        let version = newer.display_version();
+        let path = match self.download_of(Some(&newer)) {
+            Some(UpdateDownload::Ready { path, .. }) => path,
+            _ => return Err(UpdateRefusal::NotReady),
+        };
+
+        let mut current = lock(&self.install);
+        match &*current {
+            Some(running @ UpdateInstall::Installing { .. }) => return Ok(running.clone()),
+            Some(done @ UpdateInstall::Installed { version: installed })
+                if *installed == version =>
+            {
+                return Ok(done.clone())
+            }
+            _ => {}
+        }
+        let started = UpdateInstall::Installing {
+            version: version.clone(),
+        };
+        *current = Some(started.clone());
+        drop(current);
+
+        tracing::info!(
+            version = %version,
+            path = %path.display(),
+            "installing the newer release of Delta"
+        );
+        let slot = Arc::clone(&self.install);
+        let download = Arc::clone(&self.download);
+        let installer = Arc::clone(&offered.installer);
+        tokio::spawn(async move {
+            let manual_command = manual_install_command(&path);
+            let done = match installer.install(&version, &path).await {
+                Ok(()) => {
+                    tracing::info!(version = %version, "installed the newer release of Delta");
+                    Some(UpdateInstall::Installed { version })
+                }
+                Err(InstallError::Dismissed) => {
+                    tracing::info!(
+                        version = %version,
+                        "the install of the newer release of Delta was dismissed"
+                    );
+                    None
+                }
+                Err(err @ (InstallError::Unavailable(_) | InstallError::Unrunnable { .. })) => {
+                    tracing::warn!(
+                        version = %version,
+                        error = %err,
+                        manual_command = %manual_command,
+                        "Delta cannot install the newer release itself"
+                    );
+                    Some(UpdateInstall::Unavailable {
+                        version,
+                        cause: err.to_string(),
+                        manual_command,
+                    })
+                }
+                Err(InstallError::Rejected(cause)) => {
+                    tracing::warn!(
+                        version = %version,
+                        path = %path.display(),
+                        error = %cause,
+                        "the newer release of Delta was rejected: removing its download"
+                    );
+                    discard(&download, &path);
+                    Some(UpdateInstall::Rejected { version, cause })
+                }
+                Err(InstallError::Failed(cause)) => {
+                    tracing::warn!(
+                        version = %version,
+                        error = %cause,
+                        manual_command = %manual_command,
+                        "could not install the newer release of Delta"
+                    );
+                    Some(UpdateInstall::Failed {
+                        version,
+                        cause,
+                        manual_command,
+                    })
+                }
+            };
+            *lock(&slot) = done;
+        });
+        Ok(started)
+    }
+}
+
+/// Remove the rejected download at `path`, and the `Ready` state that
+/// points at it, so it is neither offered for install again nor left in the
+/// update directory. A file that cannot be removed is logged; the state is
+/// cleared regardless.
+fn discard(download: &Mutex<Option<UpdateDownload>>, path: &Path) {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => tracing::warn!(
+            path = %path.display(),
+            error = %err,
+            "could not remove the rejected download of the newer release of Delta"
+        ),
+    }
+    let mut current = lock(download);
+    if matches!(&*current, Some(UpdateDownload::Ready { path: ready, .. }) if ready == path) {
+        *current = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::super::testing::{
+        asset, newer_release, settled, update_on, v060, GatedDownloader, GatedInstaller, LINUX_DEB,
+    };
+    use super::*;
+    use crate::release_update::{NotOffered, Platform};
+
+    /// A Linux update whose download of v0.6.0 is ready, installing through
+    /// `installer`.
+    async fn ready_linux_update(installer: &Arc<GatedInstaller>) -> ReleaseUpdate {
+        let downloader = GatedDownloader::new();
+        let update = update_on(Platform::new("linux", "x86_64"), &downloader, installer);
+        update.start(Some(v060())).unwrap();
+        downloader.finish(Ok(()));
+        settled(&update).await;
+        update
+    }
+
+    /// Wait until the background install has recorded its outcome (`None`
+    /// once dismissed).
+    async fn install_settled(update: &ReleaseUpdate) -> Option<UpdateInstall> {
+        for _ in 0..200 {
+            match lock(&update.install).clone() {
+                Some(UpdateInstall::Installing { .. }) => {}
+                done => return done,
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!("the install never settled");
+    }
+
+    const MANUAL: &str = "sudo apt install /data/updates/delta-desktop_0.6.0_amd64.deb";
+
+    #[tokio::test]
+    async fn an_install_is_refused_unless_a_verified_download_is_ready() {
+        for reason in [
+            NotOffered::CliLauncher,
+            NotOffered::LocalBuild,
+            NotOffered::NoDownloader,
+        ] {
+            let update = ReleaseUpdate::not_offered(reason);
+            assert!(!update.installs());
+            assert!(update.install(Some(v060())).is_err());
+        }
+
+        let installer = GatedInstaller::new();
+        let downloader = GatedDownloader::new();
+        let mac = update_on(Platform::new("macos", "aarch64"), &downloader, &installer);
+        assert!(!mac.installs());
+        assert!(matches!(
+            mac.install(Some(v060())),
+            Err(UpdateRefusal::InstallUnsupported { .. })
+        ));
+
+        let linux = update_on(Platform::new("linux", "x86_64"), &downloader, &installer);
+        assert!(linux.installs());
+        assert!(matches!(
+            linux.install(None),
+            Err(UpdateRefusal::NoNewerRelease)
+        ));
+        // Not downloaded yet, then downloading.
+        assert!(matches!(
+            linux.install(Some(v060())),
+            Err(UpdateRefusal::NotReady)
+        ));
+        linux.start(Some(v060())).unwrap();
+        assert!(matches!(
+            linux.install(Some(v060())),
+            Err(UpdateRefusal::NotReady)
+        ));
+        downloader.finish(Ok(()));
+        settled(&linux).await;
+        // Ready, but for another release than the newer one.
+        let v070 = newer_release("0.7.0", vec![asset("delta-desktop_0.7.0_amd64.deb")]);
+        assert!(matches!(
+            linux.install(Some(v070)),
+            Err(UpdateRefusal::NotReady)
+        ));
+        tokio::task::yield_now().await;
+        assert!(installer.asked().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_install_runs_once_and_ends_installed() {
+        let installer = GatedInstaller::new();
+        let update = ready_linux_update(&installer).await;
+        assert!(matches!(update.restart(), Err(UpdateRefusal::NotInstalled)));
+
+        let installing = UpdateInstall::Installing {
+            version: "v0.6.0".into(),
+        };
+        assert_eq!(update.install(Some(v060())).unwrap(), installing);
+        // A second request while the first runs starts nothing.
+        assert_eq!(update.install(Some(v060())).unwrap(), installing);
+        assert_eq!(update.install_of(Some(&v060())), Some(installing));
+        assert!(matches!(update.restart(), Err(UpdateRefusal::NotInstalled)));
+
+        installer.finish(Ok(()));
+        let installed = UpdateInstall::Installed {
+            version: "v0.6.0".into(),
+        };
+        assert_eq!(install_settled(&update).await, Some(installed.clone()));
+        assert_eq!(update.install(Some(v060())).unwrap(), installed);
+        assert_eq!(
+            installer.asked(),
+            vec![(
+                "v0.6.0".to_owned(),
+                Path::new("/data/updates").join(LINUX_DEB)
+            )]
+        );
+        assert_eq!(update.restart().unwrap(), "v0.6.0");
+    }
+
+    #[tokio::test]
+    async fn a_dismissed_install_leaves_the_download_ready() {
+        let installer = GatedInstaller::new();
+        let update = ready_linux_update(&installer).await;
+        update.install(Some(v060())).unwrap();
+        installer.finish(Err(InstallError::Dismissed));
+        assert_eq!(install_settled(&update).await, None);
+        assert_eq!(update.install_of(Some(&v060())), None);
+        assert!(matches!(
+            update.download_of(Some(&v060())),
+            Some(UpdateDownload::Ready { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_install_delta_cannot_run_carries_the_manual_command() {
+        let installer = GatedInstaller::new();
+        let update = ready_linux_update(&installer).await;
+        update.install(Some(v060())).unwrap();
+        installer.finish(Err(InstallError::Unavailable(
+            "no authentication agent".into(),
+        )));
+        assert_eq!(
+            install_settled(&update).await,
+            Some(UpdateInstall::Unavailable {
+                version: "v0.6.0".into(),
+                cause: "Delta cannot install the update itself: no authentication agent".into(),
+                manual_command: MANUAL.into(),
+            })
+        );
+        assert!(matches!(update.restart(), Err(UpdateRefusal::NotInstalled)));
+
+        // A new request tries again.
+        assert!(matches!(
+            update.install(Some(v060())).unwrap(),
+            UpdateInstall::Installing { .. }
+        ));
+        installer.finish(Ok(()));
+        assert!(matches!(
+            install_settled(&update).await,
+            Some(UpdateInstall::Installed { .. })
+        ));
+        assert_eq!(installer.asked().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_rejected_file_is_removed_and_the_release_downloaded_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let downloader = GatedDownloader::new();
+        let installer = GatedInstaller::new();
+        let update = ReleaseUpdate::offered(
+            Platform::new("linux", "x86_64"),
+            dir.path().to_path_buf(),
+            Arc::clone(&downloader) as Arc<dyn crate::ports::AssetDownloader>,
+            Arc::clone(&installer) as Arc<dyn crate::ports::UpdateInstaller>,
+        );
+        update.start(Some(v060())).unwrap();
+        downloader.finish(Ok(()));
+        settled(&update).await;
+        let file = dir.path().join(LINUX_DEB);
+        std::fs::write(&file, b"not the release").unwrap();
+
+        update.install(Some(v060())).unwrap();
+        installer.finish(Err(InstallError::Rejected(
+            "the update file's sha256 is 00, not release v0.6.0's ff".into(),
+        )));
+        let rejected = UpdateInstall::Rejected {
+            version: "v0.6.0".into(),
+            cause: "the update file's sha256 is 00, not release v0.6.0's ff".into(),
+        };
+        assert_eq!(install_settled(&update).await, Some(rejected.clone()));
+        assert!(!file.exists());
+        assert_eq!(update.download_of(Some(&v060())), None);
+        // Not installable again: the file is gone.
+        assert!(matches!(
+            update.install(Some(v060())),
+            Err(UpdateRefusal::NotReady)
+        ));
+        assert_eq!(update.install_of(Some(&v060())), Some(rejected));
+
+        // Downloading again clears the rejection and leads to Install again.
+        update.start(Some(v060())).unwrap();
+        assert_eq!(update.install_of(Some(&v060())), None);
+        downloader.finish(Ok(()));
+        settled(&update).await;
+        assert!(matches!(
+            update.install(Some(v060())).unwrap(),
+            UpdateInstall::Installing { .. }
+        ));
+        installer.finish(Ok(()));
+        assert!(matches!(
+            install_settled(&update).await,
+            Some(UpdateInstall::Installed { .. })
+        ));
+    }
+
+    /// The installer also succeeds when the installed app is that version or
+    /// newer already (installed from a terminal, say): the update reads as
+    /// installed, and its file is kept, unlike a rejected one.
+    #[tokio::test]
+    async fn an_installed_update_keeps_its_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let downloader = GatedDownloader::new();
+        let installer = GatedInstaller::new();
+        let update = ReleaseUpdate::offered(
+            Platform::new("linux", "x86_64"),
+            dir.path().to_path_buf(),
+            Arc::clone(&downloader) as Arc<dyn crate::ports::AssetDownloader>,
+            Arc::clone(&installer) as Arc<dyn crate::ports::UpdateInstaller>,
+        );
+        update.start(Some(v060())).unwrap();
+        downloader.finish(Ok(()));
+        settled(&update).await;
+        let file = dir.path().join(LINUX_DEB);
+        std::fs::write(&file, b"the release").unwrap();
+
+        update.install(Some(v060())).unwrap();
+        installer.finish(Ok(()));
+        assert_eq!(
+            install_settled(&update).await,
+            Some(UpdateInstall::Installed {
+                version: "v0.6.0".into()
+            })
+        );
+        assert!(file.exists());
+        assert!(matches!(
+            update.download_of(Some(&v060())),
+            Some(UpdateDownload::Ready { .. })
+        ));
+        assert_eq!(update.restart().unwrap(), "v0.6.0");
+    }
+
+    #[tokio::test]
+    async fn a_failed_install_carries_the_reason_and_the_manual_command() {
+        let installer = GatedInstaller::new();
+        let update = ready_linux_update(&installer).await;
+        update.install(Some(v060())).unwrap();
+        installer.finish(Err(InstallError::Failed(
+            "apt-get could not install the update: E: broken".into(),
+        )));
+        assert_eq!(
+            install_settled(&update).await,
+            Some(UpdateInstall::Failed {
+                version: "v0.6.0".into(),
+                cause: "apt-get could not install the update: E: broken".into(),
+                manual_command: MANUAL.into(),
+            })
+        );
+    }
+}

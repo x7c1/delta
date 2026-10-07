@@ -31,6 +31,7 @@ import type {
   CloneRootsResponse,
   LatestReleaseResponse,
   UpdateDownload,
+  UpdateInstall,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -171,7 +172,11 @@ export interface ApiClientOptions {
  * the release has nothing this platform may download. The footer offers
  * Update only when `offer` is `update`, which rules out every refusal unless
  * the newer release changed in between, and shows the message of any refusal
- * as the failure's cause.
+ * as the failure's cause. `update_install_unsupported` and `update_not_ready`
+ * are the refusals of `POST /api/latest-release/install` beyond those (the
+ * app installs nothing itself on this platform, or no verified download is
+ * ready), and `update_not_installed` the refusal of
+ * `POST /api/latest-release/restart` (nothing is installed yet).
  */
 export type ApiErrorCode =
   | 'resume_unavailable'
@@ -200,7 +205,10 @@ export type ApiErrorCode =
   | 'update_local_build'
   | 'update_unavailable'
   | 'update_no_newer_release'
-  | 'update_unsupported';
+  | 'update_unsupported'
+  | 'update_install_unsupported'
+  | 'update_not_ready'
+  | 'update_not_installed';
 
 /** An error raised when the server responds with a non-2xx status. */
 export class ApiError extends Error {
@@ -846,6 +854,30 @@ export class ApiClient {
    */
   downloadLatestRelease(): Promise<UpdateDownload> {
     return this.request<UpdateDownload>('/api/latest-release/download', {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * `POST /api/latest-release/install` — start installing the ready download
+   * of the newer release in the background (Linux desktop release builds
+   * only; the system asks for an administrator's password), or join the
+   * install already running, or report it installed. `409` with an
+   * `update_*` code when the server refuses.
+   */
+  installLatestRelease(): Promise<UpdateInstall> {
+    return this.request<UpdateInstall>('/api/latest-release/install', {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * `POST /api/latest-release/restart` — restart the desktop app into the
+   * installed update (204); the page loses its server right after.
+   * `409` `update_not_installed` when nothing is installed yet.
+   */
+  restartLatestRelease(): Promise<void> {
+    return this.requestNoContent('/api/latest-release/restart', {
       method: 'POST',
     });
   }

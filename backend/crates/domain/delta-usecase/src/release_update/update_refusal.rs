@@ -1,6 +1,7 @@
 use super::RELEASE_DOWNLOAD_PREFIX;
 
-/// Why an update download was refused before anything was fetched.
+/// Why an update request — a download, an install or a restart — was refused
+/// before anything was done.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum UpdateRefusal {
     /// The CLI launched the server: only the desktop app can be replaced.
@@ -30,4 +31,14 @@ pub enum UpdateRefusal {
     /// The asset's download URL is outside [`RELEASE_DOWNLOAD_PREFIX`].
     #[error("the asset's download URL {0:?} is outside {RELEASE_DOWNLOAD_PREFIX}")]
     UntrustedUrl(String),
+    /// The app cannot install an update itself on this platform.
+    #[error("installing an update in the app is not supported on {platform}")]
+    InstallUnsupported { platform: String },
+    /// An install was asked for while no verified download of the newer
+    /// release is ready.
+    #[error("no verified download of the newer release is ready to install")]
+    NotReady,
+    /// A restart was asked for while no update has been installed.
+    #[error("no update has been installed to restart into")]
+    NotInstalled,
 }

@@ -96,7 +96,10 @@ desktop:
 # tauri.conf.json lists the "app" target next to "dmg" because the bundler
 # deletes the Delta.app it builds for the .dmg unless "app" is requested too,
 # and `make desktop` installs that Delta.app.
+# On Linux the .deb also carries the update helper, which tauri.linux.conf.json
+# takes from backend/target/release/, so it is built first.
 desktop-build: web-dist
+	@if [ "$$(uname -s)" = Linux ]; then cd backend && cargo build --release -p delta-update-helper; fi
 	cd backend/crates/apps/delta-desktop && env -u TAURI_CONFIG cargo tauri build
 
 # --- Generated code -----------------------------------------------------------

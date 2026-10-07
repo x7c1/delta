@@ -9,9 +9,10 @@ Delta therefore treats **reaching the loopback port as the trust boundary**
 ("unauthenticated-by-port") and layers explicit guards on top of it. This
 document states what each guard covers, the one deliberate trade-off in how
 Delta pre-accepts Claude Code's workspace-trust dialog, how the files Delta
-writes into its data directory are protected, what its logs deliberately
-leave out, and how Delta handles the launch options that switch an agent's own
-safety mechanisms off.
+writes into its data directory are protected, how the desktop app installs an
+update on Linux without the server ever holding root, what its logs
+deliberately leave out, and how Delta handles the launch options that switch
+an agent's own safety mechanisms off.
 
 This is a living document: it describes the guards in place today, and later
 hardening work will extend it.
@@ -115,6 +116,81 @@ a settings directory Delta does not own, which Delta does not do today.
 
 Both files are still rewritten on every run — the settings file must be, so that
 the hook URLs carry the current run's secret.
+
+One more directory holds something that ends up mattering to root:
+**`updates/`**, where the desktop app downloads a newer release and verifies
+it against the sha256 digest GitHub states for it. Whatever the user (or a
+process running as the user) can write there could be swapped after that
+check, so nothing that runs as root trusts it: the update helper below copies
+the file out and checks the copy again. Files there for a release the running
+app is not older than are removed at startup.
+
+## Updates
+
+The desktop app built by the release workflow can install a newer release on
+Linux (`POST /api/latest-release/install`, in
+[the API reference](api/settings.md#post-apilatest-releaseinstall)). That needs
+root, since the `.deb` is installed with `apt-get`. Delta's server and UI
+never hold root: the only program that runs as root for an update is a
+dedicated helper, `/usr/lib/delta-desktop/delta-update-helper`, which the
+`.deb` installs root-owned, and which the server starts through `pkexec`.
+
+- **One polkit action, one program.** The `.deb` ships the polkit action
+  `io.github.x7c1.delta.update`
+  (`/usr/share/polkit-1/actions/io.github.x7c1.delta.update.policy`). Its
+  `org.freedesktop.policykit.exec.path` names exactly the helper's path, so
+  the authorization covers running that program and nothing else; and it
+  asks for an administrator's password on every use (`auth_admin`, never
+  `auth_admin_keep`), so no authorization outlives the install it was given
+  for. The dialog's message names Delta's update.
+- **The helper trusts only the version and the file.** It accepts one command
+  line, `install --version v<version> --file <absolute path>`, and checks
+  everything else itself, as root:
+  1. it opens the file without following a symlink and refuses anything but a
+     regular file, then copies it into a new root-owned directory (mode 0700);
+     every later step reads the copy, so the original cannot be swapped
+     between the checks and the install;
+  2. it asks GitHub for the release the tag names
+     (`https://api.github.com/repos/x7c1/delta/releases/tags/<tag>`) and
+     compares the copy's sha256 with the `sha256:<hex>` digest the release
+     states for its `.deb` — the same digest the server checked the download
+     against; a release that states none is refused;
+  3. it checks with `dpkg-deb` and `dpkg-query` that the package is
+     `delta-desktop`, at exactly the requested version, and newer than the
+     installed `delta-desktop`;
+  4. it installs the copy with `apt-get install -y <path of the copy>`, so new
+     dependencies resolve, and removes its directory.
+
+  Each refusal and failure exits with a status of its own and prints one
+  line saying why, which the app shows. The statuses `10`–`19` say the file
+  itself failed a check (step 1, 2, or 3's package name and version): the
+  server then removes it and the app offers only to download the release
+  again, never a command that would install that file. When the installed
+  `delta-desktop` is already the requested version or newer (installed from
+  a terminal, say), the helper installs nothing and exits with status `30`,
+  which the app reads as installed and offers to restart into.
+- **Why not `sudo` in a terminal.** Delta's tmux server hosts autonomous
+  agents, and anything on that tmux socket can `send-keys` into any pane.
+  `sudo` remembers an authentication per terminal for a while, so a Delta
+  pane in which the user had typed their password would hand root to every
+  agent on the socket.
+- **Why not `pkexec apt install <file>` from the server.** The `.deb` sits in
+  a directory the user can write to, so it could be swapped between the
+  server's check and apt reading it — and its maintainer scripts run as root.
+  An authorization to run `apt` would also cover running it with any
+  arguments, not only this install.
+
+When Delta cannot install the update itself — no `pkexec`, no polkit agent,
+the helper missing, GitHub out of reach for the helper's check, or `apt-get`
+failing — the app shows the command for the user's own terminal,
+`sudo apt install <absolute path of the verified .deb>`. It depends on
+nothing but the file, so it stays the way out even if the in-app update turns
+out to be broken. It is not shown when the helper rejected the file itself:
+a file that failed the check is not to be installed as root by any route.
+
+Restarting into the installed update starts the installed app,
+`/usr/bin/delta-desktop`, after the running one has exited; nothing about it
+runs as root.
 
 ## Log hygiene
 

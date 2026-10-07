@@ -103,6 +103,8 @@ mod threads_response;
 pub use threads_response::WireThreadsResponse;
 mod update_download;
 pub use update_download::WireUpdateDownload;
+mod update_install;
+pub use update_install::WireUpdateInstall;
 mod update_offer;
 pub use update_offer::WireUpdateOffer;
 mod version_response;

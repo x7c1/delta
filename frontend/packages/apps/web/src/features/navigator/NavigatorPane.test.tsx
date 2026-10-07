@@ -34,6 +34,7 @@ import type {
   RateLimitWindow,
   SessionListItem,
   UpdateDownload,
+  UpdateInstall,
   UpdateOffer,
 } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
@@ -881,6 +882,8 @@ describe('NavigatorPane newer-release notice', () => {
           newer: MOCK_NEWER_RELEASE,
           offer: 'none',
           download: null,
+          installs: false,
+          install: null,
         } satisfies LatestReleaseResponse),
       ),
     );
@@ -903,6 +906,8 @@ describe('NavigatorPane newer-release notice', () => {
           newer: null,
           offer: 'none',
           download: null,
+          installs: false,
+          install: null,
         } satisfies LatestReleaseResponse);
       }),
     );
@@ -931,6 +936,8 @@ describe('NavigatorPane newer-release notice', () => {
           newer: answers === 1 ? null : MOCK_NEWER_RELEASE,
           offer: 'none',
           download: null,
+          installs: false,
+          install: null,
         } satisfies LatestReleaseResponse);
       }),
     );
@@ -968,10 +975,22 @@ describe('NavigatorPane update control', () => {
     });
   });
 
-  /** Answer `GET /api/latest-release` with the newer release, `offer` and `download`. */
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /**
+   * Answer `GET /api/latest-release` with the newer release, `offer`,
+   * `download`, and — for an app that installs updates itself (`installs`) —
+   * `install`.
+   */
   function answerLatest(
     offer: UpdateOffer,
     download: () => UpdateDownload | null = () => null,
+    { installs = false, install = () => null }: {
+      installs?: boolean;
+      install?: () => UpdateInstall | null;
+    } = {},
   ) {
     server.use(
       http.get('*/api/latest-release', () =>
@@ -979,6 +998,8 @@ describe('NavigatorPane update control', () => {
           newer: MOCK_NEWER_RELEASE,
           offer,
           download: download(),
+          installs,
+          install: install(),
         } satisfies LatestReleaseResponse),
       ),
     );
@@ -994,6 +1015,14 @@ describe('NavigatorPane update control', () => {
     'update-downloading',
     'update-ready',
     'update-retry',
+    'update-install',
+    'update-installing',
+    'update-restart',
+    'update-restarting',
+    'update-install-retry',
+    'update-install-unavailable',
+    'update-manual',
+    'update-download-again',
   ];
 
   function shownControls() {
@@ -1037,6 +1066,8 @@ describe('NavigatorPane update control', () => {
           newer: null,
           offer: 'update',
           download: null,
+          installs: false,
+          install: null,
         } satisfies LatestReleaseResponse);
       }),
     );
@@ -1150,6 +1181,266 @@ describe('NavigatorPane update control', () => {
     expect(await screen.findByTestId('update-retry')).toHaveAttribute(
       'title',
       expect.stringContaining('has no asset delta-desktop_0.0.1_amd64.deb'),
+    );
+  });
+
+  const READY: UpdateDownload = {
+    state: 'ready',
+    version: MOCK_NEWER_RELEASE.version,
+  };
+  const MANUAL_COMMAND =
+    'sudo apt install /home/dev/.local/share/io.github.x7c1.delta/updates/delta-desktop_0.6.0_amd64.deb';
+
+  it('offers no Install where the app does not install updates itself', async () => {
+    answerLatest('update', () => READY);
+    renderPane();
+    expect(await screen.findByTestId('update-ready')).toHaveTextContent(
+      'Update ready',
+    );
+    expect(shownControls()).toEqual(['update-ready']);
+  });
+
+  it('offers Install once the download is ready and follows it to Restart', async () => {
+    let install: UpdateInstall | null = null;
+    let posts = 0;
+    answerLatest('update', () => READY, {
+      installs: true,
+      install: () => install,
+    });
+    server.use(
+      http.post('*/api/latest-release/install', () => {
+        posts += 1;
+        install = { state: 'installing', version: MOCK_NEWER_RELEASE.version };
+        return HttpResponse.json(install satisfies UpdateInstall, {
+          status: 202,
+        });
+      }),
+    );
+    renderPane();
+
+    expect(await screen.findByTestId('update-install')).toHaveTextContent(
+      'Install',
+    );
+    expect(shownControls()).toEqual(['update-ready', 'update-install']);
+    fireEvent.click(screen.getByTestId('update-install'));
+
+    expect(await screen.findByTestId('update-installing')).toHaveTextContent(
+      'Installing…',
+    );
+    expect(shownControls()).toEqual(['update-installing']);
+    expect(posts).toBe(1);
+
+    install = { state: 'installed', version: MOCK_NEWER_RELEASE.version };
+    expect(
+      await screen.findByTestId('update-restart', {}, { timeout: 3000 }),
+    ).toHaveTextContent('Restart');
+    expect(shownControls()).toEqual(['update-restart']);
+  });
+
+  it('restarts the app on Restart', async () => {
+    let restarts = 0;
+    answerLatest('update', () => READY, {
+      installs: true,
+      install: () => ({
+        state: 'installed',
+        version: MOCK_NEWER_RELEASE.version,
+      }),
+    });
+    server.use(
+      http.post('*/api/latest-release/restart', () => {
+        restarts += 1;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderPane();
+
+    fireEvent.click(await screen.findByTestId('update-restart'));
+
+    expect(await screen.findByTestId('update-restarting')).toHaveTextContent(
+      'Restarting…',
+    );
+    expect(restarts).toBe(1);
+  });
+
+  it('renders a failed install with its cause, the manual command and a retry', async () => {
+    let install: UpdateInstall | null = {
+      state: 'failed',
+      version: MOCK_NEWER_RELEASE.version,
+      error: 'apt-get could not install the update: E: Unmet dependencies',
+      manual_command: MANUAL_COMMAND,
+    };
+    let posts = 0;
+    answerLatest('update', () => READY, {
+      installs: true,
+      install: () => install,
+    });
+    server.use(
+      http.post('*/api/latest-release/install', () => {
+        posts += 1;
+        install = { state: 'installing', version: MOCK_NEWER_RELEASE.version };
+        return HttpResponse.json(install satisfies UpdateInstall, {
+          status: 202,
+        });
+      }),
+    );
+    renderPane();
+
+    const retry = await screen.findByTestId('update-install-retry');
+    expect(retry).toHaveTextContent('Install failed · Retry');
+    expect(retry).toHaveAttribute(
+      'title',
+      expect.stringContaining('E: Unmet dependencies'),
+    );
+    expect(shownControls()).toEqual(['update-install-retry', 'update-manual']);
+    expect(screen.getByTestId('update-manual-command')).toHaveTextContent(
+      MANUAL_COMMAND,
+    );
+    expect(screen.getByTestId('update-release-page')).toHaveAttribute(
+      'href',
+      MOCK_NEWER_RELEASE.url,
+    );
+
+    fireEvent.click(retry);
+    expect(await screen.findByTestId('update-installing')).toBeInTheDocument();
+    expect(posts).toBe(1);
+  });
+
+  it('shows the manual command with a copy button when Delta cannot install', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    answerLatest('update', () => READY, {
+      installs: true,
+      install: () => ({
+        state: 'unavailable',
+        version: MOCK_NEWER_RELEASE.version,
+        error:
+          'Delta cannot install the update itself: not authorized, or no polkit authentication agent is running',
+        manual_command: MANUAL_COMMAND,
+      }),
+    });
+    renderPane();
+
+    expect(
+      await screen.findByTestId('update-install-unavailable'),
+    ).toHaveAttribute('title', expect.stringContaining('no polkit'));
+    expect(shownControls()).toEqual([
+      'update-install-retry',
+      'update-install-unavailable',
+      'update-manual',
+    ]);
+    expect(screen.getByTestId('update-manual-command')).toHaveTextContent(
+      MANUAL_COMMAND,
+    );
+
+    const copy = screen.getByRole('button', { name: 'Copy install command' });
+    fireEvent.click(copy);
+    expect(await within(copy).findByText('Copied')).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledWith(MANUAL_COMMAND);
+  });
+
+  it('offers a retry beside the manual command when Delta cannot install', async () => {
+    let install: UpdateInstall | null = {
+      state: 'unavailable',
+      version: MOCK_NEWER_RELEASE.version,
+      error:
+        'Delta cannot install the update itself: not authorized, or no polkit authentication agent is running',
+      manual_command: MANUAL_COMMAND,
+    };
+    let posts = 0;
+    answerLatest('update', () => READY, {
+      installs: true,
+      install: () => install,
+    });
+    server.use(
+      http.post('*/api/latest-release/install', () => {
+        posts += 1;
+        install = { state: 'installing', version: MOCK_NEWER_RELEASE.version };
+        return HttpResponse.json(install satisfies UpdateInstall, {
+          status: 202,
+        });
+      }),
+    );
+    renderPane();
+
+    const retry = await screen.findByTestId('update-install-retry');
+    expect(retry).toHaveTextContent('Install · Retry');
+    expect(retry).toHaveAttribute('title', expect.stringContaining('no polkit'));
+
+    fireEvent.click(retry);
+    expect(await screen.findByTestId('update-installing')).toBeInTheDocument();
+    expect(posts).toBe(1);
+  });
+
+  it('offers downloading again, not a manual command, for a rejected file', async () => {
+    const reason = "the update file's sha256 is 00, not release v0.6.0's ff";
+    let download: UpdateDownload | null = null;
+    let install: UpdateInstall | null = {
+      state: 'rejected',
+      version: MOCK_NEWER_RELEASE.version,
+      error: reason,
+    };
+    let posts = 0;
+    answerLatest('update', () => download, {
+      installs: true,
+      install: () => install,
+    });
+    server.use(
+      http.post('*/api/latest-release/download', () => {
+        posts += 1;
+        install = null;
+        download = {
+          state: 'downloading',
+          version: MOCK_NEWER_RELEASE.version,
+          received_bytes: 0,
+          total_bytes: null,
+        };
+        return HttpResponse.json(download satisfies UpdateDownload, {
+          status: 202,
+        });
+      }),
+    );
+    renderPane();
+
+    const again = await screen.findByTestId('update-download-again');
+    expect(again).toHaveTextContent('Verification failed · Download again');
+    expect(again).toHaveAttribute('title', expect.stringContaining(reason));
+    expect(shownControls()).toEqual(['update-download-again']);
+    expect(screen.getByTestId('update-release-page')).toHaveAttribute(
+      'href',
+      MOCK_NEWER_RELEASE.url,
+    );
+    expect(screen.queryByTestId('update-manual-command')).toBeNull();
+
+    fireEvent.click(again);
+    expect(await screen.findByTestId('update-downloading')).toBeInTheDocument();
+    expect(posts).toBe(1);
+  });
+
+  it('shows an install refusal as a failure with the server message', async () => {
+    answerLatest('update', () => READY, { installs: true });
+    server.use(
+      http.post('*/api/latest-release/install', () =>
+        HttpResponse.json(
+          {
+            error: 'no verified download of the newer release is ready to install',
+            code: 'update_not_ready',
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+    renderPane();
+
+    fireEvent.click(await screen.findByTestId('update-install'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('update-install')).toHaveTextContent(
+        'Install failed · Retry',
+      ),
+    );
+    expect(screen.getByTestId('update-install')).toHaveAttribute(
+      'title',
+      expect.stringContaining('no verified download'),
     );
   });
 });

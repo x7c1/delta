@@ -64,6 +64,8 @@ export {
   useVersionQuery,
   useLatestReleaseQuery,
   useDownloadLatestReleaseMutation,
+  useInstallLatestReleaseMutation,
+  useRestartLatestReleaseMutation,
   useStorageQuery,
   useStorageWorktreesQuery,
   useRemoveStorageWorktreeMutation,

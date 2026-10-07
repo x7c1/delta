@@ -21,6 +21,8 @@ on:
     branches: [main, 'feat/**']
     paths:
       - backend/crates/apps/delta-desktop/**
+      # The .deb carries the update helper.
+      - backend/crates/apps/delta-update-helper/**
       # A tauri bump lands in the lockfile only, and the workspace manifest
       # carries the version the bundle file names use.
       - backend/Cargo.toml
@@ -144,6 +146,14 @@ jobs:
       # built before `tauri build` compiles it in (as `make desktop-build` does).
       - name: Build the web app
         run: make web-dist
+
+      # The .deb carries the update helper, which tauri.linux.conf.json takes
+      # from backend/target/release/ (built for the host, which is the target
+      # here), as `make desktop-build` builds it.
+      - name: Build the update helper
+        if: runner.os == 'Linux'
+        run: cargo build --release -p delta-update-helper
+        working-directory: backend
 
       # With no releaseId the action only builds. It is never given tagName or
       # releaseName, so it can neither create a Release nor a tag: the Release
