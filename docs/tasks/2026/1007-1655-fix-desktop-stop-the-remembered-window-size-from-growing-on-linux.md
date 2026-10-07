@@ -85,10 +85,10 @@ keeps it.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On this Linux machine (GNOME, Wayland, fractional scaling) with the dev
+- [x] On this Linux machine (GNOME, Wayland, fractional scaling) with the dev
       build, starting the app and closing it without resizing leaves the
       remembered size unchanged, three times in a row, closing once with the
       close button and once with Ctrl-Q — needs a person to close the window.
-- [ ] Starting with the oversized size the affected build left behind, the
+- [x] Starting with the oversized size the affected build left behind, the
       window opens fitting the screen; after resizing it by hand and
       restarting, it opens at that size.
