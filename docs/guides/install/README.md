@@ -223,11 +223,10 @@ deleting them.
 ## Updating
 
 When a newer release is out, the footer of the app shows it next to the
-version. On Ubuntu the app can download, install and restart into it itself
-([how](ubuntu.md#updating)); on macOS it downloads and verifies the new
-`.dmg` into the data directory's `updates/` (see
-[Where the app keeps its data](#where-the-app-keeps-its-data)), and you install
-it from there the same way as the first time. Either way you can
+version. The app can download, install and restart into it itself, on
+Ubuntu ([how](ubuntu.md#updating)) and on macOS ([how](macos.md#updating)),
+keeping the download in the data directory's `updates/` (see
+[Where the app keeps its data](#where-the-app-keeps-its-data)). Either way you can
 also download the bundle from the new Release and install it over the old one
 yourself. Your data directory is left as is.
 

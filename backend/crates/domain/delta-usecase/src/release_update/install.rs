@@ -4,9 +4,7 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use super::{
-    lock, manual_install_command, ReleaseUpdate, UpdateDownload, UpdateInstall, UpdateRefusal,
-};
+use super::{lock, ReleaseUpdate, UpdateDownload, UpdateInstall, UpdateRefusal};
 use crate::ports::InstallError;
 use crate::NewerRelease;
 
@@ -36,19 +34,19 @@ impl ReleaseUpdate {
         }
         let newer = newer.ok_or(UpdateRefusal::NoNewerRelease)?;
         let version = newer.display_version();
-        let path = match self.download_of(Some(&newer)) {
-            Some(UpdateDownload::Ready { path, .. }) => path,
+        let (path, sha256) = match self.download_of(Some(&newer)) {
+            Some(UpdateDownload::Ready { path, sha256, .. }) => (path, sha256),
             _ => return Err(UpdateRefusal::NotReady),
         };
 
         let mut current = lock(&self.install);
         match &*current {
             Some(running @ UpdateInstall::Installing { .. }) => return Ok(running.clone()),
-            Some(done @ UpdateInstall::Installed { version: installed })
-                if *installed == version =>
-            {
-                return Ok(done.clone())
-            }
+            Some(
+                done @ UpdateInstall::Installed {
+                    version: installed, ..
+                },
+            ) if *installed == version => return Ok(done.clone()),
             _ => {}
         }
         let started = UpdateInstall::Installing {
@@ -65,12 +63,16 @@ impl ReleaseUpdate {
         let slot = Arc::clone(&self.install);
         let download = Arc::clone(&self.download);
         let installer = Arc::clone(&offered.installer);
+        let manual = offered.platform.manual_install(&path);
         tokio::spawn(async move {
-            let manual_command = manual_install_command(&path);
-            let done = match installer.install(&version, &path).await {
-                Ok(()) => {
-                    tracing::info!(version = %version, "installed the newer release of Delta");
-                    Some(UpdateInstall::Installed { version })
+            let done = match installer.install(&version, &path, &sha256).await {
+                Ok(app) => {
+                    tracing::info!(
+                        version = %version,
+                        app = ?app,
+                        "installed the newer release of Delta"
+                    );
+                    Some(UpdateInstall::Installed { version, app })
                 }
                 Err(InstallError::Dismissed) => {
                     tracing::info!(
@@ -83,13 +85,13 @@ impl ReleaseUpdate {
                     tracing::warn!(
                         version = %version,
                         error = %err,
-                        manual_command = %manual_command,
+                        manual = ?manual,
                         "Delta cannot install the newer release itself"
                     );
                     Some(UpdateInstall::Unavailable {
                         version,
                         cause: err.to_string(),
-                        manual_command,
+                        manual,
                     })
                 }
                 Err(InstallError::Rejected(cause)) => {
@@ -106,13 +108,13 @@ impl ReleaseUpdate {
                     tracing::warn!(
                         version = %version,
                         error = %cause,
-                        manual_command = %manual_command,
+                        manual = ?manual,
                         "could not install the newer release of Delta"
                     );
                     Some(UpdateInstall::Failed {
                         version,
                         cause,
-                        manual_command,
+                        manual,
                     })
                 }
             };
@@ -147,10 +149,11 @@ mod tests {
     use std::path::Path;
 
     use super::super::testing::{
-        asset, newer_release, settled, update_on, v060, GatedDownloader, GatedInstaller, LINUX_DEB,
+        asset, installed_app, newer_release, settled, test_sha256, update_on, v060,
+        GatedDownloader, GatedInstaller, LINUX_DEB, MAC_DMG,
     };
     use super::*;
-    use crate::release_update::{NotOffered, Platform};
+    use crate::release_update::{InstallUnavailable, ManualInstall, NotOffered, Platform};
 
     /// A Linux update whose download of v0.6.0 is ready, installing through
     /// `installer`.
@@ -176,7 +179,11 @@ mod tests {
         panic!("the install never settled");
     }
 
-    const MANUAL: &str = "sudo apt install /data/updates/delta-desktop_0.6.0_amd64.deb";
+    fn manual() -> ManualInstall {
+        ManualInstall::Command(
+            "sudo apt install /data/updates/delta-desktop_0.6.0_amd64.deb".into(),
+        )
+    }
 
     #[tokio::test]
     async fn an_install_is_refused_unless_a_verified_download_is_ready() {
@@ -192,10 +199,10 @@ mod tests {
 
         let installer = GatedInstaller::new();
         let downloader = GatedDownloader::new();
-        let mac = update_on(Platform::new("macos", "aarch64"), &downloader, &installer);
-        assert!(!mac.installs());
+        let elsewhere = update_on(Platform::new("windows", "x86_64"), &downloader, &installer);
+        assert!(!elsewhere.installs());
         assert!(matches!(
-            mac.install(Some(v060())),
+            elsewhere.install(Some(v060())),
             Err(UpdateRefusal::InstallUnsupported { .. })
         ));
 
@@ -245,6 +252,7 @@ mod tests {
         installer.finish(Ok(()));
         let installed = UpdateInstall::Installed {
             version: "v0.6.0".into(),
+            app: installed_app(),
         };
         assert_eq!(install_settled(&update).await, Some(installed.clone()));
         assert_eq!(update.install(Some(v060())).unwrap(), installed);
@@ -252,10 +260,13 @@ mod tests {
             installer.asked(),
             vec![(
                 "v0.6.0".to_owned(),
-                Path::new("/data/updates").join(LINUX_DEB)
+                Path::new("/data/updates").join(LINUX_DEB),
+                test_sha256(),
             )]
         );
-        assert_eq!(update.restart().unwrap(), "v0.6.0");
+        let restart = update.restart().unwrap();
+        assert_eq!(restart.version, "v0.6.0");
+        assert_eq!(restart.app, installed_app());
     }
 
     #[tokio::test]
@@ -285,7 +296,7 @@ mod tests {
             Some(UpdateInstall::Unavailable {
                 version: "v0.6.0".into(),
                 cause: "Delta cannot install the update itself: no authentication agent".into(),
-                manual_command: MANUAL.into(),
+                manual: manual(),
             })
         );
         assert!(matches!(update.restart(), Err(UpdateRefusal::NotInstalled)));
@@ -379,7 +390,8 @@ mod tests {
         assert_eq!(
             install_settled(&update).await,
             Some(UpdateInstall::Installed {
-                version: "v0.6.0".into()
+                version: "v0.6.0".into(),
+                app: installed_app(),
             })
         );
         assert!(file.exists());
@@ -387,7 +399,7 @@ mod tests {
             update.download_of(Some(&v060())),
             Some(UpdateDownload::Ready { .. })
         ));
-        assert_eq!(update.restart().unwrap(), "v0.6.0");
+        assert_eq!(update.restart().unwrap().version, "v0.6.0");
     }
 
     #[tokio::test]
@@ -403,8 +415,90 @@ mod tests {
             Some(UpdateInstall::Failed {
                 version: "v0.6.0".into(),
                 cause: "apt-get could not install the update: E: broken".into(),
-                manual_command: MANUAL.into(),
+                manual: manual(),
             })
         );
+    }
+
+    /// On macOS the app installs the downloaded disk image itself, and the
+    /// way by hand is opening that image, not a terminal command.
+    #[tokio::test]
+    async fn a_mac_install_offers_the_disk_image_by_hand() {
+        let downloader = GatedDownloader::new();
+        let installer = GatedInstaller::new();
+        let mac = update_on(Platform::new("macos", "aarch64"), &downloader, &installer);
+        assert!(mac.installs());
+        let v060_mac = || newer_release("0.6.0", vec![asset(MAC_DMG)]);
+        mac.start(Some(v060_mac())).unwrap();
+        downloader.finish(Ok(()));
+        settled(&mac).await;
+
+        mac.install(Some(v060_mac())).unwrap();
+        installer.finish(Err(InstallError::Unavailable(
+            "Delta runs from a translocated copy".into(),
+        )));
+        let image = Path::new("/data/updates").join(MAC_DMG);
+        assert_eq!(
+            install_settled(&mac).await,
+            Some(UpdateInstall::Unavailable {
+                version: "v0.6.0".into(),
+                cause:
+                    "Delta cannot install the update itself: Delta runs from a translocated copy"
+                        .into(),
+                manual: ManualInstall::DiskImage(image.clone()),
+            })
+        );
+
+        mac.install(Some(v060_mac())).unwrap();
+        installer.finish(Err(InstallError::Failed("hdiutil could not attach".into())));
+        assert_eq!(
+            install_settled(&mac).await,
+            Some(UpdateInstall::Failed {
+                version: "v0.6.0".into(),
+                cause: "hdiutil could not attach".into(),
+                manual: ManualInstall::DiskImage(image.clone()),
+            })
+        );
+        assert_eq!(
+            installer.asked()[0],
+            ("v0.6.0".to_owned(), image, test_sha256())
+        );
+        assert_eq!(mac.install_unavailable_of(Some(&v060_mac())), None);
+    }
+
+    /// An installer that says at startup it cannot install here (on macOS,
+    /// a translocated or unwritable bundle) turns Install off: a ready
+    /// download comes with the reason and the disk image to open instead.
+    #[tokio::test]
+    async fn an_installer_unavailable_at_startup_offers_the_way_by_hand_once_ready() {
+        let downloader = GatedDownloader::new();
+        let installer = GatedInstaller::unavailable_because("Delta runs from a translocated copy");
+        let mac = update_on(Platform::new("macos", "aarch64"), &downloader, &installer);
+        let v060_mac = || newer_release("0.6.0", vec![asset(MAC_DMG)]);
+        assert!(!mac.installs());
+        assert_eq!(mac.offer(Some(&v060_mac())), crate::UpdateOffer::Update);
+        // Nothing to install by hand before the download is ready.
+        assert_eq!(mac.install_unavailable_of(Some(&v060_mac())), None);
+        mac.start(Some(v060_mac())).unwrap();
+        assert_eq!(mac.install_unavailable_of(Some(&v060_mac())), None);
+        downloader.finish(Ok(()));
+        settled(&mac).await;
+
+        assert_eq!(
+            mac.install_unavailable_of(Some(&v060_mac())),
+            Some(InstallUnavailable {
+                cause:
+                    "Delta cannot install the update itself: Delta runs from a translocated copy"
+                        .into(),
+                manual: ManualInstall::DiskImage(Path::new("/data/updates").join(MAC_DMG)),
+            })
+        );
+        assert_eq!(mac.install_unavailable_of(None), None);
+
+        // Where the platform installs nothing in the app, there is nothing
+        // to turn off, whatever the installer says.
+        let elsewhere = update_on(Platform::new("windows", "x86_64"), &downloader, &installer);
+        assert!(!elsewhere.installs());
+        assert_eq!(elsewhere.install_unavailable_of(Some(&v060())), None);
     }
 }

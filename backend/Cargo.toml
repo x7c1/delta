@@ -86,3 +86,7 @@ rustls-platform-verifier = "0.7"
 # Verifies a downloaded release asset against the sha256 digest GitHub states
 # for it, computed while the file streams in.
 sha2 = "0.10"
+# Reads the Info.plist of the Delta.app inside a downloaded macOS disk image
+# (its bundle identifier and version) before it replaces the running app; the
+# version Tauri itself builds on.
+plist = "1"

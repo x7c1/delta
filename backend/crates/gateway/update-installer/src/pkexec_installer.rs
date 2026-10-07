@@ -5,9 +5,9 @@ use std::process::Stdio;
 use async_trait::async_trait;
 use tokio::process::Command;
 
-use delta_usecase::{InstallError, UpdateInstaller};
+use delta_usecase::{InstallError, InstalledApp, UpdateInstaller};
 
-use crate::{PKEXEC_PATH, UPDATE_HELPER_PATH};
+use crate::{INSTALLED_APP_PATH, PKEXEC_PATH, UPDATE_HELPER_PATH};
 
 /// `pkexec`'s exit status when the user dismissed the authentication dialog.
 const PKEXEC_DISMISSED: i32 = 126;
@@ -60,7 +60,14 @@ impl Default for PkexecInstaller {
 
 #[async_trait]
 impl UpdateInstaller for PkexecInstaller {
-    async fn install(&self, version: &str, file: &Path) -> Result<(), InstallError> {
+    /// The helper checks the file against the release's digest itself, as
+    /// root, so `sha256` is not handed to it.
+    async fn install(
+        &self,
+        version: &str,
+        file: &Path,
+        _sha256: &str,
+    ) -> Result<InstalledApp, InstallError> {
         if !self.helper.is_file() {
             return Err(InstallError::Unavailable(format!(
                 "the update helper {} is not installed",
@@ -93,6 +100,7 @@ impl UpdateInstaller for PkexecInstaller {
             "the update helper ended"
         );
         outcome(output.status.code(), &stderr)
+            .map(|()| InstalledApp::Executable(PathBuf::from(INSTALLED_APP_PATH)))
     }
 }
 
@@ -144,6 +152,8 @@ fn last_line(text: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const SHA256: &str = "ff";
 
     #[test]
     fn each_exit_status_maps_to_its_outcome() {
@@ -209,14 +219,14 @@ mod tests {
         let file = dir.path().join("d.deb");
         let missing_helper = PkexecInstaller::with_paths("/bin/sh", &helper);
         assert!(matches!(
-            missing_helper.install("v0.6.0", &file).await,
+            missing_helper.install("v0.6.0", &file, SHA256).await,
             Err(InstallError::Unavailable(cause)) if cause.contains("is not installed")
         ));
 
         std::fs::write(&helper, "exit 0\n").unwrap();
         let missing_pkexec = PkexecInstaller::with_paths(dir.path().join("pkexec"), &helper);
         assert!(matches!(
-            missing_pkexec.install("v0.6.0", &file).await,
+            missing_pkexec.install("v0.6.0", &file, SHA256).await,
             Err(InstallError::Unavailable(cause)) if cause.contains("is not installed")
         ));
 
@@ -225,7 +235,7 @@ mod tests {
         std::fs::write(&unrunnable, "").unwrap();
         assert!(matches!(
             PkexecInstaller::with_paths(&unrunnable, &helper)
-                .install("v0.6.0", &file)
+                .install("v0.6.0", &file, SHA256)
                 .await,
             Err(InstallError::Unrunnable { program, source })
                 if program == unrunnable && source.kind() == ErrorKind::PermissionDenied
@@ -245,9 +255,12 @@ mod tests {
         .unwrap();
         let file = dir.path().join("delta-desktop_0.6.0_amd64.deb");
         let result = PkexecInstaller::with_paths("/bin/sh", &helper)
-            .install("v0.6.0", &file)
+            .install("v0.6.0", &file, SHA256)
             .await;
-        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(
+            result.unwrap(),
+            InstalledApp::Executable(PathBuf::from("/usr/bin/delta-desktop"))
+        );
     }
 
     /// `/bin/sh` stands in for `pkexec`: it runs the helper script with the
@@ -268,7 +281,7 @@ mod tests {
         let file = dir.path().join("delta-desktop_0.6.0_amd64.deb");
 
         let result = PkexecInstaller::with_paths("/bin/sh", &helper)
-            .install("v0.6.0", &file)
+            .install("v0.6.0", &file, SHA256)
             .await;
         assert!(
             matches!(&result, Err(InstallError::Failed(reason)) if reason == "apt-get could not install the update: E: broken"),
