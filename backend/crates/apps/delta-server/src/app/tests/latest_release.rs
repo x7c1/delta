@@ -17,6 +17,10 @@ impl ReleaseFeed for FixedFeed {
         self.calls.fetch_add(1, Ordering::SeqCst);
         (self.answer)()
     }
+
+    fn url(&self) -> &str {
+        "https://feed.invalid/fixed"
+    }
 }
 
 #[tokio::test]

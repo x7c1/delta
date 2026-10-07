@@ -3,8 +3,8 @@ use super::{judge_release, ReleaseCheck, ReleaseCheckError};
 impl ReleaseCheck {
     /// Ask the feed once and record the verdict.
     ///
-    /// A failure logs one `warn` naming the cause and keeps the previous
-    /// verdict; it is also returned, for the caller's tests. A turned-off check
+    /// A failure logs one `warn` naming the feed's URL and the cause, and
+    /// keeps the previous verdict; it is also returned, for the caller's tests. A turned-off check
     /// asks nothing and succeeds.
     pub async fn check(&self) -> Result<(), ReleaseCheckError> {
         let Some(feed) = &self.feed else {
@@ -28,7 +28,11 @@ impl ReleaseCheck {
                 Ok(())
             }
             Err(err) => {
-                tracing::warn!(error = %with_causes(&err), "could not check for a newer release of Delta");
+                tracing::warn!(
+                    url = feed.url(),
+                    error = %with_causes(&err),
+                    "could not check for a newer release of Delta"
+                );
                 Err(err)
             }
         }

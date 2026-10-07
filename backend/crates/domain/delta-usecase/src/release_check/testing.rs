@@ -49,6 +49,10 @@ impl ReleaseFeed for ScriptedFeed {
             .pop()
             .expect("no scripted answer left")
     }
+
+    fn url(&self) -> &str {
+        "https://feed.invalid/scripted"
+    }
 }
 
 /// A check of a `0.5.0` build asking `feed`.

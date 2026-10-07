@@ -62,6 +62,10 @@ impl ReleaseFeed for GithubReleaseFeed {
             .map_err(|err| ReleaseFeedError::Request(err.into()))?;
         parse_release(&body)
     }
+
+    fn url(&self) -> &str {
+        &self.url
+    }
 }
 
 /// The fields of GitHub's release object the check reads.

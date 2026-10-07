@@ -452,8 +452,9 @@ yet, the last check found it up to date, the check is turned off
 [development guide](../development/README.md#backend-backend)), or every check
 so far failed. A failed check (offline, DNS, timeout, a non-2xx answer such as
 GitHub's 403 rate limit, unparsable JSON, a tag that is not SemVer, a page
-outside the prefix above) logs one `warn` naming the cause and keeps the
-previous verdict; it is never an error here. Always **200**.
+outside the prefix above) logs one `warn` naming the feed's URL and the
+cause, and keeps the previous verdict; it is never an error here. Always
+**200**.
 
 - **200**:
 

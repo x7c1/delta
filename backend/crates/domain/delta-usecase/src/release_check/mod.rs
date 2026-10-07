@@ -21,8 +21,8 @@
 //! # Failures
 //!
 //! A check that fails — the feed's own failures, a tag that is not SemVer, a
-//! page outside the prefix — logs one `warn` naming the cause and keeps the
-//! previous result. It never surfaces to the browser as an error: "not
+//! page outside the prefix — logs one `warn` naming the feed's URL and the
+//! cause, and keeps the previous result. It never surfaces to the browser as an error: "not
 //! checked yet", "up to date", "turned off" and "every check so far failed"
 //! all read as no newer release.
 

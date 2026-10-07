@@ -45,4 +45,8 @@ pub enum ReleaseFeedError {
 pub trait ReleaseFeed: Send + Sync {
     /// Ask for the newest published release (never a draft or pre-release).
     async fn latest_release(&self) -> Result<PublishedRelease, ReleaseFeedError>;
+
+    /// Where the feed asks, named in the log when a check fails: a failure's
+    /// own message does not always say (an HTTP status does not).
+    fn url(&self) -> &str;
 }
