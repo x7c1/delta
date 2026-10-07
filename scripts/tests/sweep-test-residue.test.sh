@@ -194,10 +194,22 @@ assert_exists "the canary sweep leaves the dev socket alone" "$DEV_SOCKET"
 # --- A dead run's orphaned delta-server is killed, and nothing else. ------------
 
 # Started detached (not this shell's children), so a killed one is reaped at
-# once and `kill -0` stops seeing it. The orphan runs through a symlink named
-# `delta-server`, which is the name `ps -o comm=` reports on Linux and macOS.
-ln -s "$(command -v sleep)" "$BIN_DIR/delta-server"
-ORPHAN_PID="$("$BIN_DIR/delta-server" 60 >/dev/null 2>&1 & echo $!)"
+# once and `kill -0` stops seeing it. The orphan is a shell script named
+# `delta-server`, which is the name `ps -o comm=` reports for it on Linux and
+# macOS. It waits in the shell itself (a builtin `read` on a FIFO it holds
+# open) rather than running `sleep`: a child would outlive the `kill -9`, and a
+# symlink to `sleep` does not work with a multicall coreutils (uutils, the
+# default on recent Ubuntu), which refuses to run under another name.
+cat >"$BIN_DIR/delta-server" <<'SH'
+#!/bin/sh
+fifo="$0.fifo.$$"
+mkfifo "$fifo"
+exec 3<>"$fifo"
+rm -f "$fifo"
+read -r _ <&3
+SH
+chmod +x "$BIN_DIR/delta-server"
+ORPHAN_PID="$("$BIN_DIR/delta-server" >/dev/null 2>&1 & echo $!)"
 BYSTANDER_PID="$(sleep 60 >/dev/null 2>&1 & echo $!)"
 SPAWNED_PIDS="$ORPHAN_PID $BYSTANDER_PID"
 ORPHAN_RUN="$FAKE_TMPDIR/delta-e2e-fake.orphan"
