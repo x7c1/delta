@@ -27,6 +27,7 @@
 //! all read as no newer release.
 
 mod check;
+pub(crate) use check::with_causes;
 mod judge_release;
 use judge_release::judge_release;
 mod newer_release;

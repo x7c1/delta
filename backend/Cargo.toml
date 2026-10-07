@@ -81,3 +81,6 @@ semver = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-platform-verifier = "0.7"
+# Verifies a downloaded release asset against the sha256 digest GitHub states
+# for it, computed while the file streams in.
+sha2 = "0.10"

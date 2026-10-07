@@ -24,7 +24,9 @@
 
 use std::ffi::OsString;
 
-use delta_bootstrap::{Config, DataDirError, DEFAULT_IDENTIFIER, DEFAULT_RELEASE_FEED_URL};
+use delta_bootstrap::{
+    BuildOrigin, Config, DataDirError, Launcher, DEFAULT_IDENTIFIER, DEFAULT_RELEASE_FEED_URL,
+};
 
 pub mod hook_state;
 use hook_state::{HookStateError, HookStateFile};
@@ -44,11 +46,24 @@ mod tests;
 /// The port the server listens on when `DELTA_PORT` does not name one.
 pub const DEFAULT_PORT: u16 = 7878;
 
+/// Where this build was made: `DELTA_BUILD_ORIGIN` as the compiler saw it,
+/// judged by [`BuildOrigin::from_build_env`] (`release` only when the release
+/// workflow's bundle step sets it; unset, empty or anything else is `local`).
+/// Read at compile time, never at run time, so a running build cannot be
+/// made to claim `release`; `build.rs` rebuilds this crate when the variable
+/// changes.
+pub fn build_origin() -> BuildOrigin {
+    BuildOrigin::from_build_env(option_env!("DELTA_BUILD_ORIGIN"))
+}
+
 /// Build configuration from the process environment, and create its data
 /// directory.
 ///
 /// The directories are created here, before anything opens a file in them
 /// (the hook state file, then the database), so neither shell has to.
+///
+/// The configuration of the CLI server: [`Config::launcher`] is
+/// [`Launcher::Cli`].
 pub fn config_from_env() -> Result<Config, DataDirError> {
     prepared(config_from_vars(|name| std::env::var_os(name)))
 }
@@ -60,11 +75,19 @@ pub fn config_from_env() -> Result<Config, DataDirError> {
 /// (`io.github.x7c1.delta.dev`) gets its own data directory and tmux socket
 /// with no further settings. `DELTA_DATA_DIR` and `DELTA_TMUX_SOCKET` still
 /// override what the identifier implies.
+///
+/// Only the desktop shell builds its configuration here, so this is the one
+/// path whose [`Config::launcher`] is [`Launcher::Desktop`].
 pub fn config_from_env_for(identifier: &str) -> Result<Config, DataDirError> {
-    prepared(config_from_vars_for(
+    prepared(desktop_config_from_vars(
         |name| std::env::var_os(name),
-        Some(identifier.to_owned()),
+        identifier,
     ))
+}
+
+/// [`config_from_vars`] for the desktop shell running under `identifier`.
+fn desktop_config_from_vars(var: impl Fn(&str) -> Option<OsString>, identifier: &str) -> Config {
+    config_from_vars_for(var, Some(identifier.to_owned()), Launcher::Desktop)
 }
 
 /// `config` once its data directory exists.
@@ -77,14 +100,16 @@ fn prepared(config: Config) -> Result<Config, DataDirError> {
 ///
 /// `var` answers like [`std::env::var_os`]. A value that is not valid Unicode is
 /// treated as unset, exactly as [`std::env::var`] would; only `HOME` is read as a
-/// raw OS string. Creates nothing on disk.
+/// raw OS string. Creates nothing on disk. The configuration is the CLI
+/// server's ([`Launcher::Cli`]).
 pub fn config_from_vars(var: impl Fn(&str) -> Option<OsString>) -> Config {
-    config_from_vars_for(var, None)
+    config_from_vars_for(var, None, Launcher::Cli)
 }
 
 fn config_from_vars_for(
     var: impl Fn(&str) -> Option<OsString>,
     identifier: Option<String>,
+    launcher: Launcher,
 ) -> Config {
     let text = |name: &str| var(name).and_then(|value| value.into_string().ok());
     let non_empty = |name: &str| text(name).filter(|value| !value.is_empty());
@@ -110,6 +135,8 @@ fn config_from_vars_for(
         launch: launch_from_vars(&text),
         child_env: Vec::new(),
         release_feed_url: release_feed_url(text("DELTA_RELEASE_FEED_URL")),
+        launcher,
+        build_origin: build_origin(),
     }
 }
 

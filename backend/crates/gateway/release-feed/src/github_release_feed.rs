@@ -1,16 +1,11 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use reqwest::header::{ACCEPT, USER_AGENT};
-use rustls_platform_verifier::BuilderVerifierExt;
 use serde::Deserialize;
 
-use delta_usecase::{PublishedRelease, ReleaseFeed, ReleaseFeedError};
+use delta_usecase::{PublishedRelease, ReleaseAsset, ReleaseFeed, ReleaseFeedError};
 
+use crate::https_client::{https_client_builder, USER_AGENT_VALUE};
 use crate::{ClientBuildError, REQUEST_TIMEOUT};
-
-/// The `User-Agent` every request sends.
-const USER_AGENT_VALUE: &str = concat!("delta/", env!("CARGO_PKG_VERSION"));
 
 /// The media type GitHub's REST API documents for its JSON answers.
 const GITHUB_JSON: &str = "application/vnd.github+json";
@@ -25,15 +20,7 @@ pub struct GithubReleaseFeed {
 impl GithubReleaseFeed {
     /// A feed asking `url` (normally [`LATEST_RELEASE_URL`](crate::LATEST_RELEASE_URL)).
     pub fn new(url: impl Into<String>) -> Result<Self, ClientBuildError> {
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let tls = rustls::ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()?
-            .with_platform_verifier()?
-            .with_no_client_auth();
-        let client = reqwest::Client::builder()
-            .tls_backend_preconfigured(tls)
-            .timeout(REQUEST_TIMEOUT)
-            .build()?;
+        let client = https_client_builder()?.timeout(REQUEST_TIMEOUT).build()?;
         Ok(Self {
             client,
             url: url.into(),
@@ -73,6 +60,19 @@ impl ReleaseFeed for GithubReleaseFeed {
 struct GithubRelease {
     tag_name: String,
     html_url: String,
+    /// Absent reads as a release with no assets.
+    #[serde(default)]
+    assets: Vec<GithubAsset>,
+}
+
+/// The fields of one of a release's assets the update reads.
+#[derive(Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+    /// `sha256:<hex>`; absent or `null` on assets GitHub has no digest for.
+    #[serde(default)]
+    digest: Option<String>,
 }
 
 /// Parse a release object out of a 2xx body.
@@ -82,44 +82,24 @@ fn parse_release(body: &[u8]) -> Result<PublishedRelease, ReleaseFeedError> {
     Ok(PublishedRelease {
         tag_name: release.tag_name,
         html_url: release.html_url,
+        assets: release
+            .assets
+            .into_iter()
+            .map(|asset| ReleaseAsset {
+                name: asset.name,
+                download_url: asset.browser_download_url,
+                digest: asset.digest,
+            })
+            .collect(),
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
-    use tokio::task::JoinHandle;
 
     use super::*;
-
-    /// Serve one plain-HTTP request on a loopback port with `status` and
-    /// `body`, handing back the raw request it received.
-    async fn serve_once(status: &'static str, body: &'static str) -> (String, JoinHandle<String>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!(
-            "http://{}/repos/x7c1/delta/releases/latest",
-            listener.local_addr().unwrap()
-        );
-        let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut request = Vec::new();
-            let mut buf = [0u8; 1024];
-            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
-                let n = socket.read(&mut buf).await.unwrap();
-                assert!(n > 0, "the client hung up mid-request");
-                request.extend_from_slice(&buf[..n]);
-            }
-            let response = format!(
-                "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            socket.write_all(response.as_bytes()).await.unwrap();
-            socket.shutdown().await.unwrap();
-            String::from_utf8(request).unwrap()
-        });
-        (url, server)
-    }
+    use crate::test_server::serve_once;
 
     #[tokio::test]
     async fn a_release_is_read_with_the_headers_github_requires() {
@@ -138,6 +118,7 @@ mod tests {
             PublishedRelease {
                 tag_name: "v0.6.0".into(),
                 html_url: "https://github.com/x7c1/delta/releases/tag/v0.6.0".into(),
+                assets: Vec::new(),
             }
         );
         let request = server.await.unwrap().to_ascii_lowercase();
@@ -148,6 +129,85 @@ mod tests {
             "{request}"
         );
         assert!(!request.contains("authorization:"), "{request}");
+    }
+
+    #[test]
+    fn each_assets_name_download_url_and_digest_are_read() {
+        // Trimmed from v0.5.0's answer: the fields read, beside some that are not.
+        let body = r#"{
+            "tag_name": "v0.5.0",
+            "html_url": "https://github.com/x7c1/delta/releases/tag/v0.5.0",
+            "assets": [
+                {
+                    "name": "Delta_0.5.0_aarch64.dmg",
+                    "browser_download_url": "https://github.com/x7c1/delta/releases/download/v0.5.0/Delta_0.5.0_aarch64.dmg",
+                    "digest": "sha256:aaaa",
+                    "size": 10
+                },
+                {
+                    "name": "delta-desktop_0.5.0_amd64.deb",
+                    "browser_download_url": "https://github.com/x7c1/delta/releases/download/v0.5.0/delta-desktop_0.5.0_amd64.deb",
+                    "digest": "sha256:bbbb",
+                    "content_type": "application/vnd.debian.binary-package"
+                }
+            ]
+        }"#;
+        let release = parse_release(body.as_bytes()).unwrap();
+        assert_eq!(
+            release.assets,
+            vec![
+                ReleaseAsset {
+                    name: "Delta_0.5.0_aarch64.dmg".into(),
+                    download_url: "https://github.com/x7c1/delta/releases/download/v0.5.0/Delta_0.5.0_aarch64.dmg".into(),
+                    digest: Some("sha256:aaaa".into()),
+                },
+                ReleaseAsset {
+                    name: "delta-desktop_0.5.0_amd64.deb".into(),
+                    download_url: "https://github.com/x7c1/delta/releases/download/v0.5.0/delta-desktop_0.5.0_amd64.deb".into(),
+                    digest: Some("sha256:bbbb".into()),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_release_without_assets_has_none() {
+        for body in [
+            r#"{"tag_name":"v0.5.0","html_url":"https://github.com/x7c1/delta/releases/tag/v0.5.0"}"#,
+            r#"{"tag_name":"v0.5.0","html_url":"https://github.com/x7c1/delta/releases/tag/v0.5.0","assets":[]}"#,
+        ] {
+            assert_eq!(parse_release(body.as_bytes()).unwrap().assets, vec![]);
+        }
+    }
+
+    #[test]
+    fn an_asset_without_a_digest_is_read_with_none() {
+        for asset in [
+            r#"{"name":"a.deb","browser_download_url":"https://github.com/x7c1/delta/releases/download/v0.5.0/a.deb"}"#,
+            r#"{"name":"a.deb","browser_download_url":"https://github.com/x7c1/delta/releases/download/v0.5.0/a.deb","digest":null}"#,
+        ] {
+            let body = format!(
+                r#"{{"tag_name":"v0.5.0","html_url":"https://github.com/x7c1/delta/releases/tag/v0.5.0","assets":[{asset}]}}"#
+            );
+            let release = parse_release(body.as_bytes()).unwrap();
+            assert_eq!(release.assets.len(), 1);
+            assert_eq!(release.assets[0].name, "a.deb");
+            assert_eq!(release.assets[0].digest, None);
+        }
+    }
+
+    #[test]
+    fn an_asset_missing_its_name_or_url_is_malformed() {
+        for asset in [
+            r#"{"browser_download_url":"https://github.com/x7c1/delta/releases/download/v0.5.0/a.deb"}"#,
+            r#"{"name":"a.deb"}"#,
+        ] {
+            let body = format!(
+                r#"{{"tag_name":"v0.5.0","html_url":"https://github.com/x7c1/delta/releases/tag/v0.5.0","assets":[{asset}]}}"#
+            );
+            let err = parse_release(body.as_bytes()).unwrap_err();
+            assert!(matches!(err, ReleaseFeedError::Malformed(_)), "{err:?}");
+        }
     }
 
     #[tokio::test]

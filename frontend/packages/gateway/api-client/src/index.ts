@@ -63,6 +63,7 @@ export {
   useOpenCwdMutation,
   useVersionQuery,
   useLatestReleaseQuery,
+  useDownloadLatestReleaseMutation,
   useStorageQuery,
   useStorageWorktreesQuery,
   useRemoveStorageWorktreeMutation,

@@ -6,11 +6,12 @@ The REST routes behind the Settings screen and the provider selector: which
 agent providers this host can launch and what each of them can do, the registry
 of custom launch options a session can be started with, the registry of prompt
 templates the composer inserts from, the server's own version string for the
-browser footer and the newer published release it last found, the inventory of
-where the server keeps its files, the cleanup of leftover worktrees and
-migration snapshots (removing old sessions in bulk, the Storage category's third
-cleanup, is in [sessions.md](sessions.md#post-apisessionsprune)), and erasing
-everything Delta left on the machine, which stops the server.
+browser footer, the newer published release it last found and the desktop
+app's download of it, the inventory of where the server keeps its files, the
+cleanup of leftover worktrees and migration snapshots (removing old sessions
+in bulk, the Storage category's third cleanup, is in
+[sessions.md](sessions.md#post-apisessionsprune)), and erasing everything Delta
+left on the machine, which stops the server.
 Applying a launch option to a session is part of a `new_session` send
 ([sends.md](sends.md#post-apisends)); conventions and error semantics are in
 [README.md](README.md).
@@ -456,6 +457,28 @@ outside the prefix above) logs one `warn` naming the feed's URL and the
 cause, and keeps the previous verdict; it is never an error here. Always
 **200**.
 
+`offer` says what the browser may show next to the notice, decided by who
+launched the server, where it was built (`DELTA_BUILD_ORIGIN` at compile
+time — see the [development guide](../development/README.md#build-origin)),
+and whether `newer` has an asset this platform may download:
+
+| `offer` | Server | The footer shows |
+|---------|--------|------------------|
+| `update` | the desktop app, built by the release workflow, when `newer` has an asset it may download (none of the `update_unsupported` cases below) | an **Update** control ([`POST /api/latest-release/download`](#post-apilatest-releasedownload)) |
+| `rebuild` | the desktop app, built locally | a hint that it is updated by rebuilding it (`make desktop`) |
+| `none` | the CLI server (the browser version), a desktop app built by the release workflow that could not set up its HTTPS client (`update_unavailable` below), or one whose `newer` has nothing this platform may download (`update_unsupported` below) | the notice and its link only |
+
+`download` is the state of `newer`'s download once one has been asked for, and
+`null` otherwise (including a download of an older release than `newer`):
+
+- `{ "state": "downloading", "version", "received_bytes", "total_bytes" }` —
+  the transfer is running; `total_bytes` is `null` when the answer did not
+  state a size.
+- `{ "state": "ready", "version" }` — downloaded and its sha256 verified,
+  waiting for a later step to apply it.
+- `{ "state": "failed", "version", "error" }` — nothing was kept; `error`
+  names the cause with its whole chain.
+
 - **200**:
 
   ```json
@@ -463,6 +486,13 @@ cause, and keeps the previous verdict; it is never an error here. Always
     "newer": {
       "version": "v0.6.0",
       "url": "https://github.com/x7c1/delta/releases/tag/v0.6.0"
+    },
+    "offer": "update",
+    "download": {
+      "state": "downloading",
+      "version": "v0.6.0",
+      "received_bytes": 4194304,
+      "total_bytes": 9437184
     }
   }
   ```
@@ -470,8 +500,67 @@ cause, and keeps the previous verdict; it is never an error here. Always
   or, with nothing to tell:
 
   ```json
-  { "newer": null }
+  { "newer": null, "offer": "none", "download": null }
   ```
+
+### `POST /api/latest-release/download`
+
+Start downloading this platform's asset of the newer release
+[`GET /api/latest-release`](#get-apilatest-release) reports, in the
+background, and answer the download's state; the footer follows it by polling
+`GET /api/latest-release`. Takes no body. This only downloads and verifies:
+nothing is installed or replaced.
+
+- **What is downloaded.** Exactly the release `GET /api/latest-release`
+  announced, by the release workflow's asset names: on Linux x86_64
+  `delta-desktop_<version>_amd64.deb`, on macOS aarch64
+  `Delta_<version>_aarch64.dmg` (`<version>` without the `v`). Its download URL
+  must be under `https://github.com/x7c1/delta/releases/download/` (GitHub's
+  redirect from there to its asset host is followed).
+- **Verification.** The sha256 is computed while the file streams in and
+  compared with the asset's `digest` (`sha256:<hex>`) from GitHub's release
+  answer. An asset without one is never downloaded (`update_unsupported`).
+- **Where it goes.** `updates/` in the data directory. The file is written
+  under `<asset name>.part` and renamed to the asset's name only once its
+  digest matches, so a file under that name is always a verified one. When a
+  download completes, every other file in `updates/` (other versions, partial
+  downloads) is removed. A mismatch, a non-2xx answer, an interrupted or
+  stalled transfer (no data for 30 s; connecting may take 15 s) or a write
+  failure deletes the partial file and is reported as `failed`.
+- **One at a time.** A request while a download runs joins it (no second
+  transfer); a request after a failure starts over; a request after the same
+  release is ready answers `ready` without downloading again. A partial
+  download is never resumed.
+
+- **202 Accepted**: a download is running (just started, or already running),
+  with the state `GET /api/latest-release` reports as `download`:
+
+  ```json
+  { "state": "downloading", "version": "v0.6.0", "received_bytes": 0, "total_bytes": null }
+  ```
+
+- **200**: this release is already downloaded and verified:
+
+  ```json
+  { "state": "ready", "version": "v0.6.0" }
+  ```
+
+- **409** — refused by the server whatever the browser shows, with nothing
+  fetched, `code` naming the case:
+  - `update_cli_launcher` — the CLI server launched this server; only the
+    desktop app can be replaced.
+  - `update_local_build` — this desktop app was built locally (not with
+    `DELTA_BUILD_ORIGIN=release`); the release would roll its tree back.
+  - `update_unavailable` — the desktop app could not set up its HTTPS client
+    (the platform trust store), so it cannot download.
+  - `update_no_newer_release` — no newer release is known (not checked yet, up
+    to date, the check turned off, or every check so far failed).
+  - `update_unsupported` — the newer release has nothing this platform may
+    download: no release asset is published for it (Windows, Intel Macs,
+    Linux on ARM), the release lacks this platform's asset, the asset's URL
+    is outside the prefix above, or it states no `sha256` digest. `error` says
+    which. `GET /api/latest-release` offers no Update for such a release, so
+    only a request that bypasses the footer meets this.
 
 ## Storage
 
@@ -644,8 +733,8 @@ In order:
    `~/.delta/worktrees`.
 5. The `~/.claude.json` trust entry goes with each removed worktree; the file
    itself is Claude Code's and is never deleted.
-6. In the data directory, `sessions/`, `settings/`, `tmux.conf` and the
-   migration snapshots are deleted.
+6. In the data directory, `sessions/`, `settings/`, `tmux.conf`, `updates/`
+   and the migration snapshots are deleted.
 7. The response is sent, and the server stops serving (the `/ws` stream closes).
 8. Once the store is closed, `delta.db`, `delta.db-wal`, `delta.db-shm`, the hook
    state file and the data directory itself are deleted — the directory only

@@ -21,8 +21,9 @@ kinds of traffic, and this directory has one page per area:
     directories, git detection, repositories and clone roots, pull requests, and
     opening a known directory in an external editor.
   - **[settings.md](settings.md)** — provider availability and capabilities, the
-    launch-option and prompt-template registries, the server version and the
-    newer published release it last found, the storage inventory (where the
+    launch-option and prompt-template registries, the server version, the
+    newer published release it last found and downloading it in the desktop
+    app, the storage inventory (where the
     server keeps its files), removing leftover worktrees and migration
     snapshots, and erasing everything Delta left on the machine.
 - **[live-channels.md](live-channels.md)** — the browser live channels: a
@@ -140,7 +141,10 @@ injects it is dev-server only). The API base needs nothing: the build leaves
     `send_not_cancellable`, `send_not_releasable`, `clone_root_duplicate`,
     `clone_dest_exists` (the one path a clone could land on is already taken —
     there is no fallback naming), or `launch_option_builtin` (a delete aimed at
-    a launch option Delta ships). Nothing is mutated in any of these cases.
+    a launch option Delta ships), or one of the `update_*` codes from
+    [`POST /api/latest-release/download`](settings.md#post-apilatest-releasedownload)
+    (this server may not download an update, or there is nothing to
+    download). Nothing is mutated in any of these cases.
   - `415 Unsupported Media Type` — a request body sent with a non-JSON
     `Content-Type`.
   - `422 Unprocessable Entity` — a syntactically valid JSON body that does not

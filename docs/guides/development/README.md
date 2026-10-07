@@ -129,6 +129,7 @@ path it writes from it, in one place
   sessions/<token>/        per-spawn working directory of a session started without a repository
   settings/<port>.json     the Claude Code settings handed to `claude --settings`
   tmux.conf                the configuration Delta's tmux server starts with
+  updates/                 the newer release the desktop app downloaded and verified (created by the download)
 ```
 
 Why the hook state file exists is in
@@ -274,6 +275,41 @@ app. Where the app keeps its data, and how it finds `tmux` and `claude` when
 launched from Finder or a desktop file, is in
 [local-run.md](local-run.md#the-desktop-app). Installing and opening a released
 bundle is in [the install guide](../install/README.md).
+
+#### Build origin
+
+A desktop app built from a newer tree with `make desktop` carries the same
+version and identifier as the release bundle, so replacing it with the release
+would roll the tree back. The build therefore records where it was made, at
+compile time, from the `DELTA_BUILD_ORIGIN` environment variable
+(`delta_server::config::build_origin`):
+
+| `DELTA_BUILD_ORIGIN` when compiling | Build origin |
+|-------------------------------------|--------------|
+| `release` | `release` |
+| unset, empty, or anything else | `local` |
+
+Only the bundle workflow (`.github/workflows/bundle.yml`, its `tauri-action`
+step) sets it to `release`; `make desktop-build`, `make desktop-dev`,
+`cargo build` and `make dev` all build `local`, so a build can only claim
+`release` by asking for it. The value is read when compiling, never at run
+time, and changing it rebuilds `delta-server`.
+
+With the launcher — the desktop shell builds its configuration through
+`config_from_env_for`, the CLI through `config_from_env` — it decides what
+[`GET /api/latest-release`](../api/settings.md#get-apilatest-release) offers
+next to a newer-release notice: **Update** for a desktop `release` build (only
+when the release has an asset for this platform, Linux x86_64 or macOS
+aarch64), a hint to rebuild for a desktop `local` build, and nothing for the
+CLI server. The server refuses
+[`POST /api/latest-release/download`](../api/settings.md#post-apilatest-releasedownload)
+in the last two cases whatever the page shows.
+
+To try Update locally, temporarily set the workspace version (`version` under
+`[workspace.package]` in `backend/Cargo.toml`) below the latest release and run
+`DELTA_BUILD_ORIGIN=release make desktop-dev`. The dev build keeps its own data
+directory, so the download lands in that directory's `updates/`, not the
+installed app's. The next build without the variable is `local` again.
 
 The Debian package is named `delta-desktop`, like the command it installs, not
 `delta`: Ubuntu's archive already has an unrelated `delta` package, and apt

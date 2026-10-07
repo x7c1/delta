@@ -22,7 +22,7 @@ mod api_error;
 pub(crate) use api_error::ApiError;
 pub(crate) mod clone_root_path;
 mod latest_release;
-pub(crate) use latest_release::get_latest_release;
+pub(crate) use latest_release::{download_latest_release, get_latest_release};
 mod session_cursor;
 mod session_prune;
 pub(crate) use session_prune::{preview_prune_sessions, prune_sessions};

@@ -35,6 +35,7 @@ import type {
   CloneRoot,
   CloneRootsResponse,
   LatestReleaseResponse,
+  UpdateDownload,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -827,14 +828,22 @@ const LATEST_RELEASE_POLL_MS = 60 * 60 * 1000;
 const LATEST_RELEASE_FIRST_RECHECK_MS = 30 * 1000;
 
 /**
+ * How often the footer re-asks while the newer release downloads, to follow
+ * its progress and catch its outcome.
+ */
+const UPDATE_DOWNLOAD_POLL_MS = 1000;
+
+/**
  * A published release newer than the running server (`GET
  * /api/latest-release`), for the notice next to the version in the navigator
- * footer. Asked again once {@link LATEST_RELEASE_FIRST_RECHECK_MS} after the
+ * footer, with what the footer may offer beside it and how its download is
+ * going. Asked again once {@link LATEST_RELEASE_FIRST_RECHECK_MS} after the
  * first answer, to catch the server's first check, then polled hourly so a
- * page left open for days learns about a release without a reload; the server
- * answers from memory, so each poll is cheap. Retries are off for the same
- * reason as {@link useVersionQuery}: a failure only hides the notice until the
- * next poll.
+ * page left open for days learns about a release without a reload — and every
+ * {@link UPDATE_DOWNLOAD_POLL_MS} while a download runs. The server answers
+ * from memory, so each poll is cheap. Retries are off for the same reason as
+ * {@link useVersionQuery}: a failure only hides the notice until the next
+ * poll.
  */
 export function useLatestReleaseQuery(
   client: ApiClient,
@@ -842,13 +851,41 @@ export function useLatestReleaseQuery(
   return useQuery({
     queryKey: queryKeys.latestRelease,
     queryFn: () => client.getLatestRelease(),
-    refetchInterval: (query) =>
-      query.state.dataUpdateCount + query.state.errorUpdateCount < 2
+    refetchInterval: (query) => {
+      if (query.state.data?.download?.state === 'downloading') {
+        return UPDATE_DOWNLOAD_POLL_MS;
+      }
+      return query.state.dataUpdateCount + query.state.errorUpdateCount < 2
         ? LATEST_RELEASE_FIRST_RECHECK_MS
-        : LATEST_RELEASE_POLL_MS,
+        : LATEST_RELEASE_POLL_MS;
+    },
     refetchIntervalInBackground: true,
     staleTime: LATEST_RELEASE_FIRST_RECHECK_MS,
     retry: false,
+  });
+}
+
+/**
+ * The footer's Update action (`POST /api/latest-release/download`): starts
+ * the newer release's download, or joins the one running. The state it
+ * answers is written into {@link useLatestReleaseQuery}'s cache at once, which
+ * then polls every {@link UPDATE_DOWNLOAD_POLL_MS} while it runs; a refusal is
+ * the mutation's error, whose message the footer shows as the cause.
+ */
+export function useDownloadLatestReleaseMutation(
+  client: ApiClient,
+): UseMutationResult<UpdateDownload, Error, void> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => client.downloadLatestRelease(),
+    onSuccess: (download) => {
+      queryClient.setQueryData<LatestReleaseResponse>(
+        queryKeys.latestRelease,
+        (latest) => (latest ? { ...latest, download } : latest),
+      );
+    },
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.latestRelease }),
   });
 }
 
