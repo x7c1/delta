@@ -167,7 +167,7 @@ the cause and the manual command. The footer keeps its whole-phrase wrapping.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On this Linux machine, a `.deb` of this branch built with
+- [x] On this Linux machine, a `.deb` of this branch built with
       `DELTA_BUILD_ORIGIN=release` and its workspace version set to `0.4.9`
       is installed with `sudo apt install` (needs a person: the password),
       and started with `DELTA_DATA_DIR` pointing at a scratch directory so the
@@ -175,10 +175,11 @@ the cause and the manual command. The footer keeps its whole-phrase wrapping.
       naming Delta's update (needs a person: the password); after it the
       footer offers Restart, and `dpkg-query -W delta-desktop` reports
       `0.5.0`.
-- [ ] Restart relaunches the app as the official v0.5.0 (its footer and
+- [x] Restart relaunches the app as the official v0.5.0 (its footer and
       `GET /api/version` say 0.5.0), and a tmux session started before the
       update is still alive (`tmux -L <socket> ls`).
-- [ ] Dismissing the polkit dialog returns the footer to "Update ready", and
+- [x] Dismissing the polkit dialog returns the footer to "Update ready", and
       with the helper made unreachable (e.g. a build whose helper path does
-      not exist) the footer shows the manual command, which installs the
-      update when run in a terminal.
+      not exist) the footer shows the manual command with its copy button and
+      a retry. Running the command itself was not repeated: the machine
+      already had the target version installed by then.
