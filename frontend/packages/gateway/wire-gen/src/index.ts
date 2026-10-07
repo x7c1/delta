@@ -80,6 +80,7 @@ export type { VersionResponse } from './generated/VersionResponse';
 export type { LatestReleaseResponse } from './generated/LatestReleaseResponse';
 export type { NewerRelease } from './generated/NewerRelease';
 export type { UpdateDownload } from './generated/UpdateDownload';
+export type { UpdateInstall } from './generated/UpdateInstall';
 export type { UpdateOffer } from './generated/UpdateOffer';
 export type { StorageFile } from './generated/StorageFile';
 export type { StorageResponse } from './generated/StorageResponse';

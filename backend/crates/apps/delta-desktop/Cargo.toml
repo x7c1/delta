@@ -26,6 +26,12 @@ tauri-plugin-window-state = "2"
 tokio = { workspace = true }
 tracing = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+# The helper path the server runs, which the bundle config and the polkit
+# policy must name too (tests/update_bundle.rs).
+update-installer = { workspace = true }
+
 # The macOS title bar (src/macos_title_bar.rs) talks to AppKit directly; these
 # are the versions Tauri itself builds on.
 # The window's app ID is set through GLib's program name (see

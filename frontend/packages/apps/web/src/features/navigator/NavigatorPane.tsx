@@ -21,7 +21,7 @@ import { useLiveStore } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
-import { UpdateControl } from './UpdateControl';
+import { useUpdateControl } from './UpdateControl';
 import { launchesFirst } from './launchesFirst';
 import { footerRateLimitGroups } from './footerRateLimitGroups';
 import {
@@ -343,6 +343,9 @@ export function NavigatorPane({
   // offered beside the notice and how a download of it is going.
   const latestRelease = useLatestReleaseQuery(client).data ?? null;
   const newerRelease = latestRelease?.newer ?? null;
+  // What this build may do about that release: a phrase for the footer row,
+  // or a problem block under it (see `useUpdateControl`).
+  const update = useUpdateControl(latestRelease);
 
   // The launches this window started and still tracks, newest first, lead the
   // list — so a launch that fails stays in view instead of sinking below every
@@ -644,9 +647,7 @@ export function NavigatorPane({
                   build), or nothing (browser). A phrase of its own, so the row
                   still wraps only between whole phrases.
                 */}
-                {latestRelease !== null && (
-                  <UpdateControl latest={latestRelease} />
-                )}
+                {update.phrase}
               </span>
             </span>
             {/*
@@ -669,6 +670,13 @@ export function NavigatorPane({
               <SettingsIcon className="h-4 w-4" />
             </Button>
           </div>
+          {/*
+            An update problem — an install that failed or that Delta cannot
+            run, or a downloaded file that failed verification — as a block
+            of its own under the row, at the footer's full width: its command
+            and actions would not read as a phrase beside the label.
+          */}
+          {update.problem}
         </div>
       }
     >

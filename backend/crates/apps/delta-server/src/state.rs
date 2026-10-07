@@ -153,7 +153,10 @@ impl AppState {
             config,
             crate::version::VERSION,
         ))
-        .with_release_update(delta_bootstrap::release_update(config));
+        .with_release_update(delta_bootstrap::release_update(
+            config,
+            crate::version::VERSION,
+        ));
         state
             .readopt_surviving_sessions(config.hook_endpoint_changed)
             .await;

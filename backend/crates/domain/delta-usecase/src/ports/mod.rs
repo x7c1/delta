@@ -56,6 +56,8 @@ pub use transcript::Transcript;
 pub use delta_attribution::TranscriptMessage;
 mod transcript_read;
 pub use transcript_read::TranscriptRead;
+mod update_installer;
+pub use update_installer::{InstallError, UpdateInstaller};
 mod user_prompt_submit_hook;
 pub use user_prompt_submit_hook::UserPromptSubmitHook;
 mod workspace;

@@ -19,6 +19,8 @@ git-worktree = { workspace = true }
 gh-cli = { workspace = true }
 binary-detector = { workspace = true }
 release-feed = { workspace = true }
+update-installer = { workspace = true }
+semver = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

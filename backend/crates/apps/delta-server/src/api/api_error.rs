@@ -158,15 +158,15 @@ const WORKTREE_NOT_REGISTERED_CODE: &str = "worktree_not_registered";
 /// is done twice; the first request's response carries the report.
 const ERASE_IN_PROGRESS_CODE: &str = "erase_in_progress";
 
-/// Stable machine-readable code for `POST /api/latest-release/download` on a
-/// server the CLI launched: only the desktop app can be replaced. The browser
-/// version offers no Update, so a client meets this from a hand-crafted
-/// request.
+/// Stable machine-readable code for `POST /api/latest-release/download` (and
+/// `/install`) on a server the CLI launched: only the desktop app can be
+/// replaced. The browser version offers no Update, so a client meets this
+/// from a hand-crafted request.
 const UPDATE_CLI_LAUNCHER_CODE: &str = "update_cli_launcher";
 
-/// Stable machine-readable code for `POST /api/latest-release/download` in a
-/// desktop app built locally, which the release would roll back. The footer
-/// shows the rebuild hint instead of Update there.
+/// Stable machine-readable code for `POST /api/latest-release/download` (and
+/// `/install`) in a desktop app built locally, which the release would roll
+/// back. The footer shows the rebuild hint instead of Update there.
 const UPDATE_LOCAL_BUILD_CODE: &str = "update_local_build";
 
 /// Stable machine-readable code for `POST /api/latest-release/download` in a
@@ -184,6 +184,21 @@ const UPDATE_NO_NEWER_RELEASE_CODE: &str = "update_no_newer_release";
 /// Delta's own GitHub Releases, or it states no sha256 digest. The footer
 /// offers no Update for such a release.
 const UPDATE_UNSUPPORTED_CODE: &str = "update_unsupported";
+
+/// Stable machine-readable code for `POST /api/latest-release/install` on a
+/// platform where the app does not install updates itself (anything but
+/// Linux, for now). `installs` is `false` there, so the footer offers no
+/// Install.
+const UPDATE_INSTALL_UNSUPPORTED_CODE: &str = "update_install_unsupported";
+
+/// Stable machine-readable code for `POST /api/latest-release/install` while
+/// no verified download of the newer release is ready: none was asked for,
+/// it is still running, it failed, or it is of another release.
+const UPDATE_NOT_READY_CODE: &str = "update_not_ready";
+
+/// Stable machine-readable code for `POST /api/latest-release/restart` while
+/// no install has ended `installed`.
+const UPDATE_NOT_INSTALLED_CODE: &str = "update_not_installed";
 
 /// An error rendered as an HTTP response.
 ///
@@ -204,7 +219,7 @@ pub(crate) enum ApiError {
     Internal(String),
     /// An erase was asked for while one is already running (`409`).
     EraseInProgress,
-    /// An update download the server refuses (`409`).
+    /// An update download, install or restart the server refuses (`409`).
     UpdateRefused(delta_usecase::UpdateRefusal),
 }
 
@@ -229,7 +244,8 @@ impl IntoResponse for ApiError {
             // Each a conflict with what this server is or knows, not a
             // malformed request: the same request succeeds from a desktop
             // release build once a newer release with this platform's asset
-            // is known.
+            // is known (and, for an install or a restart, downloaded or
+            // installed).
             ApiError::UpdateRefused(refusal) => {
                 use delta_usecase::UpdateRefusal;
                 let code = match &refusal {
@@ -241,6 +257,9 @@ impl IntoResponse for ApiError {
                     | UpdateRefusal::MissingAsset { .. }
                     | UpdateRefusal::NoDigest { .. }
                     | UpdateRefusal::UntrustedUrl(_) => UPDATE_UNSUPPORTED_CODE,
+                    UpdateRefusal::InstallUnsupported { .. } => UPDATE_INSTALL_UNSUPPORTED_CODE,
+                    UpdateRefusal::NotReady => UPDATE_NOT_READY_CODE,
+                    UpdateRefusal::NotInstalled => UPDATE_NOT_INSTALLED_CODE,
                 };
                 (StatusCode::CONFLICT, refusal.to_string(), Some(code))
             }

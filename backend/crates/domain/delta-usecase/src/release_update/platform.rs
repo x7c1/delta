@@ -35,6 +35,13 @@ impl Platform {
             _ => None,
         }
     }
+
+    /// Whether the app installs a downloaded update itself here: on Linux,
+    /// where the update is a `.deb` a root helper installs. Elsewhere the
+    /// download is as far as the app goes.
+    pub(super) fn installs_in_app(&self) -> bool {
+        self.os == "linux"
+    }
 }
 
 impl fmt::Display for Platform {

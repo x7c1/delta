@@ -129,7 +129,7 @@ path it writes from it, in one place
   sessions/<token>/        per-spawn working directory of a session started without a repository
   settings/<port>.json     the Claude Code settings handed to `claude --settings`
   tmux.conf                the configuration Delta's tmux server starts with
-  updates/                 the newer release the desktop app downloaded and verified (created by the download)
+  updates/                 the newer release the desktop app downloaded and verified (created by the download; emptied of releases not newer than the running one at startup)
 ```
 
 Why the hook state file exists is in
@@ -310,6 +310,21 @@ To try Update locally, temporarily set the workspace version (`version` under
 `DELTA_BUILD_ORIGIN=release make desktop-dev`. The dev build keeps its own data
 directory, so the download lands in that directory's `updates/`, not the
 installed app's. The next build without the variable is `local` again.
+Install needs the update helper and its polkit policy where the `.deb` puts
+them, so try it with a `.deb` built by `DELTA_BUILD_ORIGIN=release make
+desktop` (installed over the app; run it with `DELTA_DATA_DIR` pointing at a
+scratch directory to keep your data out of it), not with `make desktop-dev`.
+
+On Linux the `.deb` also carries Delta's update helper
+(`backend/crates/apps/delta-update-helper`), the one program that runs as root
+to install an update, at `/usr/lib/delta-desktop/delta-update-helper`, and
+the polkit action that allows it
+(`backend/crates/apps/delta-desktop/linux/io.github.x7c1.delta.update.policy`),
+both listed in `tauri.linux.conf.json`'s `bundle.linux.deb.files`. Tauri does
+not build the helper: `make desktop-build` and the bundle workflow run `cargo
+build --release -p delta-update-helper` first, and the bundle takes it from
+`backend/target/release/`. Why it exists and what it checks is in
+[the security guide](../security.md#updates).
 
 The Debian package is named `delta-desktop`, like the command it installs, not
 `delta`: Ubuntu's archive already has an unrelated `delta` package, and apt

@@ -12,6 +12,9 @@
 //! `sha256:<hex>` digest; which asset, and whether its URL is trusted, is the
 //! release update's decision in `delta-usecase`.
 //!
+//! [`remove_stale_updates`] clears the downloads the running app has caught
+//! up with out of that directory, at startup.
+//!
 //! # TLS
 //!
 //! The client is `reqwest` over rustls with the `ring` provider — no OpenSSL
@@ -40,6 +43,8 @@ pub use github_asset_downloader::GithubAssetDownloader;
 mod github_release_feed;
 pub use github_release_feed::GithubReleaseFeed;
 mod https_client;
+mod stale_updates;
+pub use stale_updates::remove_stale_updates;
 #[cfg(test)]
 mod test_server;
 

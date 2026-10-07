@@ -1242,6 +1242,8 @@ export function createMockApi(): MockApi {
         newer: null,
         offer: 'none',
         download: null,
+        installs: false,
+        install: null,
       } satisfies LatestReleaseResponse),
     ),
     // The browser version may not update: the server refuses, as the real one
@@ -1251,6 +1253,26 @@ export function createMockApi(): MockApi {
         {
           error: 'updating is offered only in the desktop app',
           code: 'update_cli_launcher',
+        },
+        { status: 409 },
+      ),
+    ),
+    // Nor install or restart: the CLI's refusal, and nothing is installed.
+    // Tests of the Install and Restart controls override these.
+    http.post('*/api/latest-release/install', () =>
+      HttpResponse.json(
+        {
+          error: 'updating is offered only in the desktop app',
+          code: 'update_cli_launcher',
+        },
+        { status: 409 },
+      ),
+    ),
+    http.post('*/api/latest-release/restart', () =>
+      HttpResponse.json(
+        {
+          error: 'no update has been installed to restart into',
+          code: 'update_not_installed',
         },
         { status: 409 },
       ),

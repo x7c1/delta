@@ -1,26 +1,30 @@
-//! Responses for `GET /api/latest-release` and
-//! `POST /api/latest-release/download`.
+//! The response for `GET /api/latest-release`.
 
 use delta_usecase::NewerRelease;
 use serde::Serialize;
 use ts_rs::TS;
 
-use super::{WireUpdateDownload, WireUpdateOffer};
+use super::{WireUpdateDownload, WireUpdateInstall, WireUpdateOffer};
 
 /// Response for `GET /api/latest-release`: a published release newer than the
 /// running server, if the server knows of one, what the browser may offer
-/// next to it, and how its download is going.
+/// next to it, and how its download and install are going.
 ///
 /// `newer` is `null` whenever the browser has nothing to tell the user: the
 /// server has not checked yet, the last check found it up to date, the check
 /// is turned off, or every check so far failed. `download` is `null` until a
-/// download of `newer` is asked for.
+/// download of `newer` is asked for. `installs` is whether this app installs
+/// a ready download itself (`POST /api/latest-release/install`: a desktop
+/// release build on Linux). `install` is `null` until an install of `newer`
+/// is asked for, and again after the user dismissed the password dialog.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(rename = "LatestReleaseResponse")]
 pub struct WireLatestReleaseResponse {
     pub newer: Option<WireNewerRelease>,
     pub offer: WireUpdateOffer,
     pub download: Option<WireUpdateDownload>,
+    pub installs: bool,
+    pub install: Option<WireUpdateInstall>,
 }
 
 /// A published release newer than the running server.
@@ -62,6 +66,8 @@ mod tests {
                     received_bytes: 512,
                     total_bytes: Some(1024),
                 }),
+                installs: true,
+                install: None,
             })
             .unwrap(),
             serde_json::json!({
@@ -76,6 +82,8 @@ mod tests {
                     "received_bytes": 512,
                     "total_bytes": 1024,
                 },
+                "installs": true,
+                "install": null,
             }),
         );
     }
@@ -87,9 +95,17 @@ mod tests {
                 newer: None,
                 offer: WireUpdateOffer::None,
                 download: None,
+                installs: false,
+                install: None,
             })
             .unwrap(),
-            serde_json::json!({ "newer": null, "offer": "none", "download": null }),
+            serde_json::json!({
+                "newer": null,
+                "offer": "none",
+                "download": null,
+                "installs": false,
+                "install": null,
+            }),
         );
     }
 }
