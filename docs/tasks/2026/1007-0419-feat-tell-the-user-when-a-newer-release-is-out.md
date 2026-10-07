@@ -129,5 +129,5 @@ app gets the same notice until the later change adds its action.
       pointed at a closed local port), the server starts without delay, the
       footer shows no notice, and the log has one `warn` per check naming
       the cause.
-- [ ] In the desktop app (`make desktop`), the same notice appears and its
+- [x] In the desktop app (`make desktop`), the same notice appears and its
       link opens in the default browser, not in the app window.
