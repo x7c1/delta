@@ -18,6 +18,7 @@ tauri-build = { version = "2", features = [] }
 delta-bootstrap = { workspace = true }
 delta-server = { workspace = true, features = ["embed-web"] }
 anyhow = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
@@ -29,8 +30,9 @@ tracing = { workspace = true }
 # The macOS title bar (src/macos_title_bar.rs) talks to AppKit directly; these
 # are the versions Tauri itself builds on.
 # The window's app ID is set through GLib's program name (see
-# `set_window_app_id` in src/main.rs), and Ctrl-Q is caught on the GTK window
-# (src/quit_shortcut.rs); these are the versions Tauri builds on.
+# `set_window_app_id` in src/main.rs), Ctrl-Q is caught on the GTK window
+# (src/quit_shortcut.rs), and the window's content size is read from it
+# (src/window_size/follow_resizes.rs); these are the versions Tauri builds on.
 [target.'cfg(target_os = "linux")'.dependencies]
 glib = "0.18"
 gtk = "0.18"
@@ -39,3 +41,6 @@ gtk = "0.18"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent", "NSResponder", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString", "NSUserDefaults"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

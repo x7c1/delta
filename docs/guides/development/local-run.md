@@ -183,19 +183,25 @@ to it instead.
   shown on the placeholder page`, then `window navigating to the server` with
   the port), so the time a launch spent on that page can be read from the log.
 - **Window size.** The window opens at the size it was last left at, and
-  maximized if it was. The first time — when nothing is remembered yet — it
-  opens at 80 % of the screen's work area (the screen less the menu bar and
-  Dock, or the panels), centred on macOS, not maximized, and at 1280×800 if no
-  screen can be read. It cannot be made smaller than 1024×640, the smallest size at
+  maximized if it was. A size left on the same screen, or on a smaller one,
+  comes back exactly, even one stretched across the whole screen. A size left
+  on a larger screen or at another scale is fitted to the screen the window
+  opens on — its work area on macOS; on Linux with room left for the title
+  bar and the desktop's own bars, which GNOME on Wayland does not report — so
+  it still fits. The first time — when nothing is remembered yet — it opens
+  at 80 % of the screen's work area (the screen less the menu bar and Dock, or
+  the panels), centred on macOS, not maximized, and at 1280×800 if no screen
+  can be read. It cannot be made smaller than 1024×640, the smallest size at
   which the navigator, the conversation and the terminal still sit side by
   side. Only the size and the maximized state are remembered, not the
   position: Wayland does not let an app place its window. They are kept in
-  `.window-state.json` in the app config directory, written as the app quits:
+  the app config directory, written as the app quits — the size in
+  `window-size.json` and the maximized state in `.window-state.json`:
   `~/Library/Application Support/io.github.x7c1.delta/` on macOS (the data
   directory) and `~/.config/io.github.x7c1.delta/` on Linux. The dev
-  identifier keeps its own file, so resizing the dev window leaves the
-  installed app's size alone; delete the file to get the first-launch size
-  again.
+  identifier keeps its own files, so resizing the dev window leaves the
+  installed app's size alone; delete `window-size.json` to get the
+  first-launch size again.
 - **Data.** The app passes its bundle identifier to the server, which keeps
   everything it writes in the data directory that identifier names, created on
   first run: `~/Library/Application Support/io.github.x7c1.delta/` on macOS and
