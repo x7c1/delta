@@ -132,6 +132,8 @@ pub(super) fn test_config() -> Config {
         launch: delta_usecase::LaunchConfig::default(),
         child_env: Vec::new(),
         release_feed_url: None,
+        launcher: delta_bootstrap::Launcher::Cli,
+        build_origin: delta_bootstrap::BuildOrigin::Local,
     }
 }
 

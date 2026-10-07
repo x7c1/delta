@@ -1,9 +1,16 @@
-//! GitHub-backed [`ReleaseFeed`]: the newest published release of Delta.
+//! GitHub-backed [`ReleaseFeed`] and [`AssetDownloader`]: the newest
+//! published release of Delta, and its files.
 //!
 //! [`GithubReleaseFeed`] asks GitHub's REST API for the repository's latest
 //! release (`GET /repos/x7c1/delta/releases/latest`, which never returns a
-//! draft or a pre-release) and reports its `tag_name` and `html_url`
-//! unvalidated; the release check in `delta-usecase` judges them.
+//! draft or a pre-release) and reports its `tag_name`, `html_url` and assets
+//! (name, `browser_download_url`, `digest`) unvalidated; the release check in
+//! `delta-usecase` judges them.
+//!
+//! [`GithubAssetDownloader`] downloads one asset into a directory, computing
+//! its sha256 while it streams in and comparing it with the asset's
+//! `sha256:<hex>` digest; which asset, and whether its URL is trusted, is the
+//! release update's decision in `delta-usecase`.
 //!
 //! # TLS
 //!
@@ -16,20 +23,36 @@
 //! # Requests
 //!
 //! Every request carries a `User-Agent` (GitHub rejects requests without
-//! one) and `Accept: application/vnd.github+json`, no token, and gives up
-//! after [`REQUEST_TIMEOUT`].
+//! one) and no token. The feed's request also sends
+//! `Accept: application/vnd.github+json` and gives up after
+//! [`REQUEST_TIMEOUT`]. A download of several MB has no cap on the whole
+//! transfer: it gives up when connecting takes longer than
+//! [`DOWNLOAD_CONNECT_TIMEOUT`] or no data arrives for
+//! [`DOWNLOAD_STALL_TIMEOUT`].
 //!
 //! [`ReleaseFeed`]: delta_usecase::ReleaseFeed
+//! [`AssetDownloader`]: delta_usecase::AssetDownloader
 
 mod client_build_error;
 pub use client_build_error::ClientBuildError;
+mod github_asset_downloader;
+pub use github_asset_downloader::GithubAssetDownloader;
 mod github_release_feed;
 pub use github_release_feed::GithubReleaseFeed;
+mod https_client;
+#[cfg(test)]
+mod test_server;
 
 use std::time::Duration;
 
 /// GitHub's endpoint for the newest published release of Delta.
 pub const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/x7c1/delta/releases/latest";
 
-/// How long one request may take, connecting included, before it fails.
+/// How long one feed request may take, connecting included, before it fails.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a download may take to connect before it fails.
+pub const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How long a download may go without receiving data before it fails.
+pub const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(30);

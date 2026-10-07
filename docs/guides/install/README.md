@@ -54,6 +54,8 @@ It holds:
 - `settings/<port>.json`, the settings a session is launched with. There is one
   file for every port the app has used.
 - `tmux.conf`, the configuration of Delta's tmux server.
+- `updates/`, a newer release the desktop app downloaded and verified, kept
+  until it is applied; a download of another version replaces it.
 
 The directory is readable by you only (mode `0700`) when the app creates it. A
 directory an earlier version created keeps its mode; the hook state file and the

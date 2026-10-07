@@ -17,6 +17,7 @@ mod pane_token;
 mod ports;
 mod pull_request;
 mod release_check;
+mod release_update;
 mod repository;
 mod send_target;
 mod session_listing;
@@ -47,17 +48,22 @@ pub use interactor::{
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use pane_token::{PaneToken, PaneTokenMinter};
 pub use ports::{
-    pane_for, AsyncEventReceiver, AsyncEventSink, BinaryDetector, BranchDeletion, CloneRoot,
-    CommsDirection, CommsEntry, CommsFrameKind, CommsLogSink, DirEntry, DirListing, ExternalOpener,
-    GhCli, GitRepoInfo, GitWorktree, MessageDisplayHook, NewSession, NullCommsLog,
-    PublishedRelease, RateLimitWindow, RecentWorkdir, ReleaseFeed, ReleaseFeedError,
-    RememberedPane, RemoteBranches, RepositoryCloneRow, SessionEndHook, SessionEvent,
-    SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore, SpawningSession,
-    StatusSnapshot, StopHook, TmuxDriver, Transcript, TranscriptMessage, TranscriptRead,
-    UserPromptSubmitHook, Workspace, WorktreeInspection, WorktreeRemoval, WorktreeStartPoint,
+    pane_for, AssetDownloadError, AssetDownloader, AsyncEventReceiver, AsyncEventSink,
+    BinaryDetector, BranchDeletion, CloneRoot, CommsDirection, CommsEntry, CommsFrameKind,
+    CommsLogSink, DirEntry, DirListing, DownloadProgress, ExternalOpener, FeedCause, GhCli,
+    GitRepoInfo, GitWorktree, MessageDisplayHook, NewSession, NullCommsLog, PublishedRelease,
+    RateLimitWindow, RecentWorkdir, ReleaseAsset, ReleaseFeed, ReleaseFeedError, RememberedPane,
+    RemoteBranches, RepositoryCloneRow, SessionEndHook, SessionEvent, SessionLifecycle,
+    SessionPageRow, SessionStartHook, SessionStore, SpawningSession, StatusSnapshot, StopHook,
+    TmuxDriver, Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
+    WorktreeInspection, WorktreeRemoval, WorktreeStartPoint,
 };
 pub use pull_request::{PullRequest, PullRequestLens, PullRequestList};
-pub use release_check::{NewerRelease, ReleaseCheck, ReleaseCheckError};
+pub use release_check::{NewerRelease, ReleaseCheck, ReleaseCheckError, RELEASE_PAGE_PREFIX};
+pub use release_update::{
+    check_download_url, choose_asset, downloadable_asset, BuildOrigin, Launcher, NotOffered,
+    Platform, ReleaseUpdate, UpdateDownload, UpdateOffer, UpdateRefusal, RELEASE_DOWNLOAD_PREFIX,
+};
 pub use repository::{display_name, identity_key, worktree_dir_slug, Clone, Repository};
 pub use send_target::{SendTarget, WorktreeSpec};
 pub use session_listing::SessionListing;

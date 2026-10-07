@@ -30,6 +30,7 @@ import type {
   CloneRoot,
   CloneRootsResponse,
   LatestReleaseResponse,
+  UpdateDownload,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -162,6 +163,15 @@ export interface ApiClientOptions {
  * without `force`, it has uncommitted or untracked changes, or git no longer
  * knows it as a worktree. The last two are what the forced removal, confirmed
  * by the user, gets past.
+ *
+ * `update_cli_launcher`, `update_local_build`, `update_unavailable`,
+ * `update_no_newer_release` and `update_unsupported` are the refusals of
+ * `POST /api/latest-release/download`: the server is the CLI's, the desktop
+ * app was built locally, it cannot download, no newer release is known, or
+ * the release has nothing this platform may download. The footer offers
+ * Update only when `offer` is `update`, which rules out every refusal unless
+ * the newer release changed in between, and shows the message of any refusal
+ * as the failure's cause.
  */
 export type ApiErrorCode =
   | 'resume_unavailable'
@@ -185,7 +195,12 @@ export type ApiErrorCode =
   | 'worktree_in_use'
   | 'worktree_dirty'
   | 'worktree_not_registered'
-  | 'erase_in_progress';
+  | 'erase_in_progress'
+  | 'update_cli_launcher'
+  | 'update_local_build'
+  | 'update_unavailable'
+  | 'update_no_newer_release'
+  | 'update_unsupported';
 
 /** An error raised when the server responds with a non-2xx status. */
 export class ApiError extends Error {
@@ -816,10 +831,23 @@ export class ApiClient {
    * `GET /api/latest-release` — a published release newer than the running
    * server, from its last background check of GitHub's releases. `newer` is
    * `null` whenever there is nothing to tell (not checked yet, up to date,
-   * check turned off, or every check so far failed).
+   * check turned off, or every check so far failed). Also says what the
+   * footer may offer next to it and how its download is going.
    */
   getLatestRelease(): Promise<LatestReleaseResponse> {
     return this.request<LatestReleaseResponse>('/api/latest-release');
+  }
+
+  /**
+   * `POST /api/latest-release/download` — start downloading the newer
+   * release in the background (desktop release builds only), or join the
+   * download already running, or report it ready. `409` with an `update_*`
+   * code when the server refuses.
+   */
+  downloadLatestRelease(): Promise<UpdateDownload> {
+    return this.request<UpdateDownload>('/api/latest-release/download', {
+      method: 'POST',
+    });
   }
 
   /**

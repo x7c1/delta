@@ -928,7 +928,7 @@ export const MOCK_VERSION = 'v0.0.0-mock';
 
 /**
  * A newer published release, for tests that override the mock
- * `GET /api/latest-release` (which answers `{ newer: null }` by default, so the
+ * `GET /api/latest-release` (which answers `{ newer: null, offer: 'none' }` by default, so the
  * mock app shows no update notice unless a test asks for one).
  */
 export const MOCK_NEWER_RELEASE: NewerRelease = {

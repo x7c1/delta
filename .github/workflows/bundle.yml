@@ -153,6 +153,10 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Marks the bundle as built by this workflow, the only build the
+          # desktop app's Update may replace (every other build is `local`; see
+          # docs/guides/development/README.md#build-origin).
+          DELTA_BUILD_ORIGIN: release
         with:
           projectPath: backend/crates/apps/delta-desktop
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}

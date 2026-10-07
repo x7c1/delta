@@ -20,7 +20,7 @@ use crate::rest::{
     WirePruneSessionsRequest, WirePruneSessionsResponse, WirePullRequestsResponse,
     WireQuestionAnswerRequest, WireQuestionCancelRequest, WireRemoveWorktreeRequest,
     WireRepositoriesResponse, WireSendResponse, WireSendsResponse, WireSessionsResponse,
-    WireStorageResponse, WireStorageWorktreesResponse, WireThreadsResponse,
+    WireStorageResponse, WireStorageWorktreesResponse, WireThreadsResponse, WireUpdateDownload,
     WireUpdateLaunchOptionRequest, WireUpdatePromptTemplateRequest, WireVersionResponse,
     WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
@@ -256,8 +256,20 @@ declare_endpoints! {
     /// background check of GitHub's releases. `newer` is `null` when there is
     /// nothing to tell: not checked yet, up to date, the check turned off
     /// (`DELTA_RELEASE_FEED_URL` empty), or every check so far failed. Answers
-    /// from memory; the request never reaches GitHub.
+    /// from memory; the request never reaches GitHub. Also says what the
+    /// browser may offer next to it (`update`, `rebuild` or `none`, by who
+    /// launched the server, where it was built, and whether the release has
+    /// an asset this platform may download) and how its download is going.
     GetLatestRelease: GET "/api/latest-release", response = WireLatestReleaseResponse;
+
+    /// Starts downloading this platform's asset of the newer release into the
+    /// data directory's `updates/`, verified against its sha256 digest; the
+    /// transfer runs in the background and `GetLatestRelease` reports it.
+    /// Takes no body; answers the download's state. Refused with a `409` and
+    /// a stable code unless this is a desktop app built by the release
+    /// workflow and a newer release with this platform's asset is known.
+    DownloadLatestRelease: POST "/api/latest-release/download",
+        response = WireUpdateDownload;
 
     /// Where this running Delta keeps its files — the data directory and every
     /// path derived from it, the worktree base, the transcript root, the tmux

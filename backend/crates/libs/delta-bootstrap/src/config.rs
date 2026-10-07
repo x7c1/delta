@@ -1,5 +1,7 @@
 //! Runtime configuration for the composition root.
 
+use delta_usecase::{BuildOrigin, Launcher};
+
 use crate::data_layout::DataLayout;
 use crate::settings::render_session_settings;
 
@@ -129,6 +131,16 @@ pub struct Config {
     /// `None` when the check is turned off: the server then never asks, and
     /// never reports a newer release.
     pub release_feed_url: Option<String>,
+    /// Which shell launched the server. Only the desktop shell's
+    /// configuration (`delta_server::config::config_from_env_for`) names
+    /// [`Launcher::Desktop`]; everything else is the CLI. With
+    /// [`Self::build_origin`] it decides whether an update may be downloaded
+    /// (see [`delta_usecase::ReleaseUpdate`]).
+    pub launcher: Launcher,
+    /// Where this build was made, embedded at compile time from
+    /// `DELTA_BUILD_ORIGIN` (`delta_server::config`): only a build the release
+    /// workflow made may be replaced by a release.
+    pub build_origin: BuildOrigin,
 }
 
 impl Config {
@@ -175,6 +187,8 @@ mod tests {
             launch: delta_usecase::LaunchConfig::default(),
             child_env: Vec::new(),
             release_feed_url: None,
+            launcher: Launcher::Cli,
+            build_origin: BuildOrigin::Local,
         };
         let layout = config.data_layout();
         let data_dir = std::path::Path::new("/data/delta");
@@ -188,6 +202,7 @@ mod tests {
             data_dir.join("settings").join("4000.json")
         );
         assert_eq!(layout.tmux_conf(), data_dir.join("tmux.conf"));
+        assert_eq!(layout.updates(), data_dir.join("updates"));
         assert_eq!(
             config.session_settings_path(),
             "/data/delta/settings/4000.json"

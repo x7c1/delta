@@ -21,6 +21,7 @@ import { useLiveStore } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
+import { UpdateControl } from './UpdateControl';
 import { launchesFirst } from './launchesFirst';
 import { footerRateLimitGroups } from './footerRateLimitGroups';
 import {
@@ -338,8 +339,10 @@ export function NavigatorPane({
   // A published release newer than the running server, from the server's last
   // background check (`null` when there is nothing to tell). Re-asked by the
   // hook once shortly after the first answer, then hourly, so a page left open
-  // learns about a release without a reload.
-  const newerRelease = useLatestReleaseQuery(client).data?.newer ?? null;
+  // learns about a release without a reload. The same answer says what may be
+  // offered beside the notice and how a download of it is going.
+  const latestRelease = useLatestReleaseQuery(client).data ?? null;
+  const newerRelease = latestRelease?.newer ?? null;
 
   // The launches this window started and still tracks, newest first, lead the
   // list — so a launch that fails stays in view instead of sinking below every
@@ -577,9 +580,9 @@ export function NavigatorPane({
                 />
               </span>
               {/*
-                Label and update notice wrap as two whole phrases: when both do
-                not fit on one line, the notice moves under the label instead
-                of either breaking mid-phrase.
+                Label, update notice and update control wrap as whole phrases:
+                when they do not fit on one line, the later ones move under the
+                label instead of any breaking mid-phrase.
               */}
               <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
                 {/*
@@ -634,6 +637,15 @@ export function NavigatorPane({
                   >
                     {`${newerRelease.version} available`}
                   </a>
+                )}
+                {/*
+                  Beside the notice, what this build may do about it: Update
+                  (desktop release build), a rebuild hint (desktop local
+                  build), or nothing (browser). A phrase of its own, so the row
+                  still wraps only between whole phrases.
+                */}
+                {latestRelease !== null && (
+                  <UpdateControl latest={latestRelease} />
                 )}
               </span>
             </span>

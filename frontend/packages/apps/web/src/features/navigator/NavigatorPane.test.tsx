@@ -30,8 +30,11 @@ import {
 import { ApiClient } from '@delta/api-client';
 import type {
   AgentProvider,
+  LatestReleaseResponse,
   RateLimitWindow,
   SessionListItem,
+  UpdateDownload,
+  UpdateOffer,
 } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
@@ -874,7 +877,11 @@ describe('NavigatorPane newer-release notice', () => {
   it('links to the release page next to the version when the server reports a newer release', async () => {
     server.use(
       http.get('*/api/latest-release', () =>
-        HttpResponse.json({ newer: MOCK_NEWER_RELEASE }),
+        HttpResponse.json({
+          newer: MOCK_NEWER_RELEASE,
+          offer: 'none',
+          download: null,
+        } satisfies LatestReleaseResponse),
       ),
     );
 
@@ -892,7 +899,11 @@ describe('NavigatorPane newer-release notice', () => {
     server.use(
       http.get('*/api/latest-release', () => {
         asked = true;
-        return HttpResponse.json({ newer: null });
+        return HttpResponse.json({
+          newer: null,
+          offer: 'none',
+          download: null,
+        } satisfies LatestReleaseResponse);
       }),
     );
 
@@ -918,7 +929,9 @@ describe('NavigatorPane newer-release notice', () => {
         answers += 1;
         return HttpResponse.json({
           newer: answers === 1 ? null : MOCK_NEWER_RELEASE,
-        });
+          offer: 'none',
+          download: null,
+        } satisfies LatestReleaseResponse);
       }),
     );
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -937,5 +950,206 @@ describe('NavigatorPane newer-release notice', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('NavigatorPane update control', () => {
+  beforeEach(() => {
+    useLiveStore.setState({
+      connection: 'open',
+      notices: {},
+      runningThreads: {},
+      rateLimits: {},
+    });
+    useNavStore.setState({
+      focusedSessionId: null,
+      activeThreadId: null,
+      settingsOpen: false,
+    });
+  });
+
+  /** Answer `GET /api/latest-release` with the newer release, `offer` and `download`. */
+  function answerLatest(
+    offer: UpdateOffer,
+    download: () => UpdateDownload | null = () => null,
+  ) {
+    server.use(
+      http.get('*/api/latest-release', () =>
+        HttpResponse.json({
+          newer: MOCK_NEWER_RELEASE,
+          offer,
+          download: download(),
+        } satisfies LatestReleaseResponse),
+      ),
+    );
+  }
+
+  async function noticeShown() {
+    await screen.findByTestId('newer-release');
+  }
+
+  const CONTROLS = [
+    'update-button',
+    'update-rebuild-hint',
+    'update-downloading',
+    'update-ready',
+    'update-retry',
+  ];
+
+  function shownControls() {
+    return CONTROLS.filter((id) => screen.queryByTestId(id) !== null);
+  }
+
+  it('offers Update only to a desktop release build', async () => {
+    answerLatest('update');
+    renderPane();
+    await noticeShown();
+    expect(await screen.findByTestId('update-button')).toHaveTextContent(
+      'Update',
+    );
+    expect(shownControls()).toEqual(['update-button']);
+  });
+
+  it('shows the rebuild hint, not Update, to a desktop local build', async () => {
+    answerLatest('rebuild');
+    renderPane();
+    await noticeShown();
+    expect(await screen.findByTestId('update-rebuild-hint')).toHaveAttribute(
+      'title',
+      expect.stringContaining('make desktop'),
+    );
+    expect(shownControls()).toEqual(['update-rebuild-hint']);
+  });
+
+  it('shows neither to the browser version', async () => {
+    answerLatest('none');
+    renderPane();
+    await noticeShown();
+    expect(shownControls()).toEqual([]);
+  });
+
+  it('shows nothing beside the version when there is no newer release', async () => {
+    let asked = false;
+    server.use(
+      http.get('*/api/latest-release', () => {
+        asked = true;
+        return HttpResponse.json({
+          newer: null,
+          offer: 'update',
+          download: null,
+        } satisfies LatestReleaseResponse);
+      }),
+    );
+    renderPane();
+    await waitFor(() => expect(asked).toBe(true));
+    expect(shownControls()).toEqual([]);
+  });
+
+  it('starts the download on Update and follows it to ready', async () => {
+    let download: UpdateDownload | null = null;
+    let posts = 0;
+    answerLatest('update', () => download);
+    server.use(
+      http.post('*/api/latest-release/download', () => {
+        posts += 1;
+        download = {
+          state: 'downloading',
+          version: MOCK_NEWER_RELEASE.version,
+          received_bytes: 512,
+          total_bytes: 2048,
+        };
+        return HttpResponse.json(download satisfies UpdateDownload, {
+          status: 202,
+        });
+      }),
+    );
+    renderPane();
+
+    fireEvent.click(await screen.findByTestId('update-button'));
+
+    expect(await screen.findByTestId('update-downloading')).toHaveTextContent(
+      'Downloading 25%',
+    );
+    expect(posts).toBe(1);
+
+    download = { state: 'ready', version: MOCK_NEWER_RELEASE.version };
+    expect(
+      await screen.findByTestId('update-ready', {}, { timeout: 3000 }),
+    ).toHaveTextContent('Update ready');
+    expect(shownControls()).toEqual(['update-ready']);
+  });
+
+  it('renders a running download with its progress', async () => {
+    answerLatest('update', () => ({
+      state: 'downloading',
+      version: MOCK_NEWER_RELEASE.version,
+      received_bytes: 0,
+      total_bytes: null,
+    }));
+    renderPane();
+    expect(await screen.findByTestId('update-downloading')).toHaveTextContent(
+      'Downloading…',
+    );
+    expect(shownControls()).toEqual(['update-downloading']);
+  });
+
+  it('renders a failed download with its cause and retries it', async () => {
+    let download: UpdateDownload | null = {
+      state: 'failed',
+      version: MOCK_NEWER_RELEASE.version,
+      error: 'the download answered with HTTP status 404',
+    };
+    let posts = 0;
+    answerLatest('update', () => download);
+    server.use(
+      http.post('*/api/latest-release/download', () => {
+        posts += 1;
+        download = {
+          state: 'downloading',
+          version: MOCK_NEWER_RELEASE.version,
+          received_bytes: 0,
+          total_bytes: null,
+        };
+        return HttpResponse.json(download satisfies UpdateDownload, {
+          status: 202,
+        });
+      }),
+    );
+    renderPane();
+
+    const retry = await screen.findByTestId('update-retry');
+    expect(retry).toHaveTextContent('Update failed · Retry');
+    expect(retry).toHaveAttribute(
+      'title',
+      expect.stringContaining('the download answered with HTTP status 404'),
+    );
+
+    fireEvent.click(retry);
+
+    expect(await screen.findByTestId('update-downloading')).toBeInTheDocument();
+    expect(posts).toBe(1);
+  });
+
+  it('shows a refusal as a failure with the server message', async () => {
+    answerLatest('update');
+    server.use(
+      http.post('*/api/latest-release/download', () =>
+        HttpResponse.json(
+          {
+            error: 'release v0.0.1 has no asset delta-desktop_0.0.1_amd64.deb',
+            code: 'update_unsupported',
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+    renderPane();
+
+    fireEvent.click(await screen.findByTestId('update-button'));
+
+    expect(await screen.findByTestId('update-retry')).toHaveAttribute(
+      'title',
+      expect.stringContaining('has no asset delta-desktop_0.0.1_amd64.deb'),
+    );
   });
 });

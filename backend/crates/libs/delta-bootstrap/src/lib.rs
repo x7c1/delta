@@ -36,6 +36,9 @@ pub use config::{Config, DEFAULT_IDENTIFIER, DEFAULT_RELEASE_FEED_URL};
 mod release_check;
 pub use release_check::release_check;
 
+mod release_update;
+pub use release_update::release_update;
+
 mod data_layout;
 pub use data_layout::DataLayout;
 
@@ -58,6 +61,11 @@ pub use delta_sqlite::Error as StoreError;
 // the `delta-server` main) can name the launch settings without depending on
 // the use-case crate directly.
 pub use delta_usecase::LaunchConfig;
+
+// Re-exported so a shell can say who launched the server and where it was
+// built (`Config::launcher`, `Config::build_origin`) without depending on the
+// use-case crate directly.
+pub use delta_usecase::{BuildOrigin, Launcher};
 
 use delta_usecase::BoxedInteractor;
 

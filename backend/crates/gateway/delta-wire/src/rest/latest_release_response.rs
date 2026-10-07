@@ -1,19 +1,26 @@
-//! Response for `GET /api/latest-release`.
+//! Responses for `GET /api/latest-release` and
+//! `POST /api/latest-release/download`.
 
 use delta_usecase::NewerRelease;
 use serde::Serialize;
 use ts_rs::TS;
 
+use super::{WireUpdateDownload, WireUpdateOffer};
+
 /// Response for `GET /api/latest-release`: a published release newer than the
-/// running server, if the server knows of one.
+/// running server, if the server knows of one, what the browser may offer
+/// next to it, and how its download is going.
 ///
 /// `newer` is `null` whenever the browser has nothing to tell the user: the
 /// server has not checked yet, the last check found it up to date, the check
-/// is turned off, or every check so far failed.
+/// is turned off, or every check so far failed. `download` is `null` until a
+/// download of `newer` is asked for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(rename = "LatestReleaseResponse")]
 pub struct WireLatestReleaseResponse {
     pub newer: Option<WireNewerRelease>,
+    pub offer: WireUpdateOffer,
+    pub download: Option<WireUpdateDownload>,
 }
 
 /// A published release newer than the running server.
@@ -49,13 +56,26 @@ mod tests {
                     version: "v0.6.0".to_owned(),
                     url: "https://github.com/x7c1/delta/releases/tag/v0.6.0".to_owned(),
                 }),
+                offer: WireUpdateOffer::Update,
+                download: Some(WireUpdateDownload::Downloading {
+                    version: "v0.6.0".to_owned(),
+                    received_bytes: 512,
+                    total_bytes: Some(1024),
+                }),
             })
             .unwrap(),
             serde_json::json!({
                 "newer": {
                     "version": "v0.6.0",
                     "url": "https://github.com/x7c1/delta/releases/tag/v0.6.0",
-                }
+                },
+                "offer": "update",
+                "download": {
+                    "state": "downloading",
+                    "version": "v0.6.0",
+                    "received_bytes": 512,
+                    "total_bytes": 1024,
+                },
             }),
         );
     }
@@ -63,8 +83,13 @@ mod tests {
     #[test]
     fn no_newer_release_serializes_as_null() {
         assert_eq!(
-            serde_json::to_value(WireLatestReleaseResponse { newer: None }).unwrap(),
-            serde_json::json!({ "newer": null }),
+            serde_json::to_value(WireLatestReleaseResponse {
+                newer: None,
+                offer: WireUpdateOffer::None,
+                download: None,
+            })
+            .unwrap(),
+            serde_json::json!({ "newer": null, "offer": "none", "download": null }),
         );
     }
 }

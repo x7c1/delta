@@ -13,6 +13,7 @@ pub(super) fn release(tag: &str) -> PublishedRelease {
     PublishedRelease {
         tag_name: tag.to_owned(),
         html_url: format!("{RELEASE_PAGE_PREFIX}tag/{tag}"),
+        assets: Vec::new(),
     }
 }
 
