@@ -565,7 +565,7 @@ export function NavigatorPane({
               the e2e suites can wait on disconnect/reconnect transitions without
               depending on the dot's color classes or title wording.
             */}
-            <span className="inline-flex items-center gap-1.5">
+            <span className="inline-flex min-w-0 items-center gap-1.5">
               <span
                 className="inline-flex px-1"
                 data-testid="connection-indicator"
@@ -577,58 +577,65 @@ export function NavigatorPane({
                 />
               </span>
               {/*
-                Label semantics: in the steady state (connection is `open` AND
-                the version has resolved) the label reads `Delta <version>`,
-                turning the always-visible connection row into a passive
-                build-identity readout. The status dot on its left still
-                encodes the live connection state, so a disconnect is not
-                silenced by the label swap. Non-`open` states (`connecting` /
-                `closed`) keep the previous connection wording so a dropped
-                socket still surfaces the "Disconnected" text; `open` with a
-                pending or failed version query also falls back to the
-                previous `Connected` copy so the row never renders blank or
-                broken. `data-testid="connection-label"` gates the unit test
-                without depending on the text.
+                Label and update notice wrap as two whole phrases: when both do
+                not fit on one line, the notice moves under the label instead
+                of either breaking mid-phrase.
+              */}
+              <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+                {/*
+                  Label semantics: in the steady state (connection is `open` AND
+                  the version has resolved) the label reads `Delta <version>`,
+                  turning the always-visible connection row into a passive
+                  build-identity readout. The status dot on its left still
+                  encodes the live connection state, so a disconnect is not
+                  silenced by the label swap. Non-`open` states (`connecting` /
+                  `closed`) keep the previous connection wording so a dropped
+                  socket still surfaces the "Disconnected" text; `open` with a
+                  pending or failed version query also falls back to the
+                  previous `Connected` copy so the row never renders blank or
+                  broken. `data-testid="connection-label"` gates the unit test
+                  without depending on the text.
 
-                `font-mono` is applied only in the version-showing branch —
-                the version string is a code-like identifier (sha suffix,
-                dot-separated build metadata) and the rest of the codebase
-                renders such values in mono (paths, sha short refs, PR head
-                refs — grep `font-mono` under `packages/apps/web/src`), so
-                the steady-state label matches that convention. The connection
-                fallback copy stays in the ambient sans typography.
-              */}
-              <span
-                className={cn(
-                  'text-caption text-fg-muted',
-                  connection === 'open' &&
-                    version !== null &&
-                    'font-mono text-code',
-                )}
-                data-testid="connection-label"
-              >
-                {connection === 'open' && version !== null
-                  ? `Delta ${version}`
-                  : CONNECTION_LABEL[connection]}
-              </span>
-              {/*
-                The update notice: a link to the newer release's page, which
-                opens outside the app (`target="_blank"`; the desktop shell
-                sends new-window links to the default browser). Shown only
-                while the server reports a newer release.
-              */}
-              {newerRelease !== null && (
-                <a
-                  className="font-mono text-caption text-accent hover:underline"
-                  data-testid="newer-release"
-                  href={newerRelease.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={`Delta ${newerRelease.version} is out: open its release page`}
+                  `font-mono` is applied only in the version-showing branch —
+                  the version string is a code-like identifier (sha suffix,
+                  dot-separated build metadata) and the rest of the codebase
+                  renders such values in mono (paths, sha short refs, PR head
+                  refs — grep `font-mono` under `packages/apps/web/src`), so
+                  the steady-state label matches that convention. The connection
+                  fallback copy stays in the ambient sans typography.
+                */}
+                <span
+                  className={cn(
+                    'whitespace-nowrap text-caption text-fg-muted',
+                    connection === 'open' &&
+                      version !== null &&
+                      'font-mono text-code',
+                  )}
+                  data-testid="connection-label"
                 >
-                  {`${newerRelease.version} available`}
-                </a>
-              )}
+                  {connection === 'open' && version !== null
+                    ? `Delta ${version}`
+                    : CONNECTION_LABEL[connection]}
+                </span>
+                {/*
+                  The update notice: a link to the newer release's page, which
+                  opens outside the app (`target="_blank"`; the desktop shell
+                  sends new-window links to the default browser). Shown only
+                  while the server reports a newer release.
+                */}
+                {newerRelease !== null && (
+                  <a
+                    className="whitespace-nowrap font-mono text-caption text-accent hover:underline"
+                    data-testid="newer-release"
+                    href={newerRelease.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`Delta ${newerRelease.version} is out: open its release page`}
+                  >
+                    {`${newerRelease.version} available`}
+                  </a>
+                )}
+              </span>
             </span>
             {/*
               Icon-only Settings button: aria-label carries the accessible name

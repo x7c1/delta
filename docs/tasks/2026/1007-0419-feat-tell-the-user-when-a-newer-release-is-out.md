@@ -121,11 +121,11 @@ app gets the same notice until the later change adds its action.
 
 ### Before merge (verified outside the check command)
 
-- [ ] Against the real GitHub API, a release build of `delta-server` whose
+- [x] Against the real GitHub API, a release build of `delta-server` whose
       workspace version is temporarily set below the latest tag shows
       `v<latest> available` in the footer, and the link opens the Release
       page in a new browser tab.
-- [ ] With the network unreachable (for example `DELTA_RELEASE_FEED_URL`
+- [x] With the network unreachable (for example `DELTA_RELEASE_FEED_URL`
       pointed at a closed local port), the server starts without delay, the
       footer shows no notice, and the log has one `warn` per check naming
       the cause.
