@@ -21,6 +21,10 @@ use crate::settings::render_session_settings;
 /// tool's socket in the user's tmux socket directory.
 pub const DEFAULT_IDENTIFIER: &str = "io.github.x7c1.delta";
 
+/// GitHub's endpoint for the newest published release of Delta, which the
+/// release check asks unless `DELTA_RELEASE_FEED_URL` overrides it.
+pub const DEFAULT_RELEASE_FEED_URL: &str = release_feed::LATEST_RELEASE_URL;
+
 /// Runtime configuration for the composition root.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -120,6 +124,11 @@ pub struct Config {
     /// implicitly. A user who wants an agent to see a variable sets it
     /// explicitly, never by accident.
     pub child_env: Vec<(String, String)>,
+    /// Where the release check asks for the newest published release
+    /// (`DELTA_RELEASE_FEED_URL`, default [`DEFAULT_RELEASE_FEED_URL`]), or
+    /// `None` when the check is turned off: the server then never asks, and
+    /// never reports a newer release.
+    pub release_feed_url: Option<String>,
 }
 
 impl Config {
@@ -165,6 +174,7 @@ mod tests {
             hook_endpoint_changed: false,
             launch: delta_usecase::LaunchConfig::default(),
             child_env: Vec::new(),
+            release_feed_url: None,
         };
         let layout = config.data_layout();
         let data_dir = std::path::Path::new("/data/delta");

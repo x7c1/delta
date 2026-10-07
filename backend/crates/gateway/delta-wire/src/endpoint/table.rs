@@ -14,8 +14,8 @@ use crate::rest::{
     WireCloneRepositoryRequest, WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
     WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
     WireDeleteSnapshotRequest, WireEraseResponse, WireGitBranchesResponse, WireGitRepoResponse,
-    WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse, WireNewSessionResponse,
-    WireOpenCwdRequest, WirePermissionDecisionRequest, WirePromptTemplate,
+    WireLatestReleaseResponse, WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse,
+    WireNewSessionResponse, WireOpenCwdRequest, WirePermissionDecisionRequest, WirePromptTemplate,
     WirePromptTemplatesResponse, WireProvidersResponse, WirePrunePreviewResponse,
     WirePruneSessionsRequest, WirePruneSessionsResponse, WirePullRequestsResponse,
     WireQuestionAnswerRequest, WireQuestionCancelRequest, WireRemoveWorktreeRequest,
@@ -251,6 +251,13 @@ declare_endpoints! {
     /// The Delta workspace version for the browser footer. Pre-formatted
     /// server-side, so the browser never has to know how to render `+dev.<sha>`.
     GetVersion: GET "/api/version", response = WireVersionResponse;
+
+    /// A published release newer than the running server, from the last
+    /// background check of GitHub's releases. `newer` is `null` when there is
+    /// nothing to tell: not checked yet, up to date, the check turned off
+    /// (`DELTA_RELEASE_FEED_URL` empty), or every check so far failed. Answers
+    /// from memory; the request never reaches GitHub.
+    GetLatestRelease: GET "/api/latest-release", response = WireLatestReleaseResponse;
 
     /// Where this running Delta keeps its files — the data directory and every
     /// path derived from it, the worktree base, the transcript root, the tmux

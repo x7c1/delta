@@ -11,7 +11,11 @@ import {
   StatusDot,
   type DotTone,
 } from '@delta/ui-kit';
-import { useVersionQuery, type ConnectionStatus } from '@delta/api-client';
+import {
+  useLatestReleaseQuery,
+  useVersionQuery,
+  type ConnectionStatus,
+} from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
@@ -331,6 +335,11 @@ export function NavigatorPane({
   // can render it without stripping the prefix back off.
   const versionQuery = useVersionQuery(client);
   const version = versionQuery.data?.version ?? null;
+  // A published release newer than the running server, from the server's last
+  // background check (`null` when there is nothing to tell). Re-asked by the
+  // hook once shortly after the first answer, then hourly, so a page left open
+  // learns about a release without a reload.
+  const newerRelease = useLatestReleaseQuery(client).data?.newer ?? null;
 
   // The launches this window started and still tracks, newest first, lead the
   // list — so a launch that fails stays in view instead of sinking below every
@@ -602,6 +611,24 @@ export function NavigatorPane({
                   ? `Delta ${version}`
                   : CONNECTION_LABEL[connection]}
               </span>
+              {/*
+                The update notice: a link to the newer release's page, which
+                opens outside the app (`target="_blank"`; the desktop shell
+                sends new-window links to the default browser). Shown only
+                while the server reports a newer release.
+              */}
+              {newerRelease !== null && (
+                <a
+                  className="font-mono text-caption text-accent hover:underline"
+                  data-testid="newer-release"
+                  href={newerRelease.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Delta ${newerRelease.version} is out: open its release page`}
+                >
+                  {`${newerRelease.version} available`}
+                </a>
+              )}
             </span>
             {/*
               Icon-only Settings button: aria-label carries the accessible name

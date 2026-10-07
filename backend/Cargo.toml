@@ -32,6 +32,7 @@ tmux-driver = { path = "crates/gateway/tmux-driver" }
 workspace-fs = { path = "crates/gateway/workspace-fs" }
 git-worktree = { path = "crates/gateway/git-worktree" }
 gh-cli = { path = "crates/gateway/gh-cli" }
+release-feed = { path = "crates/gateway/release-feed" }
 binary-detector = { path = "crates/gateway/binary-detector" }
 delta-wire = { path = "crates/gateway/delta-wire" }
 codex-agent = { path = "crates/gateway/codex-agent" }
@@ -70,3 +71,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
 ts-rs = "12"
+# SemVer precedence for comparing the newest published release's tag with this
+# build's version.
+semver = "1"
+# The HTTPS client the release feed asks GitHub with. No default features: no
+# OpenSSL and no bundled webpki roots reach the desktop bundle; TLS is rustls
+# with the `ring` provider, verifying against the operating system's trust
+# store through `rustls-platform-verifier` (see `crates/gateway/release-feed`).
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-platform-verifier = "0.7"

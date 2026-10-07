@@ -31,7 +31,10 @@ mod build;
 pub use build::build;
 
 mod config;
-pub use config::{Config, DEFAULT_IDENTIFIER};
+pub use config::{Config, DEFAULT_IDENTIFIER, DEFAULT_RELEASE_FEED_URL};
+
+mod release_check;
+pub use release_check::release_check;
 
 mod data_layout;
 pub use data_layout::DataLayout;

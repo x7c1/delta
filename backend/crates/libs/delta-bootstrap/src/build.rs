@@ -28,7 +28,7 @@ mod codex_launch_for;
 use codex_launch_for::codex_launch_for;
 
 #[cfg(test)]
-mod testing;
+pub(crate) mod testing;
 
 /// Construct the wired [`AppInteractor`] from configuration.
 ///

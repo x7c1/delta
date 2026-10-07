@@ -6,11 +6,11 @@ The REST routes behind the Settings screen and the provider selector: which
 agent providers this host can launch and what each of them can do, the registry
 of custom launch options a session can be started with, the registry of prompt
 templates the composer inserts from, the server's own version string for the
-browser footer, the inventory of where the server keeps its files, the
-cleanup of leftover worktrees and migration snapshots (removing old sessions in
-bulk, the Storage category's third cleanup, is in
-[sessions.md](sessions.md#post-apisessionsprune)), and erasing everything Delta
-left on the machine, which stops the server.
+browser footer and the newer published release it last found, the inventory of
+where the server keeps its files, the cleanup of leftover worktrees and
+migration snapshots (removing old sessions in bulk, the Storage category's third
+cleanup, is in [sessions.md](sessions.md#post-apisessionsprune)), and erasing
+everything Delta left on the machine, which stops the server.
 Applying a launch option to a session is part of a `new_session` send
 ([sends.md](sends.md#post-apisends)); conventions and error semantics are in
 [README.md](README.md).
@@ -428,6 +428,48 @@ the `-dev` pre-release form).
 
   ```json
   { "version": "v0.2.1" }
+  ```
+
+### `GET /api/latest-release`
+
+Return a published release newer than the running server, for the notice next
+to the version in the browser footer. The answer comes from memory: the server
+asks GitHub (`GET https://api.github.com/repos/x7c1/delta/releases/latest`,
+which never returns drafts or pre-releases) in the background, a few seconds
+after it starts and then every 6 hours, and keeps the last verdict. The request
+itself never reaches GitHub.
+
+A release counts as newer only when its tag is `v<semver>` and that version is
+strictly greater, by SemVer precedence, than the server's base version (build
+metadata dropped, so a debug build `v0.5.0+dev.<sha>` is told only about a
+release above `0.5.0`). `version` is rendered like a release build's
+[`GET /api/version`](#get-apiversion) (`v0.6.0`); `url` is the release's page,
+always under `https://github.com/x7c1/delta/releases/`.
+
+`newer` is `null` whenever there is nothing to tell: the server has not checked
+yet, the last check found it up to date, the check is turned off
+(`DELTA_RELEASE_FEED_URL` set to the empty string — see the
+[development guide](../development/README.md#backend-backend)), or every check
+so far failed. A failed check (offline, DNS, timeout, a non-2xx answer such as
+GitHub's 403 rate limit, unparsable JSON, a tag that is not SemVer, a page
+outside the prefix above) logs one `warn` naming the cause and keeps the
+previous verdict; it is never an error here. Always **200**.
+
+- **200**:
+
+  ```json
+  {
+    "newer": {
+      "version": "v0.6.0",
+      "url": "https://github.com/x7c1/delta/releases/tag/v0.6.0"
+    }
+  }
+  ```
+
+  or, with nothing to tell:
+
+  ```json
+  { "newer": null }
   ```
 
 ## Storage

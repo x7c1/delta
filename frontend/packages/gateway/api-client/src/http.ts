@@ -29,6 +29,7 @@ import type {
   RepositoriesResponse,
   CloneRoot,
   CloneRootsResponse,
+  LatestReleaseResponse,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -809,6 +810,16 @@ export class ApiClient {
    */
   getVersion(): Promise<VersionResponse> {
     return this.request<VersionResponse>('/api/version');
+  }
+
+  /**
+   * `GET /api/latest-release` — a published release newer than the running
+   * server, from its last background check of GitHub's releases. `newer` is
+   * `null` whenever there is nothing to tell (not checked yet, up to date,
+   * check turned off, or every check so far failed).
+   */
+  getLatestRelease(): Promise<LatestReleaseResponse> {
+    return this.request<LatestReleaseResponse>('/api/latest-release');
   }
 
   /**

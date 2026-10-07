@@ -30,6 +30,8 @@ mod keep_reason;
 pub use keep_reason::WireKeepReason;
 mod kept_item;
 pub use kept_item::WireKeptItem;
+mod latest_release_response;
+pub use latest_release_response::{WireLatestReleaseResponse, WireNewerRelease};
 mod launch_option_create_request;
 pub use launch_option_create_request::WireCreateLaunchOptionRequest;
 mod launch_option_update_request;

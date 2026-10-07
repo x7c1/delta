@@ -9,7 +9,8 @@ use tokio::sync::{broadcast, watch};
 
 use delta_bootstrap::{AppInteractor, Config};
 use delta_usecase::{
-    AsyncEventReceiver, AsyncEventSink, CommsLogSink, SessionEvent, SessionLifecycle,
+    AsyncEventReceiver, AsyncEventSink, CommsLogSink, NewerRelease, ReleaseCheck, SessionEvent,
+    SessionLifecycle,
 };
 
 use crate::comms_log::{CommsLogHub, CommsSubscription};
@@ -47,6 +48,21 @@ const TRANSCRIPT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// This is the backstop for an actor that has wedged, so that one cannot stall
 /// the loop forever; it is not a scheduling budget.
 const SWEEP_TICK_BOUND: Duration = Duration::from_secs(2);
+
+/// How long after the server starts the first release check runs.
+///
+/// Off the startup path on purpose: an offline machine must start exactly as
+/// fast as it would without the check, so the check waits until the server is
+/// already serving.
+///
+/// The browser footer re-asks 30 s after its first answer to catch this first
+/// check (`LATEST_RELEASE_FIRST_RECHECK_MS` in the frontend's api-client), so
+/// this delay plus the feed's request timeout must stay below that.
+const RELEASE_CHECK_FIRST_DELAY: Duration = Duration::from_secs(5);
+
+/// How often the release check runs after the first one. GitHub allows 60
+/// unauthenticated requests an hour; this is far below that.
+const RELEASE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// State shared across all request handlers.
 ///
@@ -98,6 +114,10 @@ pub struct AppState {
     /// erase succeeds — the server stops right after — so a second erase is
     /// refused rather than run twice.
     erasing: Arc<AtomicBool>,
+    /// The background check for a newer published release, holding its last
+    /// verdict for `GET /api/latest-release`. Turned off unless
+    /// [`Self::with_release_check`] sets one.
+    release_check: Arc<ReleaseCheck>,
 }
 
 impl AppState {
@@ -124,7 +144,11 @@ impl AppState {
             StorageInventory::from_config(config),
         )
         .with_comms_log(comms_log)
-        .with_child_env(config.child_env.clone());
+        .with_child_env(config.child_env.clone())
+        .with_release_check(delta_bootstrap::release_check(
+            config,
+            crate::version::VERSION,
+        ));
         state
             .readopt_surviving_sessions(config.hook_endpoint_changed)
             .await;
@@ -206,6 +230,7 @@ impl AppState {
             comms_log: Arc::new(CommsLogHub::new()),
             stop: Arc::new(watch::Sender::new(None)),
             erasing: Arc::new(AtomicBool::new(false)),
+            release_check: Arc::new(ReleaseCheck::disabled()),
         }
     }
 
@@ -232,6 +257,46 @@ impl AppState {
     pub fn with_child_env(mut self, env: Vec<(String, String)>) -> Self {
         self.child_env = env.into();
         self
+    }
+
+    /// Check for newer releases with `check`.
+    ///
+    /// Separate from [`Self::from_interactor`] for the same reason as
+    /// [`Self::with_comms_log`]: a state built from an interactor in a test
+    /// never reaches GitHub.
+    pub fn with_release_check(mut self, check: ReleaseCheck) -> Self {
+        self.release_check = Arc::new(check);
+        self
+    }
+
+    /// The newer release the last successful release check found, if any.
+    pub fn newer_release(&self) -> Option<NewerRelease> {
+        self.release_check.newer()
+    }
+
+    /// Spawn the background release check: once [`RELEASE_CHECK_FIRST_DELAY`]
+    /// after startup, then every [`RELEASE_CHECK_INTERVAL`].
+    ///
+    /// `None` when the check is turned off, so nothing is spawned and nothing
+    /// is ever asked. A failed check is logged by the check itself and keeps
+    /// its previous verdict; the loop carries on.
+    pub fn spawn_release_check(&self) -> Option<tokio::task::JoinHandle<()>> {
+        if !self.release_check.is_enabled() {
+            return None;
+        }
+        let check = Arc::clone(&self.release_check);
+        Some(tokio::spawn(async move {
+            let mut ticker = tokio::time::interval_at(
+                tokio::time::Instant::now() + RELEASE_CHECK_FIRST_DELAY,
+                RELEASE_CHECK_INTERVAL,
+            );
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                // The error is already logged as one `warn` by the check.
+                let _ = check.check().await;
+            }
+        }))
     }
 
     /// Watch one session's comms log: buffered frames, then the live tail.

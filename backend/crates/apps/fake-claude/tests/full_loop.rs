@@ -102,6 +102,7 @@ async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
             ..LaunchConfig::default()
         },
         child_env: Vec::new(),
+        release_feed_url: None,
     };
     let state = AppState::build(&config).await.expect("build app state");
     // The tail is what ingests the assistant lines the fake writes after the

@@ -34,6 +34,7 @@ import type {
   RepositoriesResponse,
   CloneRoot,
   CloneRootsResponse,
+  LatestReleaseResponse,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -804,6 +805,49 @@ export function useVersionQuery(
     queryFn: () => client.getVersion(),
     staleTime: Infinity,
     gcTime: Infinity,
+    retry: false,
+  });
+}
+
+/**
+ * How often the navigator footer re-asks for a newer release (see
+ * {@link useLatestReleaseQuery}): hourly. The server itself checks GitHub only
+ * every 6 hours, so polling faster would only re-read the same answer.
+ */
+const LATEST_RELEASE_POLL_MS = 60 * 60 * 1000;
+
+/**
+ * How soon after its first answer the footer asks once more, before settling
+ * into {@link LATEST_RELEASE_POLL_MS}. A page opened together with the server
+ * — the desktop app's window always is — asks before the server's first check
+ * has run (a few seconds after startup, plus up to the request's 10 s
+ * timeout), so that first answer is always "nothing newer"; without this
+ * second look the notice would wait up to an hour.
+ */
+const LATEST_RELEASE_FIRST_RECHECK_MS = 30 * 1000;
+
+/**
+ * A published release newer than the running server (`GET
+ * /api/latest-release`), for the notice next to the version in the navigator
+ * footer. Asked again once {@link LATEST_RELEASE_FIRST_RECHECK_MS} after the
+ * first answer, to catch the server's first check, then polled hourly so a
+ * page left open for days learns about a release without a reload; the server
+ * answers from memory, so each poll is cheap. Retries are off for the same
+ * reason as {@link useVersionQuery}: a failure only hides the notice until the
+ * next poll.
+ */
+export function useLatestReleaseQuery(
+  client: ApiClient,
+): UseQueryResult<LatestReleaseResponse> {
+  return useQuery({
+    queryKey: queryKeys.latestRelease,
+    queryFn: () => client.getLatestRelease(),
+    refetchInterval: (query) =>
+      query.state.dataUpdateCount + query.state.errorUpdateCount < 2
+        ? LATEST_RELEASE_FIRST_RECHECK_MS
+        : LATEST_RELEASE_POLL_MS,
+    refetchIntervalInBackground: true,
+    staleTime: LATEST_RELEASE_FIRST_RECHECK_MS,
     retry: false,
   });
 }

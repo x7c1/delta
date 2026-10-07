@@ -181,6 +181,24 @@ fn empty_overrides_that_must_not_be_empty_fall_back() {
 }
 
 #[test]
+fn the_release_feed_defaults_to_github_and_an_empty_value_turns_it_off() {
+    assert_eq!(
+        config(&[]).release_feed_url.as_deref(),
+        Some("https://api.github.com/repos/x7c1/delta/releases/latest")
+    );
+    assert_eq!(
+        config(&[("DELTA_RELEASE_FEED_URL", "http://127.0.0.1:9/latest")])
+            .release_feed_url
+            .as_deref(),
+        Some("http://127.0.0.1:9/latest")
+    );
+    assert_eq!(
+        config(&[("DELTA_RELEASE_FEED_URL", "")]).release_feed_url,
+        None
+    );
+}
+
+#[test]
 fn an_unparseable_port_falls_back_to_the_default() {
     assert_eq!(config(&[("DELTA_PORT", "nope")]).port, DEFAULT_PORT);
 }

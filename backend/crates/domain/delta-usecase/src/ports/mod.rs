@@ -24,6 +24,8 @@ mod message_display_hook;
 pub use message_display_hook::MessageDisplayHook;
 mod new_session;
 pub use new_session::NewSession;
+mod release_feed;
+pub use release_feed::{PublishedRelease, ReleaseFeed, ReleaseFeedError};
 mod remembered_pane;
 pub use remembered_pane::RememberedPane;
 mod session_end_hook;
