@@ -112,6 +112,27 @@ mod tests {
         path
     }
 
+    /// Run the command `command` builds, retrying while the kernel reports the
+    /// stub as busy.
+    ///
+    /// A stub written just now can still be open for writing in a child that
+    /// another test's thread forked before its `exec` (the child inherits every
+    /// descriptor until then), and Linux refuses to execute a file open for
+    /// writing (`ETXTBSY`). The window is short, so a few retries outlast it.
+    fn run_fresh_stub(
+        command: impl Fn() -> std::process::Command,
+    ) -> std::io::Result<std::process::Output> {
+        for _ in 0..50 {
+            match command().output() {
+                Err(err) if err.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                result => return result,
+            }
+        }
+        command().output()
+    }
+
     /// Success path: a stub that prints a known string on stdout and exits 0
     /// must be invoked without panicking. The visible behaviour for callers is
     /// "returns normally", which this asserts; the formatted info line is
@@ -132,8 +153,7 @@ mod tests {
         let stub = write_stub("#!/bin/sh\nprintf '%s' \"$LANG\"\n");
         let env = [("LANG".to_owned(), "delta-test.UTF-8".to_owned())];
 
-        let output = version_command(stub.to_str().expect("utf-8 path"), &env)
-            .output()
+        let output = run_fresh_stub(|| version_command(stub.to_str().expect("utf-8 path"), &env))
             .expect("the stub runs");
         let _ = std::fs::remove_file(&stub);
 
