@@ -92,6 +92,7 @@ fn api_router(state: AppState) -> Router {
         .bind(endpoint::UpdatePromptTemplate, api::update_prompt_template)
         .bind(endpoint::DeletePromptTemplate, api::delete_prompt_template)
         .bind(endpoint::GetVersion, api::get_version)
+        .bind(endpoint::GetLatestRelease, api::get_latest_release)
         .bind(endpoint::GetStorage, api::get_storage)
         .bind(endpoint::ListOrphanWorktrees, api::list_orphan_worktrees)
         .bind(endpoint::RemoveOrphanWorktree, api::remove_orphan_worktree)

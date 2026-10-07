@@ -24,7 +24,7 @@
 
 use std::ffi::OsString;
 
-use delta_bootstrap::{Config, DataDirError, DEFAULT_IDENTIFIER};
+use delta_bootstrap::{Config, DataDirError, DEFAULT_IDENTIFIER, DEFAULT_RELEASE_FEED_URL};
 
 pub mod hook_state;
 use hook_state::{HookStateError, HookStateFile};
@@ -109,6 +109,17 @@ fn config_from_vars_for(
         hook_endpoint_changed: false,
         launch: launch_from_vars(&text),
         child_env: Vec::new(),
+        release_feed_url: release_feed_url(text("DELTA_RELEASE_FEED_URL")),
+    }
+}
+
+/// Where the release check asks: `DELTA_RELEASE_FEED_URL` when set, with the
+/// empty string turning the check off; [`DEFAULT_RELEASE_FEED_URL`] when unset.
+fn release_feed_url(value: Option<String>) -> Option<String> {
+    match value {
+        None => Some(DEFAULT_RELEASE_FEED_URL.to_owned()),
+        Some(url) if url.is_empty() => None,
+        Some(url) => Some(url),
     }
 }
 

@@ -66,6 +66,8 @@ export const queryKeys = {
   cloneRoots: ['clone-roots'] as const,
   /** The Delta workspace version (`GET /api/version`) for the navigator footer. */
   version: ['version'] as const,
+  /** A newer published release (`GET /api/latest-release`) for the navigator footer. */
+  latestRelease: ['latest-release'] as const,
   /** Where the server keeps its files (`GET /api/storage`), for Settings → Storage. */
   storage: ['storage'] as const,
   /** The directories under the worktree base (`GET /api/storage/worktrees`). */

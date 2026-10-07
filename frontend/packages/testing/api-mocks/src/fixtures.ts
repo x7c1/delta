@@ -4,6 +4,7 @@ import type {
   CommsFrameKind,
   LaunchOption,
   Message,
+  NewerRelease,
   PendingPermission,
   PendingQuestion,
   PromptTemplate,
@@ -924,6 +925,16 @@ export const MOCK_WORKDIR_HOME = '/home/dev';
  * verbatim without importing build metadata into the mock package.
  */
 export const MOCK_VERSION = 'v0.0.0-mock';
+
+/**
+ * A newer published release, for tests that override the mock
+ * `GET /api/latest-release` (which answers `{ newer: null }` by default, so the
+ * mock app shows no update notice unless a test asks for one).
+ */
+export const MOCK_NEWER_RELEASE: NewerRelease = {
+  version: 'v0.0.1',
+  url: 'https://github.com/x7c1/delta/releases/tag/v0.0.1',
+};
 
 /** The worktree base the mock `GET /api/storage` reports. */
 export const MOCK_WORKTREE_BASE = '/home/u/.delta/worktrees';

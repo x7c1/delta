@@ -116,6 +116,7 @@ variables, all with local-friendly defaults:
 | `DELTA_HOOK_SECRET` | recorded in the hook state file | the secret every hook URL carries; overrides the recorded one without replacing it |
 | `DELTA_WORKTREE_BASE` | `$HOME/.delta/worktrees` (`scripts/dev.sh`: `$HOME/.delta-dev/worktrees`) | base directory for per-session git worktrees (`<base>/<repo>-<session-id>`), deliberately outside any repo tree so the worktree does not inherit a surrounding `CLAUDE.md`/settings |
 | `DELTA_TMUX_SOCKET` | the identifier | dedicated tmux socket (`tmux -L <socket>`) for Delta's sessions, isolated from your default tmux server |
+| `DELTA_RELEASE_FEED_URL` | `https://api.github.com/repos/x7c1/delta/releases/latest` | where the server asks, in the background, for the newest published release, to tell the browser footer about a newer one (schedule and failure handling in [`GET /api/latest-release`](../api/settings.md#get-apilatest-release)); set to the empty string, the check is off and the server never asks (the fake-mode e2e harness does so, so CI never reaches GitHub) |
 
 The server creates the data directory (owner-only) at startup and derives every
 path it writes from it, in one place

@@ -62,6 +62,7 @@ export {
   useCloneRepositoryMutation,
   useOpenCwdMutation,
   useVersionQuery,
+  useLatestReleaseQuery,
   useStorageQuery,
   useStorageWorktreesQuery,
   useRemoveStorageWorktreeMutation,

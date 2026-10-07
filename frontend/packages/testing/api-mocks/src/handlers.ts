@@ -37,6 +37,7 @@ import type {
   ThreadsResponse,
   GitBranchesResponse,
   GitRepoResponse,
+  LatestReleaseResponse,
   ProvidersResponse,
   PullRequestsResponse,
   RepositoriesResponse,
@@ -1232,6 +1233,12 @@ export function createMockApi(): MockApi {
     // debug); the mock returns a fixed dev-shaped string so mock-mode e2e can
     // assert on it without depending on the host's git sha.
     http.get('*/api/version', () => HttpResponse.json({ version: MOCK_VERSION })),
+    // No newer release by default, so the mock app's footer shows only the
+    // version; a test that wants the update notice overrides this handler
+    // with `MOCK_NEWER_RELEASE`.
+    http.get('*/api/latest-release', () =>
+      HttpResponse.json({ newer: null } satisfies LatestReleaseResponse),
+    ),
     http.get('*/api/storage', () =>
       HttpResponse.json({ ...mockStorage, snapshots: store.snapshots }),
     ),

@@ -8,6 +8,7 @@
 mod auth;
 mod clone_roots;
 mod hooks;
+mod latest_release;
 mod launch_options;
 mod origin_guard;
 mod permissions;
@@ -130,6 +131,7 @@ pub(super) fn test_config() -> Config {
         hook_endpoint_changed: false,
         launch: delta_usecase::LaunchConfig::default(),
         child_env: Vec::new(),
+        release_feed_url: None,
     }
 }
 

@@ -77,6 +77,8 @@ export type { CreatePromptTemplateRequest } from './generated/CreatePromptTempla
 export type { UpdatePromptTemplateRequest } from './generated/UpdatePromptTemplateRequest';
 export type { ErrorBody } from './generated/ErrorBody';
 export type { VersionResponse } from './generated/VersionResponse';
+export type { LatestReleaseResponse } from './generated/LatestReleaseResponse';
+export type { NewerRelease } from './generated/NewerRelease';
 export type { StorageFile } from './generated/StorageFile';
 export type { StorageResponse } from './generated/StorageResponse';
 export type { StorageWorktree } from './generated/StorageWorktree';

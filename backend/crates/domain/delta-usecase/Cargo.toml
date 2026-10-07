@@ -20,6 +20,9 @@ uuid = { workspace = true }
 # Parses the stored `AskUserQuestion` tool input (`{"questions":[…]}`) into the
 # shapes the key-sequence generator needs.
 serde_json = { workspace = true }
+# SemVer precedence for the release check (is the newest release newer than
+# this build?).
+semver = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

@@ -177,6 +177,10 @@ pub async fn serve(state: AppState, listener: TcpListener) -> anyhow::Result<Ser
     // who emits on it, see `Interactor::emit_async_event`.
     let drain = state.spawn_async_event_drain();
 
+    // Check for a newer published release in the background, off the startup
+    // path; `None` when `DELTA_RELEASE_FEED_URL` turned the check off.
+    let release_check = state.spawn_release_check();
+
     let app = router(state.clone());
     let addr = listener.local_addr()?;
     tracing::info!(%addr, "delta-server listening (loopback only)");
@@ -189,7 +193,7 @@ pub async fn serve(state: AppState, listener: TcpListener) -> anyhow::Result<Ser
         .ok_or_else(|| anyhow::anyhow!("the server stopped serving without being asked to"))?;
     tracing::info!("delta-server stopped serving");
 
-    for task in std::iter::once(tail).chain(drain) {
+    for task in std::iter::once(tail).chain(drain).chain(release_check) {
         task.abort();
         // Aborted on purpose; awaiting is only to know the task has dropped
         // what it held (the interactor, for the tail).

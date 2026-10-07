@@ -28,7 +28,11 @@
 //! not both branches.
 
 /// Workspace version from `backend/Cargo.toml` (`[workspace.package].version`).
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+///
+/// Also what the release check compares the newest published release with
+/// (see `delta_usecase::ReleaseCheck`): the base version, in every build
+/// profile.
+pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Short git sha of the checkout the binary was built from, or `unknown` if
 /// `git rev-parse` was unavailable. Populated by `build.rs`.

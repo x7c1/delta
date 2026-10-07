@@ -296,6 +296,9 @@ export async function bootServer(): Promise<ServerHandle> {
           // parked out from under them. The spec that exercises the watchdog
           // shrinks this for its own server generation via `restart`.
           DELTA_ECHO_DEADLINE_MS: '60000',
+          // Turn the background release check off, so the suite never reaches
+          // GitHub (and never depends on what it answers).
+          DELTA_RELEASE_FEED_URL: '',
           ...envOverrides,
         },
       });

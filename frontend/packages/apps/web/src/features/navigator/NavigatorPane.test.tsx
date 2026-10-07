@@ -6,6 +6,7 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from 'vitest';
 import {
   act,
@@ -16,9 +17,11 @@ import {
   within,
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import {
   createHandlers,
+  MOCK_NEWER_RELEASE,
   MOCK_VERSION,
   SESSION_ID,
   SESSION_ID_2,
@@ -850,5 +853,89 @@ describe('NavigatorPane workspace version', () => {
       expect(label).toHaveTextContent('Disconnected');
       expect(label).not.toHaveTextContent(MOCK_VERSION);
     });
+  });
+});
+
+describe('NavigatorPane newer-release notice', () => {
+  beforeEach(() => {
+    useLiveStore.setState({
+      connection: 'open',
+      notices: {},
+      runningThreads: {},
+      rateLimits: {},
+    });
+    useNavStore.setState({
+      focusedSessionId: null,
+      activeThreadId: null,
+      settingsOpen: false,
+    });
+  });
+
+  it('links to the release page next to the version when the server reports a newer release', async () => {
+    server.use(
+      http.get('*/api/latest-release', () =>
+        HttpResponse.json({ newer: MOCK_NEWER_RELEASE }),
+      ),
+    );
+
+    renderPane();
+
+    const notice = await screen.findByTestId('newer-release');
+    expect(notice).toHaveTextContent(`${MOCK_NEWER_RELEASE.version} available`);
+    expect(notice).toHaveAttribute('href', MOCK_NEWER_RELEASE.url);
+    expect(notice).toHaveAttribute('target', '_blank');
+    expect(notice).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('shows no notice when the server reports no newer release', async () => {
+    let asked = false;
+    server.use(
+      http.get('*/api/latest-release', () => {
+        asked = true;
+        return HttpResponse.json({ newer: null });
+      }),
+    );
+
+    renderPane();
+
+    // Wait for both footer queries to settle, so the absence is not just the
+    // notice's query still pending.
+    await waitFor(() => {
+      expect(asked).toBe(true);
+      expect(screen.getByTestId('connection-label')).toHaveTextContent(
+        `Delta ${MOCK_VERSION}`,
+      );
+    });
+    expect(screen.queryByTestId('newer-release')).not.toBeInTheDocument();
+  });
+
+  it('asks again shortly after the first answer, so a release the server finds just after startup shows without waiting for the hourly poll', async () => {
+    // A page opened together with the server asks before the server's first
+    // check has run, so its first answer is "nothing newer".
+    let answers = 0;
+    server.use(
+      http.get('*/api/latest-release', () => {
+        answers += 1;
+        return HttpResponse.json({
+          newer: answers === 1 ? null : MOCK_NEWER_RELEASE,
+        });
+      }),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderPane();
+      await waitFor(() => expect(answers).toBe(1));
+      expect(screen.queryByTestId('newer-release')).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      expect(await screen.findByTestId('newer-release')).toHaveTextContent(
+        `${MOCK_NEWER_RELEASE.version} available`,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
