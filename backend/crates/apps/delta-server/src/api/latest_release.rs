@@ -15,8 +15,8 @@ use crate::state::AppState;
 
 /// `GET /api/latest-release` — a published release newer than this server,
 /// from the last background check (`null` when there is nothing to tell),
-/// what the browser may offer next to it, and how its download and install
-/// are going.
+/// what the browser may offer next to it, how its download and install are
+/// going, and the way by hand when this app cannot install it itself.
 ///
 /// Answers from the state alone: the request never reaches GitHub, and a
 /// failed check never surfaces here as an error.
@@ -29,6 +29,9 @@ pub(crate) async fn get_latest_release(
         download: update.download_of(newer.as_ref()).map(Into::into),
         offer: update.offer(newer.as_ref()).into(),
         installs: update.installs(),
+        install_unavailable: update
+            .install_unavailable_of(newer.as_ref())
+            .map(Into::into),
         install: update.install_of(newer.as_ref()).map(Into::into),
         newer: newer.map(Into::into),
     })
@@ -88,11 +91,11 @@ pub(crate) async fn install_latest_release(
 pub(crate) async fn restart_latest_release(
     State(state): State<AppState>,
 ) -> Result<StatusCode, ApiError> {
-    let version = state
+    let restart = state
         .release_update()
         .restart()
         .map_err(ApiError::UpdateRefused)?;
     // Graceful: this response is still sent before the server stops.
-    state.stop(ServerStopped::Restart { version });
+    state.stop(ServerStopped::Restart(restart));
     Ok(StatusCode::NO_CONTENT)
 }

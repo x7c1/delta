@@ -81,6 +81,8 @@ export type { LatestReleaseResponse } from './generated/LatestReleaseResponse';
 export type { NewerRelease } from './generated/NewerRelease';
 export type { UpdateDownload } from './generated/UpdateDownload';
 export type { UpdateInstall } from './generated/UpdateInstall';
+export type { InstallUnavailable } from './generated/InstallUnavailable';
+export type { ManualInstall } from './generated/ManualInstall';
 export type { UpdateOffer } from './generated/UpdateOffer';
 export type { StorageFile } from './generated/StorageFile';
 export type { StorageResponse } from './generated/StorageResponse';

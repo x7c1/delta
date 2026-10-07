@@ -30,6 +30,7 @@ import {
 import { ApiClient } from '@delta/api-client';
 import type {
   AgentProvider,
+  InstallUnavailable,
   LatestReleaseResponse,
   RateLimitWindow,
   SessionListItem,
@@ -982,14 +983,20 @@ describe('NavigatorPane update control', () => {
   /**
    * Answer `GET /api/latest-release` with the newer release, `offer`,
    * `download`, and — for an app that installs updates itself (`installs`) —
-   * `install`.
+   * `install`, or — for one that found at startup it cannot —
+   * `installUnavailable`.
    */
   function answerLatest(
     offer: UpdateOffer,
     download: () => UpdateDownload | null = () => null,
-    { installs = false, install = () => null }: {
+    {
+      installs = false,
+      install = () => null,
+      installUnavailable,
+    }: {
       installs?: boolean;
       install?: () => UpdateInstall | null;
+      installUnavailable?: InstallUnavailable;
     } = {},
   ) {
     server.use(
@@ -999,6 +1006,9 @@ describe('NavigatorPane update control', () => {
           offer,
           download: download(),
           installs,
+          ...(installUnavailable === undefined
+            ? {}
+            : { install_unavailable: installUnavailable }),
           install: install(),
         } satisfies LatestReleaseResponse),
       ),
@@ -1021,6 +1031,7 @@ describe('NavigatorPane update control', () => {
     'update-restarting',
     'update-install-retry',
     'update-install-unavailable',
+    'update-install-reason',
     'update-manual',
     'update-download-again',
   ];
@@ -1190,6 +1201,38 @@ describe('NavigatorPane update control', () => {
   };
   const MANUAL_COMMAND =
     'sudo apt install /home/dev/.local/share/io.github.x7c1.delta/updates/delta-desktop_0.6.0_amd64.deb';
+  const DISK_IMAGE =
+    '/Users/dev/Library/Application Support/io.github.x7c1.delta/updates/Delta_0.6.0_aarch64.dmg';
+  const TRANSLOCATED =
+    'Delta cannot install the update itself: macOS runs Delta from a read-only copy (App Translocation), since it was opened from its disk image or the folder it was downloaded to: move Delta to /Applications';
+
+  it('offers no Install but the reason and the disk image once ready where the app found at startup it cannot install', async () => {
+    answerLatest('update', () => READY, {
+      installUnavailable: {
+        error: TRANSLOCATED,
+        manual: { kind: 'disk_image', path: DISK_IMAGE },
+      },
+    });
+    renderPane();
+
+    expect(
+      await screen.findByTestId('update-install-unavailable'),
+    ).toHaveTextContent('Install it from the disk image');
+    expect(screen.getByTestId('update-install-reason')).toHaveTextContent(
+      'move Delta to /Applications',
+    );
+    expect(shownControls()).toEqual([
+      'update-install-unavailable',
+      'update-install-reason',
+      'update-manual',
+    ]);
+    expect(screen.getByTestId('update-manual')).toHaveTextContent(
+      'Open the downloaded disk image, quit Delta, drag Delta to Applications, then start Delta again:',
+    );
+    expect(screen.getByTestId('update-manual-image')).toHaveTextContent(
+      DISK_IMAGE,
+    );
+  });
 
   it('offers no Install where the app does not install updates itself', async () => {
     answerLatest('update', () => READY);
@@ -1267,7 +1310,7 @@ describe('NavigatorPane update control', () => {
       state: 'failed',
       version: MOCK_NEWER_RELEASE.version,
       error: 'apt-get could not install the update: E: Unmet dependencies',
-      manual_command: MANUAL_COMMAND,
+      manual: { kind: 'command', command: MANUAL_COMMAND },
     };
     let posts = 0;
     answerLatest('update', () => READY, {
@@ -1315,7 +1358,7 @@ describe('NavigatorPane update control', () => {
         version: MOCK_NEWER_RELEASE.version,
         error:
           'Delta cannot install the update itself: not authorized, or no polkit authentication agent is running',
-        manual_command: MANUAL_COMMAND,
+        manual: { kind: 'command', command: MANUAL_COMMAND },
       }),
     });
     renderPane();
@@ -1323,6 +1366,12 @@ describe('NavigatorPane update control', () => {
     expect(
       await screen.findByTestId('update-install-unavailable'),
     ).toHaveAttribute('title', expect.stringContaining('no polkit'));
+    expect(screen.getByTestId('update-install-unavailable')).toHaveTextContent(
+      'Install it from a terminal',
+    );
+    expect(screen.getByTestId('update-manual')).toHaveTextContent(
+      'Run in a terminal, then restart Delta:',
+    );
     expect(shownControls()).toEqual([
       'update-install-retry',
       'update-install-unavailable',
@@ -1338,13 +1387,79 @@ describe('NavigatorPane update control', () => {
     expect(writeText).toHaveBeenCalledWith(MANUAL_COMMAND);
   });
 
+  it('shows the disk image to open and the reason, not a command or a retry, when Delta cannot install on macOS', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    answerLatest('update', () => READY, {
+      installs: true,
+      install: () => ({
+        state: 'unavailable',
+        version: MOCK_NEWER_RELEASE.version,
+        error: TRANSLOCATED,
+        manual: { kind: 'disk_image', path: DISK_IMAGE },
+      }),
+    });
+    renderPane();
+
+    const unavailable = await screen.findByTestId('update-install-unavailable');
+    expect(unavailable).toHaveTextContent('Install it from the disk image');
+    expect(screen.getByTestId('update-install-reason')).toHaveTextContent(
+      TRANSLOCATED,
+    );
+    expect(shownControls()).toEqual([
+      'update-install-unavailable',
+      'update-install-reason',
+      'update-manual',
+    ]);
+    expect(screen.getByTestId('update-manual')).toHaveTextContent(
+      'Open the downloaded disk image, quit Delta, drag Delta to Applications, then start Delta again:',
+    );
+    expect(screen.getByTestId('update-manual-image')).toHaveTextContent(
+      DISK_IMAGE,
+    );
+    expect(screen.queryByTestId('update-manual-command')).toBeNull();
+    expect(screen.getByTestId('update-manual')).not.toHaveTextContent(
+      'terminal',
+    );
+
+    const copy = screen.getByRole('button', { name: 'Copy disk image path' });
+    fireEvent.click(copy);
+    expect(await within(copy).findByText('Copied')).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledWith(DISK_IMAGE);
+  });
+
+  it('shows the disk image to open beside a failed install on macOS', async () => {
+    answerLatest('update', () => READY, {
+      installs: true,
+      install: () => ({
+        state: 'failed',
+        version: MOCK_NEWER_RELEASE.version,
+        error: '/usr/bin/hdiutil failed: hdiutil: attach failed',
+        manual: { kind: 'disk_image', path: DISK_IMAGE },
+      }),
+    });
+    renderPane();
+
+    const retry = await screen.findByTestId('update-install-retry');
+    expect(retry).toHaveTextContent('Install failed · Retry');
+    expect(retry).toHaveAttribute(
+      'title',
+      expect.stringContaining('hdiutil: attach failed'),
+    );
+    expect(shownControls()).toEqual(['update-install-retry', 'update-manual']);
+    expect(screen.getByTestId('update-manual-image')).toHaveTextContent(
+      DISK_IMAGE,
+    );
+    expect(screen.queryByTestId('update-manual-command')).toBeNull();
+  });
+
   it('offers a retry beside the manual command when Delta cannot install', async () => {
     let install: UpdateInstall | null = {
       state: 'unavailable',
       version: MOCK_NEWER_RELEASE.version,
       error:
         'Delta cannot install the update itself: not authorized, or no polkit authentication agent is running',
-      manual_command: MANUAL_COMMAND,
+      manual: { kind: 'command', command: MANUAL_COMMAND },
     };
     let posts = 0;
     answerLatest('update', () => READY, {

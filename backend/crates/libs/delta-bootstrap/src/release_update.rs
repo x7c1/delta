@@ -4,22 +4,23 @@ use std::sync::Arc;
 
 use delta_usecase::{AssetDownloader, NotOffered, Platform, ReleaseUpdate, UpdateInstaller};
 use release_feed::{remove_stale_updates, GithubAssetDownloader};
-use update_installer::PkexecInstaller;
+use update_installer::{BundleInstaller, PkexecInstaller};
 
 use crate::Config;
 
 /// The in-app update `config` allows: offered only to a desktop app built by
 /// the release workflow ([`NotOffered::of_build`]), downloading this
 /// platform's asset into [`DataLayout::updates`](crate::DataLayout::updates)
-/// and installing it through Delta's update helper under `pkexec` (used on
-/// Linux only).
+/// and installing it through [`installer`].
 ///
 /// First removes the downloads in that directory that `current_version`, the
 /// running app's version, is not older than ([`remove_stale_updates`]), so an
 /// update the app has restarted into does not linger. This runs for every
 /// build, offered updates or not, since the CLI server may share the desktop
 /// app's data directory. A `current_version` that is not a version removes
-/// nothing.
+/// nothing. On macOS it also removes the bundle an earlier update replaced,
+/// kept next to the running one until now
+/// ([`BundleInstaller::remove_update_leftovers`]).
 ///
 /// The HTTPS client is built here, never on a request, and only when updates
 /// are offered; when it fails, updates are not offered, with a `warn`, since a
@@ -36,6 +37,7 @@ pub fn release_update(config: &Config, current_version: &str) -> ReleaseUpdate {
             "not clearing old downloaded updates: the running version is not a version"
         ),
     }
+    let installer = installer();
     if let Some(reason) = NotOffered::of_build(config.launcher, config.build_origin) {
         return ReleaseUpdate::not_offered(reason);
     }
@@ -44,12 +46,27 @@ pub fn release_update(config: &Config, current_version: &str) -> ReleaseUpdate {
             Platform::current(),
             updates,
             Arc::new(downloader) as Arc<dyn AssetDownloader>,
-            Arc::new(PkexecInstaller::new()) as Arc<dyn UpdateInstaller>,
+            installer,
         ),
         Err(err) => {
             tracing::warn!(error = %err, "updates are not offered");
             ReleaseUpdate::not_offered(NotOffered::NoDownloader)
         }
+    }
+}
+
+/// This platform's installer: on macOS the [`BundleInstaller`] of the
+/// running app, found now, before any update replaced it, after removing
+/// what an earlier update left next to it; elsewhere Delta's update helper
+/// under `pkexec` (used on Linux only, the one other platform that installs
+/// in the app).
+fn installer() -> Arc<dyn UpdateInstaller> {
+    if cfg!(target_os = "macos") {
+        let installer = BundleInstaller::for_running_app();
+        installer.remove_update_leftovers();
+        Arc::new(installer)
+    } else {
+        Arc::new(PkexecInstaller::new())
     }
 }
 

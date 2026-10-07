@@ -10,7 +10,8 @@ Delta therefore treats **reaching the loopback port as the trust boundary**
 document states what each guard covers, the one deliberate trade-off in how
 Delta pre-accepts Claude Code's workspace-trust dialog, how the files Delta
 writes into its data directory are protected, how the desktop app installs an
-update on Linux without the server ever holding root, what its logs
+update (on Linux without the server ever holding root, on macOS without root
+at all), what its logs
 deliberately leave out, and how Delta handles the launch options that switch
 an agent's own safety mechanisms off.
 
@@ -122,15 +123,20 @@ One more directory holds something that ends up mattering to root:
 it against the sha256 digest GitHub states for it. Whatever the user (or a
 process running as the user) can write there could be swapped after that
 check, so nothing that runs as root trusts it: the update helper below copies
-the file out and checks the copy again. Files there for a release the running
-app is not older than are removed at startup.
+the file out and checks the copy again. The macOS install, which runs as the
+user, checks it again too before using it. Files there for a release the
+running app is not older than are removed at startup.
 
 ## Updates
 
 The desktop app built by the release workflow can install a newer release on
-Linux (`POST /api/latest-release/install`, in
-[the API reference](api/settings.md#post-apilatest-releaseinstall)). That needs
-root, since the `.deb` is installed with `apt-get`. Delta's server and UI
+Linux and on macOS (`POST /api/latest-release/install`, in
+[the API reference](api/settings.md#post-apilatest-releaseinstall)).
+
+### Linux
+
+Installing on Linux needs root, since the `.deb` is installed with
+`apt-get`. Delta's server and UI
 never hold root: the only program that runs as root for an update is a
 dedicated helper, `/usr/lib/delta-desktop/delta-update-helper`, which the
 `.deb` installs root-owned, and which the server starts through `pkexec`.
@@ -191,6 +197,63 @@ a file that failed the check is not to be installed as root by any route.
 Restarting into the installed update starts the installed app,
 `/usr/bin/delta-desktop`, after the running one has exited; nothing about it
 runs as root.
+
+### macOS
+
+On macOS the update is a disk image (`Delta_<version>_aarch64.dmg`) holding
+`Delta.app`, and installing it means replacing the running `Delta.app`. The
+server does that itself, **as the user running Delta: nothing runs as root,
+there is no helper, and Delta never asks for a password.** Where that user
+may not write to the directory the bundle is in (a standard account and
+`/Applications` owned by the admin group, say), Delta does not escalate: it
+reports that it cannot install the update and shows the manual way below.
+
+- **Which bundle.** The running bundle is found once, when the app starts and
+  before any update replaced anything, from the server's executable
+  (`<dir>/Delta.app/Contents/MacOS/<exe>` → `<dir>/Delta.app`); no path such
+  as `/Applications` is assumed. A process that does not run from inside an
+  app bundle has nothing to replace. A `Delta.app` opened straight from its
+  disk image or the Downloads folder without being moved runs from a random,
+  read-only copy macOS made of it (App Translocation, under
+  `/private/var/folders/…/AppTranslocation/`); replacing that copy would
+  change nothing, so Delta refuses and tells the user to move Delta to
+  `/Applications` first.
+- **The file is checked again.** The user owns `updates/`, so the download is
+  not trusted on the strength of its earlier check: it is opened without
+  following a symlink, refused unless it is a regular file, and copied into a
+  new directory only the user can reach while its sha256 is computed; the
+  copy must match the digest the download was verified against. Everything
+  after this reads the copy. A mismatch removes the download, and the release
+  must be downloaded again.
+- **The image is mounted privately and checked before anything is copied.**
+  The copy is mounted read-only on a fresh directory, out of Finder's sight
+  and without opening anything on it
+  (`hdiutil attach -nobrowse -readonly -noautoopen -mountpoint <dir> <copy>`),
+  and always detached again (`hdiutil detach`), whatever happens once it is
+  attached. It must hold exactly one app at its root, a real `Delta.app`
+  directory, whose `Contents/Info.plist` (read as a property list, not by
+  running a tool on it) states `CFBundleIdentifier` `io.github.x7c1.delta`
+  and `CFBundleShortVersionString` the requested version. Anything else
+  rejects the image, and the download is removed.
+- **The bundle is renamed, never overwritten.** The checked `Delta.app` is
+  copied next to the running one under a temporary name with `ditto`, which
+  keeps its symlinks, permissions and extended attributes and so its code
+  signature. Then the running bundle is renamed to a backup name in the same
+  directory and the copy to `Delta.app`: two renames on one volume, so the
+  app is never half-written, and if the second fails the first is undone.
+  The running app's files are never written to: overwriting a running,
+  signed binary in place invalidates its signature and the kernel kills the
+  process. The old process keeps running from the backup until it exits; the
+  next launch removes the backup.
+
+When Delta cannot install the update itself, or the install failed, the app
+shows the absolute path of the verified `.dmg` with a copy button: open it,
+quit Delta, drag Delta from it to Applications, then start Delta again. Like
+Linux's command, it depends on nothing but the file. It is not shown when the
+file or the image failed a check.
+
+Restarting into the installed update `open`s the bundle found at startup
+(`open <dir>/Delta.app`) after the running process has exited.
 
 ## Log hygiene
 

@@ -67,6 +67,11 @@ pub use delta_usecase::LaunchConfig;
 // use-case crate directly.
 pub use delta_usecase::{BuildOrigin, Launcher};
 
+// Re-exported so the desktop shell can start the app an update was installed
+// as (`ServerStopped::Restart`) without depending on the use-case crate
+// directly.
+pub use delta_usecase::InstalledApp;
+
 use delta_usecase::BoxedInteractor;
 
 /// The fully-wired Interactor.

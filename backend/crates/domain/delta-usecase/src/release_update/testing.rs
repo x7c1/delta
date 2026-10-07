@@ -10,8 +10,8 @@ use tokio::sync::{mpsc, Mutex, Notify};
 
 use super::{lock, Platform, ReleaseUpdate, UpdateDownload, RELEASE_DOWNLOAD_PREFIX};
 use crate::ports::{
-    AssetDownloadError, AssetDownloader, DownloadProgress, InstallError, ReleaseAsset,
-    UpdateInstaller,
+    AssetDownloadError, AssetDownloader, DownloadProgress, InstallError, InstalledApp,
+    ReleaseAsset, UpdateInstaller,
 };
 use crate::release_check::RELEASE_PAGE_PREFIX;
 use crate::NewerRelease;
@@ -19,12 +19,25 @@ use crate::NewerRelease;
 /// The Linux asset of v0.6.0 the tests download.
 pub(super) const LINUX_DEB: &str = "delta-desktop_0.6.0_amd64.deb";
 
+/// The macOS asset of v0.6.0 the tests download.
+pub(super) const MAC_DMG: &str = "Delta_0.6.0_aarch64.dmg";
+
+/// The sha256 every test asset states, lowercase hex.
+pub(super) fn test_sha256() -> String {
+    "0".repeat(64)
+}
+
+/// The app the tests' installer names for every install it ends `Ok`.
+pub(super) fn installed_app() -> InstalledApp {
+    InstalledApp::Executable(PathBuf::from("/usr/bin/delta-desktop"))
+}
+
 /// An asset named `name` under the pinned download prefix, with a digest.
 pub(super) fn asset(name: &str) -> ReleaseAsset {
     ReleaseAsset {
         name: name.to_owned(),
         download_url: format!("{RELEASE_DOWNLOAD_PREFIX}v0.6.0/{name}"),
-        digest: Some(format!("sha256:{}", "0".repeat(64))),
+        digest: Some(format!("sha256:{}", test_sha256())),
     }
 }
 
@@ -97,24 +110,38 @@ impl AssetDownloader for GatedDownloader {
 
 /// An installer whose every install waits until the test hands it an
 /// outcome with [`Self::finish`], recording what it was asked to install.
+/// An install it ends `Ok` names [`installed_app`]. It may install here
+/// unless made with [`Self::unavailable_because`].
 pub(super) struct GatedInstaller {
-    asked: std::sync::Mutex<Vec<(String, PathBuf)>>,
+    unavailable: Option<String>,
+    asked: std::sync::Mutex<Vec<(String, PathBuf, String)>>,
     outcome_tx: mpsc::UnboundedSender<Result<(), InstallError>>,
     outcome_rx: Mutex<mpsc::UnboundedReceiver<Result<(), InstallError>>>,
 }
 
 impl GatedInstaller {
     pub(super) fn new() -> Arc<Self> {
+        Self::with(None)
+    }
+
+    /// An installer that says up front it cannot install here, for `reason`
+    /// ([`UpdateInstaller::unavailable`]).
+    pub(super) fn unavailable_because(reason: &str) -> Arc<Self> {
+        Self::with(Some(reason.to_owned()))
+    }
+
+    fn with(unavailable: Option<String>) -> Arc<Self> {
         let (outcome_tx, outcome_rx) = mpsc::unbounded_channel();
         Arc::new(Self {
+            unavailable,
             asked: std::sync::Mutex::new(Vec::new()),
             outcome_tx,
             outcome_rx: Mutex::new(outcome_rx),
         })
     }
 
-    /// The `(version, file)` of every install started so far.
-    pub(super) fn asked(&self) -> Vec<(String, PathBuf)> {
+    /// The `(version, file, sha256)` of every install started so far.
+    pub(super) fn asked(&self) -> Vec<(String, PathBuf, String)> {
         self.asked.lock().unwrap().clone()
     }
 
@@ -126,12 +153,28 @@ impl GatedInstaller {
 
 #[async_trait]
 impl UpdateInstaller for GatedInstaller {
-    async fn install(&self, version: &str, file: &Path) -> Result<(), InstallError> {
-        self.asked
+    async fn install(
+        &self,
+        version: &str,
+        file: &Path,
+        sha256: &str,
+    ) -> Result<InstalledApp, InstallError> {
+        self.asked.lock().unwrap().push((
+            version.to_owned(),
+            file.to_path_buf(),
+            sha256.to_owned(),
+        ));
+        self.outcome_rx
             .lock()
+            .await
+            .recv()
+            .await
             .unwrap()
-            .push((version.to_owned(), file.to_path_buf()));
-        self.outcome_rx.lock().await.recv().await.unwrap()
+            .map(|()| installed_app())
+    }
+
+    fn unavailable(&self) -> Option<String> {
+        self.unavailable.clone()
     }
 }
 

@@ -3,9 +3,9 @@
 //!
 //! [`ReleaseUpdate`] takes an in-app update through its steps: it downloads
 //! this platform's asset of the newer release into the update directory and
-//! verifies its sha256; on Linux it then installs the verified file through
-//! the [`UpdateInstaller`] and lets the app restart into it. Elsewhere the
-//! download is as far as it goes for now.
+//! verifies its sha256; on Linux and macOS it then installs the verified file
+//! through the [`UpdateInstaller`] and lets the app restart into what the
+//! installer installed. Elsewhere the download is as far as it goes.
 //!
 //! # Who may update
 //!
@@ -29,16 +29,21 @@
 //! # What is installed
 //!
 //! Only a verified download of the newer release that is ready: the install
-//! is handed that file and that release's version, never anything a request
-//! names. The installer checks the file again on its own side. When it
+//! is handed that file, that release's version and the sha256 the file was
+//! verified against, never anything a request names. The installer checks
+//! the file again on its own side. When it
 //! rejects the file itself ([`UpdateInstall::Rejected`]), the file is removed
 //! and the release has to be downloaded again: a file that failed the check
 //! is never offered for install, from a terminal included. When Delta cannot
 //! install it ([`UpdateInstall::Unavailable`]) or the install fails for
-//! another reason ([`UpdateInstall::Failed`]), the state carries the command
-//! that installs the file from the user's own terminal
-//! ([`manual_install_command`]). A dismissed password prompt leaves the
-//! download ready, as if nothing had been asked.
+//! another reason ([`UpdateInstall::Failed`]), the state carries how the user
+//! installs the file by hand ([`ManualInstall`]: a command for their own
+//! terminal on Linux, the disk image to open on macOS). Where the installer
+//! can tell at startup that it cannot install any update here (on macOS, the
+//! app does not run from a `Delta.app` this user may replace), Install is not
+//! offered at all, and a ready download comes with the way by hand instead
+//! ([`InstallUnavailable`]). A dismissed password prompt leaves the download
+//! ready, as if nothing had been asked.
 //!
 //! # One at a time
 //!
@@ -54,10 +59,12 @@ pub use asset_choice::{
 };
 mod build_origin;
 pub use build_origin::BuildOrigin;
+mod install_unavailable;
+pub use install_unavailable::InstallUnavailable;
 mod launcher;
 pub use launcher::Launcher;
 mod manual_install;
-pub use manual_install::manual_install_command;
+pub use manual_install::ManualInstall;
 mod not_offered;
 pub use not_offered::NotOffered;
 mod platform;
@@ -70,6 +77,8 @@ mod update_offer;
 pub use update_offer::UpdateOffer;
 mod update_refusal;
 pub use update_refusal::UpdateRefusal;
+mod update_restart;
+pub use update_restart::UpdateRestart;
 
 mod install;
 mod start;
@@ -80,7 +89,7 @@ mod testing;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::ports::{AssetDownloader, UpdateInstaller};
+use crate::ports::{AssetDownloader, InstallError, UpdateInstaller};
 use crate::NewerRelease;
 
 /// The in-app update: whether it is offered, and the state of the last
@@ -102,23 +111,44 @@ struct Offered {
     dir: PathBuf,
     downloader: Arc<dyn AssetDownloader>,
     installer: Arc<dyn UpdateInstaller>,
+    /// Why the installer cannot install any update here, as it said when
+    /// the update was set up ([`UpdateInstaller::unavailable`]); `None`
+    /// where it may, and where the platform installs nothing in the app.
+    install_unavailable: Option<String>,
 }
 
 impl ReleaseUpdate {
     /// Updates offered: `platform`'s asset is downloaded into `dir` (the data
     /// directory's `updates/`) through `downloader`, and installed through
     /// `installer` where the app installs updates itself.
+    ///
+    /// Where it does, asks `installer` now, once, whether it cannot install
+    /// any update here ([`UpdateInstaller::unavailable`]); if so, the app
+    /// does not offer Install ([`Self::installs`]) and a ready download
+    /// comes with the way by hand instead ([`Self::install_unavailable_of`]).
     pub fn offered(
         platform: Platform,
         dir: PathBuf,
         downloader: Arc<dyn AssetDownloader>,
         installer: Arc<dyn UpdateInstaller>,
     ) -> Self {
+        let install_unavailable = if platform.installs_in_app() {
+            installer.unavailable()
+        } else {
+            None
+        };
+        if let Some(cause) = &install_unavailable {
+            tracing::info!(
+                cause = %cause,
+                "Delta cannot install updates itself here: offering the way by hand"
+            );
+        }
         Self::with(Availability::Offered(Offered {
             platform,
             dir,
             downloader,
             installer,
+            install_unavailable,
         }))
     }
 
@@ -152,10 +182,33 @@ impl ReleaseUpdate {
     }
 
     /// Whether this app installs a ready download itself ([`Self::install`]),
-    /// so the browser offers Install once the download is ready.
+    /// so the browser offers Install once the download is ready: where the
+    /// platform installs in the app, unless the installer said at startup
+    /// that it cannot install here.
     pub fn installs(&self) -> bool {
-        self.may_update()
-            .is_ok_and(|offered| offered.platform.installs_in_app())
+        self.may_update().is_ok_and(|offered| {
+            offered.platform.installs_in_app() && offered.install_unavailable.is_none()
+        })
+    }
+
+    /// Why this app does not install `newer`'s ready download itself
+    /// although its platform installs in the app, and how the user installs
+    /// it by hand: only once that download is ready, and only when the
+    /// installer said at startup that it cannot install here. `None`
+    /// otherwise, including wherever Install is offered.
+    pub fn install_unavailable_of(
+        &self,
+        newer: Option<&NewerRelease>,
+    ) -> Option<InstallUnavailable> {
+        let offered = self.may_update().ok()?;
+        let cause = offered.install_unavailable.as_ref()?;
+        match self.download_of(newer)? {
+            UpdateDownload::Ready { path, .. } => Some(InstallUnavailable {
+                cause: InstallError::Unavailable(cause.clone()).to_string(),
+                manual: offered.platform.manual_install(&path),
+            }),
+            UpdateDownload::Downloading { .. } | UpdateDownload::Failed { .. } => None,
+        }
     }
 
     /// The state of `newer`'s download, if one was asked for. A download of
@@ -177,11 +230,15 @@ impl ReleaseUpdate {
             .filter(|install| install.version() == newer.display_version())
     }
 
-    /// The release the app may restart into: the one installed, if an install
-    /// has ended `Installed`. Refused otherwise.
-    pub fn restart(&self) -> Result<String, UpdateRefusal> {
+    /// The release the app may restart into, and the installed app that runs
+    /// it: the one installed, if an install has ended `Installed`. Refused
+    /// otherwise.
+    pub fn restart(&self) -> Result<UpdateRestart, UpdateRefusal> {
         match &*lock(&self.install) {
-            Some(UpdateInstall::Installed { version }) => Ok(version.clone()),
+            Some(UpdateInstall::Installed { version, app }) => Ok(UpdateRestart {
+                version: version.clone(),
+                app: app.clone(),
+            }),
             _ => Err(UpdateRefusal::NotInstalled),
         }
     }

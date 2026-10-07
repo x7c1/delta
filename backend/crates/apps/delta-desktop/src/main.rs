@@ -68,7 +68,8 @@
 //!
 //! Restarting into an installed update (`POST /api/latest-release/restart`)
 //! stops the server the same way, for [`serve::ServerStopped::Restart`]: the
-//! shell starts a detached process that runs the installed app once this one
+//! shell starts a detached process that starts the installed app the
+//! installer named (the binary on Linux, the bundle on macOS) once this one
 //! has exited ([`relaunch`]), and quits. The tmux server is left running, as
 //! when the window is closed, so the new process re-adopts the sessions.
 
@@ -93,6 +94,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_window_state::StateFlags;
 use tokio::runtime::{self, Runtime};
 
+use delta_bootstrap::InstalledApp;
 use delta_server::{config, serve, AppState};
 use started_server::StartedServer;
 
@@ -335,7 +337,9 @@ fn start_server(
                     }
                     // An update was installed over the app: start the
                     // installed app once this process has exited, and exit.
-                    serve::ServerStopped::Restart { .. } => restart_into_update(&handle),
+                    serve::ServerStopped::Restart(restart) => {
+                        restart_into_update(&handle, &restart.app)
+                    }
                 }
             }
             Err(err) => {
@@ -368,17 +372,18 @@ fn quit_after_erase(handle: &AppHandle, message: String) {
         .show(move |_| exit_handle.exit(0));
 }
 
-/// Start the installed app again once this process has exited, then exit 0.
+/// Start the installed `app` once this process has exited, then exit 0.
 ///
 /// When it cannot be started, say so in a dialog and exit 0 once it is
 /// dismissed: the update is installed either way, so starting Delta again
 /// from the menu runs it.
-fn restart_into_update(handle: &AppHandle) {
-    let relaunched = match relaunch::installed_app() {
-        Some(app) => relaunch::relaunch_after_exit(app)
-            .map_err(|err| format!("could not start {}: {err}", app.display())),
-        None => Err("this platform has no installed app to start".to_owned()),
-    };
+fn restart_into_update(handle: &AppHandle, app: &InstalledApp) {
+    let relaunched = relaunch::relaunch_after_exit(app).map_err(|err| {
+        let path = match app {
+            InstalledApp::Executable(path) | InstalledApp::Bundle(path) => path,
+        };
+        format!("could not start {}: {err}", path.display())
+    });
     match relaunched {
         Ok(()) => {
             tracing::info!("restarting into the installed update");
