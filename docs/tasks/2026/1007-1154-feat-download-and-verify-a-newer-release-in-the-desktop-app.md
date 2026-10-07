@@ -167,11 +167,11 @@ whole phrases) must hold for the new control too.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On this Linux machine, a desktop build with `DELTA_BUILD_ORIGIN=release`
+- [x] On this Linux machine, a desktop build with `DELTA_BUILD_ORIGIN=release`
       and its workspace version temporarily set below the latest release
       shows Update; pressing it (or calling the endpoint with the run's
       token) downloads the real latest `.deb` into `updates/` of the dev data
       directory, and its sha256 matches GitHub's `digest`
       (`sha256sum` of the file against `gh api repos/x7c1/delta/releases/latest`).
-- [ ] The same build without `DELTA_BUILD_ORIGIN` shows the rebuild hint and
+- [x] The same build without `DELTA_BUILD_ORIGIN` shows the rebuild hint and
       no Update, and the browser version (`make dev`) shows only the notice.
