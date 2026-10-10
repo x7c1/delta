@@ -6,7 +6,8 @@
 //! bindings, with `RouteBinder` rejecting any drift between the two.
 //!
 //! Under the `embed-web` feature the built web frontend is mounted behind those
-//! bindings, as the router's fallback — see [`static_web`].
+//! bindings, as the router's fallback — see [`static_web`]. The request log
+//! ([`crate::request_log`]) wraps the whole of it.
 
 use axum::Router;
 
@@ -21,7 +22,8 @@ use crate::state::AppState;
 use crate::ws;
 
 /// Build the application router with all routes wired to shared state, plus the
-/// built web frontend when the `embed-web` feature is on.
+/// built web frontend when the `embed-web` feature is on, every request logged
+/// by [`crate::request_log`].
 ///
 /// # Panics
 ///
@@ -30,12 +32,20 @@ use crate::ws;
 /// [`static_web::mount`].
 pub fn router(state: AppState) -> Router {
     #[cfg(feature = "embed-web")]
-    {
+    let app = {
         let token = state.token().to_owned();
         static_web::mount(api_router(state), &static_web::BUILT, &token)
-    }
+    };
     #[cfg(not(feature = "embed-web"))]
-    api_router(state)
+    let app = api_router(state);
+    with_request_log(app)
+}
+
+/// `app` with every request logged. Applied with `Router::layer`, outside the
+/// guards the routes already carry, so a refused request is logged too and the
+/// matched route is known (see [`crate::request_log`]).
+fn with_request_log(app: Router) -> Router {
+    app.layer(axum::middleware::from_fn(crate::request_log::log_request))
 }
 
 /// The declared endpoints alone, behind their guards — [`router`] without the

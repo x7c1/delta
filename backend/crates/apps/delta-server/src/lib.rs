@@ -20,6 +20,7 @@ mod hook_auth_guard;
 mod hooks;
 mod origin_guard;
 mod pty;
+mod request_log;
 mod route_binder;
 pub mod serve;
 mod state;
