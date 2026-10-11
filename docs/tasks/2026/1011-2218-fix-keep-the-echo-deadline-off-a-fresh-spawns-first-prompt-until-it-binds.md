@@ -108,7 +108,7 @@ parked.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On this Linux machine with `make dev` (dev data directory, not the
+- [x] On this Linux machine with `make dev` (dev data directory, not the
       installed Delta's), start a new session from the composer with a first
       prompt in an empty non-git directory that Claude Code has not trusted,
       leave the trust dialog up for more than 60 seconds, then accept it. The
