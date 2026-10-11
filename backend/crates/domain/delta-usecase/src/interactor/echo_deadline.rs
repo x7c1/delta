@@ -28,6 +28,16 @@
 //! state Delta has never seen — is caught by the same net, because the signal
 //! is the silence.
 //!
+//! The silence only counts once keystrokes could have reached a ready
+//! `claude`. A session still inside its resume-readiness window (its first
+//! prompt held back until the resume settles) and a fresh spawn not yet bound
+//! (its first prompt riding the command line until `claude` is ready, which a
+//! trust dialog or a slow MCP startup can stretch past the deadline) are
+//! exempt; their waits start when the held prompt is typed and when the spawn
+//! binds. A launch that never becomes ready is the pending-spawn watchdog's to
+//! reap. Recovering here instead would re-type a prompt that is still on its
+//! way and send an `Escape` into whatever dialog the launch is showing.
+//!
 //! A **slash-command** send reads the same silence the other way. Claude Code
 //! runs a local command (`/cost`, `/model`, …) with no hook and, from 2.1.286
 //! on, no transcript line, so the silence is the command having run: after the
@@ -64,7 +74,10 @@ where
     /// A no-op — the overwhelming common case — unless a send is genuinely
     /// being awaited and its wait has run past the deadline (see
     /// [`SessionRuntime::expired_echo_deadline`], which also holds the sweep
-    /// off while a resume's first prompt is still deliberately held).
+    /// off while a resume's first prompt is still deliberately held, and while
+    /// a fresh spawn's command-line first prompt waits for the launch to bind).
+    /// In either window nothing has been typed, so neither the `Escape` nor
+    /// the re-type below may reach the pane.
     ///
     /// When the deadline does fire:
     ///
