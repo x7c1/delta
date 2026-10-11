@@ -21,6 +21,8 @@ part. The larger workflows live in their own files:
   `make e2e-real-codex`), the drift runbook, and the automatic canary trigger.
 - **[local-run.md](local-run.md)** — running the whole thing locally with
   `make dev`.
+- **[logging.md](logging.md)** — where the server's and the desktop app's log
+  goes, changing its level, and the per-request log.
 - **[release.md](../release.md)** — the release flow and its supporting
   automation.
 - **[install/](../install/README.md)** — installing the released desktop app as an

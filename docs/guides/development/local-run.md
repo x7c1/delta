@@ -181,7 +181,8 @@ to it instead.
   has answered (below), the database is open and the sessions that survived
   the last quit are re-adopted. The app logs both moments at `info` (`window
   shown on the placeholder page`, then `window navigating to the server` with
-  the port), so the time a launch spent on that page can be read from the log.
+  the port), so the time a launch spent on that page can be read from the log
+  ([where the log is](logging.md#the-desktop-apps-log-file)).
 - **Window size.** The window opens at the size it was last left at, and
   maximized if it was. A size left on the same screen, or on a smaller one,
   comes back exactly, even one stretched across the whole screen. A size left
