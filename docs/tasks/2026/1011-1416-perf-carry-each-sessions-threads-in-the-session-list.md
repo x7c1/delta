@@ -119,10 +119,10 @@ and the unread logic is unchanged.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On this Linux machine, with `make dev` running on a copy of a real
+- [x] On this Linux machine, with `make dev` running on a copy of a real
       database (not the installed Delta's data directory) and the browser
       opened on it, the navigator shows the sub-thread trees of unfocused rows
       as before, and the browser's network log shows no per-row
       `/api/sessions/{id}/threads` requests at load.
-- [ ] In the same setup, a branch send in the focused session makes its new
+- [x] In the same setup, a branch send in the focused session makes its new
       thread appear in the row and the workspace.
