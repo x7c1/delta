@@ -26,7 +26,7 @@ fn thread_from_row(row: &Row<'_>) -> Result<Thread> {
 /// from the thread's first semantically parented message — falling back to the
 /// thread's earliest semantically parented send for the window between the
 /// branch send being recorded and its user line being ingested. Requires the
-/// query to select `FROM thread` (both thread queries do).
+/// query to select `FROM thread` (every thread query does).
 const THREAD_COLS: &str = "id, session_id, title, parent_thread_id, \
      COALESCE( \
        (SELECT m.semantic_parent_uuid FROM message m \
@@ -84,6 +84,41 @@ impl SqliteStore {
             .map_err(Error::from)?;
         let rows = stmt
             .query_map(params![session_id.as_str()], |r| Ok(thread_from_row(r)))
+            .map_err(Error::from)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(Error::from)??);
+        }
+        Ok(out)
+    }
+
+    pub(super) async fn list_threads_by_session_ids(
+        &self,
+        session_ids: &[SessionId],
+    ) -> std::result::Result<Vec<Thread>, delta_usecase::Error> {
+        // An empty id list matches nothing by definition; short-circuit rather
+        // than building an `IN ()` (which SQLite rejects) or taking the lock.
+        if session_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().await;
+        let placeholders = (1..=session_ids.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        // Ordered by `id` alone, exactly as `list_threads` orders one session's
+        // threads, so the rows of each session keep that order when the caller
+        // groups them.
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {THREAD_COLS} FROM thread WHERE session_id IN ({placeholders}) ORDER BY id"
+            ))
+            .map_err(Error::from)?;
+        let rows = stmt
+            .query_map(
+                rusqlite::params_from_iter(session_ids.iter().map(|id| id.as_str())),
+                |r| Ok(thread_from_row(r)),
+            )
             .map_err(Error::from)?;
         let mut out = Vec::new();
         for row in rows {

@@ -68,6 +68,7 @@ Response:
         "pane_starting": false,
         "hooks_unreachable": false,
         "main_thread_id": 1,
+        "threads": [ /* Thread, ... */ ],
         "last_activity_at": "2026-01-01T00:01:01Z"
       }
     ],
@@ -89,6 +90,11 @@ Response:
   Closing the session and sending again resumes it with current settings,
   which clears the flag. It is `false`
   for every session that is not open.
+  `threads` is every thread of the session — the `main` trunk and its
+  branches — in the shape and order
+  [`GET /api/sessions/{id}/threads`](#get-apisessionsidthreads) returns them
+  (ascending id), so a client can draw each listed session's thread tree from
+  the list alone. The server reads the threads of the whole page in one query.
   `last_activity_at` is the ISO-8601 UTC timestamp of the session's
   most recent message (`MAX(message.created_at)`), or `null` when the session has
   no messages yet. `next_cursor` is an opaque token to fetch the following page,
@@ -438,8 +444,10 @@ route deliberately does not duplicate it.
 
 ### `GET /api/sessions/{id}/threads`
 
-List a session's thread tree for the navigator, ordered by creation (ascending
-`id`).
+List a session's thread tree, ordered by creation (ascending `id`). The session
+list already carries every listed session's threads; the browser reads this one
+for the focused session, to refresh its tree at once after a branch send or a
+turn.
 
 - **200**:
 

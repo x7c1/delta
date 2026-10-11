@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "a passage to branch from" },
+    { "type": "await_interrupt" }
+  ]
+}

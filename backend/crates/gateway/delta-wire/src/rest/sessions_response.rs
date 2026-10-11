@@ -5,6 +5,7 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::session::WireSession;
+use crate::thread::WireThread;
 
 /// One session in the list: the stored record plus its live state and trunk.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -32,6 +33,11 @@ pub struct WireSessionListItem {
     /// not open.
     pub hooks_unreachable: bool,
     pub main_thread_id: i64,
+    /// Every thread of the session — the trunk and its branches — in the shape
+    /// and order `GET /api/sessions/{id}/threads` returns them (ascending id).
+    /// Carried on the row so a client can draw each session's thread tree from
+    /// the list alone, without a request per session.
+    pub threads: Vec<WireThread>,
     /// Timestamp of the session's most recent message (ISO-8601 UTC), or `null`
     /// when the session has no messages yet.
     pub last_activity_at: Option<String>,
@@ -45,6 +51,7 @@ impl From<SessionListing> for WireSessionListItem {
             pane_starting: listing.pane_starting,
             hooks_unreachable: listing.hooks_unreachable,
             main_thread_id: listing.main_thread_id.0,
+            threads: listing.threads.into_iter().map(WireThread::from).collect(),
             last_activity_at: listing.last_activity_at,
         }
     }
@@ -67,7 +74,7 @@ pub struct WireSessionsResponse {
 mod tests {
     use super::*;
 
-    use delta_model::{AgentProvider, Session, SessionId, SessionStatus, ThreadId};
+    use delta_model::{AgentProvider, Session, SessionId, SessionStatus, Thread, ThreadId};
 
     #[test]
     fn a_page_serializes_with_the_rest_field_names() {
@@ -93,6 +100,15 @@ mod tests {
             pane_starting: false,
             hooks_unreachable: false,
             main_thread_id: ThreadId(1),
+            threads: vec![Thread {
+                id: ThreadId(1),
+                session_id: SessionId::from("sess-1"),
+                title: "main".into(),
+                parent_thread_id: None,
+                root_message_uuid: None,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                last_activity_at: None,
+            }],
             last_activity_at: None,
         };
         assert_eq!(
@@ -123,6 +139,15 @@ mod tests {
                     "pane_starting": false,
                     "hooks_unreachable": false,
                     "main_thread_id": 1,
+                    "threads": [{
+                        "id": 1,
+                        "session_id": "sess-1",
+                        "title": "main",
+                        "parent_thread_id": null,
+                        "root_message_uuid": null,
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "last_activity_at": null,
+                    }],
                     "last_activity_at": null,
                 }],
                 "next_cursor": "abc",

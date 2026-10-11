@@ -33,7 +33,7 @@ use crate::error::{Error, Result};
 use crate::migrations::{self, SCHEMA_VERSION};
 
 /// The trunk thread title. The first registered session always has one.
-const MAIN_THREAD_TITLE: &str = "main";
+const MAIN_THREAD_TITLE: &str = delta_model::Thread::MAIN_TITLE;
 
 /// A SQLite-backed session store.
 pub struct SqliteStore {

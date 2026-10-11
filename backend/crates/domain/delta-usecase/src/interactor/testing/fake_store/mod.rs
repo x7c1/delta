@@ -77,6 +77,17 @@ pub(crate) struct FakeStoreInner {
     /// error for this tool_use id (and succeeds for every other), so a test
     /// can make the process-gone subagent sweep hit a failing row write.
     pub(crate) fail_clear_subagent_launch_for: Option<String>,
+    /// How many times some read methods were called, for tests that assert a
+    /// use case reads in batches rather than once per row.
+    pub(crate) calls: FakeStoreCalls,
+}
+
+/// Call counts of the fake's thread reads (see [`FakeStoreInner::calls`]).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FakeStoreCalls {
+    pub(crate) list_threads: usize,
+    pub(crate) list_threads_by_session_ids: usize,
+    pub(crate) main_thread_id: usize,
 }
 
 #[derive(Default)]
