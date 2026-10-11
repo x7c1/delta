@@ -143,6 +143,10 @@ impl SessionStore for FakeStore {
         self.list_threads(session_id).await
     }
 
+    async fn list_threads_by_session_ids(&self, session_ids: &[SessionId]) -> Result<Vec<Thread>> {
+        self.list_threads_by_session_ids(session_ids).await
+    }
+
     async fn create_thread(
         &self,
         session_id: &SessionId,

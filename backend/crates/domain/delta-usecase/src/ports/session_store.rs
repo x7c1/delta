@@ -336,6 +336,16 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// All threads for a session, ordered by creation (ascending `id`).
     async fn list_threads(&self, session_id: &SessionId) -> Result<Vec<Thread>>;
 
+    /// All threads of several sessions in one query, ordered by creation
+    /// (ascending `id`) — so each session's threads, taken in result order,
+    /// come out in the order [`Self::list_threads`] returns them.
+    ///
+    /// Backs the session list, which carries every listed session's threads:
+    /// one query per page rather than one per row. An id with no session (or no
+    /// threads) contributes nothing. An empty `session_ids` returns an empty
+    /// `Vec` without touching the database.
+    async fn list_threads_by_session_ids(&self, session_ids: &[SessionId]) -> Result<Vec<Thread>>;
+
     /// Create a new child thread under `parent_thread_id`.
     ///
     /// The message the thread branches from is NOT passed here: the branch edge
@@ -970,6 +980,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn list_threads(&self, session_id: &SessionId) -> Result<Vec<Thread>> {
         (**self).list_threads(session_id).await
+    }
+
+    async fn list_threads_by_session_ids(&self, session_ids: &[SessionId]) -> Result<Vec<Thread>> {
+        (**self).list_threads_by_session_ids(session_ids).await
     }
 
     async fn create_thread(

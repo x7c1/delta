@@ -57,3 +57,25 @@ pub struct Thread {
     /// thread.
     pub last_activity_at: Option<String>,
 }
+
+impl Thread {
+    /// The title of a session's trunk thread.
+    ///
+    /// Every registered session has one thread with this title, created with the
+    /// session; when more than one thread carries it (a branch whose prompt
+    /// happened to be titled the same), the trunk is the lowest-id one, because
+    /// it is created before any branch.
+    pub const MAIN_TITLE: &'static str = "main";
+
+    /// The trunk thread among `threads`: the lowest-id thread titled
+    /// [`Self::MAIN_TITLE`], or `None` when none is.
+    ///
+    /// The same rule the store's main-thread lookup applies, so a caller holding
+    /// every thread of a session can derive the trunk without asking again.
+    pub fn trunk_of<'a>(threads: impl IntoIterator<Item = &'a Thread>) -> Option<&'a Thread> {
+        threads
+            .into_iter()
+            .filter(|thread| thread.title == Self::MAIN_TITLE)
+            .min_by_key(|thread| thread.id)
+    }
+}

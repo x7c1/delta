@@ -1,4 +1,5 @@
 import {
+  skipToken,
   useInfiniteQuery,
   useMutation,
   useQueries,
@@ -41,6 +42,7 @@ import type {
   SessionsResponse,
   StorageResponse,
   StorageWorktreesResponse,
+  Thread,
   ThreadsResponse,
   UpdateLaunchOptionRequest,
   UpdatePromptTemplateRequest,
@@ -48,7 +50,7 @@ import type {
   WorkdirListResponse,
   WorkdirRecentResponse,
 } from '@delta/wire-gen';
-import { appendSessionSend } from './cache';
+import { appendSessionSend, seedSessionThreads } from './cache';
 import type { ApiClient, PullRequestLens } from './http';
 import { queryKeys } from './query-keys';
 
@@ -74,13 +76,21 @@ const SESSIONS_PAGE_SIZE = 30;
 export function useSessionsQuery(
   client: ApiClient,
 ): UseInfiniteQueryResult<{ pages: SessionsResponse[] }, Error> {
+  const queryClient = useQueryClient();
   return useInfiniteQuery({
     queryKey: queryKeys.sessions,
-    queryFn: ({ pageParam }) =>
-      client.getSessions({
+    queryFn: async ({ pageParam }) => {
+      const requestedAt = Date.now();
+      const page = await client.getSessions({
         cursor: pageParam ?? undefined,
         limit: SESSIONS_PAGE_SIZE,
-      }),
+      });
+      // Each item carries its session's threads: hand them to the per-session
+      // thread cache the rows and the focused workspace read, so the list
+      // costs no request per row (see `seedSessionThreads`).
+      seedSessionThreads(queryClient, page, requestedAt);
+      return page;
+    },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     retry: 2,
@@ -88,12 +98,12 @@ export function useSessionsQuery(
 }
 
 /**
- * Milliseconds a fetched thread tree is considered fresh. Every session visible
- * in the windowed list mounts its own thread query, so rows mounting and
- * unmounting during a scroll would otherwise refetch repeatedly. A short window
- * keeps a row's tree from refetching the instant it scrolls back into view while
- * still letting branch-send invalidation (`useCreateSendMutation`) force a
- * refresh immediately, since invalidation overrides `staleTime`.
+ * Milliseconds a thread tree in the cache is considered fresh. Applies to the
+ * focused workspace's {@link useSessionThreadsQuery}: an entry seeded from the
+ * session list (or fetched) within this window is served as is when a session
+ * gains focus, rather than refetched the instant it does. Branch-send and
+ * focused-turn invalidations still force a refresh immediately, since
+ * invalidation overrides `staleTime`.
  */
 const SESSION_THREADS_STALE_TIME = 30_000;
 
@@ -109,26 +119,66 @@ const SESSION_THREADS_STALE_TIME = 30_000;
  */
 const MESSAGES_STALE_TIME = 30_000;
 
+/** The shared options of every observer of a session's thread tree. */
+function sessionThreadsQueryOptions(client: ApiClient, sessionId: SessionId) {
+  return {
+    queryKey: queryKeys.sessionThreads(sessionId),
+    // Kept on the passive observers too (see `useListedSessionThreads`): a
+    // refetch an invalidation starts runs with the options the query last
+    // received, which may be theirs.
+    queryFn: () => client.getSessionThreads(sessionId),
+    staleTime: SESSION_THREADS_STALE_TIME,
+  };
+}
+
 /**
- * A single session's thread tree. Disabled until a real session id is supplied.
+ * The focused session's thread tree (`GET /api/sessions/{id}/threads`).
+ * Disabled until a real session id is supplied.
  *
- * Both the focused-session query in the workspace and each visible session
- * row's query share the same `sessionThreads(sessionId)` key, so React Query
- * dedupes them into one request per session — no double fetch.
+ * This is the one observer that fetches the tree: the session list seeds the
+ * same `sessionThreads(sessionId)` entry for every session it carries, and the
+ * navigator rows read it passively ({@link useListedSessionThreads}). Branch
+ * sends and the focused session's turn events invalidate the entry, and this
+ * observer is what turns that into a targeted refetch — which every row of the
+ * session then shows.
  */
 export function useSessionThreadsQuery(
   client: ApiClient,
   sessionId: SessionId | null,
 ): UseQueryResult<ThreadsResponse> {
-  return useQuery({
-    queryKey:
-      sessionId === null
-        ? queryKeys.sessionThreadsNone
-        : queryKeys.sessionThreads(sessionId),
-    queryFn: () => client.getSessionThreads(sessionId as SessionId),
-    enabled: sessionId !== null,
-    staleTime: SESSION_THREADS_STALE_TIME,
+  return useQuery(
+    sessionId === null
+      ? { queryKey: queryKeys.sessionThreadsNone, queryFn: skipToken }
+      : sessionThreadsQueryOptions(client, sessionId),
+  );
+}
+
+/**
+ * A listed session's thread tree, read without ever requesting it.
+ *
+ * Reads the `sessionThreads(sessionId)` cache entry — seeded from each session
+ * list page as it arrives, and refetched while the session is focused by
+ * {@link useSessionThreadsQuery} — through a disabled observer: mounting it
+ * (a row scrolling into view) and invalidating the entry while only rows
+ * observe it start no request. So a row shows its tree from the list alone,
+ * and the focused session's targeted refetch (after a branch send, on a turn
+ * event) reaches the row the moment it lands.
+ *
+ * `listed` is the list item's own copy, served while the entry is absent — the
+ * cache collected it while nothing observed it, or the row was rendered from a
+ * list that did not pass through {@link useSessionsQuery}. It is the very data
+ * seeding writes, so the two never tell different stories.
+ */
+export function useListedSessionThreads(
+  client: ApiClient,
+  sessionId: SessionId,
+  listed: Thread[],
+): Thread[] {
+  const query = useQuery({
+    ...sessionThreadsQueryOptions(client, sessionId),
+    enabled: false,
   });
+  return query.data?.threads ?? listed;
 }
 
 /**
