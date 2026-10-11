@@ -266,11 +266,22 @@ impl SessionRuntime {
     /// sessions that never had a pending spawn at all). "Arrives first" means
     /// gets all the way through registration: callers do their fallible work
     /// behind [`Self::has_pending_spawn`] first.
+    ///
+    /// The bind also restarts the echo-deadline clock of a first prompt still
+    /// being awaited: that prompt rides `claude`'s command line, so its echo
+    /// cannot arrive before the bind, however long the launch took. The sweep
+    /// holds off while the spawn is unbound (see
+    /// [`Self::expired_echo_deadline`]); without the restart, after a launch
+    /// longer than the deadline the first tick after the bind would fire in
+    /// the gap before the prompt's own `UserPromptSubmit` and re-type a prompt
+    /// already on its way. A prompt that really never echoes still meets the
+    /// normal deadline, measured from the bind.
     pub fn bind_pending_spawn(&mut self) -> bool {
         let Some(spawn) = self.pending_spawn.take() else {
             return false;
         };
         self.bind(OpenHandle::launched(spawn.token, spawn.pane));
+        self.restamp_awaiting_echo();
         true
     }
 
