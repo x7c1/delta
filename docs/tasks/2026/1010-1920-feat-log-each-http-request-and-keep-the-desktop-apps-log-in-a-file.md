@@ -122,12 +122,12 @@ its level switchable on both platforms.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On this Linux machine, with the dev desktop build and the request log
+- [x] On this Linux machine, with the dev desktop build and the request log
       turned on through the data directory's filter file (no `RUST_LOG`),
       launching the app writes a log file under the app log directory, and
       it lists the launch's requests, including one
       `/api/sessions/{id}/threads` line per mounted session row.
-- [ ] With the filter file removed, the next launch logs no request lines.
+- [x] With the filter file removed, the next launch logs no request lines.
 - [ ] On macOS, a build started from Finder writes the log file under
       `~/Library/Logs/<identifier>` (can be done in the Mac session that
       verifies the in-app update).
