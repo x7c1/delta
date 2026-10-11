@@ -10,6 +10,7 @@ import type {
   Send,
   SendsResponse,
   SessionsResponse,
+  ThreadsResponse,
 } from '@delta/wire-gen';
 import { queryKeys } from './query-keys';
 
@@ -159,6 +160,34 @@ export function invalidateRepositoriesAndPullRequests(
   invalidateDiscardingInFlight(queryClient, queryKeys.repositories);
   invalidateDiscardingInFlight(queryClient, queryKeys.pullRequests('reviewer'));
   invalidateDiscardingInFlight(queryClient, queryKeys.pullRequests('author'));
+}
+
+/**
+ * Write every listed session's threads (`SessionListItem.threads`) into its
+ * `sessionThreads(sessionId)` cache entry, so the navigator rows and the focused
+ * workspace read one copy of each tree and the list costs no request per row.
+ * `setQueryData` starts no fetch, so seeding requests nothing.
+ *
+ * `requestedAt` is when the page's request was sent. An entry updated after
+ * that (a targeted refetch of the focused session that landed while the page
+ * was in flight) is newer than the page's snapshot and is left alone, so a slow
+ * list response never rolls a freshly branched tree back.
+ */
+export function seedSessionThreads(
+  queryClient: QueryClient,
+  page: SessionsResponse,
+  requestedAt: number,
+): void {
+  for (const item of page.sessions) {
+    const queryKey = queryKeys.sessionThreads(item.session.id);
+    const updatedAt = queryClient.getQueryState(queryKey)?.dataUpdatedAt ?? 0;
+    if (updatedAt > requestedAt) {
+      continue;
+    }
+    queryClient.setQueryData<ThreadsResponse>(queryKey, {
+      threads: item.threads,
+    });
+  }
 }
 
 /** Mark a single session's thread tree stale so it refetches. */

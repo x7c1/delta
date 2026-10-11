@@ -88,8 +88,8 @@ test('a visible non-focused session shows its sub-thread tree expanded without a
   await page.goto('/');
 
   // The open session ("sess-mock-1") is auto-focused; the closed session
-  // ("scratch notes") is on page 1 and visible but NOT focused. Every visible
-  // row fetches its own thread tree and renders it expanded by default, so the
+  // ("scratch notes") is on page 1 and visible but NOT focused. Every row's
+  // list item carries its thread tree, rendered expanded by default, so the
   // non-focused session's sub-thread ("scratch ideas") is on screen with no
   // interaction. The row is matched by its launch-time branch identifier,
   // visible as the line-1 text on the card.

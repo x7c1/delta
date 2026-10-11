@@ -37,14 +37,33 @@ fn derive_last_activity_at(g: &FakeStoreInner, thread_id: ThreadId) -> Option<St
         .max()
 }
 
+/// The threads of every session `wanted` accepts, ascending `id` (the SQL
+/// store's order), with their derived fields filled in.
+fn threads_of(g: &FakeStoreInner, wanted: impl Fn(&SessionId) -> bool) -> Vec<Thread> {
+    let mut out: Vec<Thread> = g
+        .threads
+        .iter()
+        .filter(|t| wanted(&t.session_id))
+        .cloned()
+        .map(|mut t| {
+            t.root_message_uuid = derive_root_message_uuid(g, t.id);
+            t.last_activity_at = derive_last_activity_at(g, t.id);
+            t
+        })
+        .collect();
+    out.sort_by_key(|t| t.id);
+    out
+}
+
 impl FakeStore {
     pub(super) async fn main_thread_id(&self, session_id: &SessionId) -> Result<ThreadId> {
-        let g = self.inner.lock().unwrap();
-        Ok(g.threads
-            .iter()
-            .find(|t| &t.session_id == session_id && t.title == "main")
-            .unwrap()
-            .id)
+        let mut g = self.inner.lock().unwrap();
+        g.calls.main_thread_id += 1;
+        Ok(
+            Thread::trunk_of(g.threads.iter().filter(|t| &t.session_id == session_id))
+                .unwrap()
+                .id,
+        )
     }
 
     pub(super) async fn thread(&self, id: ThreadId) -> Result<Option<Thread>> {
@@ -57,20 +76,18 @@ impl FakeStore {
     }
 
     pub(super) async fn list_threads(&self, session_id: &SessionId) -> Result<Vec<Thread>> {
-        let g = self.inner.lock().unwrap();
-        let mut out: Vec<Thread> = g
-            .threads
-            .iter()
-            .filter(|t| &t.session_id == session_id)
-            .cloned()
-            .map(|mut t| {
-                t.root_message_uuid = derive_root_message_uuid(&g, t.id);
-                t.last_activity_at = derive_last_activity_at(&g, t.id);
-                t
-            })
-            .collect();
-        out.sort_by_key(|t| t.id);
-        Ok(out)
+        let mut g = self.inner.lock().unwrap();
+        g.calls.list_threads += 1;
+        Ok(threads_of(&g, |id| id == session_id))
+    }
+
+    pub(super) async fn list_threads_by_session_ids(
+        &self,
+        session_ids: &[SessionId],
+    ) -> Result<Vec<Thread>> {
+        let mut g = self.inner.lock().unwrap();
+        g.calls.list_threads_by_session_ids += 1;
+        Ok(threads_of(&g, |id| session_ids.contains(id)))
     }
 
     pub(super) async fn create_thread(

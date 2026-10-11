@@ -68,6 +68,17 @@ function makeItem(
     },
     open: true,
     main_thread_id: mainThreadId,
+    threads: [
+      {
+        id: mainThreadId,
+        session_id: id,
+        title: 'main',
+        parent_thread_id: null,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:00:00Z',
+        last_activity_at: null,
+      },
+    ],
     last_activity_at: '2026-01-01T00:00:00Z',
   };
 }
@@ -144,6 +155,95 @@ describe('NavigatorPane per-session running indicator', () => {
     // visually-hidden label), never as a standalone footer spinner.
     const runningRows = screen.getAllByTestId('session-running');
     expect(runningRows).toHaveLength(1);
+  });
+});
+
+describe('NavigatorPane thread trees from the session list', () => {
+  /** A list item for `id` whose threads are its trunk plus `branches`. */
+  function itemWithBranches(
+    id: string,
+    mainThreadId: number,
+    branches: string[],
+  ): SessionListItem {
+    const item = makeItem(id, mainThreadId);
+    return {
+      ...item,
+      threads: [
+        ...item.threads,
+        ...branches.map((title, index) => ({
+          id: mainThreadId + index + 1,
+          session_id: id,
+          title,
+          parent_thread_id: mainThreadId,
+          root_message_uuid: `${id}-root-${index}`,
+          created_at: '2026-01-01T00:00:00Z',
+          last_activity_at: null,
+        })),
+      ],
+    };
+  }
+
+  beforeEach(() => {
+    useLiveStore.setState({
+      connection: 'open',
+      notices: {},
+      runningThreads: {},
+      unread: {},
+      spawns: [],
+    });
+    useNavStore.setState({ focusedSessionId: null, activeThreadId: null });
+    useComposerStore.setState({ newSessionWorkdir: null });
+  });
+
+  it("draws every row's sub-thread tree from the list without requesting any session's threads", async () => {
+    const listed = [
+      itemWithBranches('tree-a', 10, ['alpha one', 'alpha two']),
+      itemWithBranches('tree-b', 20, ['beta one']),
+      itemWithBranches('tree-c', 30, ['gamma one']),
+    ];
+    const threadRequests: string[] = [];
+    server.use(
+      http.get('*/api/sessions', () =>
+        HttpResponse.json({ sessions: listed, next_cursor: null }),
+      ),
+      http.get('*/api/sessions/:id/threads', ({ params }) => {
+        threadRequests.push(String(params.id));
+        return HttpResponse.json({ threads: [] });
+      }),
+    );
+    const page = await new ApiClient({
+      baseUrl: 'http://localhost',
+    }).getSessions({});
+
+    const { unmount } = renderPane(page.sessions);
+
+    // Each row shows its own sub-threads, and only its own.
+    const rowOf = (repo: string) =>
+      screen
+        .getAllByRole('listitem')
+        .find((row) => row.textContent?.includes(repo)) as HTMLElement;
+    for (const [repo, mine, others] of [
+      ['dev/tree-a', ['alpha one', 'alpha two'], ['beta one', 'gamma one']],
+      ['dev/tree-b', ['beta one'], ['alpha one', 'gamma one']],
+      ['dev/tree-c', ['gamma one'], ['alpha one', 'beta one']],
+    ] as const) {
+      for (const title of mine) {
+        expect(within(rowOf(repo)).getByText(title)).toBeInTheDocument();
+      }
+      for (const title of others) {
+        expect(within(rowOf(repo)).queryByText(title)).not.toBeInTheDocument();
+      }
+    }
+
+    // Rows mounting again (as an unfocused row does when it scrolls back into
+    // view) read the list too.
+    unmount();
+    renderPane(page.sessions);
+    expect(screen.getByText('beta one')).toBeInTheDocument();
+
+    // Give any request a row might have started time to reach the server.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(threadRequests).toEqual([]);
   });
 });
 

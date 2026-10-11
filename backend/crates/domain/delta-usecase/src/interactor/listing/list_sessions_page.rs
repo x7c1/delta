@@ -1,8 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use delta_model::SessionId;
+use delta_model::{SessionId, Thread};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::ports::{GitWorktree, SessionPageRow, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::session_listing::SessionListing;
 use crate::session_page::{SessionPage, SessionPageCursor};
@@ -63,43 +63,40 @@ where
         let live_ids = self.live_session_ids().await;
         let live: HashSet<SessionId> = live_ids.iter().cloned().collect();
 
-        let mut listings = Vec::new();
+        let mut rows = Vec::new();
 
         // Phase 1 — the live head, first page only. Later pages resume inside
         // the closed stream, which these rows are excluded from, so emitting
         // them again would duplicate them.
         if cursor.is_none() {
-            for row in self.store.list_sessions_by_ids(&live_ids).await? {
-                listings.push(self.listing_for(row).await?);
-            }
+            rows.extend(self.store.list_sessions_by_ids(&live_ids).await?);
         }
 
         // Phase 2 — the closed stream. Over-fetch by exactly the live count so
         // that dropping the live rows still leaves `limit` closed ones whenever
         // that many remain; a page is short only when the stream is exhausted.
-        let rows = self
+        let closed = self
             .store
             .list_sessions_page(cursor, limit.saturating_add(live.len() as u32))
             .await?;
         let mut kept = 0;
         let mut last_kept = None;
-        for row in rows {
+        for row in closed {
             if kept == limit {
                 break;
             }
-            if live.contains(&row.0.id) {
+            let (session, last_activity_at) = &row;
+            if live.contains(&session.id) {
                 continue;
             }
-            let listing = self.listing_for(row).await?;
             last_kept = Some(SessionPageCursor {
-                recency: listing
-                    .last_activity_at
+                recency: last_activity_at
                     .clone()
-                    .unwrap_or_else(|| listing.session.created_at.clone()),
-                created_at: listing.session.created_at.clone(),
-                id: listing.session.id.as_str().to_owned(),
+                    .unwrap_or_else(|| session.created_at.clone()),
+                created_at: session.created_at.clone(),
+                id: session.id.as_str().to_owned(),
             });
-            listings.push(listing);
+            rows.push(row);
             kept += 1;
         }
 
@@ -109,20 +106,56 @@ where
         // portion came back full; a short/last page yields `None`.
         let next = if kept == limit { last_kept } else { None };
 
+        // Every row carries its session's threads. They are read for the whole
+        // page in one store query, never one per row: the navigator draws each
+        // row's thread tree from them, so a per-row read here would only move
+        // the per-row request the list exists to avoid behind the endpoint.
+        let ids: Vec<SessionId> = rows.iter().map(|(session, _)| session.id.clone()).collect();
+        let mut threads_by_session: HashMap<SessionId, Vec<Thread>> = HashMap::new();
+        for thread in self.store.list_threads_by_session_ids(&ids).await? {
+            threads_by_session
+                .entry(thread.session_id.clone())
+                .or_default()
+                .push(thread);
+        }
+
+        let mut listings = Vec::with_capacity(rows.len());
+        for row in rows {
+            let threads = threads_by_session.remove(&row.0.id).unwrap_or_default();
+            listings.push(self.listing_for(row, threads).await?);
+        }
+
         Ok(SessionPage { listings, next })
     }
 
-    /// Enrich one store row into a [`SessionListing`]: attach its trunk thread
-    /// and the live state the registry owns (its `open` flag and whether it
-    /// holds an unbound attachable pane) — process-runtime data, not SQL
-    /// columns.
+    /// Enrich one store row into a [`SessionListing`]: attach its threads, its
+    /// trunk thread and the live state the registry owns (its `open` flag and
+    /// whether it holds an unbound attachable pane) — process-runtime data, not
+    /// SQL columns.
+    ///
+    /// The trunk is derived from `threads` (every thread of the session, as the
+    /// batch read returned them) by the same rule the store's main-thread lookup
+    /// applies ([`Thread::trunk_of`]), so a row costs no store call of its own.
+    /// A session without one is a broken row, the same failure that lookup
+    /// reports.
     ///
     /// Both runtime facts come from one actor query
     /// ([`Interactor::listing_state_for`]), not a round-trip each, so the pair
     /// the row carries is a consistent snapshot.
-    async fn listing_for(&self, row: SessionPageRow) -> Result<SessionListing> {
+    async fn listing_for(
+        &self,
+        row: SessionPageRow,
+        threads: Vec<Thread>,
+    ) -> Result<SessionListing> {
         let (session, last_activity_at) = row;
-        let main_thread_id = self.store.main_thread_id(&session.id).await?;
+        let main_thread_id = Thread::trunk_of(&threads)
+            .map(|thread| thread.id)
+            .ok_or_else(|| {
+                Error::Store(format!(
+                    "session {} has no main thread",
+                    session.id.as_str()
+                ))
+            })?;
         let state = self.listing_state_for(&session.id).await;
         Ok(SessionListing {
             session,
@@ -130,6 +163,7 @@ where
             pane_starting: state.pane_starting,
             hooks_unreachable: state.hooks_unreachable,
             main_thread_id,
+            threads,
             last_activity_at,
         })
     }

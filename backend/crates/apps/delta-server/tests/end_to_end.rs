@@ -39,12 +39,13 @@ use axum::Router;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
+use delta_model::SessionId;
 use delta_server::{router, AppState, StorageInventory};
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{
-    BranchDeletion, GitWorktree, Interactor, RemoteBranches, TmuxDriver, Workspace,
-    WorktreeRemoval, WorktreeStartPoint,
+    BranchDeletion, GitWorktree, Interactor, NewSession, RemoteBranches, SessionStore, TmuxDriver,
+    Workspace, WorktreeRemoval, WorktreeStartPoint,
 };
 
 /// A `TmuxDriver` that records the lines it would have sent instead of touching
@@ -311,6 +312,14 @@ impl GitWorktree for NoopGitWorktree {
 /// Assemble the app with test-wired gateways and return the router plus the
 /// fake tmux driver (for asserting keystroke dispatch) and the transcript path.
 fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf, AppState) {
+    build_app_with_store(SqliteStore::open_in_memory().unwrap())
+}
+
+/// [`build_app`] over a store the caller has already seeded, for a test that
+/// needs rows the REST surface has no direct way to create.
+fn build_app_with_store(
+    store: SqliteStore,
+) -> (Router, Arc<FakeTmux>, std::path::PathBuf, AppState) {
     let transcript_file = tempfile::Builder::new()
         .prefix("delta-e2e-transcript-")
         .suffix(".jsonl")
@@ -320,7 +329,6 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf, AppState) {
     let (_, transcript_path) = transcript_file.keep().unwrap();
 
     let tmux = Arc::new(FakeTmux::default());
-    let store = SqliteStore::open_in_memory().unwrap();
     let transcript = JsonlTranscript::new();
 
     let interactor = Interactor::new(
@@ -1252,4 +1260,75 @@ async fn removing_a_still_starting_session_is_refused_with_its_stable_code() {
     );
 
     let _ = std::fs::remove_file(&transcript_path);
+}
+
+/// Every item of `GET /api/sessions` carries exactly its own session's threads,
+/// in the shape and order `GET /api/sessions/{id}/threads` returns them — on the
+/// first page and on a later one alike.
+#[tokio::test]
+async fn session_list_items_carry_their_sessions_threads() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let mut branched = Vec::new();
+    for (id, branches) in [("sess-a", 2), ("sess-b", 0), ("sess-c", 1)] {
+        let session_id = SessionId::from(id);
+        let (_, main) = store
+            .register_session(NewSession {
+                id: session_id.clone(),
+                cwd: "/work/delta".into(),
+                transcript_path: format!("/tmp/{id}.jsonl"),
+                branch_at_launch: None,
+                repo_root: None,
+                repository_display_name: None,
+            })
+            .await
+            .unwrap();
+        let mut parent = main;
+        for n in 0..branches {
+            // Each branch hangs off the previous one, so a tree deeper than one
+            // level has to come through intact.
+            parent = store
+                .create_thread(&session_id, &format!("{id} branch {n}"), Some(parent))
+                .await
+                .unwrap()
+                .id;
+            branched.push(id);
+        }
+    }
+    let (app, _, _, _) = build_app_with_store(store);
+
+    // Walk the list one session per page, so the second and third sessions
+    // arrive on later pages.
+    let mut items = Vec::new();
+    let mut uri = "/api/sessions?limit=1".to_owned();
+    loop {
+        let (status, body) = get(&app, &uri).await;
+        assert_eq!(status, StatusCode::OK);
+        let page = body["sessions"].as_array().expect("sessions array");
+        // A full page always yields a cursor, so the walk ends on an empty one.
+        assert!(page.len() <= 1, "at most one closed session per page");
+        items.extend(page.iter().cloned());
+        match body["next_cursor"].as_str() {
+            Some(cursor) => uri = format!("/api/sessions?limit=1&cursor={cursor}"),
+            None => break,
+        }
+    }
+    assert_eq!(items.len(), 3, "every session is listed once");
+
+    for item in &items {
+        let id = item["session"]["id"].as_str().expect("session id");
+        let (status, body) = get(&app, &format!("/api/sessions/{id}/threads")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            item["threads"], body["threads"],
+            "{id}'s listed threads match its threads endpoint"
+        );
+        let threads = item["threads"].as_array().expect("threads array");
+        assert_eq!(
+            threads.len(),
+            1 + branched.iter().filter(|b| **b == id).count(),
+            "{id} carries its trunk and its own branches only"
+        );
+        assert!(threads.iter().all(|t| t["session_id"] == id));
+        assert_eq!(threads[0]["id"], item["main_thread_id"], "the trunk leads");
+    }
 }
