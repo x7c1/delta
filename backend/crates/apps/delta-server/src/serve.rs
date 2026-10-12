@@ -52,8 +52,9 @@ impl ServerStopped {
     }
 }
 
-/// Install the global `tracing` subscriber: `RUST_LOG` when set, `info`
-/// otherwise.
+/// Install the global `tracing` subscriber of the `delta-server` binary:
+/// stdout only, filtered by `RUST_LOG` when set, `info` otherwise. The desktop
+/// app installs its own, which also writes a log file and reads a filter file.
 pub fn init_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(

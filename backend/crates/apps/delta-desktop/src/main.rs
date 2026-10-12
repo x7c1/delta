@@ -41,6 +41,9 @@
 //!
 //! Steps 1 and 5 are each logged at `info`, so the time a launch spent behind
 //! the placeholder can be read from the log.
+//! Logging is set up before any of them, to stdout and to a file in the app
+//! log directory, at a level a file in the data directory can change
+//! ([`logging`]).
 //!
 //! Links the page follows never take the window away from Delta; [`links`]
 //! says where they go instead.
@@ -69,6 +72,7 @@
 
 mod erase;
 mod links;
+mod logging;
 mod login_env;
 #[cfg(target_os = "macos")]
 mod macos_title_bar;
@@ -95,10 +99,9 @@ const WINDOW_LABEL: &str = "main";
 const WINDOW_TITLE: &str = "Delta";
 
 fn main() {
-    serve::init_tracing();
-
     let context = tauri::generate_context!();
     let identifier = context.config().identifier.clone();
+    let log_guard = Arc::new(logging::init(&identifier));
     #[cfg(target_os = "linux")]
     set_window_app_id(&identifier);
 
@@ -106,6 +109,7 @@ fn main() {
         Ok(runtime) => runtime,
         Err(err) => {
             tracing::error!("could not start the async runtime: {err}");
+            log_guard.flush();
             std::process::exit(1);
         }
     };
@@ -136,6 +140,7 @@ fn main() {
         )
         .plugin(tauri_plugin_dialog::init())
         .manage(erase::EraseExit::default())
+        .manage(Arc::clone(&log_guard))
         .manage(window_size::RememberedSize::default())
         .register_uri_scheme_protocol(placeholder::SCHEME, |_context, request| {
             placeholder::respond(&request)
@@ -143,6 +148,10 @@ fn main() {
         // Tauri panics on an error returned from here, so every failure is
         // reported (and exits 1) inside the hook instead.
         .setup(move |app| {
+            logging::warn_if_the_resolver_disagrees(
+                app.handle(),
+                &app.state::<Arc<logging::LogGuard>>(),
+            );
             let started_server = Arc::new(StartedServer::default());
             let runtime_handle = runtime.handle().clone();
             // The runtime serves for the app's whole lifetime.
@@ -165,6 +174,7 @@ fn main() {
         Ok(app) => app,
         Err(err) => {
             tracing::error!("delta-desktop failed: {err:#}");
+            log_guard.flush();
             std::process::exit(1);
         }
     };
@@ -176,11 +186,14 @@ fn main() {
             code: None, api, ..
         } if handle.state::<erase::EraseExit>().is_marked() => api.prevent_exit(),
         // Every way the app ends comes here, so this is where the window's
-        // size is saved (`window_size` lists the exits). Plugins see `Exit`
-        // before this callback, so the window-state plugin's file is already
-        // written too when the erase removes the config directory they live in.
+        // size is saved (`window_size` lists the exits) and the log file
+        // flushed — before the erase removes the directory it is in. Plugins
+        // see `Exit` before this callback, so the window-state plugin's file is
+        // already written too when the erase removes the config directory they
+        // live in.
         RunEvent::Exit => {
             window_size::save(handle);
+            handle.state::<Arc<logging::LogGuard>>().flush();
             if handle.state::<erase::EraseExit>().is_marked() {
                 erase::remove_app_dirs(handle);
             }

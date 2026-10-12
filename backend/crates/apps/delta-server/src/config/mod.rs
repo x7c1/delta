@@ -67,6 +67,23 @@ pub fn config_from_env_for(identifier: &str) -> Result<Config, DataDirError> {
     ))
 }
 
+/// The data directory [`config_from_env_for`] gives a shell running under
+/// `identifier`: `DELTA_DATA_DIR` when set, `<platform data dir>/<identifier>`
+/// otherwise. Creates nothing on disk.
+///
+/// For what a shell reads from the data directory before it builds the whole
+/// configuration — the desktop app's log filter, read before logging starts.
+pub fn data_dir_from_env_for(identifier: &str) -> String {
+    data_dir_from_vars(|name| std::env::var_os(name), identifier)
+}
+
+fn data_dir_from_vars(var: impl Fn(&str) -> Option<OsString>, identifier: &str) -> String {
+    var("DELTA_DATA_DIR")
+        .and_then(|value| value.into_string().ok())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| default_data_dir(identifier))
+}
+
 /// `config` once its data directory exists.
 fn prepared(config: Config) -> Result<Config, DataDirError> {
     config.data_layout().create_dirs()?;
@@ -93,7 +110,7 @@ fn config_from_vars_for(
         .or_else(|| non_empty("DELTA_IDENTIFIER"))
         .unwrap_or_else(|| DEFAULT_IDENTIFIER.to_owned());
     Config {
-        data_dir: non_empty("DELTA_DATA_DIR").unwrap_or_else(|| default_data_dir(&identifier)),
+        data_dir: data_dir_from_vars(&var, &identifier),
         worktree_base: text("DELTA_WORKTREE_BASE")
             .unwrap_or_else(|| default_worktree_base(home.clone())),
         tmux_socket: non_empty("DELTA_TMUX_SOCKET").unwrap_or_else(|| identifier.clone()),
