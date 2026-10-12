@@ -169,17 +169,29 @@ existing `updates/` clean-up keeps working.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On a Mac (Apple silicon) — needs a person at that machine — a `.dmg`
+- [x] On a Mac (Apple silicon) — needs a person at that machine — a `.dmg`
       of this branch built with `DELTA_BUILD_ORIGIN=release` and its
       workspace version set to `0.4.9`, installed into `/Applications` and
       started with `DELTA_DATA_DIR` pointing at a scratch directory, offers
       Update; Update then Install replaces `/Applications/Delta.app` with the
       official v0.5.0 without a password prompt, and the footer offers
       Restart.
-- [ ] Restart relaunches the app as v0.5.0 (its footer says so), a tmux
+- [x] Restart relaunches the app as v0.5.0 (its footer says so), a tmux
       session started before the update is still alive, the backup bundle is
       gone after the relaunch, and Gatekeeper does not block the new bundle
       (no quarantine prompt on the self-downloaded image).
-- [ ] Started from the mounted `.dmg` without moving it (translocated), the
+      - v0.5.0 predates `DELTA_DATA_DIR`, so the relaunched app opened the
+        default data directory; `DELTA_TMUX_SOCKET` set through
+        `launchctl setenv` kept the tmux session on a scratch socket.
+      - v0.5.0 does not have the backup removal either, so
+        `.delta-update-backup` stayed after the relaunch. Starting this
+        branch's build from `/Applications` afterwards removed it. The
+        relaunch into a release that has the removal is checked after the
+        release that ships this change.
+- [x] Started from the mounted `.dmg` without moving it (translocated), the
       footer shows the "move Delta to Applications" instruction instead of
       installing.
+      - The locally built `.dmg` carries no quarantine, so macOS did not
+        translocate the app; it ran from the read-only volume, and after
+        Update the footer showed the not-writable reason and the manual way
+        instead of Install.
