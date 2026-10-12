@@ -128,6 +128,9 @@ its level switchable on both platforms.
       it lists the launch's requests, including one
       `/api/sessions/{id}/threads` line per mounted session row.
 - [x] With the filter file removed, the next launch logs no request lines.
-- [ ] On macOS, a build started from Finder writes the log file under
+- [x] On macOS, a build started from Finder writes the log file under
       `~/Library/Logs/<identifier>` (can be done in the Mac session that
       verifies the in-app update).
+      - A release build bundled with the dev identifier and started through
+        Launch Services (`open`, as Finder does) wrote
+        `~/Library/Logs/io.github.x7c1.delta.dev/delta-desktop.<date>.log`.
