@@ -10,9 +10,9 @@ use async_trait::async_trait;
 use axum::http::StatusCode;
 use delta_bootstrap::{BuildOrigin, Launcher};
 use delta_usecase::{
-    AssetDownloadError, AssetDownloader, DownloadProgress, InstallError, Platform,
+    AssetDownloadError, AssetDownloader, DownloadProgress, InstallError, InstalledApp, Platform,
     PublishedRelease, ReleaseAsset, ReleaseCheck, ReleaseFeed, ReleaseFeedError, ReleaseUpdate,
-    UpdateInstaller,
+    UpdateInstaller, UpdateRestart,
 };
 
 use crate::serve::ServerStopped;
@@ -21,6 +21,12 @@ use tokio::sync::{mpsc, Mutex};
 /// The newer release the tests' feeds announce, with Linux's asset.
 const NEWER_TAG: &str = "v99.0.0";
 const LINUX_ASSET: &str = "delta-desktop_99.0.0_amd64.deb";
+const MAC_ASSET: &str = "Delta_99.0.0_aarch64.dmg";
+
+/// The sha256 every asset of the tests' feeds states, lowercase hex.
+fn asset_sha256() -> String {
+    "a".repeat(64)
+}
 
 /// A feed that always answers what `answer` builds and counts how often it
 /// was asked.
@@ -46,7 +52,7 @@ fn release(tag: &str) -> PublishedRelease {
     let asset = |name: String| ReleaseAsset {
         download_url: format!("https://github.com/x7c1/delta/releases/download/{tag}/{name}"),
         name,
-        digest: Some(format!("sha256:{}", "a".repeat(64))),
+        digest: Some(format!("sha256:{}", asset_sha256())),
     };
     PublishedRelease {
         tag_name: tag.into(),
@@ -118,18 +124,33 @@ impl AssetDownloader for GatedDownloader {
     }
 }
 
-/// An installer whose every install waits until the test hands it an
-/// outcome, and which counts the installs it started.
+/// An installer of `asset` (the platform's asset of [`NEWER_TAG`]) whose
+/// every install waits until the test hands it an outcome, and which counts
+/// the installs it started. It says up front it cannot install here when
+/// made with `unavailable`.
 struct GatedInstaller {
+    asset: &'static str,
+    unavailable: Option<&'static str>,
     calls: AtomicUsize,
-    outcome_tx: mpsc::UnboundedSender<Result<(), InstallError>>,
-    outcome_rx: Mutex<mpsc::UnboundedReceiver<Result<(), InstallError>>>,
+    outcome_tx: mpsc::UnboundedSender<Result<InstalledApp, InstallError>>,
+    outcome_rx: Mutex<mpsc::UnboundedReceiver<Result<InstalledApp, InstallError>>>,
 }
 
 impl GatedInstaller {
+    /// An installer of the Linux asset.
     fn new() -> Arc<Self> {
+        Self::of(LINUX_ASSET)
+    }
+
+    fn of(asset: &'static str) -> Arc<Self> {
+        Self::with(asset, None)
+    }
+
+    fn with(asset: &'static str, unavailable: Option<&'static str>) -> Arc<Self> {
         let (outcome_tx, outcome_rx) = mpsc::unbounded_channel();
         Arc::new(Self {
+            asset,
+            unavailable,
             calls: AtomicUsize::new(0),
             outcome_tx,
             outcome_rx: Mutex::new(outcome_rx),
@@ -140,19 +161,34 @@ impl GatedInstaller {
         self.calls.load(Ordering::SeqCst)
     }
 
-    fn finish(&self, outcome: Result<(), InstallError>) {
+    fn finish(&self, outcome: Result<InstalledApp, InstallError>) {
         self.outcome_tx.send(outcome).unwrap();
     }
 }
 
 #[async_trait]
 impl UpdateInstaller for GatedInstaller {
-    async fn install(&self, version: &str, file: &Path) -> Result<(), InstallError> {
+    async fn install(
+        &self,
+        version: &str,
+        file: &Path,
+        sha256: &str,
+    ) -> Result<InstalledApp, InstallError> {
         assert_eq!(version, NEWER_TAG);
-        assert_eq!(file, Path::new("/data/updates").join(LINUX_ASSET));
+        assert_eq!(file, Path::new("/data/updates").join(self.asset));
+        assert_eq!(sha256, asset_sha256());
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.outcome_rx.lock().await.recv().await.unwrap()
     }
+
+    fn unavailable(&self) -> Option<String> {
+        self.unavailable.map(str::to_owned)
+    }
+}
+
+/// The app the Linux installer names.
+fn linux_app() -> InstalledApp {
+    InstalledApp::Executable(PathBuf::from("/usr/bin/delta-desktop"))
 }
 
 /// A desktop release build on `platform` that knows of [`NEWER_TAG`],
@@ -495,9 +531,12 @@ async fn ready_state(installer: &Arc<GatedInstaller>) -> AppState {
     state
 }
 
-/// What `sudo apt install` is given for the ready download.
-fn manual_command() -> String {
-    format!("sudo apt install /data/updates/{LINUX_ASSET}")
+/// How the ready Linux download is installed by hand.
+fn manual() -> serde_json::Value {
+    serde_json::json!({
+        "kind": "command",
+        "command": format!("sudo apt install /data/updates/{LINUX_ASSET}"),
+    })
 }
 
 #[tokio::test]
@@ -531,16 +570,103 @@ async fn an_install_is_refused_where_the_app_does_not_install_updates() {
     let downloader = GatedDownloader::new();
     let installer = GatedInstaller::new();
     let state =
-        desktop_release_state_on(Platform::new("macos", "aarch64"), &downloader, &installer).await;
-    post_download(&state).await;
-    downloader.finish(Ok(()));
-    assert_eq!(settled_download(&state).await["state"], "ready");
-
+        desktop_release_state_on(Platform::new("windows", "x86_64"), &downloader, &installer).await;
     let (_, latest) = request_json(&state, "GET", "/api/latest-release", None).await;
     assert_eq!(latest["installs"], false);
     let (status, body) = post(&state, "/api/latest-release/install").await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body["code"], "update_install_unsupported");
+    assert_eq!(installer.calls(), 0);
+}
+
+/// A macOS desktop release build installs the downloaded disk image itself,
+/// restarts into the bundle the installer named, and offers opening the
+/// disk image when it cannot install.
+#[tokio::test]
+async fn a_mac_release_build_installs_the_disk_image_and_restarts_into_the_bundle() {
+    let downloader = GatedDownloader::new();
+    let installer = GatedInstaller::of(MAC_ASSET);
+    let state =
+        desktop_release_state_on(Platform::new("macos", "aarch64"), &downloader, &installer).await;
+    let (_, latest) = request_json(&state, "GET", "/api/latest-release", None).await;
+    assert_eq!(latest["installs"], true);
+    post_download(&state).await;
+    downloader.finish(Ok(()));
+    assert_eq!(settled_download(&state).await["state"], "ready");
+    let (_, latest) = request_json(&state, "GET", "/api/latest-release", None).await;
+    assert_eq!(latest["install_unavailable"], serde_json::Value::Null);
+
+    post(&state, "/api/latest-release/install").await;
+    installer.finish(Err(InstallError::Unavailable(
+        "Delta runs from a read-only copy macOS made of it".into(),
+    )));
+    assert_eq!(
+        settled_install(&state).await,
+        serde_json::json!({
+            "state": "unavailable",
+            "version": NEWER_TAG,
+            "error": "Delta cannot install the update itself: Delta runs from a read-only copy macOS made of it",
+            "manual": {
+                "kind": "disk_image",
+                "path": format!("/data/updates/{MAC_ASSET}"),
+            },
+        })
+    );
+
+    let (status, body) = post(&state, "/api/latest-release/install").await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(body["state"], "installing");
+    let bundle = InstalledApp::Bundle(PathBuf::from("/Applications/Delta.app"));
+    installer.finish(Ok(bundle.clone()));
+    assert_eq!(
+        settled_install(&state).await,
+        serde_json::json!({ "state": "installed", "version": NEWER_TAG })
+    );
+    let (status, _) = post(&state, "/api/latest-release/restart").await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        state.take_stop_reason(),
+        Some(ServerStopped::Restart(UpdateRestart {
+            version: NEWER_TAG.to_owned(),
+            app: bundle,
+        }))
+    );
+    assert_eq!(installer.calls(), 2);
+}
+
+/// A macOS desktop release build whose installer found at startup that it
+/// cannot replace the running bundle offers no Install: once the download is
+/// ready it answers why, and the disk image to open by hand.
+#[tokio::test]
+async fn a_mac_release_build_that_cannot_replace_its_bundle_offers_the_disk_image() {
+    let downloader = GatedDownloader::new();
+    let installer = GatedInstaller::with(
+        MAC_ASSET,
+        Some("macOS runs Delta from a read-only copy (App Translocation)"),
+    );
+    let state =
+        desktop_release_state_on(Platform::new("macos", "aarch64"), &downloader, &installer).await;
+    let (_, latest) = request_json(&state, "GET", "/api/latest-release", None).await;
+    assert_eq!(latest["offer"], "update");
+    assert_eq!(latest["installs"], false);
+    assert_eq!(latest["install_unavailable"], serde_json::Value::Null);
+
+    post_download(&state).await;
+    downloader.finish(Ok(()));
+    assert_eq!(settled_download(&state).await["state"], "ready");
+    let (_, latest) = request_json(&state, "GET", "/api/latest-release", None).await;
+    assert_eq!(latest["installs"], false);
+    assert_eq!(
+        latest["install_unavailable"],
+        serde_json::json!({
+            "error": "Delta cannot install the update itself: macOS runs Delta from a read-only copy (App Translocation)",
+            "manual": {
+                "kind": "disk_image",
+                "path": format!("/data/updates/{MAC_ASSET}"),
+            },
+        })
+    );
+    assert_eq!(latest["install"], serde_json::Value::Null);
     assert_eq!(installer.calls(), 0);
 }
 
@@ -585,7 +711,7 @@ async fn a_ready_download_installs_once_and_ends_installed() {
     let (_, latest) = request_json(&state, "GET", "/api/latest-release", None).await;
     assert_eq!(latest["install"]["state"], "installing");
 
-    installer.finish(Ok(()));
+    installer.finish(Ok(linux_app()));
     assert_eq!(
         settled_install(&state).await,
         serde_json::json!({ "state": "installed", "version": NEWER_TAG })
@@ -626,7 +752,7 @@ async fn an_install_delta_cannot_run_offers_the_manual_command() {
             "state": "unavailable",
             "version": NEWER_TAG,
             "error": "Delta cannot install the update itself: not authorized, or no polkit authentication agent is running",
-            "manual_command": manual_command(),
+            "manual": manual(),
         })
     );
 }
@@ -644,7 +770,7 @@ async fn a_failed_install_reports_the_helpers_reason_and_the_manual_command() {
             "state": "failed",
             "version": NEWER_TAG,
             "error": reason,
-            "manual_command": manual_command(),
+            "manual": manual(),
         })
     );
 }
@@ -685,14 +811,15 @@ async fn a_restart_is_refused_until_the_update_is_installed() {
         "nothing asked the server to stop"
     );
 
-    installer.finish(Ok(()));
+    installer.finish(Ok(linux_app()));
     assert_eq!(settled_install(&state).await["state"], "installed");
     let (status, _) = post(&state, "/api/latest-release/restart").await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(
         state.take_stop_reason(),
-        Some(ServerStopped::Restart {
-            version: NEWER_TAG.to_owned()
-        })
+        Some(ServerStopped::Restart(UpdateRestart {
+            version: NEWER_TAG.to_owned(),
+            app: linux_app(),
+        }))
     );
 }

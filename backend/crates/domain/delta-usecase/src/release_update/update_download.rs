@@ -17,6 +17,10 @@ pub enum UpdateDownload {
         version: String,
         /// The verified file.
         path: PathBuf,
+        /// The sha256 the file was verified against, lowercase hex: the
+        /// release's digest for it, which an installer that checks the file
+        /// again checks it against.
+        sha256: String,
     },
     /// The download failed and left nothing behind; a new request starts
     /// over.

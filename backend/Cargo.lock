@@ -5155,7 +5155,11 @@ version = "0.5.0"
 dependencies = [
  "async-trait",
  "delta-usecase",
+ "libc",
+ "plist",
+ "sha2",
  "tempfile",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]

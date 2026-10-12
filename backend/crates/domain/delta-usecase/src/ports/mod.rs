@@ -20,6 +20,8 @@ mod gh_cli;
 pub use gh_cli::GhCli;
 mod git_worktree;
 pub use git_worktree::{GitRepoInfo, GitWorktree, RemoteBranches, WorktreeStartPoint};
+mod installed_app;
+pub use installed_app::InstalledApp;
 mod message_display_hook;
 pub use message_display_hook::MessageDisplayHook;
 mod new_session;

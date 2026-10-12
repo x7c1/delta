@@ -1,5 +1,9 @@
 import type { ReactNode } from 'react';
-import type { LatestReleaseResponse, NewerRelease } from '@delta/wire-gen';
+import type {
+  LatestReleaseResponse,
+  ManualInstall,
+  NewerRelease,
+} from '@delta/wire-gen';
 import { Button, cn } from '@delta/ui-kit';
 import {
   useDownloadLatestReleaseMutation,
@@ -50,15 +54,22 @@ const problem = (node: ReactNode): UpdateControlView => ({
  *   an asset it may download): an **Update** control that downloads the
  *   release, then shows the download's state — downloading with its progress,
  *   ready, or failed with a retry and the cause in its tooltip. Where the app
- *   installs updates itself (`installs`, Linux), ready offers **Install**,
- *   which shows installing while the system asks for the password and the
- *   install runs, then **Restart** once installed. A failed install, and an
- *   install Delta cannot run here, offer a retry and show the command that
- *   installs the file from the user's own terminal ({@link ManualInstall}).
- *   A file the update helper rejected (it failed the digest or package check)
- *   was removed by the server: that offers downloading it again and the
- *   release page, never a command that would install it. A dismissed
- *   password dialog leaves the update ready.
+ *   installs updates itself (`installs`: on Linux, and on macOS where it runs
+ *   from a `Delta.app` this user may replace), ready offers
+ *   **Install**, which shows installing while the install runs (on Linux,
+ *   while the system asks for the password too), then **Restart** once
+ *   installed. A failed install, and an install Delta cannot run here, show
+ *   how to install the file by hand ({@link ManualInstallSteps}): the
+ *   command for the user's own terminal on Linux, the disk image to open on
+ *   macOS. A failed install offers a retry, and so does an install Delta
+ *   cannot run on Linux; on macOS the reason shows as a line instead
+ *   ({@link InstallUnavailableBox}). Where the app found at startup that it
+ *   cannot install (`install_unavailable`: on macOS, it does not run from a
+ *   `Delta.app` this user may replace), ready offers no Install: it shows
+ *   that reason and the way by hand at once. A file the installer rejected
+ *   (it failed the digest or package check) was removed by the server: that
+ *   offers downloading it again and the release page, never a way to install
+ *   it. A dismissed password dialog leaves the update ready.
  * - `rebuild` (a desktop app built locally): a hint that it is updated by
  *   rebuilding it, since the release would roll its tree back.
  * - `none` (the browser version, a desktop app that cannot download, or a
@@ -102,7 +113,7 @@ export function useUpdateControl(
         className={STATUS}
         data-testid="update-installing"
         role="status"
-        title={`Installing Delta ${newer.version}: enter an administrator's password in the dialog the system shows`}
+        title={`Installing Delta ${newer.version}: if the system asks for an administrator's password, enter it in its dialog`}
       >
         Installing…
       </span>,
@@ -148,34 +159,23 @@ export function useUpdateControl(
             Install failed · Retry
           </Button>
         </div>
-        <ManualInstall command={installState.manual_command} newer={newer} />
+        <ManualInstallSteps manual={installState.manual} newer={newer} />
       </ProblemBox>,
     );
   }
   if (installState?.state === 'unavailable') {
+    // On macOS what stopped the install (where Delta runs from, a folder it
+    // may not write to) does not change by trying again: the reason says
+    // what to do instead.
     return problem(
-      <ProblemBox tone="warning">
-        <div className={PROBLEM_HEADING}>
-          <span
-            className="font-medium text-warning"
-            data-testid="update-install-unavailable"
-            title={installState.error}
-          >
-            Install it from a terminal
-          </span>
-          <Button
-            size="sm"
-            className="text-left"
-            data-testid="update-install-retry"
-            title={`Delta could not install the update itself: ${installState.error}. Press to try again.`}
-            aria-label={`Retry the install, which Delta could not run: ${installState.error}`}
-            onClick={() => install.mutate()}
-          >
-            Install · Retry
-          </Button>
-        </div>
-        <ManualInstall command={installState.manual_command} newer={newer} />
-      </ProblemBox>,
+      <InstallUnavailableBox
+        error={installState.error}
+        manual={installState.manual}
+        newer={newer}
+        retry={
+          installState.manual.kind === 'command' ? () => install.mutate() : null
+        }
+      />,
     );
   }
 
@@ -199,6 +199,16 @@ export function useUpdateControl(
     );
   }
   if (state?.state === 'ready') {
+    if (latest.install_unavailable !== undefined) {
+      return problem(
+        <InstallUnavailableBox
+          error={latest.install_unavailable.error}
+          manual={latest.install_unavailable.manual}
+          newer={newer}
+          retry={null}
+        />,
+      );
+    }
     if (!latest.installs) {
       return phrase(
         <span
@@ -226,7 +236,7 @@ export function useUpdateControl(
           data-testid="update-install"
           title={
             cause === null
-              ? `Install Delta ${state.version}: the system asks for an administrator's password`
+              ? `Install Delta ${state.version} over this app`
               : `Install failed: ${cause}. Press to try again.`
           }
           onClick={() => install.mutate()}
@@ -320,6 +330,61 @@ function ProblemBox({
   );
 }
 
+/**
+ * An install Delta cannot run here, and the way by hand. With `retry`, an
+ * **Install · Retry** beside the heading and the reason in its tooltip (on
+ * Linux, where a polkit agent started or an authorization granted since
+ * lets a retry succeed); without, the reason as a line of its own, since it
+ * tells the user what to do instead (on macOS, where the cause is where
+ * Delta runs from or a folder it may not write to, and where the app found
+ * at startup that it cannot install, so it offers no Install at all).
+ */
+function InstallUnavailableBox({
+  error,
+  manual,
+  newer,
+  retry,
+}: {
+  error: string;
+  manual: ManualInstall;
+  newer: NewerRelease;
+  retry: (() => void) | null;
+}) {
+  return (
+    <ProblemBox tone="warning">
+      <div className={PROBLEM_HEADING}>
+        <span
+          className="font-medium text-warning"
+          data-testid="update-install-unavailable"
+          title={error}
+        >
+          {manual.kind === 'command'
+            ? 'Install it from a terminal'
+            : 'Install it from the disk image'}
+        </span>
+        {retry !== null && (
+          <Button
+            size="sm"
+            className="text-left"
+            data-testid="update-install-retry"
+            title={`Delta could not install the update itself: ${error}. Press to try again.`}
+            aria-label={`Retry the install, which Delta could not run: ${error}`}
+            onClick={retry}
+          >
+            Install · Retry
+          </Button>
+        )}
+      </div>
+      {retry === null && (
+        <span className="select-text" data-testid="update-install-reason">
+          {error}
+        </span>
+      )}
+      <ManualInstallSteps manual={manual} newer={newer} />
+    </ProblemBox>
+  );
+}
+
 /** The newer release's page, which opens outside the app. */
 function ReleasePageLink({ newer }: { newer: NewerRelease }) {
   return (
@@ -335,32 +400,50 @@ function ReleasePageLink({ newer }: { newer: NewerRelease }) {
   );
 }
 
+/** A long path or command in a sunken well where it wraps anywhere rather than widening the column, and stays selectable. */
+const WELL =
+  'block select-text break-all rounded border border-border-default bg-surface-sunken px-1.5 py-1 font-mono text-code text-fg';
+
 /**
- * The way out when the app cannot install the update: the exact command that
- * installs the verified file from the user's own terminal, and that the app
- * must then be restarted to run it, with a copy button and a link to the
- * release page. The command, a long path, sits in a sunken well where it
- * wraps anywhere rather than widening the column, and stays selectable.
+ * The way out when the app cannot install the update, with a copy button
+ * and a link to the release page:
+ *
+ * - `command` (Linux): the exact command that installs the verified file
+ *   from the user's own terminal, after which Delta is restarted.
+ * - `disk_image` (macOS): the absolute path of the verified disk image, to
+ *   open, then quit Delta (Finder does not replace an app that is open),
+ *   drag Delta to Applications and start Delta again.
  */
-function ManualInstall({
-  command,
+function ManualInstallSteps({
+  manual,
   newer,
 }: {
-  command: string;
+  manual: ManualInstall;
   newer: NewerRelease;
 }) {
+  const [steps, value, testId, label] =
+    manual.kind === 'command'
+      ? [
+          'Run in a terminal, then restart Delta:',
+          manual.command,
+          'update-manual-command',
+          'install command',
+        ]
+      : [
+          'Open the downloaded disk image, quit Delta, drag Delta to Applications, then start Delta again:',
+          manual.path,
+          'update-manual-image',
+          'disk image path',
+        ];
   return (
     <div className="flex flex-col gap-1" data-testid="update-manual">
-      <span>Run in a terminal, then restart Delta:</span>
-      <code
-        className="block select-text break-all rounded border border-border-default bg-surface-sunken px-1.5 py-1 font-mono text-code text-fg"
-        data-testid="update-manual-command"
-      >
-        {command}
+      <span>{steps}</span>
+      <code className={WELL} data-testid={testId}>
+        {value}
       </code>
       <div className="flex items-center justify-between gap-2">
         <ReleasePageLink newer={newer} />
-        <CopyButton value={command} label="install command" />
+        <CopyButton value={value} label={label} />
       </div>
     </div>
   );

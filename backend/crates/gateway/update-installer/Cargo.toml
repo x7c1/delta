@@ -8,8 +8,14 @@ repository.workspace = true
 [dependencies]
 delta-usecase = { workspace = true }
 async-trait = { workspace = true }
+# `access(2)`, whether this user may write next to the app bundle, and
+# `O_NOFOLLOW` when reading the downloaded disk image (macOS).
+libc = { workspace = true }
+plist = { workspace = true }
+sha2 = { workspace = true }
+# The private directory the macOS installer copies the disk image into and
+# mounts it on.
+tempfile = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-
-[dev-dependencies]
-tempfile = { workspace = true }

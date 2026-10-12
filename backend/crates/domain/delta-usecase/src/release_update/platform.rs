@@ -1,8 +1,11 @@
 //! The operating system and CPU architecture a build runs on.
 
 use std::fmt;
+use std::path::Path;
 
 use semver::Version;
+
+use super::ManualInstall;
 
 /// An operating system and CPU architecture, named like
 /// [`std::env::consts::OS`] and [`std::env::consts::ARCH`].
@@ -37,10 +40,21 @@ impl Platform {
     }
 
     /// Whether the app installs a downloaded update itself here: on Linux,
-    /// where the update is a `.deb` a root helper installs. Elsewhere the
-    /// download is as far as the app goes.
+    /// where the update is a `.deb` a root helper installs, and on macOS,
+    /// where the `Delta.app` in the update's disk image replaces the running
+    /// one. Elsewhere the download is as far as the app goes.
     pub(super) fn installs_in_app(&self) -> bool {
-        self.os == "linux"
+        matches!(self.os.as_str(), "linux" | "macos")
+    }
+
+    /// How the user installs the verified download at `path` by hand here:
+    /// open the disk image on macOS, `sudo apt install` it elsewhere (Linux,
+    /// the only other platform that installs in the app).
+    pub(super) fn manual_install(&self, path: &Path) -> ManualInstall {
+        match self.os.as_str() {
+            "macos" => ManualInstall::DiskImage(path.to_path_buf()),
+            _ => ManualInstall::apt_install(path),
+        }
     }
 }
 

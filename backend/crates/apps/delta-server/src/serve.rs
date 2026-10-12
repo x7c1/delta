@@ -8,7 +8,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use delta_usecase::EraseReport;
+use delta_usecase::{EraseReport, UpdateRestart};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
@@ -27,12 +27,12 @@ pub enum ServerStopped {
     /// was removed and what was kept. The process should exit `0`.
     Erased(EraseReport),
     /// `POST /api/latest-release/restart` asked to restart into the update
-    /// installed over the running app, release `version` (`v<version>`). The
-    /// shell should start the installed app again once this process has
-    /// exited, then exit `0`. The data directory and the tmux server are left
-    /// as they are, so the sessions keep running and the new process
-    /// re-adopts them.
-    Restart { version: String },
+    /// installed over the running app: the release, and the installed app
+    /// the installer named for it. The shell should start that app once this
+    /// process has exited, then exit `0`. The data directory and the tmux
+    /// server are left as they are, so the sessions keep running and the new
+    /// process re-adopts them.
+    Restart(UpdateRestart),
 }
 
 impl ServerStopped {
@@ -55,8 +55,9 @@ impl ServerStopped {
                     tracing::info!("kept {kept}");
                 }
             }
-            Self::Restart { version } => tracing::info!(
-                version = %version,
+            Self::Restart(restart) => tracing::info!(
+                version = %restart.version,
+                app = ?restart.app,
                 "the server has stopped to restart into the installed update"
             ),
         }
@@ -213,7 +214,7 @@ pub async fn serve(state: AppState, listener: TcpListener) -> anyhow::Result<Ser
     }
     match &reason {
         ServerStopped::Erased(_) => delete_data_dir_once_closed(state).await,
-        ServerStopped::Restart { .. } => {}
+        ServerStopped::Restart(_) => {}
     }
     Ok(reason)
 }

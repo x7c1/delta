@@ -35,6 +35,11 @@ impl ReleaseUpdate {
             _ => {}
         }
         let asset = downloadable_asset(&offered.platform, &newer)?.clone();
+        // `downloadable_asset` accepts only an asset stating a sha256.
+        let sha256 = asset.sha256().ok_or_else(|| UpdateRefusal::NoDigest {
+            version: version.clone(),
+            asset: asset.name.clone(),
+        })?;
 
         let started = UpdateDownload::Downloading {
             version: version.clone(),
@@ -75,7 +80,11 @@ impl ReleaseUpdate {
                         path = %path.display(),
                         "downloaded and verified the newer release of Delta"
                     );
-                    UpdateDownload::Ready { version, path }
+                    UpdateDownload::Ready {
+                        version,
+                        path,
+                        sha256,
+                    }
                 }
                 Err(err) => {
                     let cause = with_causes(&err);
@@ -151,6 +160,7 @@ mod tests {
             UpdateDownload::Ready {
                 version: "v0.6.0".into(),
                 path: Path::new("/data/updates").join(LINUX_DEB),
+                sha256: "0".repeat(64),
             }
         );
         // Ready for this release: answered without downloading again.
