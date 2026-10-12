@@ -314,7 +314,7 @@ function RateLimitRow({
  * permission request and an in-flight turn (running) — is surfaced on the
  * owning session's row rather than globally, so it is clear which session it
  * refers to. Top-level nodes are sessions; every session that has branched
- * shows its thread tree expanded (each row fetches its own — see SessionNode).
+ * shows its thread tree expanded (carried by its list item — see SessionNode).
  */
 export function NavigatorPane({
   sessions,

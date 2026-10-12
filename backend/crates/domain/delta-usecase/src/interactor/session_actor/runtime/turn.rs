@@ -183,16 +183,35 @@ impl SessionRuntime {
         self.requeues_per_send.get(&send_id).copied().unwrap_or(0)
     }
 
+    /// Move the start of the current echo wait `by` into the past, for the
+    /// tests that need a wait older than the deadline at a moment when the
+    /// live clock has barely moved (a launch that took minutes to bind).
+    /// Sweeping with a future `now` cannot stand in for this: the restart
+    /// under test also stamps from the live clock, so a future `now` would
+    /// find the restarted wait expired too. A no-op when no send is being
+    /// awaited.
+    #[cfg(test)]
+    pub(crate) fn backdate_awaiting_echo(&mut self, by: Duration) {
+        if let Some(since) = self.awaiting_echo_since {
+            self.awaiting_echo_since = Some(
+                since
+                    .checked_sub(by)
+                    .expect("the monotonic clock has run longer than the backdate"),
+            );
+        }
+    }
+
     /// Restart the echo-deadline clock for the send currently being awaited.
     ///
     /// [`Self::apply_turn`] stamps the clock when the wait *begins*, which
-    /// covers every path that types keystrokes as part of a transition. Two
-    /// paths re-type an already-outstanding send without any transition at all
-    /// — the compact re-dispatch, and the resume settle typing a held first
-    /// prompt — and each of those restarts the wait for real, so each calls
-    /// this. Without it, a send held across a slow resume would be measured
-    /// from the moment its row was written rather than from the moment its
-    /// keystrokes actually reached the pane.
+    /// covers every path that types keystrokes as part of a transition. Three
+    /// paths start the real wait for an already-outstanding send without any
+    /// transition at all — the compact re-dispatch, the resume settle typing a
+    /// held first prompt, and a fresh spawn binding while its command-line
+    /// first prompt is outstanding ([`Self::bind_pending_spawn`]) — and each
+    /// calls this. Without it, a send held across a slow resume or launch would
+    /// be measured from the moment its row was written rather than from the
+    /// moment it could actually reach `claude`.
     ///
     /// A no-op when no send is being awaited: there is no wait to restart.
     pub fn restamp_awaiting_echo(&mut self) {
@@ -211,19 +230,29 @@ impl SessionRuntime {
     /// awaited AND its wait has run past its deadline: `slash_command_deadline`
     /// for a slash-command send, `deadline` for any other.
     ///
-    /// A session inside its resume-readiness window is never reported: its
-    /// first prompt's keystrokes are deliberately *held* (typing into a pane
-    /// that is not yet accepting input would lose them), so there is nothing
-    /// in flight to have gone missing. The wait that this deadline measures
-    /// starts when the resume settles and the held prompt is actually typed —
-    /// which is one of the two [`Self::restamp_awaiting_echo`] call sites.
+    /// Two windows are never reported, because in neither has anything been
+    /// typed that could have gone missing:
+    ///
+    /// - **Resuming**: the first prompt's keystrokes are deliberately *held*
+    ///   (typing into a pane that is not yet accepting input would lose them).
+    ///   The wait starts when the resume settles and the held prompt is
+    ///   actually typed.
+    /// - **A fresh spawn still launching or pending** (not yet bound): its
+    ///   first prompt rides `claude`'s command line and is auto-submitted once
+    ///   the TUI is ready, however long that takes. A launch that never becomes
+    ///   ready is the pending-spawn deadline's to reap, not this one's — and
+    ///   this one's recovery would be wrong here: the re-type duplicates a
+    ///   prompt still on its way, and the `Escape` lands in whatever dialog
+    ///   `claude` is showing. The wait starts at the bind.
+    ///
+    /// Both starts are [`Self::restamp_awaiting_echo`] call sites.
     pub fn expired_echo_deadline(
         &self,
         now: Instant,
         deadline: Duration,
         slash_command_deadline: Duration,
     ) -> Option<i64> {
-        if self.is_resuming() {
+        if self.is_resuming() || self.is_launching_or_pending() {
             return None;
         }
         let TurnState::AwaitingEcho {

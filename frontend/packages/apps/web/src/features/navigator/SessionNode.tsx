@@ -5,7 +5,7 @@ import {
   ApiError,
   useCloseSessionMutation,
   useDeleteSessionMutation,
-  useSessionThreadsQuery,
+  useListedSessionThreads,
 } from '@delta/api-client';
 import { Badge, Menu, Spinner, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
@@ -127,11 +127,12 @@ function removalRefusalDetail(error: unknown): string {
  *
  * Every session that has branched into sub-threads shows its {@link ThreadTree}
  * expanded by default — focused or not — so the whole visible list reads as a
- * navigable session → thread tree. Each mounted row fetches its own thread tree;
- * because the list is windowed, that fetch is bounded to the visible window, and
- * it shares the focused session's query key so the two are deduped into one
- * request per session. Clicking a sub-thread in a non-focused session focuses
- * that session and activates the thread, switching the center pane to it.
+ * navigable session → thread tree. The tree comes with the row's list item
+ * (`SessionListItem.threads`), so a row draws it at its full height on first
+ * render and never requests it; the focused session's workspace keeps the tree
+ * current through the shared per-session cache entry. Clicking a sub-thread in
+ * a non-focused session focuses that session and activates the thread,
+ * switching the center pane to it.
  *
  * Wrapped in {@link memo}: the windowed list re-renders on every scroll tick,
  * so each row must skip re-rendering unless its own inputs changed. That holds
@@ -224,12 +225,15 @@ export const SessionNode = memo(function SessionNode({
           },
     [start],
   );
-  // Fetch this row's thread tree. Mounted only for sessions in the windowed
-  // viewport (+overscan), so the number of in-flight thread queries is bounded
-  // by the visible window, not the full session list. Shares the focused
-  // session's query key, so React Query serves both from one request.
-  const threadsQuery = useSessionThreadsQuery(client, item.session.id);
-  const threads = threadsQuery.data?.threads;
+  // This row's thread tree, carried by the session list itself: the row never
+  // requests it, so mounting (a scroll back into view) costs nothing. It is read
+  // from the same per-session cache entry the focused workspace refetches, so a
+  // branch send's new thread shows here as soon as that targeted refetch lands.
+  const threads = useListedSessionThreads(
+    client,
+    item.session.id,
+    item.threads,
+  );
 
   const label = sessionLabel(item);
   // Line 1: the local branch checked out in the launch directory at spawn time,
@@ -280,20 +284,16 @@ export const SessionNode = memo(function SessionNode({
   // thread itself is never listed (it is reached by clicking this card's
   // header — see NavigatorPane); a session with no sub-threads shows no tree at
   // all. A sub-thread is any thread with a parent.
-  const hasSubThreads =
-    threads?.some((t) => t.parent_thread_id !== null) ?? false;
+  const hasSubThreads = threads.some((t) => t.parent_thread_id !== null);
 
-  // `unread` OR-aggregates over the session's threads for the collapsed row.
-  // The thread ids are main plus every fetched thread; until the tree loads,
-  // fall back to main alone so an unread main thread still shows.
+  // `unread` OR-aggregates over the session's threads for the collapsed row:
+  // main plus every sub-thread (the list always carries the trunk).
   //
   // `running` deliberately only considers the main thread — sub-thread
   // spinners are rendered by the {@link ThreadTree} below, so the header
   // spinner answers "is the main thread running?" and avoids duplicating a
   // signal that is already visible one row down.
-  const sessionThreadIds: ThreadId[] = threads
-    ? threads.map((t) => t.id)
-    : [item.main_thread_id];
+  const sessionThreadIds: ThreadId[] = threads.map((t) => t.id);
   const running = threadIsRunning(
     sessionRunningThreads,
     sessionRunningSubagents,
@@ -622,7 +622,7 @@ export const SessionNode = memo(function SessionNode({
           />
         </div>
 
-        {hasSubThreads && threads && (
+        {hasSubThreads && (
           // No horizontal padding here: each tree row carries the card's inset
           // itself (see the `paddingLeft` in {@link ThreadTree}), so a first-level
           // row's arrow lines up with the header's status dot instead of sitting

@@ -330,6 +330,9 @@ export function createMockApi(): MockApi {
         // whose hooks stopped arriving.
         hooks_unreachable: false,
         main_thread_id: entry.mainThreadId,
+        // The same array the threads route below returns: the list carries
+        // each session's threads in that route's shape and order.
+        threads: entry.threads,
         last_activity_at: lastActivityAt(entry.threads.map((t) => t.id)),
       }));
       // Open-first, mirroring the backend: every live session leads, then the

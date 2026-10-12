@@ -60,7 +60,7 @@ impl FakeStore {
             let main_id = g
                 .threads
                 .iter()
-                .find(|t| t.session_id == new.id && t.title == "main")
+                .find(|t| t.session_id == new.id && t.title == Thread::MAIN_TITLE)
                 .map(|t| t.id)
                 .unwrap();
             return Ok((session, main_id));
@@ -98,7 +98,7 @@ impl FakeStore {
         g.threads.push(Thread {
             id: main_id,
             session_id: new.id,
-            title: "main".into(),
+            title: Thread::MAIN_TITLE.into(),
             parent_thread_id: None,
             root_message_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
@@ -149,7 +149,7 @@ impl FakeStore {
         g.threads.push(Thread {
             id: main_id,
             session_id: id.clone(),
-            title: "main".into(),
+            title: Thread::MAIN_TITLE.into(),
             parent_thread_id: None,
             root_message_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
