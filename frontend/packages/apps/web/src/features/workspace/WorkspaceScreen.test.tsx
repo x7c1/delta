@@ -30,10 +30,17 @@ import {
   SESSION_4_MAIN_THREAD_ID,
   createHandlers,
   mockProviders,
+  mockThreads,
+  mockThreads2,
+  mockThreads4,
 } from '@delta/api-mocks';
-import { ApiClient, queryKeys } from '@delta/api-client';
-import type { SessionEvent } from '@delta/wire-gen';
-import { ApiProvider } from '../../data/apiContext';
+import {
+  ApiClient,
+  queryKeys,
+  useCreateSendMutation,
+} from '@delta/api-client';
+import type { SessionEvent, Thread } from '@delta/wire-gen';
+import { ApiProvider, useApiClient } from '../../data/apiContext';
 import { applySessionEvent } from '../../data/applySessionEvent';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
@@ -47,6 +54,32 @@ import { WorkspaceScreen } from './WorkspaceScreen';
 vi.mock('../../data/useSessionEvents', () => ({
   useSessionEvents: () => {},
 }));
+
+/**
+ * The threads a session-list item carries for `id`: the mock store's own tree
+ * for a seeded session (what its threads route answers), else the trunk alone.
+ */
+function listedThreads(id: string, mainThreadId: number): Thread[] {
+  const seeded: Record<string, Thread[]> = {
+    [SESSION_ID]: mockThreads,
+    [SESSION_ID_2]: mockThreads2,
+    [SESSION_ID_4]: mockThreads4,
+  };
+  return (
+    seeded[id] ?? [
+      {
+        id: mainThreadId,
+        session_id: id,
+        title: 'main',
+        parent_thread_id: null,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:00:00Z',
+        last_activity_at: null,
+      },
+    ]
+  );
+}
+
 // Mounts of the stubbed terminal pane, so a test can tell a pane that was only
 // hidden from one that was unmounted and rebuilt (which would drop every bridge
 // it holds).
@@ -574,6 +607,7 @@ describe('WorkspaceScreen multi-session', () => {
               },
               open: true,
               main_thread_id: MAIN_THREAD_ID,
+              threads: listedThreads(SESSION_ID, MAIN_THREAD_ID),
               last_activity_at: '2026-01-01T00:00:02Z',
             },
           ],
@@ -930,7 +964,7 @@ describe('WorkspaceScreen multi-session', () => {
     renderScreen();
 
     // sess-mock-1 (open) is auto-focused; sess-mock-2 (closed, "scratch notes")
-    // is visible but NOT focused. Each visible row fetches its own thread tree,
+    // is visible but NOT focused. Each row's list item carries its thread tree,
     // so the non-focused session shows its sub-thread ("scratch ideas") expanded
     // from the start — no click required. (Runs before the Close test below,
     // which permanently closes sess-mock-1 in the shared mock store.)
@@ -950,6 +984,117 @@ describe('WorkspaceScreen multi-session', () => {
     expect(useNavStore.getState().activeThreadId).toBe(
       SESSION_2_BRANCH_THREAD_ID,
     );
+  });
+
+  it("shows a branch send's new thread in the focused row once the targeted refetch lands", async () => {
+    // The row draws its tree from the session list, but a branch send does not
+    // wait for the list: it refetches the focused session's threads alone, and
+    // the row reads that same per-session cache entry. The list here keeps
+    // answering the pre-branch tree, so the new thread can only reach the row
+    // through the targeted refetch.
+    const branch: Thread = {
+      id: 900,
+      session_id: SESSION_ID,
+      title: 'the new branch',
+      parent_thread_id: MAIN_THREAD_ID,
+      root_message_uuid: 'uuid-u1',
+      created_at: '2026-01-01T00:10:00Z',
+      last_activity_at: null,
+    };
+    let threadsNow: Thread[] = mockThreads;
+    let threadsRequests = 0;
+    server.use(
+      http.get('*/api/sessions', () =>
+        HttpResponse.json({
+          sessions: [
+            {
+              session: {
+                id: SESSION_ID,
+                cwd: '/work',
+                transcript_path: '/tmp/s1.jsonl',
+                title: null,
+                status: 'active',
+                created_at: '2026-01-01T00:00:00Z',
+                branch_at_launch: null,
+                repo_root: null,
+                repository_display_name: null,
+                provider: 'claude',
+                provider_session_id: null,
+                provider_thread_id: null,
+                pull_request_number: null,
+              },
+              open: true,
+              main_thread_id: MAIN_THREAD_ID,
+              threads: mockThreads,
+              last_activity_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+      http.get(`*/api/sessions/${SESSION_ID}/threads`, () => {
+        threadsRequests += 1;
+        return HttpResponse.json({ threads: threadsNow });
+      }),
+      http.post('*/api/sends', () => {
+        // The server creates the branch thread as it accepts the send.
+        threadsNow = [...mockThreads, branch];
+        return HttpResponse.json(
+          {
+            send: {
+              id: 1,
+              session_id: SESSION_ID,
+              thread_id: branch.id,
+              semantic_parent_uuid: 'uuid-u1',
+              text: 'branch off here',
+              locator_quote: null,
+              status: 'dispatched',
+              matched_uuid: null,
+              created_at: '2026-01-01T00:10:00Z',
+              held_at: null,
+            },
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    function BranchSender() {
+      const createSend = useCreateSendMutation(useApiClient());
+      return (
+        <button
+          type="button"
+          onClick={() =>
+            createSend.mutate({
+              thread_id: MAIN_THREAD_ID,
+              text: 'branch off here',
+              semantic_parent_uuid: 'uuid-u1',
+            })
+          }
+        >
+          send a branch
+        </button>
+      );
+    }
+    renderScreen(<BranchSender />);
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID),
+    );
+    // The row's `<li>` holds both its header and its thread tree.
+    const row = () =>
+      screen.getByTestId('session-node').closest('li') as HTMLElement;
+    await waitFor(() =>
+      expect(within(row()).getByText('delta etymology')).toBeInTheDocument(),
+    );
+    expect(within(row()).queryByText('the new branch')).not.toBeInTheDocument();
+    const requestsBeforeSend = threadsRequests;
+
+    fireEvent.click(screen.getByRole('button', { name: 'send a branch' }));
+
+    await waitFor(() =>
+      expect(within(row()).getByText('the new branch')).toBeInTheDocument(),
+    );
+    expect(threadsRequests).toBeGreaterThan(requestsBeforeSend);
   });
 
   it('falls back to the most-recently-active session when none are open', async () => {
@@ -978,6 +1123,7 @@ describe('WorkspaceScreen multi-session', () => {
               },
               open: false,
               main_thread_id: SESSION_2_MAIN_THREAD_ID,
+              threads: listedThreads(SESSION_ID_2, SESSION_2_MAIN_THREAD_ID),
               last_activity_at: '2026-01-02T00:00:02Z',
             },
             {
@@ -998,6 +1144,7 @@ describe('WorkspaceScreen multi-session', () => {
               },
               open: false,
               main_thread_id: 1,
+              threads: listedThreads(SESSION_ID, 1),
               last_activity_at: '2026-01-01T00:00:02Z',
             },
           ],
@@ -1072,6 +1219,7 @@ describe('WorkspaceScreen multi-session', () => {
               },
               open: true,
               main_thread_id: MAIN_THREAD_ID,
+              threads: listedThreads(SESSION_ID, MAIN_THREAD_ID),
               last_activity_at: '2026-01-01T00:00:02Z',
             },
           ],
@@ -1221,6 +1369,7 @@ describe('WorkspaceScreen multi-session', () => {
               },
               open: true,
               main_thread_id: 1,
+              threads: listedThreads(SESSION_ID, 1),
               last_activity_at: lastActivityAt,
             },
           ],
@@ -1302,6 +1451,7 @@ describe('WorkspaceScreen multi-session', () => {
           pane_starting: paneStarting,
           hooks_unreachable: hooksUnreachable,
           main_thread_id: mainThreadId,
+          threads: listedThreads(id, mainThreadId),
           last_activity_at: '2026-01-01T00:00:02Z',
         },
       ],
@@ -1974,6 +2124,7 @@ describe('WorkspaceScreen multi-session', () => {
               },
               open: true,
               main_thread_id: 1,
+              threads: listedThreads(SESSION_ID, 1),
               last_activity_at: '2026-01-01T00:00:02Z',
             },
           ],

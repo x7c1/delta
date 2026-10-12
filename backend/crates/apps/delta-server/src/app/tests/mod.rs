@@ -15,6 +15,7 @@ mod permissions;
 mod prompt_templates;
 mod providers;
 mod pull_requests;
+mod request_log;
 mod session_prune;
 mod sessions;
 mod static_web;

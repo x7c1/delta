@@ -41,12 +41,16 @@
 //!
 //! Steps 1 and 5 are each logged at `info`, so the time a launch spent behind
 //! the placeholder can be read from the log.
+//! Logging is set up before any of them, to stdout and to a file in the app
+//! log directory, at a level a file in the data directory can change
+//! ([`logging`]).
 //!
 //! Links the page follows never take the window away from Delta; [`links`]
 //! says where they go instead.
 //!
-//! The window opens at the size it was left at, maximized if it was; the first
-//! time, at a size taken from the screen ([`window_size`]).
+//! The window opens at the size it was left at, fitted to the screen and
+//! maximized if it was; the first time, at a size taken from the screen
+//! ([`window_size`]).
 //!
 //! Only one copy runs at a time: launching the app again focuses the running
 //! window and exits (see [`focus_running_window`]).
@@ -75,6 +79,7 @@
 
 mod erase;
 mod links;
+mod logging;
 mod login_env;
 #[cfg(target_os = "macos")]
 mod macos_title_bar;
@@ -103,10 +108,9 @@ const WINDOW_LABEL: &str = "main";
 const WINDOW_TITLE: &str = "Delta";
 
 fn main() {
-    serve::init_tracing();
-
     let context = tauri::generate_context!();
     let identifier = context.config().identifier.clone();
+    let log_guard = Arc::new(logging::init(&identifier));
     #[cfg(target_os = "linux")]
     set_window_app_id(&identifier);
 
@@ -114,6 +118,7 @@ fn main() {
         Ok(runtime) => runtime,
         Err(err) => {
             tracing::error!("could not start the async runtime: {err}");
+            log_guard.flush();
             std::process::exit(1);
         }
     };
@@ -133,22 +138,29 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             focus_running_window(app);
         }))
-        // Remembers the window's size and whether it is maximized; see
-        // `window_size`. After single-instance, so a second launch exits before
-        // this loads anything, and the running window is only brought forward.
+        // Remembers whether the window is maximized; the size is
+        // `window_size`'s own, as the plugin's grows on Linux (see there).
+        // After single-instance, so a second launch exits before this loads
+        // anything, and the running window is only brought forward.
         .plugin(
             tauri_plugin_window_state::Builder::new()
-                .with_state_flags(StateFlags::SIZE | StateFlags::MAXIMIZED)
+                .with_state_flags(StateFlags::MAXIMIZED)
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
         .manage(erase::EraseExit::default())
+        .manage(Arc::clone(&log_guard))
+        .manage(window_size::RememberedSize::default())
         .register_uri_scheme_protocol(placeholder::SCHEME, |_context, request| {
             placeholder::respond(&request)
         })
         // Tauri panics on an error returned from here, so every failure is
         // reported (and exits 1) inside the hook instead.
         .setup(move |app| {
+            logging::warn_if_the_resolver_disagrees(
+                app.handle(),
+                &app.state::<Arc<logging::LogGuard>>(),
+            );
             let started_server = Arc::new(StartedServer::default());
             let runtime_handle = runtime.handle().clone();
             // The runtime serves for the app's whole lifetime.
@@ -171,6 +183,7 @@ fn main() {
         Ok(app) => app,
         Err(err) => {
             tracing::error!("delta-desktop failed: {err:#}");
+            log_guard.flush();
             std::process::exit(1);
         }
     };
@@ -181,11 +194,18 @@ fn main() {
         RunEvent::ExitRequested {
             code: None, api, ..
         } if handle.state::<erase::EraseExit>().is_marked() => api.prevent_exit(),
-        // Plugins see `Exit` before this callback, so the window-state
-        // plugin's file is already written when the erase removes the config
-        // directory it lives in.
-        RunEvent::Exit if handle.state::<erase::EraseExit>().is_marked() => {
-            erase::remove_app_dirs(handle);
+        // Every way the app ends comes here, so this is where the window's
+        // size is saved (`window_size` lists the exits) and the log file
+        // flushed — before the erase removes the directory it is in. Plugins
+        // see `Exit` before this callback, so the window-state plugin's file is
+        // already written too when the erase removes the config directory they
+        // live in.
+        RunEvent::Exit => {
+            window_size::save(handle);
+            handle.state::<Arc<logging::LogGuard>>().flush();
+            if handle.state::<erase::EraseExit>().is_marked() {
+                erase::remove_app_dirs(handle);
+            }
         }
         _ => {}
     });
@@ -437,7 +457,7 @@ fn open_window(app: &App, started_server: Arc<StartedServer>) -> anyhow::Result<
     #[cfg(target_os = "linux")]
     let builder = quit_shortcut::style(builder, terminal_focus.clone());
     let window = builder.build()?;
-    window_size::fit_window_size(app.handle(), &window, WINDOW_LABEL);
+    window_size::fit_window_size(app.handle(), &window);
     #[cfg(target_os = "macos")]
     macos_title_bar::install_drag_strip(&window)?;
     // Without the shortcut the app still quits by closing the window.

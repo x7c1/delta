@@ -30,6 +30,7 @@ export { queryKeys } from './query-keys';
 export {
   useSessionsQuery,
   useSessionThreadsQuery,
+  useListedSessionThreads,
   useSessionSendsQuery,
   useNewSessionMutation,
   useOpenSessionMutation,

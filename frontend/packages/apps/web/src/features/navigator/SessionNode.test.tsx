@@ -124,6 +124,17 @@ const item: SessionListItem = {
   },
   open: true,
   main_thread_id: 1,
+  threads: [
+    {
+      id: 1,
+      session_id: SESSION_ID,
+      title: 'main',
+      parent_thread_id: null,
+      root_message_uuid: null,
+      created_at: '2026-01-01T00:00:00Z',
+      last_activity_at: null,
+    },
+  ],
   last_activity_at: '2026-01-01T00:00:00Z',
 };
 

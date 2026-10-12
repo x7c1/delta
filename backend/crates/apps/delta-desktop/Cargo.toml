@@ -18,6 +18,8 @@ tauri-build = { version = "2", features = [] }
 delta-bootstrap = { workspace = true }
 delta-server = { workspace = true, features = ["embed-web"] }
 anyhow = { workspace = true }
+dirs = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
@@ -25,6 +27,8 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 tokio = { workspace = true }
 tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
@@ -35,8 +39,9 @@ update-installer = { workspace = true }
 # The macOS title bar (src/macos_title_bar.rs) talks to AppKit directly; these
 # are the versions Tauri itself builds on.
 # The window's app ID is set through GLib's program name (see
-# `set_window_app_id` in src/main.rs), and Ctrl-Q is caught on the GTK window
-# (src/quit_shortcut.rs); these are the versions Tauri builds on.
+# `set_window_app_id` in src/main.rs), Ctrl-Q is caught on the GTK window
+# (src/quit_shortcut.rs), and the window's content size is read from it
+# (src/window_size/follow_resizes.rs); these are the versions Tauri builds on.
 [target.'cfg(target_os = "linux")'.dependencies]
 glib = "0.18"
 gtk = "0.18"

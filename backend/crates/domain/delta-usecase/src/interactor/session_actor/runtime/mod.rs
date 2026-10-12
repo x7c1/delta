@@ -105,11 +105,12 @@ pub struct SessionRuntime {
     /// whenever no send is being awaited — the echo-deadline watchdog's clock.
     ///
     /// Kept in lockstep with [`Self::turn`] by [`SessionRuntime::apply_turn`]
-    /// (and restarted by [`SessionRuntime::restamp_awaiting_echo`] on the two
-    /// paths that re-type an already-outstanding send). `Instant` is monotonic,
-    /// so the elapsed comparison is immune to system-clock changes, matching
-    /// the launch deadlines. NOT part of [`Self::is_empty`]: it is only ever
-    /// `Some` alongside a non-idle turn, which already pins the actor alive.
+    /// (and restarted by [`SessionRuntime::restamp_awaiting_echo`] on the
+    /// paths where an already-outstanding send's real wait begins later).
+    /// `Instant` is monotonic, so the elapsed comparison is immune to
+    /// system-clock changes, matching the launch deadlines. NOT part of
+    /// [`Self::is_empty`]: it is only ever `Some` alongside a non-idle turn,
+    /// which already pins the actor alive.
     awaiting_echo_since: Option<Instant>,
     /// Oneshot waiters for permission requests the browser may decide, keyed
     /// by request-row id. Registered by the `PermissionRequest` hook (whose

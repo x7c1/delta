@@ -1,7 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
-import type { Message, MessagesResponse } from '@delta/wire-gen';
-import { invalidateAll, invalidateThreadMessages } from './cache';
+import type {
+  Message,
+  MessagesResponse,
+  SessionsResponse,
+  Thread,
+  ThreadsResponse,
+} from '@delta/wire-gen';
+import {
+  invalidateAll,
+  invalidateThreadMessages,
+  seedSessionThreads,
+} from './cache';
 import { queryKeys } from './query-keys';
 
 type Deferred<T> = {
@@ -136,5 +146,114 @@ describe('invalidateAll', () => {
 
     unsubscribe();
     queryClient.clear();
+  });
+});
+
+describe('seedSessionThreads', () => {
+  function thread(id: number, sessionId: string): Thread {
+    return {
+      id,
+      session_id: sessionId,
+      title: id === 1 ? 'main' : `branch ${id}`,
+      parent_thread_id: id === 1 ? null : 1,
+      root_message_uuid: null,
+      created_at: '2026-01-01T00:00:00Z',
+      last_activity_at: null,
+    };
+  }
+
+  function page(sessionId: string, threads: Thread[]): SessionsResponse {
+    return {
+      sessions: [
+        {
+          session: {
+            id: sessionId,
+            cwd: '/work',
+            transcript_path: null,
+            title: null,
+            status: 'active',
+            created_at: '2026-01-01T00:00:00Z',
+            branch_at_launch: null,
+            repo_root: null,
+            repository_display_name: null,
+            provider: 'claude',
+            provider_session_id: null,
+            provider_thread_id: null,
+            pull_request_number: null,
+            failure_reason: null,
+          },
+          open: true,
+          pane_starting: false,
+          hooks_unreachable: false,
+          main_thread_id: 1,
+          threads,
+          last_activity_at: null,
+        },
+      ],
+      next_cursor: null,
+    };
+  }
+
+  it("writes each listed session's threads into its thread cache without fetching", () => {
+    const queryClient = new QueryClient();
+    const queryFn = vi.fn();
+    // A passive observer, as a navigator row holds one.
+    const observer = new QueryObserver<ThreadsResponse>(queryClient, {
+      queryKey: queryKeys.sessionThreads('s'),
+      queryFn,
+      enabled: false,
+    });
+    const unsubscribe = observer.subscribe(() => {});
+
+    seedSessionThreads(
+      queryClient,
+      page('s', [thread(1, 's'), thread(2, 's')]),
+      Date.now(),
+    );
+
+    expect(observer.getCurrentResult().data?.threads.map((t) => t.id)).toEqual(
+      [1, 2],
+    );
+    expect(queryFn).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('keeps an entry updated after the page was requested', () => {
+    const queryClient = new QueryClient();
+    const requestedAt = Date.now() - 1_000;
+    // The focused session's targeted refetch landed while the page was in
+    // flight: it already holds the branch the page's snapshot predates.
+    queryClient.setQueryData<ThreadsResponse>(queryKeys.sessionThreads('s'), {
+      threads: [thread(1, 's'), thread(2, 's')],
+    });
+
+    seedSessionThreads(queryClient, page('s', [thread(1, 's')]), requestedAt);
+
+    expect(
+      queryClient
+        .getQueryData<ThreadsResponse>(queryKeys.sessionThreads('s'))
+        ?.threads.map((t) => t.id),
+    ).toEqual([1, 2]);
+  });
+
+  it('replaces an entry older than the page', () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData<ThreadsResponse>(
+      queryKeys.sessionThreads('s'),
+      { threads: [thread(1, 's')] },
+      { updatedAt: Date.now() - 1_000 },
+    );
+
+    seedSessionThreads(
+      queryClient,
+      page('s', [thread(1, 's'), thread(2, 's')]),
+      Date.now(),
+    );
+
+    expect(
+      queryClient
+        .getQueryData<ThreadsResponse>(queryKeys.sessionThreads('s'))
+        ?.threads.map((t) => t.id),
+    ).toEqual([1, 2]);
   });
 });
