@@ -114,6 +114,9 @@ mod tests {
             other => panic!("{other:?}"),
         }
 
-        assert!(run(Command::new("/bin/true"), "/bin/true").is_ok());
+        // Through `/bin/sh`, like the cases above: macOS has no `/bin/true`.
+        let mut succeeding = Command::new("/bin/sh");
+        succeeding.arg("-c").arg("exit 0");
+        assert!(run(succeeding, "/bin/sh").is_ok());
     }
 }
