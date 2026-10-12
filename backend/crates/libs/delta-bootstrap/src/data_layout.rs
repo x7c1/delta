@@ -11,6 +11,7 @@
 //!   sessions/<token>/         per-spawn working directories
 //!   settings/<port>.json      the Claude Code session settings (hook URLs)
 //!   tmux.conf                 the configuration Delta's tmux server loads
+//!   updates/                  the desktop app's downloaded, verified release
 //! ```
 //!
 //! Per-session git worktrees are deliberately *not* here: they are paths the
@@ -43,6 +44,9 @@ const SETTINGS_DIR: &str = "settings";
 
 /// The tmux configuration file's name.
 const TMUX_CONF_FILE: &str = "tmux.conf";
+
+/// The directory a newer release's asset is downloaded into.
+const UPDATES_DIR: &str = "updates";
 
 /// Owner-only: the data directory holds the hook secret (in the hook state
 /// file and in every session settings file).
@@ -103,6 +107,14 @@ impl DataLayout {
     /// The configuration file Delta's tmux server is started with (`tmux -f`).
     pub fn tmux_conf(&self) -> PathBuf {
         self.dir.join(TMUX_CONF_FILE)
+    }
+
+    /// The directory the desktop app downloads a newer release's asset into.
+    /// Created by the download, not at startup: only a desktop release build
+    /// ever downloads. A file under its asset's name is always a verified one;
+    /// one being downloaded carries a `.part` suffix.
+    pub fn updates(&self) -> PathBuf {
+        self.dir.join(UPDATES_DIR)
     }
 
     /// Create the data directory (owner-only) and `sessions/` in it, before

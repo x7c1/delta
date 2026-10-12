@@ -9,8 +9,8 @@ use tokio::sync::{broadcast, watch};
 
 use delta_bootstrap::{AppInteractor, Config};
 use delta_usecase::{
-    AsyncEventReceiver, AsyncEventSink, CommsLogSink, NewerRelease, ReleaseCheck, SessionEvent,
-    SessionLifecycle,
+    AsyncEventReceiver, AsyncEventSink, CommsLogSink, NewerRelease, NotOffered, ReleaseCheck,
+    ReleaseUpdate, SessionEvent, SessionLifecycle,
 };
 
 use crate::comms_log::{CommsLogHub, CommsSubscription};
@@ -118,6 +118,10 @@ pub struct AppState {
     /// verdict for `GET /api/latest-release`. Turned off unless
     /// [`Self::with_release_check`] sets one.
     release_check: Arc<ReleaseCheck>,
+    /// The download of the newer release [`Self::release_check`] found, for
+    /// `POST /api/latest-release/download`. Not offered unless
+    /// [`Self::with_release_update`] sets one that is.
+    release_update: Arc<ReleaseUpdate>,
 }
 
 impl AppState {
@@ -146,6 +150,10 @@ impl AppState {
         .with_comms_log(comms_log)
         .with_child_env(config.child_env.clone())
         .with_release_check(delta_bootstrap::release_check(
+            config,
+            crate::version::VERSION,
+        ))
+        .with_release_update(delta_bootstrap::release_update(
             config,
             crate::version::VERSION,
         ));
@@ -231,6 +239,7 @@ impl AppState {
             stop: Arc::new(watch::Sender::new(None)),
             erasing: Arc::new(AtomicBool::new(false)),
             release_check: Arc::new(ReleaseCheck::disabled()),
+            release_update: Arc::new(ReleaseUpdate::not_offered(NotOffered::CliLauncher)),
         }
     }
 
@@ -269,9 +278,24 @@ impl AppState {
         self
     }
 
+    /// Download newer releases with `update`.
+    ///
+    /// Separate from [`Self::from_interactor`] for the same reason as
+    /// [`Self::with_release_check`]: a state built from an interactor in a
+    /// test never downloads anything.
+    pub fn with_release_update(mut self, update: ReleaseUpdate) -> Self {
+        self.release_update = Arc::new(update);
+        self
+    }
+
     /// The newer release the last successful release check found, if any.
     pub fn newer_release(&self) -> Option<NewerRelease> {
         self.release_check.newer()
+    }
+
+    /// The download of the newer release.
+    pub(crate) fn release_update(&self) -> &ReleaseUpdate {
+        &self.release_update
     }
 
     /// Spawn the background release check: once [`RELEASE_CHECK_FIRST_DELAY`]

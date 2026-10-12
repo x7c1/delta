@@ -1,19 +1,38 @@
-//! Response for `GET /api/latest-release`.
+//! The response for `GET /api/latest-release`.
 
 use delta_usecase::NewerRelease;
 use serde::Serialize;
 use ts_rs::TS;
 
+use super::{WireInstallUnavailable, WireUpdateDownload, WireUpdateInstall, WireUpdateOffer};
+
 /// Response for `GET /api/latest-release`: a published release newer than the
-/// running server, if the server knows of one.
+/// running server, if the server knows of one, what the browser may offer
+/// next to it, and how its download and install are going.
 ///
 /// `newer` is `null` whenever the browser has nothing to tell the user: the
 /// server has not checked yet, the last check found it up to date, the check
-/// is turned off, or every check so far failed.
+/// is turned off, or every check so far failed. `download` is `null` until a
+/// download of `newer` is asked for. `installs` is whether this app installs
+/// a ready download itself (`POST /api/latest-release/install`: a desktop
+/// release build on Linux, and on macOS where it runs from a `Delta.app` this
+/// user may replace, as found when the app started). `install_unavailable`
+/// is present only when `installs` is `false` on a platform that installs
+/// in the app and the download of `newer` is ready: why the app does not
+/// install it and how the user does by hand ([`WireInstallUnavailable`]).
+/// `install` is `null` until an install of `newer` is asked for, and again
+/// after the user dismissed the password dialog.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(rename = "LatestReleaseResponse")]
 pub struct WireLatestReleaseResponse {
     pub newer: Option<WireNewerRelease>,
+    pub offer: WireUpdateOffer,
+    pub download: Option<WireUpdateDownload>,
+    pub installs: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub install_unavailable: Option<WireInstallUnavailable>,
+    pub install: Option<WireUpdateInstall>,
 }
 
 /// A published release newer than the running server.
@@ -49,22 +68,84 @@ mod tests {
                     version: "v0.6.0".to_owned(),
                     url: "https://github.com/x7c1/delta/releases/tag/v0.6.0".to_owned(),
                 }),
+                offer: WireUpdateOffer::Update,
+                download: Some(WireUpdateDownload::Downloading {
+                    version: "v0.6.0".to_owned(),
+                    received_bytes: 512,
+                    total_bytes: Some(1024),
+                }),
+                installs: true,
+                install_unavailable: None,
+                install: None,
             })
             .unwrap(),
             serde_json::json!({
                 "newer": {
                     "version": "v0.6.0",
                     "url": "https://github.com/x7c1/delta/releases/tag/v0.6.0",
-                }
+                },
+                "offer": "update",
+                "download": {
+                    "state": "downloading",
+                    "version": "v0.6.0",
+                    "received_bytes": 512,
+                    "total_bytes": 1024,
+                },
+                "installs": true,
+                "install": null,
             }),
+        );
+    }
+
+    #[test]
+    fn an_install_unavailable_is_present_only_when_set() {
+        let response = WireLatestReleaseResponse {
+            newer: Some(WireNewerRelease {
+                version: "v0.6.0".to_owned(),
+                url: "https://github.com/x7c1/delta/releases/tag/v0.6.0".to_owned(),
+            }),
+            offer: WireUpdateOffer::Update,
+            download: Some(WireUpdateDownload::Ready {
+                version: "v0.6.0".to_owned(),
+            }),
+            installs: false,
+            install_unavailable: Some(WireInstallUnavailable {
+                error: "Delta cannot install the update itself: read-only".to_owned(),
+                manual: crate::rest::WireManualInstall::DiskImage {
+                    path: "/u/updates/Delta_0.6.0_aarch64.dmg".to_owned(),
+                },
+            }),
+            install: None,
+        };
+        let value = serde_json::to_value(response).unwrap();
+        assert_eq!(
+            value["install_unavailable"],
+            serde_json::json!({
+                "error": "Delta cannot install the update itself: read-only",
+                "manual": { "kind": "disk_image", "path": "/u/updates/Delta_0.6.0_aarch64.dmg" },
+            })
         );
     }
 
     #[test]
     fn no_newer_release_serializes_as_null() {
         assert_eq!(
-            serde_json::to_value(WireLatestReleaseResponse { newer: None }).unwrap(),
-            serde_json::json!({ "newer": null }),
+            serde_json::to_value(WireLatestReleaseResponse {
+                newer: None,
+                offer: WireUpdateOffer::None,
+                download: None,
+                installs: false,
+                install_unavailable: None,
+                install: None,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "newer": null,
+                "offer": "none",
+                "download": null,
+                "installs": false,
+                "install": null,
+            }),
         );
     }
 }

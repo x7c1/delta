@@ -45,6 +45,9 @@ fn main() {
     };
     let sha = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".into());
     println!("cargo:rustc-env=DELTA_GIT_SHA={sha}");
+    // `config::build_origin` embeds this at compile time; a build with a
+    // different value must not reuse a binary compiled under the old one.
+    println!("cargo:rerun-if-env-changed=DELTA_BUILD_ORIGIN");
     for git_path in ["HEAD", "logs/HEAD"] {
         let Some(resolved) = git(&[
             "rev-parse",

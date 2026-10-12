@@ -4,7 +4,11 @@
   "bundle": {
     "linux": {
       "deb": {
-        "desktopTemplate": "linux/delta-desktop.desktop"
+        "desktopTemplate": "linux/delta-desktop.desktop",
+        "files": {
+          "/usr/lib/delta-desktop/delta-update-helper": "../../../target/release/delta-update-helper",
+          "/usr/share/polkit-1/actions/io.github.x7c1.delta.update.policy": "linux/io.github.x7c1.delta.update.policy"
+        }
       }
     }
   }

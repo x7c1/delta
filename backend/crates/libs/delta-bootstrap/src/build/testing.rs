@@ -15,5 +15,7 @@ pub(crate) fn test_config(dir: &tempfile::TempDir) -> Config {
         launch: delta_usecase::LaunchConfig::default(),
         child_env: Vec::new(),
         release_feed_url: None,
+        launcher: delta_usecase::Launcher::Cli,
+        build_origin: delta_usecase::BuildOrigin::Local,
     }
 }

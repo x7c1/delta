@@ -8,7 +8,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use delta_usecase::EraseReport;
+use delta_usecase::{EraseReport, UpdateRestart};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
@@ -26,6 +26,13 @@ pub enum ServerStopped {
     /// no work, and the server then deleted its data directory. Carries what
     /// was removed and what was kept. The process should exit `0`.
     Erased(EraseReport),
+    /// `POST /api/latest-release/restart` asked to restart into the update
+    /// installed over the running app: the release, and the installed app
+    /// the installer named for it. The shell should start that app once this
+    /// process has exited, then exit `0`. The data directory and the tmux
+    /// server are left as they are, so the sessions keep running and the new
+    /// process re-adopts them.
+    Restart(UpdateRestart),
 }
 
 impl ServerStopped {
@@ -48,6 +55,11 @@ impl ServerStopped {
                     tracing::info!("kept {kept}");
                 }
             }
+            Self::Restart(restart) => tracing::info!(
+                version = %restart.version,
+                app = ?restart.app,
+                "the server has stopped to restart into the installed update"
+            ),
         }
     }
 }
@@ -158,7 +170,8 @@ pub fn user_facing_startup_error(err: &anyhow::Error) -> Option<String> {
 /// response. Then the background loops are aborted and the state dropped, and
 /// for an erase, once the store has closed — the session actors hold it until
 /// they have run down — the data directory is deleted (see
-/// `StorageInventory::delete_data_dir`).
+/// `StorageInventory::delete_data_dir`). A restart leaves everything as it
+/// is.
 pub async fn serve(state: AppState, listener: TcpListener) -> anyhow::Result<ServerStopped> {
     // Rewrite the session settings file now, so a restart leaves it matching
     // this run's hook URLs instead of a stale copy (see
@@ -202,6 +215,7 @@ pub async fn serve(state: AppState, listener: TcpListener) -> anyhow::Result<Ser
     }
     match &reason {
         ServerStopped::Erased(_) => delete_data_dir_once_closed(state).await,
+        ServerStopped::Restart(_) => {}
     }
     Ok(reason)
 }

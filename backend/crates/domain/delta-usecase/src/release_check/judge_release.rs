@@ -31,6 +31,7 @@ pub(super) fn judge_release(
     Ok(newer.then_some(NewerRelease {
         version,
         url: release.html_url,
+        assets: release.assets,
     }))
 }
 
@@ -113,6 +114,7 @@ mod tests {
             let answer = PublishedRelease {
                 tag_name: "v0.6.0".into(),
                 html_url: url.into(),
+                assets: Vec::new(),
             };
             let err = judge("0.5.0", answer).unwrap_err();
             assert!(

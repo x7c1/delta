@@ -54,6 +54,9 @@ It holds:
 - `settings/<port>.json`, the settings a session is launched with. There is one
   file for every port the app has used.
 - `tmux.conf`, the configuration of Delta's tmux server.
+- `updates/`, a newer release the desktop app downloaded and verified, kept
+  until it is installed; a download of another version replaces it, and the
+  app removes it at startup once it runs that version or a newer one.
 
 The directory is readable by you only (mode `0700`) when the app creates it. A
 directory an earlier version created keeps its mode; the hook state file and the
@@ -219,8 +222,13 @@ deleting them.
 
 ## Updating
 
-Download the bundle from the new Release and install it over the old one the
-same way as the first time. Your data directory is left as is.
+When a newer release is out, the footer of the app shows it next to the
+version. The app can download, install and restart into it itself, on
+Ubuntu ([how](ubuntu.md#updating)) and on macOS ([how](macos.md#updating)),
+keeping the download in the data directory's `updates/` (see
+[Where the app keeps its data](#where-the-app-keeps-its-data)). Either way you can
+also download the bundle from the new Release and install it over the old one
+yourself. Your data directory is left as is.
 
 On the first launch of the new version, the database is migrated forward
 automatically, with a snapshot taken first when a step is destructive. Going

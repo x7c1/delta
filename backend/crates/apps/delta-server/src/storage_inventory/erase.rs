@@ -23,7 +23,7 @@ impl StorageInventory {
 
     /// Delete what the data directory holds that the store does not keep open:
     /// the per-spawn working directories, the session settings, the tmux
-    /// configuration and the migration snapshots.
+    /// configuration, the downloaded updates and the migration snapshots.
     ///
     /// Run after every session is closed and Delta's tmux server is gone, so
     /// nothing is still running in a working directory or about to read its
@@ -33,6 +33,7 @@ impl StorageInventory {
         remove_tree(&self.layout.sessions());
         remove_tree(&self.layout.settings_dir());
         remove_file(&self.layout.tmux_conf());
+        remove_tree(&self.layout.updates());
         for snapshot in snapshots_of(&self.layout.database()) {
             remove_file(Path::new(&snapshot.path));
         }
@@ -108,10 +109,11 @@ mod tests {
     use super::super::testing::inventory;
 
     /// Planted in a data directory the way a running server leaves it.
-    const DERIVED: [&str; 4] = [
+    const DERIVED: [&str; 5] = [
         "sessions/tok/notes.txt",
         "settings/7878.json",
         "tmux.conf",
+        "updates/delta-desktop_0.6.0_amd64.deb",
         "delta.db.bak-v3",
     ];
     const HELD: [&str; 4] = [
@@ -139,7 +141,13 @@ mod tests {
 
         inventory.delete_derived_files();
 
-        for name in ["sessions", "settings", "tmux.conf", "delta.db.bak-v3"] {
+        for name in [
+            "sessions",
+            "settings",
+            "tmux.conf",
+            "updates",
+            "delta.db.bak-v3",
+        ] {
             assert!(!data.join(name).exists(), "{name} is gone");
         }
         for name in HELD {

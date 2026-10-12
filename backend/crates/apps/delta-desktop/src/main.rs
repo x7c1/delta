@@ -69,6 +69,13 @@
 //! The shell then closes the window, shows what was kept in a message dialog,
 //! and quits when it is dismissed; as the process ends ([`RunEvent::Exit`]) it
 //! removes its own files under the identifier ([`erase`]).
+//!
+//! Restarting into an installed update (`POST /api/latest-release/restart`)
+//! stops the server the same way, for [`serve::ServerStopped::Restart`]: the
+//! shell starts a detached process that starts the installed app the
+//! installer named (the binary on Linux, the bundle on macOS) once this one
+//! has exited ([`relaunch`]), and quits. The tmux server is left running, as
+//! when the window is closed, so the new process re-adopts the sessions.
 
 mod erase;
 mod links;
@@ -79,6 +86,7 @@ mod macos_title_bar;
 mod placeholder;
 #[cfg(any(target_os = "linux", test))]
 mod quit_shortcut;
+mod relaunch;
 mod started_server;
 mod window_size;
 
@@ -91,6 +99,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 use tauri_plugin_window_state::StateFlags;
 use tokio::runtime::{self, Runtime};
 
+use delta_bootstrap::InstalledApp;
 use delta_server::{config, serve, AppState};
 use started_server::StartedServer;
 
@@ -346,6 +355,11 @@ fn start_server(
                     serve::ServerStopped::Erased(report) => {
                         quit_after_erase(&handle, erase::report_message(report.kept_items()));
                     }
+                    // An update was installed over the app: start the
+                    // installed app once this process has exited, and exit.
+                    serve::ServerStopped::Restart(restart) => {
+                        restart_into_update(&handle, &restart.app)
+                    }
                 }
             }
             Err(err) => {
@@ -376,6 +390,42 @@ fn quit_after_erase(handle: &AppHandle, message: String) {
         .title("Delta erased everything")
         .kind(MessageDialogKind::Info)
         .show(move |_| exit_handle.exit(0));
+}
+
+/// Start the installed `app` once this process has exited, then exit 0.
+///
+/// When it cannot be started, say so in a dialog and exit 0 once it is
+/// dismissed: the update is installed either way, so starting Delta again
+/// from the menu runs it.
+fn restart_into_update(handle: &AppHandle, app: &InstalledApp) {
+    let relaunched = relaunch::relaunch_after_exit(app).map_err(|err| {
+        let path = match app {
+            InstalledApp::Executable(path) | InstalledApp::Bundle(path) => path,
+        };
+        format!("could not start {}: {err}", path.display())
+    });
+    match relaunched {
+        Ok(()) => {
+            tracing::info!("restarting into the installed update");
+            handle.exit(0);
+        }
+        Err(cause) => {
+            tracing::error!("the update is installed, but Delta {cause}");
+            let exit_handle = handle.clone();
+            let mut dialog = handle
+                .dialog()
+                .message(format!(
+                    "The update is installed, but Delta could not start again ({cause}). \
+                     Start Delta again yourself."
+                ))
+                .title("Delta could not restart")
+                .kind(MessageDialogKind::Warning);
+            if let Some(window) = handle.get_webview_window(WINDOW_LABEL) {
+                dialog = dialog.parent(&window);
+            }
+            dialog.show(move |_| exit_handle.exit(0));
+        }
+    }
 }
 
 /// Open the window on the placeholder page. Its link handlers read the

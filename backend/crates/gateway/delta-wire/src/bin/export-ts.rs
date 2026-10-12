@@ -31,8 +31,9 @@ use delta_wire::rest::{
     WirePullRequestsResponse, WireQuestionAnswerRequest, WireQuestionCancelRequest,
     WireRemoveWorktreeRequest, WireRepositoriesResponse, WireSendResponse, WireSendsResponse,
     WireSessionsResponse, WireStorageResponse, WireStorageWorktreesResponse, WireThreadsResponse,
-    WireUpdateLaunchOptionRequest, WireUpdatePromptTemplateRequest, WireVersionResponse,
-    WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireUpdateDownload, WireUpdateInstall, WireUpdateLaunchOptionRequest,
+    WireUpdatePromptTemplateRequest, WireVersionResponse, WireWorkdirListResponse,
+    WireWorkdirRecentResponse,
 };
 use delta_wire::{event_kinds, export_config, WireCommsFrame, WireSessionEvent};
 use ts_rs::TS;
@@ -94,6 +95,8 @@ fn main() {
     WireErrorBody::export_all(&config).expect("export ErrorBody.ts");
     WireVersionResponse::export_all(&config).expect("export VersionResponse.ts");
     WireLatestReleaseResponse::export_all(&config).expect("export LatestReleaseResponse.ts");
+    WireUpdateDownload::export_all(&config).expect("export UpdateDownload.ts");
+    WireUpdateInstall::export_all(&config).expect("export UpdateInstall.ts");
     WireStorageResponse::export_all(&config).expect("export StorageResponse.ts");
     WireStorageWorktreesResponse::export_all(&config).expect("export StorageWorktreesResponse.ts");
     WireRemoveWorktreeRequest::export_all(&config).expect("export RemoveWorktreeRequest.ts");

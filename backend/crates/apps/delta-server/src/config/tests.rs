@@ -69,10 +69,7 @@ fn a_shell_identifier_wins_over_the_variable() {
     let vars: HashMap<&str, OsString> = [("DELTA_IDENTIFIER", OsString::from("io.example.env"))]
         .into_iter()
         .collect();
-    let config = config_from_vars_for(
-        |name| vars.get(name).cloned(),
-        Some("io.example.app".to_owned()),
-    );
+    let config = desktop_config_from_vars(|name| vars.get(name).cloned(), "io.example.app");
     assert_eq!(config.identifier, "io.example.app");
     assert_eq!(config.tmux_socket, "io.example.app");
     assert!(config.data_dir.ends_with("io.example.app"));
@@ -242,4 +239,25 @@ fn only_the_default_worktree_base_names_its_parent_for_erasing() {
         Some("/home/u/.delta")
     );
     assert_eq!(default_base_parent("/srv/worktrees", home()), None);
+}
+
+#[test]
+fn only_the_desktop_shells_configuration_names_the_desktop_launcher() {
+    assert_eq!(config(&[]).launcher, Launcher::Cli);
+    assert_eq!(
+        desktop_config_from_vars(|_| None, DEFAULT_IDENTIFIER).launcher,
+        Launcher::Desktop
+    );
+}
+
+#[test]
+fn the_build_origin_is_the_one_this_build_was_compiled_with() {
+    let compiled = BuildOrigin::from_build_env(option_env!("DELTA_BUILD_ORIGIN"));
+    assert_eq!(build_origin(), compiled);
+    assert_eq!(config(&[]).build_origin, compiled);
+    // A run-time variable claims nothing.
+    assert_eq!(
+        config(&[("DELTA_BUILD_ORIGIN", "release")]).build_origin,
+        compiled
+    );
 }

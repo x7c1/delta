@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  The polkit action Delta's in-app update runs under. It allows exactly one
+  program, Delta's update helper at the path the .deb installs it to (see
+  tauri.linux.conf.json), and asks for an administrator's password on every
+  use: auth_admin, never the variant that keeps the authorization for a while,
+  so no authorization outlives the one install it was given for
+  (tests/update_bundle.rs checks both).
+-->
+<policyconfig>
+  <vendor>Delta</vendor>
+  <vendor_url>https://github.com/x7c1/delta</vendor_url>
+  <action id="io.github.x7c1.delta.update">
+    <description>Install an update of Delta</description>
+    <message>Delta wants to install its downloaded update (the delta-desktop package). Authentication is required to install it.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/delta-desktop/delta-update-helper</annotate>
+  </action>
+</policyconfig>

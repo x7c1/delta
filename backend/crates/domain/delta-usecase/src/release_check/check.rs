@@ -45,7 +45,7 @@ impl ReleaseCheck {
 /// "error sending request"); what a user needs in the log — DNS, a refused
 /// connection, a timeout, a certificate the trust store rejects — is further
 /// down the chain.
-fn with_causes(err: &dyn std::error::Error) -> String {
+pub(crate) fn with_causes(err: &dyn std::error::Error) -> String {
     let mut message = err.to_string();
     let mut source = err.source();
     while let Some(cause) = source {
@@ -89,6 +89,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_newer_release_keeps_its_assets() {
+        let asset = crate::ports::ReleaseAsset {
+            name: "delta-desktop_0.6.0_amd64.deb".into(),
+            download_url: "https://github.com/x7c1/delta/releases/download/v0.6.0/delta-desktop_0.6.0_amd64.deb".into(),
+            digest: Some("sha256:00".into()),
+        };
+        let feed = ScriptedFeed::new(vec![Ok(PublishedRelease {
+            assets: vec![asset.clone()],
+            ..release("v0.6.0")
+        })]);
+        let check = check_with(&feed);
+        check.check().await.unwrap();
+        assert_eq!(check.newer().expect("newer").assets(), [asset]);
+    }
+
+    #[tokio::test]
     async fn an_up_to_date_check_records_nothing_newer() {
         let feed = ScriptedFeed::new(vec![Ok(release("v0.5.0"))]);
         let check = check_with(&feed);
@@ -115,6 +131,7 @@ mod tests {
                 Ok(PublishedRelease {
                     tag_name: "v0.6.0".into(),
                     html_url: "https://example.com/delta".into(),
+                    assets: Vec::new(),
                 }),
                 |err| matches!(err, ReleaseCheckError::Page(page) if page == "https://example.com/delta"),
             ),
@@ -142,6 +159,7 @@ mod tests {
             Ok(PublishedRelease {
                 tag_name: "v0.7.0".into(),
                 html_url: "https://example.com/v0.7.0".into(),
+                assets: Vec::new(),
             }),
         ]);
         let check = check_with(&feed);

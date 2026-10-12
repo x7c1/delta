@@ -1,0 +1,29 @@
+[package]
+name = "delta-update-helper"
+description = "Installs a downloaded update of the Delta desktop app on Linux, as root through polkit, after verifying it itself"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "delta-update-helper"
+path = "src/main.rs"
+
+# Kept to what the checks need: the helper runs as root, so it shares no code
+# with Delta's server and trusts nothing its caller says beyond the version and
+# the file. The HTTPS client is the release feed's (rustls with `ring`,
+# verifying against the operating system's trust store), set up on its own.
+[dependencies]
+libc = { workspace = true }
+reqwest = { workspace = true }
+rustls = { workspace = true }
+rustls-platform-verifier = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
