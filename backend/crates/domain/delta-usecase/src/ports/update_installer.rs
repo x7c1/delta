@@ -31,13 +31,14 @@ pub trait UpdateInstaller: Send + Sync {
     ) -> Result<InstalledApp, InstallError>;
 
     /// Why this installer cannot install any update on this machine, as far
-    /// as it can tell without installing one and without side effects, or
-    /// `None` when it may (the default: an installer that can only tell by
-    /// trying). Asked once, when the update is set up at startup, so the
-    /// browser shows the way by hand instead of an Install that can only end
-    /// [`InstallError::Unavailable`]; [`Self::install`] still checks again,
-    /// in case the machine changed since.
-    fn unavailable(&self) -> Option<String> {
+    /// as it can tell without installing one and without side effects (an
+    /// [`InstallError::Unavailable`]), or `None` when it may (the default:
+    /// an installer that can only tell by trying). Asked once, when the
+    /// update is set up at startup, so the browser shows the way by hand
+    /// instead of an Install that can only end [`InstallError::Unavailable`];
+    /// [`Self::install`] still checks again, in case the machine changed
+    /// since.
+    fn unavailable(&self) -> Option<InstallError> {
         None
     }
 }

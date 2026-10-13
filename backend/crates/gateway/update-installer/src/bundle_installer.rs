@@ -10,6 +10,7 @@ use delta_usecase::{with_causes, InstallError, InstalledApp, UpdateInstaller};
 use crate::image_check::{check_image, APP_NAME};
 use crate::image_check_error::ImageCheckError;
 use crate::swap_paths::{remove_any, SwapPaths};
+use crate::unreplaceable_bundle::UnreplaceableBundle;
 use crate::verified_copy::{copy_verified, CopyError};
 use crate::{BundleLocation, DiskImageTools, SystemDiskImageTools, ToolError};
 
@@ -22,9 +23,9 @@ use crate::{BundleLocation, DiskImageTools, SystemDiskImageTools, ToolError};
 /// in the [crate documentation](crate).
 pub struct BundleInstaller {
     /// Where the app runs from, resolved once when the installer was made,
-    /// before any update replaced anything; `Err` says why it could not be
-    /// resolved.
-    location: Result<BundleLocation, String>,
+    /// before any update replaced anything; `Err` is why it could not be
+    /// resolved ([`UnreplaceableBundle::Unlocated`]).
+    location: Result<BundleLocation, Arc<std::io::Error>>,
     tools: Arc<dyn DiskImageTools>,
     /// The directory the private working directory of each install is made
     /// in.
@@ -42,7 +43,7 @@ impl BundleInstaller {
                 let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
                 BundleLocation::of_executable(&exe)
             })
-            .map_err(|err| format!("could not tell where Delta runs from: {err}"));
+            .map_err(Arc::new);
         tracing::debug!(location = ?location, "where the running app is, for its updates");
         Self {
             location,
@@ -87,7 +88,7 @@ impl UpdateInstaller for BundleInstaller {
         file: &Path,
         sha256: &str,
     ) -> Result<InstalledApp, InstallError> {
-        let paths = replaceable_bundle(&self.location).map_err(InstallError::Unavailable)?;
+        let paths = replaceable_bundle(&self.location).map_err(InstallError::unavailable)?;
         let tools = Arc::clone(&self.tools);
         let temp_dir = self.temp_dir.clone();
         let (version, file, sha256) = (version.to_owned(), file.to_path_buf(), sha256.to_owned());
@@ -98,45 +99,40 @@ impl UpdateInstaller for BundleInstaller {
         .map_err(|err| InstallError::failed_with("the install stopped unexpectedly", err))?
     }
 
-    /// Why no update can replace the running bundle: it is not in a bundle,
-    /// macOS runs a translocated copy of it, or this user may not write to
-    /// its directory. Checked without writing anything.
-    fn unavailable(&self) -> Option<String> {
-        replaceable_bundle(&self.location).err()
+    /// Why no update can replace the running bundle: where it runs from is
+    /// unknown, it is not in a bundle, macOS runs a translocated copy of it,
+    /// or this user may not write to its directory. Checked without writing
+    /// anything.
+    fn unavailable(&self) -> Option<InstallError> {
+        replaceable_bundle(&self.location)
+            .err()
+            .map(InstallError::unavailable)
     }
 }
 
 /// Where the bundle at `location` would be updated, or why Delta cannot
-/// update it ([`InstallError::Unavailable`]'s text): it is not in a bundle,
-/// macOS runs a translocated copy of it, or this user may not write to the
-/// bundle's directory. Writes nothing.
-fn replaceable_bundle(location: &Result<BundleLocation, String>) -> Result<SwapPaths, String> {
+/// update it ([`InstallError::Unavailable`]'s source): where it runs from is
+/// unknown, it is not in a bundle, macOS runs a translocated copy of it, or
+/// this user may not write to the bundle's directory. Writes nothing.
+fn replaceable_bundle(
+    location: &Result<BundleLocation, Arc<std::io::Error>>,
+) -> Result<SwapPaths, UnreplaceableBundle> {
     let bundle = match location {
         Ok(BundleLocation::Bundle(bundle)) => bundle,
-        Ok(BundleLocation::Translocated(_)) => {
-            return Err(
-                "macOS runs Delta from a read-only copy (App Translocation), since it was \
-                 opened from its disk image or the folder it was downloaded to: move Delta to \
-                 /Applications"
-                    .to_owned(),
-            )
-        }
+        Ok(BundleLocation::Translocated(_)) => return Err(UnreplaceableBundle::Translocated),
         Ok(BundleLocation::NotInBundle(exe)) => {
-            return Err(format!(
-                "Delta does not run from an app bundle ({}), so there is no {APP_NAME} to replace",
-                exe.display()
-            ))
+            return Err(UnreplaceableBundle::NotInBundle { exe: exe.clone() })
         }
-        Err(reason) => return Err(reason.clone()),
+        Err(source) => return Err(UnreplaceableBundle::Unlocated(Arc::clone(source))),
     };
-    let paths = SwapPaths::of(bundle)
-        .ok_or_else(|| format!("{} has no parent directory", bundle.display()))?;
+    let paths = SwapPaths::of(bundle).ok_or_else(|| UnreplaceableBundle::NoParent {
+        bundle: bundle.clone(),
+    })?;
     if !writable(&paths.dir) {
-        return Err(format!(
-            "you cannot write to {}, where {} is, so Delta cannot replace it",
-            paths.dir.display(),
-            bundle.display()
-        ));
+        return Err(UnreplaceableBundle::NotWritable {
+            dir: paths.dir,
+            bundle: bundle.clone(),
+        });
     }
     Ok(paths)
 }
@@ -285,7 +281,7 @@ fn image_check_failure(err: ImageCheckError) -> InstallError {
 /// `err`.
 fn tool_failure(reason: &str, err: ToolError) -> InstallError {
     match err {
-        ToolError::Missing { .. } => InstallError::Unavailable(err.to_string()),
+        ToolError::Missing { .. } => InstallError::unavailable(err),
         ToolError::Unrunnable { program, source } => InstallError::Unrunnable { program, source },
         ToolError::Failed { .. } => InstallError::failed_with(reason, err),
     }
@@ -533,10 +529,23 @@ mod tests {
             })
         };
         let missing = Arc::new(missing);
-        assert!(matches!(
-            machine.install(&missing).await,
-            Err(InstallError::Unavailable(reason)) if reason == "/usr/bin/hdiutil is not installed"
-        ));
+        let unavailable = machine.install(&missing).await;
+        match &unavailable {
+            Err(err @ InstallError::Unavailable { source }) => {
+                assert!(
+                    matches!(
+                        source.downcast_ref(),
+                        Some(ToolError::Missing { program }) if program == Path::new("/usr/bin/hdiutil")
+                    ),
+                    "{err:?}"
+                );
+                assert_eq!(
+                    with_causes(err),
+                    "Delta cannot install the update itself: /usr/bin/hdiutil is not installed"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
         assert_eq!(Machine::version_of(&machine.bundle()), "0.5.0");
         assert!(!machine.work_left());
     }
@@ -576,6 +585,15 @@ mod tests {
         assert!(!machine.work_left());
     }
 
+    /// Why `err` says no update can replace the bundle, where it is
+    /// [`InstallError::Unavailable`] for that.
+    fn unreplaceable(err: Option<&InstallError>) -> Option<&UnreplaceableBundle> {
+        match err? {
+            InstallError::Unavailable { source } => source.downcast_ref(),
+            _ => None,
+        }
+    }
+
     #[tokio::test]
     async fn an_app_not_in_a_bundle_translocated_or_not_writable_is_unavailable() {
         let machine = Machine::new();
@@ -597,7 +615,10 @@ mod tests {
         ))))
         .await;
         assert!(
-            matches!(&not_in_bundle, Err(InstallError::Unavailable(reason)) if reason.contains("does not run from an app bundle")),
+            matches!(
+                unreplaceable(not_in_bundle.as_ref().err()),
+                Some(UnreplaceableBundle::NotInBundle { exe }) if exe == Path::new("/usr/local/bin/delta-server")
+            ),
             "{not_in_bundle:?}"
         );
 
@@ -606,8 +627,17 @@ mod tests {
         ))))
         .await;
         assert!(
-            matches!(&translocated, Err(InstallError::Unavailable(reason)) if reason.contains("App Translocation") && reason.contains("move Delta to /Applications")),
+            matches!(
+                unreplaceable(translocated.as_ref().err()),
+                Some(UnreplaceableBundle::Translocated)
+            ),
             "{translocated:?}"
+        );
+        assert_eq!(
+            with_causes(&translocated.unwrap_err()),
+            "Delta cannot install the update itself: macOS runs Delta from a read-only copy \
+             (App Translocation), since it was opened from its disk image or the folder it was \
+             downloaded to: move Delta to /Applications"
         );
 
         // Root may write anywhere, so only another user sees the refusal.
@@ -619,7 +649,11 @@ mod tests {
             std::fs::set_permissions(&apps, std::os::unix::fs::PermissionsExt::from_mode(0o755))
                 .unwrap();
             assert!(
-                matches!(&read_only, Err(InstallError::Unavailable(reason)) if reason.contains("you cannot write to")),
+                matches!(
+                    unreplaceable(read_only.as_ref().err()),
+                    Some(UnreplaceableBundle::NotWritable { dir, bundle })
+                        if *dir == apps && *bundle == machine.bundle()
+                ),
                 "{read_only:?}"
             );
         }
@@ -746,23 +780,25 @@ mod tests {
             .unavailable()
         };
 
-        assert_eq!(unavailable(BundleLocation::Bundle(machine.bundle())), None);
+        assert!(unavailable(BundleLocation::Bundle(machine.bundle())).is_none());
         let not_in_bundle = unavailable(BundleLocation::NotInBundle(PathBuf::from(
             "/usr/local/bin/delta-server",
         )));
         assert!(
-            not_in_bundle
-                .as_deref()
-                .is_some_and(|reason| reason.contains("does not run from an app bundle")),
+            matches!(
+                unreplaceable(not_in_bundle.as_ref()),
+                Some(UnreplaceableBundle::NotInBundle { .. })
+            ),
             "{not_in_bundle:?}"
         );
         let translocated = unavailable(BundleLocation::Translocated(PathBuf::from(
             "/private/var/folders/xy/T/AppTranslocation/0F1E/d/Delta.app",
         )));
         assert!(
-            translocated
-                .as_deref()
-                .is_some_and(|reason| reason.contains("App Translocation")),
+            matches!(
+                unreplaceable(translocated.as_ref()),
+                Some(UnreplaceableBundle::Translocated)
+            ),
             "{translocated:?}"
         );
         if unsafe { libc::geteuid() } != 0 {
@@ -773,9 +809,10 @@ mod tests {
             std::fs::set_permissions(&apps, std::os::unix::fs::PermissionsExt::from_mode(0o755))
                 .unwrap();
             assert!(
-                read_only
-                    .as_deref()
-                    .is_some_and(|reason| reason.contains("you cannot write to")),
+                matches!(
+                    unreplaceable(read_only.as_ref()),
+                    Some(UnreplaceableBundle::NotWritable { .. })
+                ),
                 "{read_only:?}"
             );
         }
@@ -783,5 +820,58 @@ mod tests {
         assert!(tools.calls().is_empty());
         assert!(!machine.work_left());
         assert_eq!(Machine::version_of(&machine.bundle()), "0.5.0");
+    }
+
+    /// An app that could not tell where it runs from is one no update can
+    /// replace, at startup and at an install alike: the I/O error that
+    /// stopped it is the source of the reason, a value a caller may
+    /// downcast, and the text rendered with its causes names each once.
+    #[tokio::test]
+    async fn an_app_that_cannot_tell_where_it_runs_from_keeps_the_io_error() {
+        let cause = "no such file from the test";
+        let tools = Arc::new(FakeTools::of_version("0.6.0"));
+        let installer = BundleInstaller {
+            location: Err(Arc::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                cause,
+            ))),
+            tools: Arc::clone(&tools) as Arc<dyn DiskImageTools>,
+            temp_dir: std::env::temp_dir(),
+        };
+        let at_startup = installer.unavailable();
+        let at_install = installer
+            .install(
+                "v0.6.0",
+                Path::new("/updates/Delta_0.6.0_aarch64.dmg"),
+                "ff",
+            )
+            .await
+            .err();
+        for err in [at_startup, at_install] {
+            let err = err.expect("unavailable");
+            assert!(
+                matches!(
+                    err.source().and_then(|source| source.downcast_ref()),
+                    Some(UnreplaceableBundle::Unlocated(_))
+                ),
+                "{err:?}"
+            );
+            let io = err
+                .source()
+                .and_then(|source| source.source())
+                .and_then(|source| source.downcast_ref::<std::io::Error>());
+            assert!(
+                io.is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound),
+                "{err:?}"
+            );
+            assert_eq!(
+                with_causes(&err),
+                format!(
+                    "Delta cannot install the update itself: \
+                     could not tell where Delta runs from: {cause}"
+                )
+            );
+        }
+        assert!(tools.calls().is_empty());
     }
 }

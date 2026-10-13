@@ -190,8 +190,8 @@ impl UpdateInstaller for GatedInstaller {
         self.outcome_rx.lock().await.recv().await.unwrap()
     }
 
-    fn unavailable(&self) -> Option<String> {
-        self.unavailable.map(str::to_owned)
+    fn unavailable(&self) -> Option<InstallError> {
+        self.unavailable.map(InstallError::unavailable)
     }
 }
 
@@ -606,8 +606,8 @@ async fn a_mac_release_build_installs_the_disk_image_and_restarts_into_the_bundl
     assert_eq!(latest["install_unavailable"], serde_json::Value::Null);
 
     post(&state, "/api/latest-release/install").await;
-    installer.finish(Err(InstallError::Unavailable(
-        "Delta runs from a read-only copy macOS made of it".into(),
+    installer.finish(Err(InstallError::unavailable(
+        "Delta runs from a read-only copy macOS made of it",
     )));
     assert_eq!(
         settled_install(&state).await,
@@ -752,8 +752,8 @@ async fn an_install_delta_cannot_run_offers_the_manual_command() {
     let installer = GatedInstaller::new();
     let state = ready_state(&installer).await;
     post(&state, "/api/latest-release/install").await;
-    installer.finish(Err(InstallError::Unavailable(
-        "not authorized, or no polkit authentication agent is running".into(),
+    installer.finish(Err(InstallError::unavailable(
+        "not authorized, or no polkit authentication agent is running",
     )));
     assert_eq!(
         settled_install(&state).await,

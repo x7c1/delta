@@ -18,8 +18,15 @@ pub enum InstallError {
     /// authorized; on macOS, the app does not run from a `Delta.app` it may
     /// replace, or `hdiutil` is missing. The user can still install it by
     /// hand.
-    #[error("Delta cannot install the update itself: {0}")]
-    Unavailable(String),
+    #[error("Delta cannot install the update itself")]
+    Unavailable {
+        /// Why: the installer's own error, boxed, as this crate cannot name
+        /// the installers' error types (a caller may downcast it, and reach
+        /// the error it was caused by through its `source`); text where all
+        /// the installer has is text.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     /// The program the install needs is there but could not be started.
     /// Delta cannot install the update itself, as for
     /// [`Self::Unavailable`]; the user can still install it by hand.
@@ -61,6 +68,14 @@ pub enum InstallError {
 }
 
 impl InstallError {
+    /// [`Self::Unavailable`] because of `source`: an error value, or text
+    /// where there is no value to keep.
+    pub fn unavailable(source: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+        Self::Unavailable {
+            source: source.into(),
+        }
+    }
+
     /// [`Self::Rejected`] for `reason` alone.
     pub fn rejected(reason: impl Into<String>) -> Self {
         Self::Rejected {

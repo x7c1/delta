@@ -98,8 +98,8 @@ mod testing;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::ports::{AssetDownloader, InstallError, UpdateInstaller};
-use crate::NewerRelease;
+use crate::ports::{AssetDownloader, UpdateInstaller};
+use crate::{with_causes, NewerRelease};
 
 /// The in-app update: whether it is offered, and the state of the last
 /// download and install.
@@ -126,8 +126,9 @@ struct Offered {
     downloader: Arc<dyn AssetDownloader>,
     installer: Arc<dyn UpdateInstaller>,
     /// Why the installer cannot install any update here, as it said when
-    /// the update was set up ([`UpdateInstaller::unavailable`]); `None`
-    /// where it may, and where the platform installs nothing in the app.
+    /// the update was set up ([`UpdateInstaller::unavailable`]), rendered
+    /// with its causes; `None` where it may, and where the platform installs
+    /// nothing in the app.
     install_unavailable: Option<String>,
 }
 
@@ -146,11 +147,11 @@ impl ReleaseUpdate {
         downloader: Arc<dyn AssetDownloader>,
         installer: Arc<dyn UpdateInstaller>,
     ) -> Self {
-        let install_unavailable = if platform.installs_in_app() {
-            installer.unavailable()
-        } else {
-            None
-        };
+        let install_unavailable = platform
+            .installs_in_app()
+            .then(|| installer.unavailable())
+            .flatten()
+            .map(|err| with_causes(&err));
         if let Some(cause) = &install_unavailable {
             tracing::info!(
                 cause = %cause,
@@ -219,7 +220,7 @@ impl ReleaseUpdate {
         let cause = offered.install_unavailable.as_ref()?;
         match self.download_of(newer)? {
             UpdateDownload::Ready { path, .. } => Some(InstallUnavailable {
-                cause: InstallError::Unavailable(cause.clone()).to_string(),
+                cause: cause.clone(),
                 manual: offered.platform.manual_install(&path),
             }),
             UpdateDownload::Downloading { .. } | UpdateDownload::Failed { .. } => None,

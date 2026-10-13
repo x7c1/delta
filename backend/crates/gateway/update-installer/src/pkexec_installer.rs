@@ -7,7 +7,7 @@ use tokio::process::Command;
 
 use delta_usecase::{InstallError, InstalledApp, UpdateInstaller};
 
-use crate::{INSTALLED_APP_PATH, PKEXEC_PATH, UPDATE_HELPER_PATH};
+use crate::{PkexecUnavailable, INSTALLED_APP_PATH, PKEXEC_PATH, UPDATE_HELPER_PATH};
 
 /// `pkexec`'s exit status when the user dismissed the authentication dialog.
 const PKEXEC_DISMISSED: i32 = 126;
@@ -69,10 +69,11 @@ impl UpdateInstaller for PkexecInstaller {
         _sha256: &str,
     ) -> Result<InstalledApp, InstallError> {
         if !self.helper.is_file() {
-            return Err(InstallError::Unavailable(format!(
-                "the update helper {} is not installed",
-                self.helper.display()
-            )));
+            return Err(InstallError::unavailable(
+                PkexecUnavailable::HelperMissing {
+                    helper: self.helper.clone(),
+                },
+            ));
         }
         let output = Command::new(&self.pkexec)
             .arg(&self.helper)
@@ -85,7 +86,10 @@ impl UpdateInstaller for PkexecInstaller {
             .await
             .map_err(|source| match source.kind() {
                 ErrorKind::NotFound => {
-                    InstallError::Unavailable(format!("{} is not installed", self.pkexec.display()))
+                    InstallError::unavailable(PkexecUnavailable::PkexecMissing {
+                        pkexec: self.pkexec.clone(),
+                        source,
+                    })
                 }
                 _ => InstallError::Unrunnable {
                     program: self.pkexec.clone(),
@@ -118,12 +122,11 @@ fn outcome(code: Option<i32>, stderr: &str) -> Result<(), InstallError> {
             Ok(())
         }
         Some(PKEXEC_DISMISSED) => Err(InstallError::Dismissed),
-        Some(PKEXEC_NOT_AUTHORIZED) => Err(InstallError::Unavailable(match said {
-            Some(said) => format!(
-                "not authorized, or no polkit authentication agent is running (pkexec: {said})"
-            ),
-            None => "not authorized, or no polkit authentication agent is running".to_owned(),
-        })),
+        Some(PKEXEC_NOT_AUTHORIZED) => Err(InstallError::unavailable(
+            PkexecUnavailable::NotAuthorized {
+                said: said.map(str::to_owned),
+            },
+        )),
         Some(code) => {
             let reason = said.map_or_else(
                 || format!("the update helper exited with status {code}"),
@@ -151,9 +154,20 @@ fn last_line(text: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error as _;
+
     use super::*;
 
     const SHA256: &str = "ff";
+
+    /// Why `err` says `pkexec` cannot install, where it is
+    /// [`InstallError::Unavailable`] for that.
+    fn unavailable(err: &InstallError) -> Option<&PkexecUnavailable> {
+        match err {
+            InstallError::Unavailable { source } => source.downcast_ref(),
+            _ => None,
+        }
+    }
 
     #[test]
     fn each_exit_status_maps_to_its_outcome() {
@@ -175,9 +189,32 @@ mod tests {
             Some(127),
             "Error executing command as another user: No authentication agent found.\n",
         ) {
-            Err(InstallError::Unavailable(cause)) => {
-                assert!(cause.contains("No authentication agent found."), "{cause}")
+            Err(err @ InstallError::Unavailable { .. }) => {
+                assert!(
+                    matches!(
+                        unavailable(&err),
+                        Some(PkexecUnavailable::NotAuthorized { said: Some(said) })
+                            if said == "Error executing command as another user: No authentication agent found."
+                    ),
+                    "{err:?}"
+                );
+                assert_eq!(
+                    delta_usecase::with_causes(&err),
+                    "Delta cannot install the update itself: not authorized, or no polkit \
+                     authentication agent is running (pkexec: Error executing command as \
+                     another user: No authentication agent found.)"
+                );
             }
+            other => panic!("{other:?}"),
+        }
+        match outcome(Some(127), "") {
+            Err(err) => assert!(
+                matches!(
+                    unavailable(&err),
+                    Some(PkexecUnavailable::NotAuthorized { said: None })
+                ),
+                "{err:?}"
+            ),
             other => panic!("{other:?}"),
         }
         match outcome(
@@ -227,17 +264,40 @@ mod tests {
         let helper = dir.path().join("helper");
         let file = dir.path().join("d.deb");
         let missing_helper = PkexecInstaller::with_paths("/bin/sh", &helper);
-        assert!(matches!(
-            missing_helper.install("v0.6.0", &file, SHA256).await,
-            Err(InstallError::Unavailable(cause)) if cause.contains("is not installed")
-        ));
+        let err = missing_helper
+            .install("v0.6.0", &file, SHA256)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                unavailable(&err),
+                Some(PkexecUnavailable::HelperMissing { helper: missing }) if *missing == helper
+            ),
+            "{err:?}"
+        );
 
         std::fs::write(&helper, "exit 0\n").unwrap();
-        let missing_pkexec = PkexecInstaller::with_paths(dir.path().join("pkexec"), &helper);
-        assert!(matches!(
-            missing_pkexec.install("v0.6.0", &file, SHA256).await,
-            Err(InstallError::Unavailable(cause)) if cause.contains("is not installed")
-        ));
+        let pkexec = dir.path().join("pkexec");
+        let missing_pkexec = PkexecInstaller::with_paths(&pkexec, &helper);
+        let err = missing_pkexec
+            .install("v0.6.0", &file, SHA256)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                unavailable(&err),
+                Some(PkexecUnavailable::PkexecMissing { pkexec: missing, .. }) if *missing == pkexec
+            ),
+            "{err:?}"
+        );
+        // The I/O error starting it met is kept, below the reason.
+        let io = unavailable(&err)
+            .and_then(|reason| reason.source())
+            .and_then(|source| source.downcast_ref::<std::io::Error>());
+        assert!(
+            io.is_some_and(|io| io.kind() == ErrorKind::NotFound),
+            "{err:?}"
+        );
 
         // A `pkexec` that is there but not executable cannot be started.
         let unrunnable = dir.path().join("pkexec");
