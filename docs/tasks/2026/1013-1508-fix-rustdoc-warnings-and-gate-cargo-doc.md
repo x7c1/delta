@@ -71,6 +71,6 @@ has both (not the backend job). Record the target in
 
 ### Before merge (verified outside the check command)
 
-- [ ] Each formerly unresolved link either resolves to the item the sentence
+- [x] Each formerly unresolved link either resolves to the item the sentence
       means or the sentence was rewritten; none was fixed by only removing the
       link brackets (reviewed in the diff).
