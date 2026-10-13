@@ -47,7 +47,7 @@ const LOCAL_COMMAND_CAVEAT_PREFIX: &str = "<local-command-caveat>";
 
 /// Prefixes of a local command's captured output, written by Claude Code as
 /// `type: "user"` lines with NO `isMeta` flag. They are command machinery, not
-/// human turns, so attribution folds them to [`crate::Role::Meta`]. Detected by
+/// human turns, so attribution folds them to [`Role::Meta`](delta_model::Role::Meta). Detected by
 /// content because — unlike the bare command-name line — the prefix is a stable
 /// structural marker, so this catches the output even outside a recognized
 /// `promptId` group (e.g. a partial sync window that missed the caveat line).
@@ -448,7 +448,7 @@ fn scan_tool_result_text<'a>(
 /// `task_id` upgrade the live `PostToolUse(Agent)` hook records — needed when
 /// a `<task-notification>` body ships only `<task-id>`.
 ///
-/// Accepts every shape [`scan_tool_result_text`] does; anything else degrades
+/// Accepts every shape `scan_tool_result_text` does; anything else degrades
 /// to `None`. The id token is `[A-Za-z0-9_-]+`; the first `agentId: `
 /// occurrence wins.
 pub fn agent_id_from_tool_result_content(content: &serde_json::Value) -> Option<&str> {

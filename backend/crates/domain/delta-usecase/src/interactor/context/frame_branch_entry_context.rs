@@ -11,7 +11,7 @@ use delta_model::ThreadId;
 /// Isolated so the exact wording is easy to tune; affects only the model-facing
 /// `additionalContext`, never an on-screen message or stored field.
 ///
-/// [`frame_locator_context`]: super::frame_locator_context
+/// [`frame_locator_context`]: fn@super::frame_locator_context
 pub(in crate::interactor) fn frame_branch_entry_context(
     locator_frame: &str,
     thread: ThreadId,

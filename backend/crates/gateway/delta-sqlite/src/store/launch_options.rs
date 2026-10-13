@@ -11,7 +11,7 @@ use super::SqliteStore;
 
 /// Map a `launch_option` row, in `LAUNCH_OPTION_COLS` order. Every column maps
 /// directly to its domain field (no fallible status/enum parse), so this mirrors
-/// [`map_session`] and returns the raw `rusqlite::Result`.
+/// `sessions::map_session` and returns the raw `rusqlite::Result`.
 fn launch_option_from_row(row: &Row<'_>) -> rusqlite::Result<LaunchOption> {
     // `provider` is a persisted enum token (`'claude'`/`'codex'`); parse it into
     // the domain variant, surfacing an unknown token as a column-conversion

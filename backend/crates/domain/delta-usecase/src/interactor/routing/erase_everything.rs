@@ -45,7 +45,7 @@ where
     ///    Delta created for it applies unchanged: a dirty worktree and an
     ///    unmerged branch are kept, and so is a branch Delta did not create.
     /// 4. Every directory left under the worktree base is removed through
-    ///    [`Self::remove_worktree_dir`] without `force`: a clean worktree git
+    ///    `InteractorCore::remove_worktree_dir` without `force`: a clean worktree git
     ///    knows goes (with its trust entry), a dirty or unregistered one is
     ///    kept. Their branches are never touched, and a worktree a removed
     ///    session already kept is not reported twice. The worktree base itself is

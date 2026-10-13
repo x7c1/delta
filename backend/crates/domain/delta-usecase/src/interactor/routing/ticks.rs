@@ -98,7 +98,7 @@ where
     /// mailbox orders its ingestion. A session with no live pane no-ops.
     ///
     /// Each session announces its *own* ingest as it happens, from inside its
-    /// actor (see [`SessionContext::sync_tick`]), so a session whose reply
+    /// actor (see `SessionContext::sync_tick`), so a session whose reply
     /// misses `bound` does not delay any other session's
     /// [`SessionEvent::TranscriptUpdated`]. What is returned here is the
     /// batch itself, for callers that inspect it: each session that ingested
@@ -110,9 +110,7 @@ where
     /// seam, so a caller that drains the seam must not broadcast them again.
     ///
     /// `bound` caps how long the fan-out waits on the actors; see
-    /// [`Self::collect_tick_replies`].
-    ///
-    /// [`SessionContext::sync_tick`]: crate::interactor::session_actor::actor::SessionContext::sync_tick
+    /// `Self::collect_tick_replies`.
     pub async fn poll_transcript(
         &self,
         bound: Duration,
@@ -148,7 +146,7 @@ where
     /// `now` is injected (rather than read here) so the dispatch is
     /// deterministic under test: the server loop passes `Instant::now()`,
     /// while tests advance a controlled instant. `bound` caps how long the
-    /// fan-out waits on the actors; see [`Self::collect_tick_replies`].
+    /// fan-out waits on the actors; see `Self::collect_tick_replies`.
     pub async fn dispatch_ready_resumes(
         &self,
         now: Instant,
@@ -179,14 +177,12 @@ where
     /// a session that cannot accept input; the next send then resumes it. Both
     /// checks ride this one
     /// tick rather than each owning a timer — see
-    /// [`SessionContext::reap_tick`].
+    /// `SessionContext::reap_tick`.
     ///
     /// `now` is injected so the watchdog is deterministic under test; the
     /// server owns the periodic tick that calls this and broadcasts the
     /// result. `bound` caps how long the fan-out waits on the actors; see
-    /// [`Self::collect_tick_replies`].
-    ///
-    /// [`SessionContext::reap_tick`]: crate::interactor::session_actor::actor::SessionContext::reap_tick
+    /// `Self::collect_tick_replies`.
     pub async fn reap_stale_spawns(
         &self,
         now: Instant,
@@ -204,7 +200,7 @@ where
     /// Give up on every dispatched send whose `UserPromptSubmit` echo — and
     /// every other signal — never arrived before its deadline (the echo
     /// watchdog sweep). See the
-    /// [`echo_deadline`](crate::interactor::echo_deadline) module for why a
+    /// `interactor::echo_deadline` module for why a
     /// time-driven input is the only thing that can recover this class.
     ///
     /// The owning actor retries such a send once (preceded by an `Escape` into
@@ -215,7 +211,7 @@ where
     /// produced, for the caller to broadcast. `now` is
     /// injected so the sweep is deterministic under test; the server owns the
     /// periodic tick that calls this. `bound` caps how long the fan-out waits
-    /// on the actors; see [`Self::collect_tick_replies`].
+    /// on the actors; see `Self::collect_tick_replies`.
     pub async fn sweep_echo_deadlines(
         &self,
         now: Instant,

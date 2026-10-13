@@ -24,7 +24,7 @@
 //! not configure the agent so much as switch its safety mechanisms off —
 //! Claude's `--dangerously-skip-permissions`, a Codex `danger-full-access`
 //! sandbox. Those stay perfectly registrable and selectable; what they may never
-//! be is *silent*, so [`Self::default_enabled`] cannot be set on one (the use
+//! be is *silent*, so [`LaunchOption::default_enabled`] cannot be set on one (the use
 //! case refuses the write) and the REST layer marks such a row so the UI can
 //! warn. Recognising them still needs the provider's vocabulary, so the
 //! predicate lives in the gateway adapters and reaches the use case through a

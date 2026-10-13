@@ -277,7 +277,7 @@ pub struct InteractorCore<T, X, S, W, G> {
     pub(in crate::interactor) launches_in_flight: std::sync::atomic::AtomicUsize,
 }
 
-/// The public entry point: wraps the shared [`InteractorCore`] and routes
+/// The public entry point: wraps the shared `InteractorCore` and routes
 /// per-session work to the session actors.
 ///
 /// Derefs to the core, so the pure read paths (listing, threads, messages,
@@ -454,7 +454,8 @@ where
         Self { core, sessions }
     }
 
-    /// Register the factory that lazily builds a provider's [`AgentAdapter`],
+    /// Register the factory that lazily builds a provider's
+    /// [`AgentAdapter`](crate::AgentAdapter),
     /// keyed by the provider it drives ([`AgentAdapterFactory::provider`]).
     ///
     /// The default constructor registers no factory, so a configuration that

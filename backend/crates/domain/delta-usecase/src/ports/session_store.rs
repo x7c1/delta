@@ -129,7 +129,7 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// already-active session.
     ///
     /// The row and everything hanging off it are KEPT — see
-    /// [`SessionStatus::Failed`](delta_model::SessionStatus::Failed).
+    /// [`SessionStatus::Failed`].
     async fn mark_session_failed(&self, id: &SessionId, reason: Option<&str>) -> Result<()>;
 
     /// Point a session at the transcript Claude Code moved it to, in any

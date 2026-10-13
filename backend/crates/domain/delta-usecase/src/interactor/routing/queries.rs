@@ -86,7 +86,7 @@ where
 
     /// Whether a session is currently open (driven by a live pane).
     ///
-    /// The `open` half of [`Self::listing_state_for`], for the callers that
+    /// The `open` half of `Self::listing_state_for`, for the callers that
     /// only ask that one question.
     pub async fn is_session_open(&self, id: &SessionId) -> bool {
         self.listing_state_for(id).await.open

@@ -287,6 +287,18 @@ jobs:
         run: cargo build --locked -p delta-desktop && cargo test --locked -p delta-desktop && cargo clippy --locked -p delta-desktop --all-targets -- -D warnings
         working-directory: backend
 
+      # Rustdoc over the whole workspace, private items included, with warnings
+      # denied (`make check` runs the same step as check-backend-doc;
+      # docs/guides/development/README.md says why one run suffices). It runs
+      # here rather than in the backend job because `--workspace` takes in the
+      # desktop shell, which needs the system libraries and the dist/ this job
+      # provides.
+      - name: Check the backend docs
+        run: cargo doc --locked --workspace --no-deps --document-private-items
+        working-directory: backend
+        env:
+          RUSTDOCFLAGS: -D warnings
+
       - name: Install Playwright browser
         run: pnpm --filter @delta/web exec playwright install --with-deps chromium
         working-directory: frontend

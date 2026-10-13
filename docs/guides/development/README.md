@@ -41,7 +41,7 @@ by both — see "Portability conventions" below.
 |----------|---------------|
 | Linux | `tmux`, `lsof`, `jq`, GNU `make`, `bash` — install via the system package manager (e.g. `apt install tmux lsof jq make`). |
 | macOS | `tmux` and `jq` via Homebrew (`brew install tmux jq`). `lsof`, `make` (GNU make 3.81), `awk`, `bash` 3.2, `date`, and `pkill` ship with the system. Installing the Xcode Command Line Tools (`xcode-select --install`) is the standard way to get `make`. |
-| Linux, desktop shell only | The system libraries Tauri v2 links against, needed only to build `delta-desktop` (`make desktop-dev`, `make desktop`, and `make check`'s `check-desktop-build`): on Debian/Ubuntu `apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf build-essential file`. macOS needs nothing beyond the Xcode Command Line Tools. |
+| Linux, desktop shell only | The system libraries Tauri v2 links against, needed only to build `delta-desktop` (`make desktop-dev`, `make desktop`, and `make check`'s `check-desktop-build` and `check-backend-doc`): on Debian/Ubuntu `apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf build-essential file`. macOS needs nothing beyond the Xcode Command Line Tools. |
 
 In addition, both platforms need the Rust toolchain (`cargo`) and pnpm (via
 `corepack enable`), plus the agent CLIs you plan to drive: an authenticated
@@ -78,7 +78,7 @@ regress:
 Quality gate — `make build`, `make test`, and `make lint` each cover both
 parts and stay fast, for the inner loop. `make check` is the pre-PR gate: it
 runs the whole thing for both parts at once (build, test, lint, the frontend
-typecheck, the generated-bindings freshness check, the vendored Codex schema's
+typecheck, the backend's rustdoc, the generated-bindings freshness check, the vendored Codex schema's
 stored form, the canary gate's, the re-vendor script's and the freshness
 check's own stubbed tests) **plus both Playwright suites**, so passing it means
 CI will pass. It needs tmux, because `make e2e-fake` drives the real backend
@@ -88,14 +88,27 @@ defined in terms of.
 `make check` is a dependency graph, not a script: each step is a target that
 depends only on what it needs (the backend tests, clippy and the freshness
 check on the backend build; the frontend typecheck, tests, lint and mock e2e
-on the frontend build; the fake-mode e2e on both builds; the script checks on
-nothing). Run it with `-j` to let independent steps overlap — the wall clock
+on the frontend build; the fake-mode e2e and the rustdoc check on both builds;
+the script checks on nothing). Run it with `-j` to let independent steps overlap — the wall clock
 then approaches CI's longest job instead of the sum of all steps:
 
 ```bash
 make -j4 check      # parallel; add -O to keep each step's output together
 make check          # serial, in the same dependency order
 ```
+
+The rustdoc check, `check-backend-doc`, runs
+`cargo doc --workspace --no-deps --document-private-items` with
+`RUSTDOCFLAGS="-D warnings"`. The crates are an application's internals, so
+their private items are documented too, and a link in a private item's doc
+that no longer resolves is wrong documentation. One run covers the plain
+`cargo doc` as well: rustdoc still reports a public item's doc that links to a
+private item (`rustdoc::private_intra_doc_links`) under
+`--document-private-items`, only with a different note — make the target
+reachable or stop linking to it.
+
+It needs the frontend build because `--workspace` takes in the desktop shell,
+which embeds the web app's `dist/`.
 
 The graph is spelled out above the `check` target in the `Makefile`. The two
 Playwright suites run side by side safely: each has its own ports and its own

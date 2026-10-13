@@ -31,7 +31,7 @@
 //! [`ClaudeCodePtyHookAdapter::ingest_transcript_lines`] are the entry points
 //! that feed Claude's lossy wire input (hook payloads, transcript lines) into
 //! the neutral [`AgentEvent`] projection on this session's [`events`] stream.
-//! The parsing lives in the [`ingest`] module. This phase wires the
+//! The parsing lives in the `ingest` module. This phase wires the
 //! **permission** projection (the `PermissionRequest` hook and its correlated
 //! `tool_result`) and the **turn-lifecycle** projection (the `UserPromptSubmit`
 //! echo, the `Stop` hook, and the `[Request interrupted by user…]` transcript
@@ -118,7 +118,7 @@ const INTERRUPT_KEY: &str = "Escape";
 #[derive(Debug, Clone)]
 pub struct ClaudeLaunchConfig {
     /// The program launched in each tmux session (`claude` by default). Used
-    /// verbatim as argv[0], so it may be a bare name resolved via `PATH` or an
+    /// verbatim as `argv[0]`, so it may be a bare name resolved via `PATH` or an
     /// absolute path — matching the core's `LaunchConfig::claude_bin`.
     pub claude_bin: String,
     /// Path to the Delta-owned session settings file passed via `--settings`.
@@ -213,7 +213,7 @@ impl<T: TmuxDriver> ClaudeCodePtyHookAdapter<T> {
     /// Ingest a Claude hook payload for `handle`'s session, projecting the
     /// [`AgentEvent`] it implies onto the session's [`events`] stream.
     ///
-    /// This is one half of the ingestion seam. Parsing lives in [`ingest`]; the
+    /// This is one half of the ingestion seam. Parsing lives in the `ingest` module; the
     /// adapter only mints the correlation id and tracks the open dialog. For an
     /// unknown session (the stream was never opened) this is a no-op.
     ///

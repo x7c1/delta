@@ -66,7 +66,7 @@ const GRANULAR_SAFETY_GATES: &[&str] = &["sandbox_approval", "rules"];
 ///
 /// `name` is a `thread/start` field and `value` its registry text, exactly as
 /// stored. The text is mapped to the JSON value the launch would actually send
-/// through [`thread_start_value`] — the same function `thread_start_params` uses
+/// through `thread_start_value` — the same function `thread_start_params` uses
 /// — so what is classified here is what the server would receive, not a second
 /// reading of the same string.
 pub fn is_dangerous_launch_option(name: &str, value: Option<&str>) -> bool {

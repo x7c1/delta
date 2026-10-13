@@ -62,8 +62,8 @@ pub trait AgentContentSource: Send + Sync + std::fmt::Debug {
     ///
     /// - `thread_id` is the delta thread the turn's messages land on: the
     ///   session's `main` thread for a plain turn, or the resolved branch child
-    ///   thread for a branch send (from
-    ///   [`resolve_branch_target`](crate::interactor::session_actor::actor::SessionContext)).
+    ///   thread for a branch send (resolved by the interactor's
+    ///   `resolve_branch_target`, which every provider's dispatch shares).
     /// - `semantic_parent` is the branched-from message stamped onto the branch
     ///   *root* user message (the turn's first message) — mirroring the `send`
     ///   row's own `semantic_parent` — so a Codex branch's content lives on the

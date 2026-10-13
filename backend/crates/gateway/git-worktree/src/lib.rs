@@ -9,7 +9,7 @@
 //!
 //! It also seeds Claude Code's per-directory workspace-trust flag in the user's
 //! config so a programmatic launch in a fresh directory is not blocked by the
-//! interactive trust dialog; see [`mod@trust`].
+//! interactive trust dialog; see the `trust` module.
 
 mod error;
 mod git;

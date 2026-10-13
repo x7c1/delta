@@ -21,7 +21,7 @@ pub const TASK_OUTPUT_TOOL_NAME: &str = "TaskOutput";
 const TERMINAL_TASK_STATUSES: [&str; 3] = ["completed", "failed", "killed"];
 
 /// Whether a task `<status>` value means the task has finished for good (see
-/// [`TERMINAL_TASK_STATUSES`]).
+/// `TERMINAL_TASK_STATUSES`).
 pub fn is_terminal_task_status(status: &str) -> bool {
     TERMINAL_TASK_STATUSES.contains(&status)
 }

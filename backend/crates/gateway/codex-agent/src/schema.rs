@@ -26,7 +26,7 @@ pub const V2_COMBINED_SCHEMA_RELATIVE_PATH: &str =
 /// carries the `ServerRequest` registry — the server → client request surface,
 /// including the `*RequestApproval` approval methods empirically confirmed to
 /// drive `turn/start` turns. It is the ground-truth reference the approval
-/// fan-out in [`crate::translate`] is reconciled against (see the vendor
+/// fan-out in `crate::translate` is reconciled against (see the vendor
 /// directory's `README.md` for why v2 alone is insufficient).
 pub const COMBINED_SERVER_REQUEST_SCHEMA_RELATIVE_PATH: &str =
     "vendor/app-server-schema/codex_app_server_protocol.schemas.json";

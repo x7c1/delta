@@ -74,9 +74,9 @@ where
     ///    runs (a no-op when there is nothing bound), then the still-`spawning`
     ///    row is cleaned up and reported like the other two, so such a card
     ///    cannot stay amber with nothing behind it. This is the one shape whose
-    ///    session may already hold ingested messages, in which case
-    ///    [`Self::clean_up_failed_spawn_row`] keeps the row as `failed` instead
-    ///    of deleting it — the report is the same, the data is not thrown away.
+    ///    session may already hold ingested messages, which survive because
+    ///    [`Self::cancel_unbound_launch`] marks the row `failed` rather than
+    ///    deleting it — the report is the same, the data is not thrown away.
     ///
     /// The teardown of a bound session is [`Self::tear_down_bound_session`],
     /// shared with the background tick that closes a session whose pane has

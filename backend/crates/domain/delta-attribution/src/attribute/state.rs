@@ -55,6 +55,9 @@ pub struct AttributionState {
     /// parent's own `TaskOutput` retrieval of the result, or the launching
     /// `tool_result` reporting the launch never started at all.
     /// `BTreeMap` keeps the seed-from-store ↔ fold round-trip deterministic.
+    ///
+    /// [`Effect::SubagentLaunched`]: crate::Effect::SubagentLaunched
+    /// [`Effect::SubagentCompleted`]: crate::Effect::SubagentCompleted
     pub launched_threads: BTreeMap<String, SubagentLaunch>,
     /// The `promptId`s of the slash/local-command groups seen in this fold. A
     /// local command (e.g. `/review-pr`) is recorded as several `type: "user"`
@@ -62,7 +65,7 @@ pub struct AttributionState {
     /// only one Claude flags `isMeta`), the bare command-name line, then the
     /// command's `<local-command-stdout>`/`<local-command-stderr>` output.
     /// Recording the caveat's `promptId` here lets the later same-`promptId`
-    /// lines be recognized as command machinery (folded to [`Role::Meta`]) and
+    /// lines be recognized as command machinery (folded to [`Role::Meta`](delta_model::Role::Meta)) and
     /// the command-name line, when the head outstanding send is itself a slash
     /// command, be resolved as a degenerate completed turn — a local command
     /// fires no `UserPromptSubmit` echo and no `Stop`, so without this its

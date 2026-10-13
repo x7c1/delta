@@ -3,7 +3,7 @@
 //! A session driven headlessly over a structured transport has no terminal to
 //! watch, so this is its window: the JSON-RPC frames Delta exchanged with the
 //! provider, time-ordered, streamed to the browser as JSON text frames (one
-//! [`WireCommsFrame`] each).
+//! [`WireCommsFrame`](delta_wire::WireCommsFrame) each).
 //!
 //! Deliberately its own route rather than a variant on `/ws`:
 //!

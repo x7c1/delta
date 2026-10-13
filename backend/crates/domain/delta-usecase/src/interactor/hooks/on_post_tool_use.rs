@@ -45,7 +45,8 @@ where
     ///
     /// For a BACKGROUND subagent (`run_in_background: true`) this hook fires
     /// immediately at launch — the call returned, the subagent did not — so it
-    /// must NOT finish the running entry. [`SessionRuntime::finish_foreground_subagent`]
+    /// must NOT finish the running entry.
+    /// [`SessionRuntime::finish_foreground_subagent`](crate::interactor::session_actor::runtime::SessionRuntime::finish_foreground_subagent)
     /// skips a background entry; the indicator is cleared later when its
     /// completion `<task-notification>` is folded. But the launch's `tool_result`
     /// DOES land here, and it carries the `agentId` Claude Code minted for the

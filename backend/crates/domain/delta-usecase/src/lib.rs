@@ -33,10 +33,10 @@ pub use agent::{
     AgentPermissionRequest, AgentProvider, AgentSessionHandle, AgentTokenUsage,
     ContentSourceRequest, ContextInjectionCapability, EventCapability, ForkCapability,
     InterruptCapability, LaunchCapability, LaunchOptionCardinality, LaunchOptionSpec,
-    LaunchOptionVocabulary, LaunchRequest, NullLaunchOptionVocabulary, PermissionCapability,
-    PtyHandle, ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionEndReason,
-    SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability, TerminalCapability,
-    TranscriptCapability, TurnStatus,
+    LaunchOptionVocabulary, LaunchRequest, NullContentSource, NullLaunchOptionVocabulary,
+    PermissionCapability, PtyHandle, ResumeCapability, ResumeRequest, SendReceipt, SendRequest,
+    SessionEndReason, SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability,
+    TerminalCapability, TranscriptCapability, TurnStatus,
 };
 pub use erase_report::EraseReport;
 pub use error::{Error, Result};
@@ -45,7 +45,11 @@ pub use interactor::{
     PendingPermission, PendingQuestion, PermissionDecision, PermissionWait, ReadoptionSummary,
     RunningSubagent, SessionLiveState, VSCODE_HANDLER_ID,
 };
-pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
+pub use launch_config::{
+    LaunchConfig, DEFAULT_SESSION_COMMAND, ECHO_DEADLINE, LAUNCH_PREP_DEADLINE,
+    PENDING_SPAWN_DEADLINE, PERMISSION_DECISION_DEADLINE, RESUME_READY_DEADLINE,
+    SLASH_COMMAND_ECHO_DEADLINE,
+};
 pub use pane_token::{PaneToken, PaneTokenMinter};
 pub use ports::{
     pane_for, AssetDownloadError, AssetDownloader, AsyncEventReceiver, AsyncEventSink,

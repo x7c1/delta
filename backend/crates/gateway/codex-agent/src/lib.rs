@@ -41,7 +41,7 @@
 //! frames arrive (`account/rateLimits/updated` names no thread, because the
 //! account is shared by every thread on the connection), and the adapter drains
 //! it — see [`AppServerConnection::take_unrouted`]. It is bounded
-//! ([`UNROUTED_CAPACITY`]) so a connection nobody drains cannot grow without
+//! (`UNROUTED_CAPACITY` frames) so a connection nobody drains cannot grow without
 //! limit; an overflowing frame is dropped with a log line rather than
 //! accumulating silently.
 //!
@@ -49,7 +49,7 @@
 //!
 //! Because this provider is headless — there is no terminal for a human to watch
 //! — every frame is also mirrored into a
-//! [`CommsLogSink`](delta_usecase::CommsLogSink) for the browser's comms-log
+//! [`CommsLogSink`] for the browser's comms-log
 //! inspector: outgoing frames and their responses here (see
 //! [`AppServerConnection::with_comms_log`]), server-pushed frames in the
 //! adapter's own receive path (which is where a provider thread id can be
@@ -98,11 +98,11 @@ use wire::{parse_incoming, Incoming, Notification, RequestId, ServerRequest};
 #[derive(Debug, Clone)]
 pub struct CodexLaunchConfig {
     /// The program launched to obtain an app-server (`codex` by default). Used
-    /// verbatim as argv[0], so it may be a bare name resolved via `PATH` or an
+    /// verbatim as `argv[0]`, so it may be a bare name resolved via `PATH` or an
     /// absolute path — matching the core's `LaunchConfig::claude_bin`. A test
     /// points this at the fake app-server binary.
     pub codex_bin: String,
-    /// Arguments after argv[0] (`["app-server"]` by default, so `codex_bin`
+    /// Arguments after `argv[0]` (`["app-server"]` by default, so `codex_bin`
     /// alone spawns the server). A test that points `codex_bin` at a fake
     /// clears this.
     pub args: Vec<String>,

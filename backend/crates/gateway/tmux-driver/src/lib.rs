@@ -1,4 +1,4 @@
-//! tmux-backed [`TmuxDriver`] implementation.
+//! tmux-backed [`TmuxDriver`](delta_usecase::TmuxDriver) implementation.
 //!
 //! [`Tmux`] manages Claude Code sessions by shelling out to `tmux`. It is
 //! stateless: every method takes the target session name (or pane) explicitly,

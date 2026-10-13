@@ -1,8 +1,8 @@
-//! SQLite-backed [`SessionStore`] implementation.
+//! SQLite-backed [`SessionStore`](delta_usecase::SessionStore) implementation.
 //!
 //! [`SqliteStore`] owns Delta's schema and persists the thread overlay: the
 //! session row, threads, the message cache, the send FIFO and permission
-//! history. The schema is defined by the migration ladder in [`migrations`] and
+//! history. The schema is defined by the migration ladder in the `migrations` module and
 //! brought up to date when the store is opened — a fresh database replays the
 //! whole ladder, an existing one only the steps above its stamped version.
 //!

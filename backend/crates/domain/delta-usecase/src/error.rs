@@ -1,7 +1,7 @@
 //! Use-case-level errors.
 //!
 //! Each capability trait reports failures through this single error type. The
-//! gateway crates define their own errors and convert into [`Error`] when they
+//! gateway crates define their own errors and convert into [`enum@Error`] when they
 //! cross the trait boundary, keeping the dependency direction intact.
 
 use thiserror::Error;

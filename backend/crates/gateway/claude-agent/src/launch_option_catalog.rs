@@ -42,7 +42,7 @@ use delta_usecase::{AgentProvider, LaunchOptionPreset};
 /// copy and break every session started with it, silently.
 ///
 /// [`CLAUDE_CAPABILITIES`]: super::CLAUDE_CAPABILITIES
-/// [`launch_option_cardinality`]: super::launch_option_cardinality
+/// [`launch_option_cardinality`]: fn@super::launch_option_cardinality
 pub const CLAUDE_LAUNCH_OPTION_CATALOG: &[LaunchOptionPreset] = &[
     LaunchOptionPreset {
         key: "claude:model-opus",

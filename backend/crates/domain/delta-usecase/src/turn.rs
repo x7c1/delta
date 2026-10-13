@@ -230,7 +230,7 @@ pub enum TurnInput {
     /// settles the send as delivered instead of requeueing it — re-typing
     /// would run the command a second time — and the runtime measures it
     /// against a much shorter wait
-    /// ([`SLASH_COMMAND_ECHO_DEADLINE`](crate::interactor::session_actor::runtime::SLASH_COMMAND_ECHO_DEADLINE)).
+    /// ([`SLASH_COMMAND_ECHO_DEADLINE`](crate::SLASH_COMMAND_ECHO_DEADLINE)).
     /// A slash command that is really a prompt (a skill, a custom command)
     /// echoes within seconds and so never reaches it. If its
     /// `UserPromptSubmit` does arrive after the settle, the session is already

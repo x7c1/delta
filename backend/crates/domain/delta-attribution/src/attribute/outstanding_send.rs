@@ -7,7 +7,8 @@ use delta_model::{MessageUuid, Send, ThreadId};
 /// and the text the echo is compared against.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutstandingSend {
-    /// The send row id, echoed back in [`Effect::SendMatched`].
+    /// The send row id, echoed back in
+    /// [`Effect::SendMatched`](crate::Effect::SendMatched).
     pub id: i64,
     /// The thread this send is attributed to.
     pub thread_id: ThreadId,

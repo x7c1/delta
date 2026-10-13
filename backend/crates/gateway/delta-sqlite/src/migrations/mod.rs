@@ -103,7 +103,7 @@ use crate::error::{Error, Result};
 /// newer binary and is refused, because the ladder only runs forward.
 ///
 /// Bump this in the same change that appends a step, and never on its own —
-/// [`validate`] fails the build's test suite if the two disagree in either
+/// `validate` fails the build's test suite if the two disagree in either
 /// direction.
 pub const SCHEMA_VERSION: u32 = 10;
 

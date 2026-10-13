@@ -131,7 +131,7 @@ impl AppState {
     /// sweep returning restart-orphaned `dispatched` rows to `queued`) runs
     /// against the freshly-opened store before the state is handed out, and
     /// so does the re-adoption of the sessions whose panes survived the
-    /// restart ([`Self::readopt_surviving_sessions`]).
+    /// restart (`Self::readopt_surviving_sessions`).
     pub async fn build(config: &Config) -> anyhow::Result<Self> {
         // The comms log is created here, before the composition root wires the
         // adapters, because it is the one gateway BOTH sides need: the adapters
@@ -298,8 +298,8 @@ impl AppState {
         &self.release_update
     }
 
-    /// Spawn the background release check: once [`RELEASE_CHECK_FIRST_DELAY`]
-    /// after startup, then every [`RELEASE_CHECK_INTERVAL`].
+    /// Spawn the background release check: once `RELEASE_CHECK_FIRST_DELAY`
+    /// after startup, then every `RELEASE_CHECK_INTERVAL`.
     ///
     /// `None` when the check is turned off, so nothing is spawned and nothing
     /// is ever asked. A failed check is logged by the check itself and keeps
@@ -344,7 +344,7 @@ impl AppState {
     }
 
     /// The per-run bearer token every browser request must present. Read by
-    /// [`crate::auth_guard`] to authorize a request, and by the integration
+    /// `crate::auth_guard` to authorize a request, and by the integration
     /// tests to attach a valid token to the requests they drive through the
     /// router.
     pub fn token(&self) -> &str {
@@ -352,7 +352,7 @@ impl AppState {
     }
 
     /// The hook secret every `/hooks/*` request must present as an `?hs=`
-    /// query parameter. Read by [`crate::hook_auth_guard`] to authorize a hook
+    /// query parameter. Read by `crate::hook_auth_guard` to authorize a hook
     /// callback, and by the integration tests to attach a valid secret to the
     /// hook requests they drive through the router.
     pub fn hook_secret(&self) -> &str {
@@ -494,7 +494,7 @@ impl AppState {
 
     /// Spawn the continuous transcript tail.
     ///
-    /// Every [`TRANSCRIPT_POLL_INTERVAL`], poll every registered session's
+    /// Every `TRANSCRIPT_POLL_INTERVAL`, poll every registered session's
     /// transcript for newly-written lines. This catches the assistant reply that
     /// Claude Code flushes to the JSONL *after* the `Stop` hook fires, which the
     /// hook sync misses.
@@ -510,8 +510,8 @@ impl AppState {
     ///
     /// Every fan-out is bounded, so an actor that stops answering cannot stall
     /// the loop; the use case logs the session and stage it dropped. The poll
-    /// waits [`TRANSCRIPT_POLL_INTERVAL`] and the three sweeps below wait
-    /// [`SWEEP_TICK_BOUND`] — they type into panes, and a skipped reply loses
+    /// waits `TRANSCRIPT_POLL_INTERVAL` and the three sweeps below wait
+    /// `SWEEP_TICK_BOUND` — they type into panes, and a skipped reply loses
     /// their events outright rather than just a return value (see that
     /// constant). A tick that still overruns the interval is logged with its
     /// per-stage durations.

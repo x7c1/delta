@@ -5,7 +5,7 @@
 //! `interrupt` (which sends `turn/interrupt` on the provider's wire) but keeps
 //! the open agent — and therefore its event pump — alive, so the provider's
 //! `turn/completed{interrupted}` can arrive and settle the turn. That settle is
-//! what emits [`SessionEvent::TurnInterrupted`] on the async seam; there is no
+//! what emits [`SessionEvent::TurnInterrupted`](crate::SessionEvent::TurnInterrupted) on the async seam; there is no
 //! synchronous event to return here.
 //!
 //! Runs inside the session's actor, so an interrupt is ordered against the
