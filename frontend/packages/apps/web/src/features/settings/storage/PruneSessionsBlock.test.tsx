@@ -122,7 +122,7 @@ describe('PruneSessionsBlock', () => {
     expect(screen.queryByTestId('storage-prune-confirm')).toBeNull();
   });
 
-  it('cancelling the confirmation removes nothing', async () => {
+  it('cancelling the confirmation removes nothing and gives the focus back to Remove…', async () => {
     previewAnswering(1);
     let posts = 0;
     server.use(
@@ -138,6 +138,13 @@ describe('PruneSessionsBlock', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(screen.queryByTestId('storage-prune-confirm')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Remove…' })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove…' }));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Cancel' }), { key: 'Escape' });
+
+    expect(screen.queryByTestId('storage-prune-confirm')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Remove…' })).toHaveFocus();
     expect(posts).toBe(0);
   });
 

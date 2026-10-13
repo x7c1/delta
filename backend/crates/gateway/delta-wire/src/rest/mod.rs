@@ -101,6 +101,8 @@ mod storage_response;
 pub use storage_response::WireStorageResponse;
 mod storage_worktree;
 pub use storage_worktree::WireStorageWorktree;
+mod storage_worktree_branch;
+pub use storage_worktree_branch::WireStorageWorktreeBranch;
 mod storage_worktrees_response;
 pub use storage_worktrees_response::WireStorageWorktreesResponse;
 mod threads_response;

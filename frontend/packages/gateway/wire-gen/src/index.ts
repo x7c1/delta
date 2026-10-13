@@ -87,6 +87,7 @@ export type { UpdateOffer } from './generated/UpdateOffer';
 export type { StorageFile } from './generated/StorageFile';
 export type { StorageResponse } from './generated/StorageResponse';
 export type { StorageWorktree } from './generated/StorageWorktree';
+export type { StorageWorktreeBranch } from './generated/StorageWorktreeBranch';
 export type { StorageWorktreesResponse } from './generated/StorageWorktreesResponse';
 export type { RemoveWorktreeRequest } from './generated/RemoveWorktreeRequest';
 export type { DeleteSnapshotRequest } from './generated/DeleteSnapshotRequest';

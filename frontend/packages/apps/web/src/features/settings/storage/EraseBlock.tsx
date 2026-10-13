@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ApiError,
   useEraseEverythingMutation,
   useStorageWorktreesQuery,
 } from '@delta/api-client';
-import type { StorageWorktree } from '@delta/wire-gen';
+import type { StorageWorktree, StorageWorktreeBranch } from '@delta/wire-gen';
 import { Button } from '@delta/ui-kit';
 import { useApiClient } from '../../../data/apiContext';
 import { ConfirmPanel } from './ConfirmPanel';
@@ -15,12 +15,54 @@ import { baseName, errorMessage } from './StorageParts';
 const CONFIRM_WORD = 'erase';
 
 /**
- * The worktrees erasing will keep: those with changes, and those git no longer
- * knows, whose contents Delta cannot vouch for. A clean one goes, whether a
+ * Whether erasing keeps `worktree`: it has changes, or git no longer knows
+ * it, so Delta cannot vouch for its contents. A clean one goes, whether a
  * session works in it or not.
  */
-function keptWorktrees(worktrees: StorageWorktree[]): StorageWorktree[] {
-  return worktrees.filter((worktree) => worktree.dirty === true || worktree.repo_root === null);
+function keepsWorktree(worktree: StorageWorktree): boolean {
+  return worktree.dirty === true || worktree.repo_root === null;
+}
+
+/** A branch erasing leaves in place, with why, after "because". */
+interface KeptBranch {
+  name: string;
+  worktree: string;
+  reason: string;
+}
+
+/**
+ * Why erasing keeps `branch` of `worktree` — the one checked out in it, or
+ * the one Delta cut for its session before the session switched away from
+ * it — or `null` when it deletes it. Erasing removes each session as
+ * removing it alone would: a branch goes only when it is the one Delta
+ * created for a session it still lists, its worktree goes, and git counts it
+ * as merged.
+ */
+function branchKeepReason(
+  worktree: StorageWorktree,
+  branch: StorageWorktreeBranch,
+): string | null {
+  if (keepsWorktree(worktree)) {
+    return 'its worktree has changes and stays';
+  }
+  if (!branch.created_for_session) {
+    return worktree.in_use
+      ? 'Delta did not create it'
+      : 'no session Delta lists owns it';
+  }
+  return branch.merged === false ? 'it is not merged' : null;
+}
+
+/** The branches erasing will keep, from the Worktrees block's own listing. */
+function keptBranches(worktrees: StorageWorktree[]): KeptBranch[] {
+  return worktrees.flatMap((worktree) =>
+    [worktree.branch, worktree.launch_branch].flatMap((branch) => {
+      const reason = branch === null ? null : branchKeepReason(worktree, branch);
+      return branch === null || reason === null
+        ? []
+        : [{ name: branch.name, worktree: worktree.path, reason }];
+    }),
+  );
 }
 
 /** The line a failed erase shows. */
@@ -36,7 +78,8 @@ function failureText(error: unknown): string {
  * on this machine that holds no work, then stop Delta.
  *
  * Before the user confirms it says what will stay — the worktrees
- * {@link keptWorktrees} picks, by directory name, from the Worktrees block's
+ * {@link keepsWorktree} picks, by directory name, and the branches
+ * {@link keptBranches} picks, each with why, both from the Worktrees block's
  * own query — and the confirmation needs the word `erase` typed. On success
  * the whole app is replaced by the report (see {@link useShowErased}).
  * `active` gates the worktree fetch to while the Storage category is shown.
@@ -48,7 +91,10 @@ export function EraseBlock({ active }: { active: boolean }) {
   const erase = useEraseEverythingMutation(client, showErased);
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState('');
-  const kept = keptWorktrees(worktreesQuery.data?.worktrees ?? []);
+  const openerRef = useRef<HTMLDivElement>(null);
+  const worktrees = worktreesQuery.data?.worktrees ?? [];
+  const kept = worktrees.filter(keepsWorktree);
+  const branches = keptBranches(worktrees);
 
   const cancel = () => {
     setConfirming(false);
@@ -66,36 +112,59 @@ export function EraseBlock({ active }: { active: boolean }) {
         <p className="text-caption text-fg-muted">
           Delta closes every session, removes its worktrees and branches that
           hold no work, deletes its own files, and stops. What stays:
-          worktrees with changes and branches that are not merged, the app
-          itself, and Claude Code&apos;s and Codex&apos;s own files under{' '}
+          worktrees with changes, branches that are not merged or that Delta
+          did not create, the app itself, and Claude Code&apos;s and
+          Codex&apos;s own files under{' '}
           <span className="font-mono">~/.claude</span> and{' '}
           <span className="font-mono">~/.codex</span>, which Delta does not own.
         </p>
       </div>
-      {/* The desktop app quits as soon as the erase is done, so this list is
-          the only place its user learns what stays: say when it is not known
-          yet rather than show nothing. */}
+      {/* The desktop app quits as soon as the erase is done, so these lists
+          are the only place its user learns what stays: say when it is not
+          known yet rather than show nothing. */}
       {worktreesQuery.isPending ? (
-        <p className="text-caption text-fg-muted">Checking which worktrees will stay…</p>
+        <p className="text-caption text-fg-muted">Checking which worktrees and branches will stay…</p>
       ) : worktreesQuery.isError ? (
         <p className="text-caption text-danger" data-testid="storage-erase-kept-error">
-          Could not list the worktrees that will stay: {errorMessage(worktreesQuery.error)}
-        </p>
-      ) : kept.length === 0 ? (
-        <p className="text-caption text-fg-muted" data-testid="storage-erase-kept">
-          No worktree will stay: none has changes.
+          Could not list the worktrees and branches that will stay:{' '}
+          {errorMessage(worktreesQuery.error)}
         </p>
       ) : (
-        <div className="text-caption text-fg-muted" data-testid="storage-erase-kept">
-          <p>These worktrees may hold work and will stay:</p>
-          <ul className="flex flex-col gap-0.5">
-            {kept.map((worktree) => (
-              <li key={worktree.path} className="font-mono text-code" title={worktree.path}>
-                {baseName(worktree.path)}
-              </li>
-            ))}
-          </ul>
-        </div>
+        <>
+          {kept.length === 0 ? (
+            <p className="text-caption text-fg-muted" data-testid="storage-erase-kept">
+              No worktree will stay: none has changes.
+            </p>
+          ) : (
+            <div className="text-caption text-fg-muted" data-testid="storage-erase-kept">
+              <p>These worktrees may hold work and will stay:</p>
+              <ul className="flex flex-col gap-0.5">
+                {kept.map((worktree) => (
+                  <li key={worktree.path} className="font-mono text-code" title={worktree.path}>
+                    {baseName(worktree.path)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {branches.length === 0 ? (
+            <p className="text-caption text-fg-muted" data-testid="storage-erase-kept-branches">
+              No branch of Delta&apos;s worktrees will stay.
+            </p>
+          ) : (
+            <div className="text-caption text-fg-muted" data-testid="storage-erase-kept-branches">
+              <p>These branches will stay:</p>
+              <ul className="flex flex-col gap-0.5">
+                {branches.map((branch) => (
+                  <li key={`${branch.worktree}:${branch.name}`} title={branch.worktree}>
+                    <span className="font-mono text-code text-fg">{branch.name}</span>, because{' '}
+                    {branch.reason}.
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
       )}
       {confirming ? (
         <ConfirmPanel
@@ -106,10 +175,11 @@ export function EraseBlock({ active }: { active: boolean }) {
           pending={erase.isPending}
           error={erase.isError ? failureText(erase.error) : null}
           testId="storage-erase-confirm"
+          returnFocusTo={openerRef}
         >
           <p>
             Every session&apos;s conversation in Delta goes for good, and Delta
-            stops. Worktrees and branches holding work stay on disk.
+            stops. The worktrees and branches listed above stay on disk.
           </p>
           <label className="flex flex-col gap-1 text-fg-muted">
             <span>
@@ -127,7 +197,7 @@ export function EraseBlock({ active }: { active: boolean }) {
           </label>
         </ConfirmPanel>
       ) : (
-        <div>
+        <div ref={openerRef}>
           <Button size="sm" onClick={() => setConfirming(true)}>
             Erase everything…
           </Button>

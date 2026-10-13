@@ -225,6 +225,17 @@ pub trait GitWorktree: Send + Sync {
         branch: &str,
     ) -> Result<BranchDeletion>;
 
+    /// Whether local branch `branch` in the repository at `repo_root` is
+    /// merged, as [`Self::delete_branch_if_merged`] judges it — without
+    /// deleting anything.
+    ///
+    /// The same test `git branch -d` makes: `branch` is an ancestor of its
+    /// upstream when it has one that resolves, of `HEAD` otherwise. `None`
+    /// when the branch does not exist, as [`BranchDeletion::Absent`] says it.
+    /// Any other failure — the repository is gone, `git` is missing — is an
+    /// error.
+    async fn is_branch_merged(&self, repo_root: &str, branch: &str) -> Result<Option<bool>>;
+
     /// Drop the administrative entries of worktrees whose directories no
     /// longer exist: `git -C <repo_root> worktree prune`.
     async fn prune_worktrees(&self, repo_root: &str) -> Result<()>;
@@ -331,6 +342,10 @@ impl GitWorktree for Box<dyn GitWorktree> {
         branch: &str,
     ) -> Result<BranchDeletion> {
         (**self).delete_branch_if_merged(repo_root, branch).await
+    }
+
+    async fn is_branch_merged(&self, repo_root: &str, branch: &str) -> Result<Option<bool>> {
+        (**self).is_branch_merged(repo_root, branch).await
     }
 
     async fn prune_worktrees(&self, repo_root: &str) -> Result<()> {

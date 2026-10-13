@@ -24,6 +24,7 @@ test('the Storage category shows the data directory the server reports', async (
     section.getByTitle(MOCK_DATA_DIR, { exact: true }),
   ).toBeVisible();
   await expect(section.getByTestId('storage-database')).toContainText('3.1 MB');
+  await expect(section.getByTestId('storage-updates')).toContainText('9.0 MB');
 });
 
 /** Open Settings → Storage and return the section. */
@@ -98,6 +99,23 @@ test('a migration snapshot is deleted after a confirmation naming it', async ({ 
   await expect(snapshots.getByTitle(second.path, { exact: true })).toBeVisible();
 });
 
+test('Escape cancels an open confirmation first, then closes Settings', async ({ page }) => {
+  const section = await openStorage(page);
+  const snapshots = section.getByTestId('storage-snapshots');
+  const opener = snapshots.getByRole('button', { name: 'Delete snapshot delta.db.bak-v3' });
+  await opener.click();
+  const confirm = snapshots.getByTestId('storage-snapshot-confirm');
+  await expect(confirm).toBeVisible();
+
+  await page.keyboard.press('Escape');
+
+  await expect(confirm).toHaveCount(0);
+  await expect(section).toBeVisible();
+  await expect(opener).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
 test('erasing everything asks for the word, then leaves only the report', async ({ page }) => {
   const section = await openStorage(page);
   const block = section.getByTestId('storage-erase');
@@ -109,6 +127,9 @@ test('erasing everything asks for the word, then leaves only the report', async 
       worktree.path.slice(worktree.path.lastIndexOf('/') + 1),
     );
   }
+  await expect(block.getByTestId('storage-erase-kept-branches')).toContainText(
+    'delta-session-1, because it is not merged.',
+  );
 
   await block.getByRole('button', { name: 'Erase everything…' }).click();
   const confirm = block.getByRole('button', { name: 'Erase everything and stop Delta' });

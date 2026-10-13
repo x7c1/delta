@@ -13,12 +13,17 @@ pub(super) fn under_base(name: &str) -> String {
 
 /// Register a session that works in `cwd`.
 pub(super) async fn session_in(ix: &TestInteractor, id: &str, cwd: &str) {
+    session_on(ix, id, cwd, None).await;
+}
+
+/// Register a session that works in `cwd`, launched on `branch`.
+pub(super) async fn session_on(ix: &TestInteractor, id: &str, cwd: &str, branch: Option<&str>) {
     ix.store()
         .register_session(NewSession {
             id: id.into(),
             cwd: cwd.into(),
             transcript_path: format!("/transcripts/{id}.jsonl"),
-            branch_at_launch: None,
+            branch_at_launch: branch.map(str::to_owned),
             repo_root: Some(REPO_ROOT.into()),
             repository_display_name: None,
         })

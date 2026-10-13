@@ -453,6 +453,16 @@ impl GitWorktree for Git {
             .map_err(delta_usecase::Error::from)
     }
 
+    async fn is_branch_merged(
+        &self,
+        repo_root: &str,
+        branch: &str,
+    ) -> std::result::Result<Option<bool>, delta_usecase::Error> {
+        self.branch_is_merged(repo_root, branch)
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
     async fn prune_worktrees(
         &self,
         repo_root: &str,

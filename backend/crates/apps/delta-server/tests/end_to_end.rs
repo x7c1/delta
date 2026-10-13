@@ -285,6 +285,14 @@ impl GitWorktree for NoopGitWorktree {
         Ok(BranchDeletion::KeptUnmerged)
     }
 
+    async fn is_branch_merged(
+        &self,
+        _repo_root: &str,
+        _branch: &str,
+    ) -> delta_usecase::Result<Option<bool>> {
+        Ok(Some(false))
+    }
+
     async fn prune_worktrees(&self, _repo_root: &str) -> delta_usecase::Result<()> {
         Ok(())
     }

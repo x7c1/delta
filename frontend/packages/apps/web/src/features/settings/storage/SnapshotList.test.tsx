@@ -52,7 +52,7 @@ describe('SnapshotList', () => {
     expect(screen.getByTitle(second.path, { exact: true })).toBeInTheDocument();
   });
 
-  it('cancelling puts the Delete control back and deletes nothing', async () => {
+  it('cancelling puts the Delete control back, with the focus, and deletes nothing', async () => {
     renderWithApi(<StorageSection active />);
     const snapshots = await screen.findByTestId('storage-snapshots');
 
@@ -62,9 +62,17 @@ describe('SnapshotList', () => {
     fireEvent.click(within(snapshots).getByRole('button', { name: 'Cancel' }));
 
     expect(within(snapshots).queryByTestId('storage-snapshot-confirm')).toBeNull();
-    expect(
-      within(snapshots).getByRole('button', { name: 'Delete snapshot delta.db.bak-v3' }),
-    ).toBeInTheDocument();
+    const opener = () =>
+      within(snapshots).getByRole('button', { name: 'Delete snapshot delta.db.bak-v3' });
+    expect(opener()).toHaveFocus();
+
+    fireEvent.click(opener());
+    fireEvent.keyDown(within(snapshots).getByRole('button', { name: 'Cancel' }), {
+      key: 'Escape',
+    });
+
+    expect(within(snapshots).queryByTestId('storage-snapshot-confirm')).toBeNull();
+    expect(opener()).toHaveFocus();
     expect(screen.getByTitle(first.path, { exact: true })).toBeInTheDocument();
   });
 });

@@ -751,6 +751,8 @@ length as `stat` reports it, not the disk blocks `du` counts. `database.bytes`
 sums `delta.db`, `delta.db-wal` and `delta.db-shm`, whichever exist, and leaves
 out the snapshots. `snapshots` lists the migration runner's `delta.db.bak-v<N>`
 copies beside the database in ascending `<N>`, and is empty when there are none.
+`updates` is the `updates/` directory where the desktop app keeps the newer
+release it downloaded, with `bytes` summing every file under it.
 A file that does not exist counts as zero bytes and is not an error. The
 response never carries the hook secret or the auth token. Read-only: nothing
 here deletes or moves a file. The snapshots are kept until the user deletes
@@ -773,6 +775,10 @@ them with [`DELETE /api/storage/snapshots`](#delete-apistoragesnapshots).
         "bytes": 1048576
       }
     ],
+    "updates": {
+      "path": "/home/u/.local/share/io.github.x7c1.delta/updates",
+      "bytes": 9437184
+    },
     "hook_state": "/home/u/.local/share/io.github.x7c1.delta/delta-hook-state.json",
     "sessions_dir": "/home/u/.local/share/io.github.x7c1.delta/sessions",
     "session_settings": "/home/u/.local/share/io.github.x7c1.delta/settings/7878.json",
@@ -801,6 +807,24 @@ what Delta and git know of each:
   it or is gone, or it was never one).
 - `dirty` — whether `git status --porcelain` lists anything (modified, staged or
   untracked files), or `null` when git does not know the directory.
+- `branch` — the branch checked out in it, or `null` when git does not know the
+  directory or its `HEAD` is detached:
+  - `name` — the branch's short name.
+  - `created_for_session` — it is the `delta-<id>` branch Delta cut for session
+    `<id>`, which Delta still lists and which works in this directory: the only
+    kind of branch removing a session, or
+    [erasing everything](#post-apistorageerase), ever deletes. Any other branch
+    — one a session was started on, or one whose session is already removed —
+    is never deleted.
+  - `merged` — whether it is merged as `git branch -d` judges it (an ancestor of
+    its upstream, or of `HEAD` when it has none), so removing its session would
+    delete it. Given only when `created_for_session` is `true` and the worktree
+    is clean, `null` otherwise.
+- `launch_branch` — the `delta-<id>` branch Delta cut for the session that
+  created the directory, when that session, still listed, has since checked out
+  another branch there (so it is not `branch`) and the branch still exists;
+  `null` otherwise. Removing the session settles it as it would `branch`, so it
+  has the same fields, with `created_for_session` always `true`.
 
 The directories nothing works in are the leftovers: worktrees kept because they
 held work when their session was removed, or left by versions that did not
@@ -815,13 +839,25 @@ clean up. A worktree base that does not exist yet lists nothing.
         "path": "/home/u/.delta/worktrees/x7c1-delta-0198c0df-…",
         "in_use": false,
         "repo_root": "/home/u/src/delta",
-        "dirty": true
+        "dirty": true,
+        "branch": {
+          "name": "delta-0198c0df-…",
+          "created_for_session": false,
+          "merged": null
+        },
+        "launch_branch": null
       },
       {
         "path": "/home/u/.delta/worktrees/x7c1-delta-0198c0e0-…",
         "in_use": true,
         "repo_root": "/home/u/src/delta",
-        "dirty": false
+        "dirty": false,
+        "branch": {
+          "name": "delta-0198c0e0-…",
+          "created_for_session": true,
+          "merged": false
+        },
+        "launch_branch": null
       }
     ]
   }
@@ -896,7 +932,10 @@ In order:
    [`DELETE /api/sessions/{id}`](sessions.md#delete-apisessionsid) removes one: a
    clean worktree Delta created goes, one with uncommitted or untracked changes
    is kept; a `delta-<id>` branch is deleted when merged, and an unmerged one,
-   or a branch Delta did not create, is kept.
+   or a branch Delta did not create, is kept. Sessions that shared a worktree
+   are settled once all of them are removed, as
+   [the bulk removal](sessions.md#post-apisessionsprune) settles them, so the
+   first one's merged branch goes too.
 4. Every directory left under the worktree base is removed as
    [`DELETE /api/storage/worktrees`](#delete-apistorageworktrees) removes one
    without `force`: a clean worktree git knows goes, a dirty one or one git does

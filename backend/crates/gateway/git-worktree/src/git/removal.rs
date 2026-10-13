@@ -4,7 +4,7 @@
 
 use delta_usecase::{BranchDeletion, WorktreeRemoval};
 
-use super::{command_error, Git};
+use super::{command_error, trimmed_stdout, Git};
 use crate::error::Error;
 
 /// What `git worktree remove` (without `--force`) says when it refuses a
@@ -102,6 +102,52 @@ impl Git {
             Ok(BranchDeletion::KeptUnmerged)
         } else {
             Err(command_error("branch -d", &output))
+        }
+    }
+
+    /// Whether `branch` is merged by the test `git branch -d` makes: an
+    /// ancestor of its upstream when it has one that resolves, of `HEAD`
+    /// otherwise; `None` when there is no such branch, told apart up front
+    /// as [`Self::delete_merged_branch`] does. `merge-base --is-ancestor`
+    /// exits 1 for "not an ancestor"; any other non-zero exit is an error.
+    pub(super) async fn branch_is_merged(
+        &self,
+        repo_root: &str,
+        branch: &str,
+    ) -> std::result::Result<Option<bool>, Error> {
+        let local_ref = format!("refs/heads/{branch}");
+        let exists = self
+            .output(repo_root, &["show-ref", "--verify", "--quiet", &local_ref])
+            .await?
+            .status
+            .success();
+        if !exists {
+            return Ok(None);
+        }
+        // `<branch>@{upstream}` takes the short name; `refs/heads/...` would
+        // not resolve its upstream.
+        let upstream_spec = format!("{branch}@{{upstream}}");
+        let upstream = self
+            .output(
+                repo_root,
+                &["rev-parse", "--verify", "--quiet", &upstream_spec],
+            )
+            .await?;
+        let reference = if upstream.status.success() {
+            trimmed_stdout(&upstream)
+        } else {
+            "HEAD".to_owned()
+        };
+        let output = self
+            .output(
+                repo_root,
+                &["merge-base", "--is-ancestor", &local_ref, &reference],
+            )
+            .await?;
+        match output.status.code() {
+            Some(0) => Ok(Some(true)),
+            Some(1) => Ok(Some(false)),
+            _ => Err(command_error("merge-base --is-ancestor", &output)),
         }
     }
 }
@@ -258,6 +304,97 @@ mod tests {
             "git worktree list no longer shows it"
         );
         git_ok(&repo_root, &["show-ref", "--verify", "refs/heads/delta-s1"]).await;
+    }
+
+    #[tokio::test]
+    async fn is_branch_merged_compares_with_head_when_there_is_no_upstream() {
+        let (repo, worktrees) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (repo_root, wt_path) = repo_with_worktree(&repo, &worktrees, "delta-s1").await;
+        let git = Git::new(Vec::new());
+
+        assert_eq!(
+            git.is_branch_merged(&repo_root, "delta-s1").await.unwrap(),
+            Some(true),
+            "a branch with no commit of its own is merged"
+        );
+        git_ok(&wt_path, &["commit", "-q", "--allow-empty", "-m", "work"]).await;
+        assert_eq!(
+            git.is_branch_merged(&repo_root, "delta-s1").await.unwrap(),
+            Some(false),
+            "a branch ahead of HEAD is not"
+        );
+        git_ok(&repo_root, &["worktree", "remove", &wt_path]).await;
+        assert_eq!(
+            git.delete_branch_if_merged(&repo_root, "delta-s1")
+                .await
+                .unwrap(),
+            BranchDeletion::KeptUnmerged,
+            "which is what deleting it says"
+        );
+    }
+
+    #[tokio::test]
+    async fn is_branch_merged_compares_with_the_upstream_when_there_is_one() {
+        let (repo, worktrees) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (repo_root, wt_path) = repo_with_worktree(&repo, &worktrees, "delta-s1").await;
+        git_ok(&wt_path, &["commit", "-q", "--allow-empty", "-m", "work"]).await;
+        // An upstream that holds the branch's commit, while HEAD does not.
+        git_ok(&repo_root, &["branch", "upstream", "delta-s1"]).await;
+        git_ok(
+            &repo_root,
+            &["branch", "--set-upstream-to=upstream", "delta-s1"],
+        )
+        .await;
+        let git = Git::new(Vec::new());
+
+        assert_eq!(
+            git.is_branch_merged(&repo_root, "delta-s1").await.unwrap(),
+            Some(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn is_branch_merged_compares_with_head_once_the_upstream_is_gone() {
+        let (repo, worktrees) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (repo_root, wt_path) = repo_with_worktree(&repo, &worktrees, "delta-s1").await;
+        git_ok(&wt_path, &["commit", "-q", "--allow-empty", "-m", "work"]).await;
+        git_ok(&repo_root, &["branch", "upstream", "delta-s1"]).await;
+        git_ok(
+            &repo_root,
+            &["branch", "--set-upstream-to=upstream", "delta-s1"],
+        )
+        .await;
+        // The upstream is configured but no longer resolves, as after its
+        // remote branch was deleted and pruned.
+        git_ok(&repo_root, &["branch", "-D", "upstream"]).await;
+        let git = Git::new(Vec::new());
+
+        assert_eq!(
+            git.is_branch_merged(&repo_root, "delta-s1").await.unwrap(),
+            Some(false),
+            "a branch ahead of HEAD is not merged"
+        );
+        git_ok(&repo_root, &["worktree", "remove", &wt_path]).await;
+        assert_eq!(
+            git.delete_branch_if_merged(&repo_root, "delta-s1")
+                .await
+                .unwrap(),
+            BranchDeletion::KeptUnmerged,
+            "which is what deleting it says"
+        );
+    }
+
+    #[tokio::test]
+    async fn is_branch_merged_of_a_missing_branch_is_none() {
+        let repo = tempfile::tempdir().unwrap();
+        init_repo_with_commit(repo.path()).await;
+        let git = Git::new(Vec::new());
+
+        let result = git
+            .is_branch_merged(repo.path().to_str().unwrap(), "delta-gone")
+            .await;
+
+        assert_eq!(result.unwrap(), None);
     }
 
     #[tokio::test]

@@ -44,6 +44,10 @@ where
     ///    ([`Self::delete_session`]), so the rule on the worktree and branch
     ///    Delta created for it applies unchanged: a dirty worktree and an
     ///    unmerged branch are kept, and so is a branch Delta did not create.
+    ///    A session whose worktree was kept only because another session
+    ///    still worked in it is revisited once that one is removed too, so a
+    ///    worktree two sessions shared leaves no merged branch behind
+    ///    (`Self::remove_sessions`).
     /// 4. Every directory left under the worktree base is removed through
     ///    `InteractorCore::remove_worktree_dir` without `force`: a clean worktree git
     ///    knows goes (with its trust entry), a dirty or unregistered one is
