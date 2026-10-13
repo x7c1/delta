@@ -514,7 +514,8 @@ which leaves the download `ready`:
   release stating none), or not Delta at the requested version (on Linux, not
   `delta-desktop`; on macOS, a disk image that does not hold exactly one
   `Delta.app` of bundle identifier `io.github.x7c1.delta` at that version);
-  `error` is the installer's one-line reason. The server removed the
+  `error` is the installer's one-line reason, followed by the error it met,
+  when it has one. The server removed the
   file and `download` is `null` again, so the next step is
   [downloading the release again](#post-apilatest-releasedownload), which
   clears this state. There is no `manual`: a file that failed the
@@ -522,8 +523,10 @@ which leaves the download `ready`:
 - `{ "state": "failed", "version", "error", "manual" }` — the installer
   could not check or install the file for another reason (on Linux, GitHub
   out of reach or refusing the request, `dpkg` or `apt-get` failing; on
-  macOS, `hdiutil` or `ditto` failing, or the bundle not renamed into
-  place); `error` is the installer's one-line reason.
+  macOS, the file not copied to a private working directory to be checked,
+  `hdiutil` or `ditto` failing, the mounted disk image's contents not
+  listed, or the bundle not renamed into place); `error` is the
+  installer's one-line reason, followed by the error it met, when it has one.
 - `{ "state": "unavailable", "version", "error", "manual" }` — Delta
   cannot install updates itself on this machine. On Linux: `pkexec` or the
   helper is missing, no polkit authentication agent is running, or the user

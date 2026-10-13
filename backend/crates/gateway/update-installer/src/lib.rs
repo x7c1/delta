@@ -29,7 +29,9 @@
 //! A missing `pkexec` or helper is [`InstallError::Unavailable`] too, found
 //! before anything is run; a `pkexec` that is there but cannot be started is
 //! [`InstallError::Unrunnable`]. The app to restart into is the one the
-//! `.deb` installs, [`INSTALLED_APP_PATH`].
+//! `.deb` installs, [`INSTALLED_APP_PATH`]. The helper's reason reaches this
+//! crate only as a line of text, so [`InstallError::Rejected`] and
+//! [`InstallError::Failed`] carry it as their reason, with no source.
 //!
 //! # macOS
 //!
@@ -49,10 +51,14 @@
 //! | 2. this user may write to the bundle's directory (`access(2)`) | [`InstallError::Unavailable`] |
 //! | 3. the download, a regular file and not a symlink, is copied into a private working directory and the copy's sha256 checked against the digest it was downloaded with | [`InstallError::Rejected`]; the copy not written (the working directory full or out of reach): [`InstallError::Failed`] |
 //! | 4. the copy is mounted read-only and privately: `hdiutil attach -nobrowse -readonly -noautoopen -mountpoint <dir> <copy>` | missing `hdiutil`: [`InstallError::Unavailable`]; failing: [`InstallError::Failed`] |
-//! | 5. the image holds exactly one app at its root, a `Delta.app` whose `Info.plist` states `CFBundleIdentifier` `io.github.x7c1.delta` and `CFBundleShortVersionString` the requested version | [`InstallError::Rejected`] |
+//! | 5. the image holds exactly one app at its root, a `Delta.app` whose `Info.plist` states `CFBundleIdentifier` `io.github.x7c1.delta` and `CFBundleShortVersionString` the requested version | [`InstallError::Rejected`]; the image's root not listed: [`InstallError::Failed`] |
 //! | 6. that `Delta.app` is copied next to the running one, as `.delta-update-new`, with `ditto` (keeping symlinks, permissions and extended attributes, so the code signature holds) | [`InstallError::Failed`] |
 //! | 7. the image is detached (`hdiutil detach`), on every path once step 4 attached it | logged |
 //! | 8. the running bundle is renamed to `.delta-update-backup` next to it, and the new one to the bundle's name; if the second rename fails, the first is undone | [`InstallError::Failed`] |
+//!
+//! Where a step fails on an error value, [`InstallError::Rejected`] and
+//! [`InstallError::Failed`] keep it as their source, under a reason naming
+//! the step.
 //!
 //! The running app's files are never written to — overwriting a running
 //! binary in place breaks its signature and the kernel kills it — and it
@@ -77,8 +83,10 @@ use bundle_location::BundleLocation;
 mod disk_image_tools;
 use disk_image_tools::DiskImageTools;
 mod image_check;
+mod image_check_error;
 mod pkexec_installer;
 pub use pkexec_installer::PkexecInstaller;
+mod swap_error;
 mod swap_paths;
 mod system_disk_image_tools;
 use system_disk_image_tools::SystemDiskImageTools;

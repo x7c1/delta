@@ -772,7 +772,7 @@ async fn a_failed_install_reports_the_helpers_reason_and_the_manual_command() {
     let installer = GatedInstaller::new();
     let state = ready_state(&installer).await;
     post(&state, "/api/latest-release/install").await;
-    installer.finish(Err(InstallError::Failed(reason.into())));
+    installer.finish(Err(InstallError::failed(reason)));
     assert_eq!(
         settled_install(&state).await,
         serde_json::json!({
@@ -790,7 +790,7 @@ async fn a_rejected_file_offers_no_manual_command_and_must_be_downloaded_again()
     let installer = GatedInstaller::new();
     let state = ready_state(&installer).await;
     post(&state, "/api/latest-release/install").await;
-    installer.finish(Err(InstallError::Rejected(reason.into())));
+    installer.finish(Err(InstallError::rejected(reason)));
     assert_eq!(
         settled_install(&state).await,
         serde_json::json!({ "state": "rejected", "version": NEWER_TAG, "error": reason })
