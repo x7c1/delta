@@ -21,8 +21,9 @@
 #   Any trailing arguments are forwarded to `playwright test`, so a single
 #   spec or filter can be run against the same real harness, e.g.
 #     scripts/e2e-fake.sh server-restart.spec.ts
-#   E2E_FAKE_BACKEND_PORT / E2E_FAKE_PORT override the ports (the config and
-#   the server fixture both read E2E_FAKE_BACKEND_PORT).
+#   E2E_FAKE_BACKEND_PORT / E2E_FAKE_PORT override the ports (both read once,
+#   in frontend/packages/apps/web/e2e-fake/support/endpoints.ts, which the
+#   config and the server fixture share).
 #
 # Prerequisites: tmux, the Rust toolchain, pnpm (workspace installed and
 # libraries built: `pnpm install && pnpm -r build` in frontend/), and the
@@ -48,8 +49,8 @@ command -v pnpm >/dev/null 2>&1 || die "pnpm not found on PATH"
 log "Building delta-server, fake-claude and fake-codex ..."
 (cd "$BACKEND_DIR" && cargo build -p delta-server -p fake-claude -p fake-codex)
 
-# Run the suite; the worker fixture boots and tears down the server, and
-# Playwright owns the Vite dev server (proxied to the backend port).
+# Run the suite; the worker fixture boots and tears down the server and the
+# Vite dev server proxied to it.
 log "Running the fake-mode Playwright suite ..."
 (
   cd "$FRONTEND_DIR"

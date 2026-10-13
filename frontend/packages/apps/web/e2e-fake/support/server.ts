@@ -1,13 +1,17 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { AUTH_TOKEN, BACKEND_PORT, DEV_SERVER_PORT } from './endpoints';
 import { ARTIFACT_DIR, REPO_ROOT } from './paths';
 
 /**
- * The `delta-server` lifecycle, owned by the Playwright worker process.
+ * The lifecycle of the suite's two servers — `delta-server` and the Vite dev
+ * server the page loads — owned by the Playwright worker process.
  *
  * The server-restart semantics under test (a `dispatched` send a dead process
  * left behind, swept back to `queued` + `held_at` at the next boot) cross
@@ -39,7 +43,8 @@ import { ARTIFACT_DIR, REPO_ROOT } from './paths';
  *
  * One run can now span several server generations (each `restart` spawns a
  * fresh process). Each generation logs to its own file — `server.log`,
- * `server.2.log`, … — written there directly (not copied on teardown) so a
+ * `server.2.log`, …, and likewise `vite.log`, `vite.2.log`, … for the dev
+ * server — written there directly (not copied on teardown) so a
  * hard crash still leaves every generation's log behind for CI to upload.
  *
  * Those files, and the transcripts copied out on teardown, land under a
@@ -50,25 +55,34 @@ import { ARTIFACT_DIR, REPO_ROOT } from './paths';
  * `boot-2/` next to `boot-1/`, and the artifact dir itself is emptied once per
  * run, by `globalSetup.ts`, never here.
  *
+ * ## The dev server is this worker's too, and never adopted
+ *
+ * The Vite dev server is started here rather than by Playwright's `webServer`,
+ * for two reasons. A `webServer` outlives every worker, so a spec that took it
+ * down left every later spec failing with a refused connection, and nothing
+ * could bring it back; a worker-owned one is restarted like the backend. And
+ * `webServer` adopted whatever already answered on its port — a killed run's
+ * orphaned Vite, or another checkout's run in progress — a process this run
+ * does not own and that can vanish under it mid-suite. Here neither server is
+ * ever adopted: each start first waits for its port to be released, and fails
+ * naming the process that still holds it.
+ *
+ * ## Health is checked around every spec
+ *
+ * {@link ServerHandle.findDown} and {@link ServerHandle.restoreDown} back a
+ * per-spec fixture (`fixtures.ts`) that restores a server found down before a
+ * spec and fails the spec that leaves one down, so a dead server is reported
+ * once, against the spec that caused it, instead of as a connection error in
+ * every spec after it.
+ *
  * ## Teardown keeps the run directory; the next run sweeps it
  *
- * Teardown kills the server and the per-run tmux server but leaves the run
+ * Teardown kills both servers and the per-run tmux server but leaves the run
  * directory in place: its database is the evidence a failure investigation
  * reads. Cleanup happens at the start of the next run instead, through the
  * sweep in `globalSetup.ts` (once per invocation, never per worker), which
  * also covers a teardown that never ran (SIGKILL, a Ctrl-C storm).
  */
-
-/** The default backend port; kept in sync with `playwright.fake.config.ts`. */
-const BACKEND_PORT = Number(process.env.E2E_FAKE_BACKEND_PORT ?? 7899);
-
-/**
- * The per-run bearer token every backend generation this fixture spawns is
- * given. It must match the token `playwright.fake.config.ts` injects into the
- * page (its `AUTH_TOKEN`), so the real frontend the fake suite drives presents
- * the token the backend enforces.
- */
-const AUTH_TOKEN = 'delta-e2e-fake-auth-token';
 
 /**
  * Recognisable prefixes so `scripts/sweep-test-residue.sh e2e-fake` can find a
@@ -82,6 +96,29 @@ const BACKEND_DIR = path.join(REPO_ROOT, 'backend');
 const SERVER_BIN = path.join(BACKEND_DIR, 'target/debug/delta-server');
 const FAKE_BIN = path.join(BACKEND_DIR, 'target/debug/fake-claude');
 const FAKE_CODEX_BIN = path.join(BACKEND_DIR, 'target/debug/fake-codex');
+const WEB_DIR = path.join(REPO_ROOT, 'frontend/packages/apps/web');
+/** Vite's CLI entry, run with this Node so the process is Vite itself. */
+const VITE_BIN = path.join(
+  path.dirname(
+    createRequire(path.join(WEB_DIR, 'package.json')).resolve(
+      'vite/package.json',
+    ),
+  ),
+  'bin/vite.js',
+);
+/**
+ * Preloaded into the dev server: end the process (through Vite's own SIGTERM
+ * shutdown) once its stdin reaches EOF, which happens when the worker holding
+ * the other end dies. Vite registers a stdin `end` listener itself, but never
+ * reads stdin, so on its own the EOF goes unnoticed and an orphaned dev server
+ * keeps the port for good — observed after a run's Playwright processes were
+ * killed.
+ */
+const EXIT_WITH_PARENT =
+  "data:text/javascript,process.stdin.on('end', () => process.kill(process.pid, 'SIGTERM')).resume();";
+/** The dev server's own address; the page reaches it as `localhost`. */
+const DEV_SERVER_URL = `http://127.0.0.1:${DEV_SERVER_PORT}/`;
+const BACKEND_HEALTH_URL = `http://127.0.0.1:${BACKEND_PORT}/health`;
 const SCENARIO_DIR = path.join(HERE, '..', 'scenarios');
 /**
  * The scripted turn every Codex session in a run plays. `fake-codex` selects its
@@ -132,7 +169,18 @@ export interface ServerHandle {
    */
   restart(env?: Record<string, string>): Promise<void>;
   /**
-   * Kill the server and tmux and copy transcripts out. The run directory is
+   * The servers not answering right now (`backend`, `dev server`): a process
+   * that has exited, or one that does not answer its readiness URL.
+   */
+  findDown(): Promise<string[]>;
+  /**
+   * Bring back every server {@link findDown} reports — the backend with the
+   * suite's shared configuration, as a bare `restart()` would — and return
+   * which ones were restarted.
+   */
+  restoreDown(): Promise<string[]>;
+  /**
+   * Kill both servers and tmux and copy transcripts out. The run directory is
    * left behind as evidence; the next run's sweep removes it.
    */
   teardown(): Promise<void>;
@@ -153,32 +201,122 @@ function allocateBootDir(): string {
   return dir;
 }
 
-/** Poll `/health` until the server answers ok, or throw with the log tail. */
-async function waitHealthy(
-  port: number,
+/** Whether `url` answers 2xx within `timeoutMs`. */
+async function answersOk(url: string, timeoutMs: number): Promise<boolean> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Poll `url` until it answers ok, or throw with the log tail. `what` names the
+ * server in the error.
+ */
+async function waitReady(
+  what: string,
+  url: string,
   isChildAlive: () => boolean,
   logPath: string,
+  timeoutMs: number,
 ): Promise<void> {
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!isChildAlive()) {
       throw new Error(
-        `delta-server exited during startup. Log tail:\n${logTail(logPath)}`,
+        `${what} exited during startup. Log tail:\n${logTail(logPath)}`,
       );
     }
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
-      if (res.ok) {
-        return;
+    if (await answersOk(url, 2_000)) {
+      // The port was free before the spawn, so this is our child answering —
+      // unless it died meanwhile and something else took the port.
+      if (!isChildAlive()) {
+        throw new Error(
+          `${what} exited during startup, but ${url} answers: another process ` +
+            `took the port.\n${portHolder(Number(new URL(url).port))}\nLog tail:\n${logTail(logPath)}`,
+        );
       }
-    } catch {
-      /* not up yet */
+      return;
     }
     await sleep(100);
   }
   throw new Error(
-    `delta-server did not become healthy on port ${port}. Log tail:\n${logTail(logPath)}`,
+    `${what} did not answer ${url} within ${timeoutMs / 1000}s. Log tail:\n${logTail(logPath)}`,
   );
+}
+
+/** Whether anything accepts a TCP connection on 127.0.0.1:`port`. */
+function portAccepts(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port });
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => resolve(false));
+  });
+}
+
+/** The process listening on `port`, as lsof shows it. */
+function portHolder(port: number): string {
+  try {
+    return execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return `(lsof could not name the process listening on port ${port})`;
+  }
+}
+
+/**
+ * Wait until nothing listens on `port` any more, so the server about to start
+ * there binds it rather than failing to — or, worse, having its readiness poll
+ * answered by whatever still holds it. A process this worker just killed
+ * releases its port as it exits, so the wait is normally zero; anything still
+ * listening after the grace period is not ours, and the error names it.
+ */
+async function waitPortReleased(what: string, port: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (await portAccepts(port)) {
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Cannot start ${what}: port ${port} is held by a process this run does ` +
+          `not own — another e2e-fake run (in this or another checkout), or ` +
+          `one a killed run left behind. Stop it and re-run.\n${portHolder(port)}`,
+      );
+    }
+    await sleep(100);
+  }
+}
+
+const isRunning = (proc: ChildProcess | null): proc is ChildProcess =>
+  proc !== null && proc.exitCode === null && proc.signalCode === null;
+
+/**
+ * Start one server: wait for `port` to be free, spawn the process through
+ * `launch` (handed the log file's descriptor for its stdout and stderr), and
+ * wait until `readyUrl` answers. `launch` records the process before the wait,
+ * so the caller can still kill one that never became ready.
+ */
+async function startServer(
+  what: string,
+  port: number,
+  readyUrl: string,
+  timeoutMs: number,
+  logPath: string,
+  launch: (logFd: number) => ChildProcess,
+): Promise<void> {
+  await waitPortReleased(what, port);
+  const logFd = fs.openSync(logPath, 'a');
+  try {
+    const proc = launch(logFd);
+    await waitReady(what, readyUrl, () => isRunning(proc), logPath, timeoutMs);
+  } finally {
+    fs.closeSync(logFd);
+  }
 }
 
 /** The last few KB of a log file, for a startup-failure message. */
@@ -256,6 +394,10 @@ export async function bootServer(): Promise<ServerHandle> {
     { mode: 0o755 },
   );
 
+  /** `server.log`, `server.2.log`, … — one file per start of `name`. */
+  const logFile = (name: string, n: number): string =>
+    path.join(bootDir, n === 1 ? `${name}.log` : `${name}.${n}.log`);
+
   let generation = 0;
   let child: ChildProcess | null = null;
   /** Per-spec environment layered over the defaults; see `restart`. */
@@ -263,85 +405,183 @@ export async function bootServer(): Promise<ServerHandle> {
 
   const spawnGeneration = async (): Promise<void> => {
     generation += 1;
-    const logPath = path.join(
-      bootDir,
-      generation === 1 ? 'server.log' : `server.${generation}.log`,
+    await startServer(
+      'delta-server',
+      BACKEND_PORT,
+      BACKEND_HEALTH_URL,
+      30_000,
+      logFile('server', generation),
+      (logFd) => {
+        const proc = spawn(SERVER_BIN, [], {
+          stdio: ['ignore', logFd, logFd],
+          env: {
+            ...process.env,
+            RUST_LOG: SERVER_RUST_LOG,
+            DELTA_PORT: String(BACKEND_PORT),
+            DELTA_AUTH_TOKEN: AUTH_TOKEN,
+            DELTA_DATA_DIR: runDir,
+            DELTA_TMUX_SOCKET: tmuxSocket,
+            DELTA_CLAUDE_BIN: wrapper,
+            DELTA_CODEX_BIN: codexWrapper,
+            // Confine hook-reported transcript paths to where the fake actually
+            // writes them (the same dir exported to the wrapper as
+            // FAKE_CLAUDE_TRANSCRIPT_DIR); without this the backend would reject
+            // the fake's transcript path as outside the default ~/.claude/projects
+            // root and never ingest a turn. The backend mints its own hook secret
+            // and renders it into the hook URLs the fake reads, so no hook-secret
+            // env is needed here.
+            DELTA_TRANSCRIPT_ROOT: transcripts,
+            DELTA_LAUNCH_DEADLINE_MS: '3000',
+            DELTA_PERMISSION_DECISION_TIMEOUT_MS: '3000',
+            // The echo watchdog stays near its production generosity for the
+            // shared suite: several specs deliberately hold a send `dispatched`
+            // with no echo (cancel, restart) and must not have it retried or
+            // parked out from under them. The spec that exercises the watchdog
+            // shrinks this for its own server generation via `restart`.
+            DELTA_ECHO_DEADLINE_MS: '60000',
+            // Turn the background release check off, so the suite never reaches
+            // GitHub (and never depends on what it answers).
+            DELTA_RELEASE_FEED_URL: '',
+            ...envOverrides,
+          },
+        });
+        child = proc;
+        if (proc.pid !== undefined) {
+          fs.appendFileSync(pidFile, `${proc.pid}\n`);
+        }
+        return proc;
+      },
     );
-    const logFd = fs.openSync(logPath, 'a');
-    try {
-      const proc = spawn(SERVER_BIN, [], {
-        stdio: ['ignore', logFd, logFd],
-        env: {
-          ...process.env,
-          RUST_LOG: SERVER_RUST_LOG,
-          DELTA_PORT: String(BACKEND_PORT),
-          DELTA_AUTH_TOKEN: AUTH_TOKEN,
-          DELTA_DATA_DIR: runDir,
-          DELTA_TMUX_SOCKET: tmuxSocket,
-          DELTA_CLAUDE_BIN: wrapper,
-          DELTA_CODEX_BIN: codexWrapper,
-          // Confine hook-reported transcript paths to where the fake actually
-          // writes them (the same dir exported to the wrapper as
-          // FAKE_CLAUDE_TRANSCRIPT_DIR); without this the backend would reject
-          // the fake's transcript path as outside the default ~/.claude/projects
-          // root and never ingest a turn. The backend mints its own hook secret
-          // and renders it into the hook URLs the fake reads, so no hook-secret
-          // env is needed here.
-          DELTA_TRANSCRIPT_ROOT: transcripts,
-          DELTA_LAUNCH_DEADLINE_MS: '3000',
-          DELTA_PERMISSION_DECISION_TIMEOUT_MS: '3000',
-          // The echo watchdog stays near its production generosity for the
-          // shared suite: several specs deliberately hold a send `dispatched`
-          // with no echo (cancel, restart) and must not have it retried or
-          // parked out from under them. The spec that exercises the watchdog
-          // shrinks this for its own server generation via `restart`.
-          DELTA_ECHO_DEADLINE_MS: '60000',
-          // Turn the background release check off, so the suite never reaches
-          // GitHub (and never depends on what it answers).
-          DELTA_RELEASE_FEED_URL: '',
-          ...envOverrides,
-        },
-      });
-      child = proc;
-      let exited = false;
-      proc.on('exit', () => {
-        exited = true;
-      });
-      if (proc.pid !== undefined) {
-        fs.appendFileSync(pidFile, `${proc.pid}\n`);
-      }
-      await waitHealthy(BACKEND_PORT, () => !exited, logPath);
-    } finally {
-      fs.closeSync(logFd);
-    }
   };
 
-  await spawnGeneration();
+  let devGeneration = 0;
+  let devServer: ChildProcess | null = null;
 
-  const killChild = async (): Promise<void> => {
-    const proc = child;
-    if (!proc || proc.exitCode !== null || proc.pid === undefined) {
+  /**
+   * Start the Vite dev server, proxied to the backend, and wait until it
+   * serves the page.
+   *
+   * Its stdin is a pipe only this worker holds, and the process stops itself
+   * when that pipe closes ({@link EXIT_WITH_PARENT}), so a worker killed
+   * outright takes its dev server with it instead of leaving it on the port.
+   */
+  const startDevServer = async (): Promise<void> => {
+    devGeneration += 1;
+    await startServer(
+      'the Vite dev server',
+      DEV_SERVER_PORT,
+      DEV_SERVER_URL,
+      // A cold start pre-bundles dependencies.
+      120_000,
+      logFile('vite', devGeneration),
+      (logFd) => {
+        devServer = spawn(
+          process.execPath,
+          [
+            '--import',
+            EXIT_WITH_PARENT,
+            VITE_BIN,
+            '--port',
+            String(DEV_SERVER_PORT),
+            '--strictPort',
+            // Bound to the loopback address explicitly, so the port check and
+            // the readiness poll look exactly where it listens.
+            '--host',
+            '127.0.0.1',
+          ],
+          {
+            cwd: WEB_DIR,
+            stdio: ['pipe', logFd, logFd],
+            env: {
+              ...process.env,
+              DELTA_PORT: String(BACKEND_PORT),
+              DELTA_AUTH_TOKEN: AUTH_TOKEN,
+            },
+          },
+        );
+        return devServer;
+      },
+    );
+  };
+
+  /**
+   * Send `signal` to `proc` and wait for it to exit. A process that has not
+   * exited 5s after a gentler signal is killed outright.
+   */
+  const kill = async (
+    proc: ChildProcess | null,
+    signal: NodeJS.Signals,
+  ): Promise<void> => {
+    if (!isRunning(proc) || proc.pid === undefined) {
       return;
     }
     const done = new Promise<void>((resolve) => proc.once('exit', () => resolve()));
-    try {
-      proc.kill('SIGKILL');
-    } catch {
-      /* already gone */
+    proc.kill(signal);
+    if (signal !== 'SIGKILL') {
+      const exitedInTime = await Promise.race([
+        done.then(() => true),
+        sleep(5_000).then(() => false),
+      ]);
+      if (!exitedInTime) {
+        proc.kill('SIGKILL');
+      }
     }
     await done;
+  };
+  // The backend dies hard, as in the production incident the restart specs
+  // model; the dev server is let to shut down (and stop its esbuild service).
+  const killChild = (): Promise<void> => kill(child, 'SIGKILL');
+  const killDevServer = (): Promise<void> => kill(devServer, 'SIGTERM');
+  const backendDown = async (): Promise<boolean> =>
+    !isRunning(child) || !(await answersOk(BACKEND_HEALTH_URL, 5_000));
+  const devServerDown = async (): Promise<boolean> =>
+    !isRunning(devServer) || !(await answersOk(DEV_SERVER_URL, 5_000));
+
+  try {
+    await startDevServer();
+    await spawnGeneration();
+  } catch (error) {
+    await killChild();
+    await killDevServer();
+    throw error;
+  }
+
+  const restart = async (env: Record<string, string> = {}): Promise<void> => {
+    envOverrides = env;
+    await killChild();
+    await spawnGeneration();
   };
 
   return {
     port: BACKEND_PORT,
     transcriptDir: transcripts,
-    async restart(env: Record<string, string> = {}): Promise<void> {
-      envOverrides = env;
-      await killChild();
-      await spawnGeneration();
+    restart,
+    async findDown(): Promise<string[]> {
+      const down: string[] = [];
+      if (await backendDown()) {
+        down.push('backend');
+      }
+      if (await devServerDown()) {
+        down.push('dev server');
+      }
+      return down;
+    },
+    async restoreDown(): Promise<string[]> {
+      const restored: string[] = [];
+      if (await devServerDown()) {
+        await killDevServer();
+        await startDevServer();
+        restored.push('dev server');
+      }
+      if (await backendDown()) {
+        await restart();
+        restored.push('backend');
+      }
+      return restored;
     },
     async teardown(): Promise<void> {
       await killChild();
+      await killDevServer();
       // Copy the fake transcripts out of the temp dir into this boot's
       // directory under the artifact dir CI uploads (best-effort — a run that
       // never spawned claude leaves none). The temp dir itself stays behind

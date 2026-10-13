@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { AUTH_TOKEN, DEV_SERVER_PORT } from './e2e-fake/support/endpoints';
 import { ARTIFACT_DIR } from './e2e-fake/support/paths';
 
 /**
@@ -9,27 +10,15 @@ import { ARTIFACT_DIR } from './e2e-fake/support/paths';
  * bridge all hit a live `delta-server`, which spawns real tmux panes; only the
  * model behind them is a deterministic script.
  *
- * The backend is booted by a worker-scoped Playwright fixture
- * (`e2e-fake/support/server.ts`), which owns the temp database, the per-run
- * tmux socket, the scripted-claude wrapper, and teardown — and can kill and
- * relaunch the server mid-suite for the restart coverage. `scripts/e2e-fake.sh`
- * (the `make e2e-fake` entry point) only builds the binaries and invokes this
- * suite. This config starts the Vite dev server, proxied to the backend via
- * DELTA_PORT (see vite.config.ts); the fixture spawns the server on that same
- * `E2E_FAKE_BACKEND_PORT`.
+ * Both servers — the backend and the Vite dev server proxied to it — are
+ * started by a worker-scoped Playwright fixture (`e2e-fake/support/server.ts`),
+ * which owns the temp database, the per-run tmux socket, the scripted-claude
+ * wrapper, and teardown, can kill and relaunch the backend mid-suite for the
+ * restart coverage, and checks both servers around every spec. There is no
+ * `webServer` here: see that file for why the dev server is the worker's.
+ * `scripts/e2e-fake.sh` (the `make e2e-fake` entry point) only builds the
+ * binaries and invokes this suite.
  */
-
-// Dedicated ports so the suite never collides with `make dev` (5173/7878) or
-// the mock e2e suite (5199).
-const PORT = Number(process.env.E2E_FAKE_PORT ?? 5198);
-const BACKEND_PORT = Number(process.env.E2E_FAKE_BACKEND_PORT ?? 7899);
-
-// A fixed per-run bearer token for the fake suite. This config passes it to the
-// Vite dev server (which injects it into the page as the `delta-auth-token`
-// meta tag) and the server fixture (`e2e-fake/support/server.ts`) passes the
-// SAME value to every backend it spawns, so the page's token matches the
-// backend's. The two must stay in sync — see that file's `AUTH_TOKEN`.
-const AUTH_TOKEN = 'delta-e2e-fake-auth-token';
 
 export default defineConfig({
   testDir: './e2e-fake',
@@ -62,7 +51,7 @@ export default defineConfig({
   // genuine failures report slower.
   expect: { timeout: 15_000 },
   use: {
-    baseURL: `http://localhost:${PORT}`,
+    baseURL: `http://localhost:${DEV_SERVER_PORT}`,
     // Specs that read server state directly through `page.request` (see
     // support/rest.ts) bypass the app's ApiClient, which is the only thing
     // that attaches the bearer token. Set it as a default header on the whole
@@ -86,19 +75,4 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: `pnpm exec vite --port ${PORT} --strictPort`,
-    env: { DELTA_PORT: String(BACKEND_PORT), DELTA_AUTH_TOKEN: AUTH_TOKEN },
-    url: `http://localhost:${PORT}`,
-    // Locally, adopt a server already bound to the port: a hard-killed run
-    // (Ctrl-C storm, kill -9) leaks its Vite child, and with strict mode the
-    // next run would abort on this port check before the worker fixture's
-    // stale-run sweep ever gets to run. The port is dedicated to this suite,
-    // so a squatter is that leaked Vite — same config, serving current
-    // sources on demand — and adopting it is what lets an interrupted run
-    // self-heal. CI keeps strict mode: its runners are fresh, so a bound
-    // port there is a real error that must stay loud.
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
 });

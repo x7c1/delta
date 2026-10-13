@@ -152,19 +152,54 @@ test('the comms log leaks no scrollable overflow past its own scroll box', async
 
   // Baseline first: at this tiny viewport the shell already carries some
   // ordinary min-height overflow that has nothing to do with the comms pane,
-  // so the assertion below is a delta, not an absolute zero. That overflow
-  // depends on what the transcript column is showing — swapping its
-  // "Loading transcript…" line for the settled empty state grows it by a
-  // whole row — so the baseline is read only once the Codex session's
-  // (message-less) transcript has finished loading.
+  // so the assertion below is a delta, not an absolute zero. That overflow is
+  // the transcript body's own padding — its top and bottom reserves outgrow a
+  // 300px column — so it depends on what the transcript column is showing:
+  // the settled empty state rather than "Loading transcript…", and the closed
+  // session's read-only notice in the bottom overlay, whose reserve the pane
+  // applies in the same commit that focuses the session. Hence the baseline is
+  // read only once the Codex session's (message-less) transcript has finished
+  // loading.
   const shellOverflow = () =>
     page
       .getByTestId('workspace-shell')
       .evaluate((shell) => shell.scrollHeight - shell.clientHeight);
+  // What extends the shell's scroll height: the bottom-most descendant that is
+  // not clipped by a scroll box of its own (whose overflow stays inside it).
+  // Reported with a failure, so a mismatch names the element that moved.
+  const overflowSource = () =>
+    page.getByTestId('workspace-shell').evaluate((shell) => {
+      let source: Element = shell;
+      let bottom = -Infinity;
+      const visit = (el: Element) => {
+        for (const child of el.children) {
+          const rect = child.getBoundingClientRect();
+          if (rect.height > 0 && rect.bottom > bottom) {
+            bottom = rect.bottom;
+            source = child;
+          }
+          if (getComputedStyle(child).overflowY === 'visible') {
+            visit(child);
+          }
+        }
+      };
+      visit(shell);
+      const style = getComputedStyle(source);
+      const testId = source.getAttribute('data-testid');
+      return (
+        `${source.tagName.toLowerCase()}` +
+        `${testId === null ? '' : `[data-testid=${testId}]`}` +
+        ` class="${source.getAttribute('class') ?? ''}"` +
+        ` bottom=${Math.round(bottom)}` +
+        ` padding=${style.paddingTop}/${style.paddingBottom}` +
+        ` (shell scrollHeight=${shell.scrollHeight}, clientHeight=${shell.clientHeight})`
+      );
+    });
   await expect(
     page.getByText('No messages yet. Send the first message below.'),
   ).toBeVisible();
   const baseline = await shellOverflow();
+  const baselineSource = await overflowSource();
 
   // The after-measurement likewise waits for the whole scripted exchange to be
   // in the DOM — its last frame included, though it sits below the fold — so
@@ -189,5 +224,10 @@ test('the comms log leaks no scrollable overflow past its own scroll box', async
 
   // …and none of that below-the-fold content may register as scrollable
   // overflow on the workspace shell.
-  expect(await shellOverflow()).toBe(baseline);
+  const after = await shellOverflow();
+  expect(
+    after,
+    `shell overflow source — baseline: ${baselineSource}; ` +
+      `after: ${await overflowSource()}`,
+  ).toBe(baseline);
 });

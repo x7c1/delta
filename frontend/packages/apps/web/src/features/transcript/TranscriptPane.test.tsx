@@ -1819,6 +1819,46 @@ describe('TranscriptPane', () => {
       expect(body.scrollTop).toBe(600);
     });
 
+    it('applies a re-render that grows the overlay in that same commit, before the observer reports it', async () => {
+      // Focusing a closed session adds the read-only notice above the composer
+      // in the same commit that swaps the transcript. The observer would report
+      // the taller overlay only at the next rendering step, and its update would
+      // commit later still — so the reserve is re-measured after every commit,
+      // and lands with the change that caused it.
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      const client = new ApiClient({ baseUrl: 'http://localhost' });
+      const active = mockThreads.find((t) => t.id === MAIN_THREAD_ID)!;
+      const tree = (readOnly: boolean) => (
+        <QueryClientProvider client={queryClient}>
+          <ApiProvider client={client}>
+            <TranscriptPane
+              threads={mockThreads}
+              activeThread={active}
+              readOnly={readOnly}
+            />
+          </ApiProvider>
+        </QueryClientProvider>
+      );
+      const { rerender } = render(tree(false));
+      const overlay = await screen.findByTestId('bottom-overlay');
+      await waitFor(() => expect(lookupObserver(overlay)).not.toBeNull());
+      overlay.getBoundingClientRect = () => ({ height: 80 }) as DOMRect;
+      act(() => {
+        const fire = lookupObserver(overlay)!;
+        fire([], fire as unknown as ResizeObserver);
+      });
+      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('284px'));
+
+      // The notice makes the overlay taller; the observer is NOT fired.
+      overlay.getBoundingClientRect = () => ({ height: 136 }) as DOMRect;
+      act(() => rerender(tree(true)));
+
+      expect(screen.getByTestId('readonly-notice')).toBeInTheDocument();
+      expect(bodyEl().style.paddingBottom).toBe('340px');
+    });
+
     // v19 top-row layout. The collapsed state places the breadcrumb and
     // the {Thread + Terminal} cluster as INDIVIDUAL absolute floating
     // cards over the body (preserved from v18). The expanded state
