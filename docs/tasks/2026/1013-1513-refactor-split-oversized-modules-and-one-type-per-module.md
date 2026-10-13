@@ -62,5 +62,5 @@ what was moved in the PR.
 
 ### Before merge (verified outside the check command)
 
-- [ ] `cargo test -p delta-server --test end_to_end -- --list` lists the same
+- [x] `cargo test -p delta-server --test end_to_end -- --list` lists the same
       test names before and after (compared in the PR).
