@@ -1,5 +1,5 @@
 import type { SessionEvent } from '@delta/wire-gen';
-import { MAIN_THREAD_ID, SESSION_ID, SESSION_ID_2 } from './fixtures';
+import { MAIN_THREAD_ID, SESSION_ID, SESSION_ID_2 } from './sessionFixtures';
 
 /**
  * A dev/test fake event source. MSW cannot mock WebSockets, so in mock mode the

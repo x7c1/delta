@@ -17,7 +17,7 @@ import {
   it,
   vi,
 } from 'vitest';
-import { LANE_LEFT_PAD_PX } from './ThreadTimelineOverlay';
+import { LANE_LEFT_PAD_PX } from './TimelineLaneRow';
 import {
   makeThread,
   makeUserText,

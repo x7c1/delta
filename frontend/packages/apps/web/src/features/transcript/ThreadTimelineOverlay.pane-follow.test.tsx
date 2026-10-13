@@ -19,12 +19,12 @@ import {
   vi,
 } from 'vitest';
 import { useNavStore } from '../../store/navStore';
+import { LANE_LEFT_PAD_PX } from './TimelineLaneRow';
 import {
-  LANE_LEFT_PAD_PX,
   PANE_SCROLL_DEBOUNCE_MS,
   PANE_SCROLL_OBSERVER_THRESHOLD,
   PANE_SCROLL_PROGRAMMATIC_GUARD_MS,
-} from './ThreadTimelineOverlay';
+} from './useTimelinePaneScrollFollow';
 import {
   makeThread,
   makeUserText,

@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,65 +9,39 @@ import {
 } from 'react';
 import { threadAncestry, type ThreadId } from '@delta/model';
 import type { Message, Thread } from '@delta/wire-gen';
-import { useQueryClient } from '@tanstack/react-query';
-import {
-  invalidateSessions,
-  useThreadMessagesQuery,
-} from '@delta/api-client';
-import { Badge, Breadcrumb, Button, Chip, Panel } from '@delta/ui-kit';
+import { useThreadMessagesQuery } from '@delta/api-client';
+import { Badge, Panel } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { noticeOf, useLiveStore } from '../../store/liveStore';
-import {
-  Composer,
-  composerDraftKey,
-  type ComposerMode,
-} from '../composer/Composer';
-import { ComposerDraftTargetProvider } from '../composer/composerDraftTarget';
-import { ComposerRail } from '../composer/ComposerRail';
-import { PromptTemplateButton } from '../composer/PromptTemplateButton';
-import { ProviderTabs } from '../composer/ProviderTabs';
-import { ProviderUnavailableNotice } from '../composer/ProviderUnavailableNotice';
-import { PendingQueue } from '../composer/PendingQueue';
+import type { ComposerMode } from '../composer/Composer';
 import {
   usePendingSends,
   type PendingSurface,
 } from '../composer/usePendingSends';
-import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
+import { WorkdirDialog } from '../composer/WorkdirDialog';
 import { NewSessionPanel } from '../new-session/NewSessionPanel';
 import { NewSessionTabBar } from '../new-session/NewSessionTabBar';
-import { WorktreeOptions } from '../composer/WorktreeOptions';
-import { LaunchOptionsPicker } from '../composer/LaunchOptionsPicker';
 import { AssistantMarkdown } from './AssistantMarkdown';
-import {
-  isTaskNotificationMessage,
-  isUnknownCommandNoticeMessage,
-} from './claudeFormat';
-import { MessageItem } from './MessageItem';
-import { PermissionNoticeCard } from './PermissionNotice';
-import { QuestionCard } from './QuestionCard';
+import { isUnknownCommandNoticeMessage } from './claudeFormat';
 import { SubagentRunningIndicator } from './SubagentRunningIndicator';
-import { ThreadTimelineOverlay } from './ThreadTimelineOverlay';
 import { useTimelineExpanded } from './useTimelineExpanded';
 import { childThreadsByMessage } from './branches';
-import {
-  buildToolPairing,
-  messageRendersNothing,
-  messageRendersProse,
-} from './toolPairs';
+import { buildToolPairing, messageRendersNothing } from './toolPairs';
 import { persistedHasStreamedText } from './streamingHandoff';
 import {
   clearBranchHighlight,
   findAllQuoteRanges,
   setBranchHighlight,
 } from './branchHighlight';
-
-/**
- * Distance from the bottom (in px) under which the transcript is considered
- * "at the bottom" and keeps following new content.
- */
-const STICK_THRESHOLD_PX = 64;
+import { useStickToBottom } from './useStickToBottom';
+import { TranscriptComposerStack } from './TranscriptComposerStack';
+import { useBottomOverlayReserve } from './useBottomOverlayReserve';
+import { useTopRegionReserve } from './useTopRegionReserve';
+import { TranscriptTopRegion } from './TranscriptTopRegion';
+import { TranscriptMessageBlock } from './TranscriptMessageBlock';
+import { TranscriptTailCards } from './TranscriptTailCards';
 
 /**
  * Pointer travel (px, per axis) between `mousedown` and `click` under which a
@@ -78,63 +51,6 @@ const STICK_THRESHOLD_PX = 64;
  * "stationary" click can carry still reads as stationary.
  */
 const CLICK_DRAG_SLOP_PX = 6;
-
-/**
- * Fallback gap (px) between the bottom overlay and the resting content when the
- * `--delta-overlay-inset` token cannot be read (e.g. jsdom, which computes no
- * styles). Mirrors the token's resting value (0.75rem at the 16px default root)
- * so the measured reserve still leaves the same gap the floating card uses.
- */
-const OVERLAY_INSET_FALLBACK_PX = 12;
-
-/**
- * Comfortable reading gap (px) kept between the last turn and the bottom overlay,
- * added on top of the measured reserve. The measured reserve (overlay height +
- * inset) alone parks the last turn flush against the composer, which reads worse
- * than leaving some air there — so a slice of the breathing room the old fixed
- * reserve always had is preserved here while the rest of the reserve still tracks
- * the overlay's real height. Present at every composer size and grows with it.
- */
-const BODY_BOTTOM_READING_GAP_PX = 192;
-
-/**
- * Shared chrome for the transcript pane's cards: the floating bottom notices
- * card and composer card that hover over the conversation, plus the in-flow
- * breadcrumb card that sits in the top region above it. A full border,
- * rounded corners, an opaque surface fill that occludes the conversation
- * beneath, and a shadow so the card reads as lifted above its surroundings
- * rather than fused to them. Per-card padding is applied at each use site.
- *
- * The shadow routes through `--delta-card-shadow` (rather than a literal
- * `shadow-md`) so the visual-effects gate can drop it under
- * `[data-effects='flat']` without touching functional overlay shadows; see the
- * token definition in src/index.css.
- */
-const FLOATING_CARD_CLASS =
-  'rounded-md border border-border-default bg-surface shadow-[shadow:var(--delta-card-shadow)]';
-
-/**
- * The overlay inset in pixels: the gap the floating cards leave from the body
- * edges (`--delta-overlay-inset`). Read from the live computed style so the
- * measured bottom reserve (overlay height + this gap) stays in lockstep with the
- * card's own `bottom-overlay-inset`, even if the token is themed. Falls back to
- * {@link OVERLAY_INSET_FALLBACK_PX} when the value is unavailable or non-numeric.
- */
-function overlayInsetPx(el: Element): number {
-  const raw = getComputedStyle(el)
-    .getPropertyValue('--delta-overlay-inset')
-    .trim();
-  if (raw.endsWith('rem')) {
-    const rem = Number.parseFloat(raw);
-    const rootSize = Number.parseFloat(
-      getComputedStyle(document.documentElement).fontSize,
-    );
-    const px = rem * (Number.isFinite(rootSize) ? rootSize : 16);
-    return Number.isFinite(px) ? px : OVERLAY_INSET_FALLBACK_PX;
-  }
-  const px = Number.parseFloat(raw);
-  return Number.isFinite(px) ? px : OVERLAY_INSET_FALLBACK_PX;
-}
 
 export interface TranscriptPaneProps {
   threads: Thread[];
@@ -226,18 +142,7 @@ export function TranscriptPane({
   hooksUnreachable = false,
 }: TranscriptPaneProps) {
   const client = useApiClient();
-  const queryClient = useQueryClient();
-  // A `409 …_not_pending` from a permission or question card is the first sign
-  // this tab's idea of the session may be stale: a live socket gone silently
-  // half-open never delivers `session_closed`. `readOnly` comes from the session
-  // list, so refetch it; once it says closed, the cards show their closed-session
-  // copy instead of pointing at a terminal that no longer exists.
-  const refetchSessions = useCallback(
-    () => invalidateSessions(queryClient),
-    [queryClient],
-  );
   const setActiveThread = useNavStore((state) => state.setActiveThread);
-  const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
   const cancelNewSession = useNavStore((state) => state.cancelNewSession);
   const branchOrigin = useComposerStore((state) => state.branchOrigin);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
@@ -255,26 +160,8 @@ export function TranscriptPane({
   const workdirDialogOpen = useComposerStore(
     (state) => state.workdirDialogOpen,
   );
-  const openWorkdirDialog = useComposerStore(
-    (state) => state.openWorkdirDialog,
-  );
   const closeWorkdirDialog = useComposerStore(
     (state) => state.closeWorkdirDialog,
-  );
-  // The focused session's external-input notice, if any. Keyed per session like
-  // the permission notice; visibility is further gated to the active thread below.
-  const externalInput = useLiveStore((state) =>
-    activeThread
-      ? noticeOf(state.notices, activeThread.session_id, 'external_input')
-      : null,
-  );
-  // The focused session's parked-send notice, if any: a composed message the
-  // server stopped trying to deliver. No thread gate — the message never
-  // reached the conversation, so there is no thread it belongs to.
-  const sendParked = useLiveStore((state) =>
-    activeThread
-      ? noticeOf(state.notices, activeThread.session_id, 'send_parked')
-      : null,
   );
   // Whether the focused (closed) session just failed to resume because its
   // transcript is gone; drives the inline "cannot be resumed" notice.
@@ -283,16 +170,6 @@ export function TranscriptPane({
       ? noticeOf(state.notices, activeThread.session_id, 'resume_unavailable') !==
         null
       : false,
-  );
-  // The focused session's pending permission prompt, if any. Emitted by the
-  // `PermissionRequest` hook, which fires only when an interactive dialog
-  // actually appears, so it is a genuine "answer needed" signal and is shown
-  // directly — no debounce. It clears on dismiss, on resolution, or when the
-  // turn completes.
-  const permission = useLiveStore((state) =>
-    activeThread
-      ? noticeOf(state.notices, activeThread.session_id, 'permission')
-      : null,
   );
   // The focused session's live assistant preview, if a turn is streaming. It is
   // shown as a provisional bubble at the conversation tail while the turn
@@ -325,31 +202,6 @@ export function TranscriptPane({
         : null,
     [sessionSubagents, activeThread],
   );
-  // The focused session's latest context-window usage (a `status_updated`
-  // snapshot's `used_percentage`, replace-latest in the store). Drives the
-  // ambient fill along the composer card's top edge — right where the user is
-  // about to send. `undefined` when no snapshot has arrived yet (or after a
-  // `/compact` cleared it), in which case the fill is omitted rather than shown
-  // at 0%. Forwarded straight through; never recomputed here.
-  const contextUsage = useLiveStore((state) =>
-    activeThread ? state.contextUsage[activeThread.session_id] : undefined,
-  );
-  const dismissPermission = useLiveStore((state) => state.dismissPermission);
-  // The focused session's pending AskUserQuestion, if any. Emitted by the
-  // `PreToolUse` hook for that built-in tool, so it is a genuine "answer
-  // needed" signal shown directly as a readable question card. It clears on
-  // dismiss, when the correlated tool_result resolves it (the user picked in
-  // the terminal), or when the turn ends.
-  const question = useLiveStore((state) =>
-    activeThread
-      ? noticeOf(state.notices, activeThread.session_id, 'question')
-      : null,
-  );
-  const dismissQuestion = useLiveStore((state) => state.dismissQuestion);
-  const dismissExternalInput = useLiveStore(
-    (state) => state.dismissExternalInput,
-  );
-  const dismissSendParked = useLiveStore((state) => state.dismissSendParked);
 
   // The sub-thread chip currently hovered; its text is highlighted in the body.
   const [hoveredBranchTitle, setHoveredBranchTitle] = useState<string | null>(
@@ -441,98 +293,20 @@ export function TranscriptPane({
     [activeThreadId, setBranchOrigin],
   );
 
-  // Stick-to-bottom: auto-scroll the transcript when new content arrives, but
-  // only while the user is already near the bottom (so reading scrollback is
-  // never yanked away). The scroll region is the Panel body.
-  const bodyRef = useRef<HTMLDivElement | null>(null);
-  const stickRef = useRef(true);
-  const prevPendingRef = useRef(pendingCount);
-
-  // The pending timeline-jump intent (set atomically with a cross-lane
-  // active-thread switch by the overlay). While an intent for THIS lane is
-  // live the pane must land on the jump target, never the lane's tail: the
-  // thread-change effect skips its stick-to-bottom jump (below) and the scroll
-  // listener refuses to re-arm stick from the jump's own programmatic
-  // scrollIntoView — even when the target sits near the tail and the landing
-  // scroll clamps at the bottom. Only a genuine user scroll (after the intent
-  // is consumed) re-arms stick. Subscribing reactively is cheap: the intent
-  // flips at most twice per cross-lane jump (set, then cleared on settle). The
-  // ref mirror lets the scroll listener read the latest value without
-  // re-binding its native listener every render.
-  const activeThreadJumpTarget = useNavStore(
-    (state) => state.activeThreadJumpTarget,
-  );
-  const jumpTargetRef = useRef(activeThreadJumpTarget);
-  useLayoutEffect(() => {
-    jumpTargetRef.current = activeThreadJumpTarget;
-  }, [activeThreadJumpTarget]);
-  // The active thread id mirrored into a ref so the once-bound scroll listener
-  // can compare a live jump intent's lane against the pane's current lane
-  // without re-binding on every thread switch.
-  const activeThreadIdRef = useRef<ThreadId | null>(activeThread?.id ?? null);
-  useLayoutEffect(() => {
-    activeThreadIdRef.current = activeThread?.id ?? null;
-  }, [activeThread?.id]);
-
-  // The bottom overlay (composer + pending strip + bottom notices) floats over
-  // the scrolling body and grows with the composer's content. Reserve bottom
-  // padding equal to its MEASURED height (plus the overlay inset as a gap) so
-  // the last turn always rests just above it and stays readable as it grows —
-  // replacing the old fixed `pb-composer-reserve`, which a grown composer would
-  // cover. `null` until measured: the body falls back to the fixed reserve so a
-  // first paint (or a body without an overlay) never under-reserves.
-  const bottomOverlayRef = useRef<HTMLDivElement | null>(null);
-  const [bottomReserve, setBottomReserve] = useState<number | null>(null);
-  // The bound overlay's measure-and-apply, so the per-commit re-measure can reuse
-  // it; `null` while no overlay is mounted.
-  const remeasureBottomReserveRef = useRef<(() => void) | null>(null);
-
-  // In the COLLAPSED state the top row is rendered as two independent
-  // absolute floating cards — the breadcrumb at top-left and the
-  // {Thread + pane toggle} cluster at top-right — so the conversation shows
-  // through the gap between them rather than being hidden under a full-
-  // width white bar. Each card pins itself with `top`/`left` (or
-  // `top`/`right`) at the shared `overlay-inset` so they read as one row
-  // even though they are two separate boxes. Two things compensate for
-  // those cards not occupying layout space: the body reserves
-  // `padding-top` equal to the visual row height (the taller of the two
-  // cards) so the first message is not hidden under them on initial
-  // paint, and `article[data-message-uuid]` carries a matching
-  // `scroll-margin-top` (index.css) so a timeline-jump
-  // `scrollIntoView({ block: 'start' })` lands the destination article
-  // just BELOW the floating row rather than hidden underneath it. Both
-  // feeds share one source: `Math.max(breadcrumbHeight,
-  // rightClusterHeight)`, measured via the ResizeObservers below and
-  // exposed as the `--delta-top-region-reserve` CSS variable.
-  //
-  // In the EXPANDED state the entire top region — the expanded timeline
-  // card AND the row carrying the breadcrumb + pane toggle underneath it —
-  // sits inside a SINGLE absolute container pinned to the top of the
-  // Panel's body region (`absolute top-0 left-0 right-0 z-20`). The
-  // container does NOT scroll with the conversation: it anchors to the
-  // Panel's relative wrapper (outside the scrolling body), not to the
-  // body's scrolling content. Pinning the container — not its children
-  // — is what fixes v18's regression where scrubbing the expanded
-  // timeline scrolled the conversation, dragging the timeline itself
-  // off-screen so the user could not scrub again after the first jump.
-  // Inside the container the children use normal flow (the timeline
-  // card on top, the breadcrumb + pane-toggle row underneath); no child
-  // carries its own absolute positioning.
-  //
-  // Like the collapsed state, the expanded container does not occupy
-  // layout space inside the body, so the body reserves matching
-  // `padding-top` equal to the container's measured height. The
-  // ResizeObserver effect below switches its observation targets when
-  // `timelineExpanded` flips: collapsed observes the two floating
-  // cards' refs and writes their max, expanded observes the single
-  // container's ref and writes its height. Both feeds share the same
-  // `--delta-top-region-reserve` CSS variable so the body padding-top
-  // and the `scroll-margin-top` on `article[data-message-uuid]` (see
-  // index.css) track whichever state is live.
-  const breadcrumbOverlayRef = useRef<HTMLDivElement | null>(null);
-  const rightClusterOverlayRef = useRef<HTMLDivElement | null>(null);
-  const expandedContainerRef = useRef<HTMLDivElement | null>(null);
-  const [topRegionReserve, setTopRegionReserve] = useState<number | null>(null);
+  // When navigating UP to an ancestor via the breadcrumb, this holds the child
+  // thread one level down toward where we were. After the ancestor renders, the
+  // scroll effect brings that child's chip — where the branch sprouts — into
+  // view instead of jumping to the bottom of a possibly long parent.
+  const scrollToChildRef = useRef<ThreadId | null>(null);
+  const { bodyRef, stickRef, lastContentLength } = useStickToBottom({
+    activeThread,
+    newSession,
+    messages,
+    pendingCount,
+    streaming,
+    scrollToChildRef,
+    setHoveredBranchTitle,
+  });
 
   // `timelineExpanded` flips the entire top-row layout — not just the
   // timeline card's own collapsed/expanded chrome:
@@ -558,11 +332,6 @@ export function TranscriptPane({
   );
   const [timelineExpanded] = useTimelineExpanded(expandedSessionId);
 
-  // When navigating UP to an ancestor via the breadcrumb, this holds the child
-  // thread one level down toward where we were. After the ancestor renders, the
-  // scroll effect brings that child's chip — where the branch sprouts — into
-  // view instead of jumping to the bottom of a possibly long parent.
-  const scrollToChildRef = useRef<ThreadId | null>(null);
   // The child chip to briefly flash after such a scroll, so the eye catches it.
   const [flashChildId, setFlashChildId] = useState<ThreadId | null>(null);
 
@@ -624,80 +393,6 @@ export function TranscriptPane({
     };
   }, [setBranchOrigin]);
 
-  // Recompute "is the user near the bottom?" on every scroll so the
-  // stick-to-bottom effects know whether to follow new content.
-  useLayoutEffect(() => {
-    const el = bodyRef.current;
-    if (!el) {
-      return;
-    }
-    const onScroll = () => {
-      // A timeline jump into this lane is landing: its programmatic
-      // scrollIntoView fires a scroll event just like a user scroll, and for a
-      // near-tail target it clamps at the bottom. Re-arming stick here would
-      // glue the pane to the tail and then live content would push the
-      // jump target off-screen. So while an intent for this lane is live, never
-      // arm — keep stick disarmed and let the jump land on its target. The
-      // intent is cleared a couple of frames after the scroll settles (see the
-      // overlay), so a genuine user scroll afterwards re-arms normally.
-      const jump = jumpTargetRef.current;
-      if (jump !== null && jump.threadId === activeThreadIdRef.current) {
-        stickRef.current = false;
-        return;
-      }
-      stickRef.current =
-        el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD_PX;
-    };
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
-
-  // The last message's content length lets streaming/incremental appends to the
-  // same message count as a content change, so growing replies keep scrolling.
-  const lastContentLength =
-    messages.length > 0
-      ? JSON.stringify(messages[messages.length - 1].content).length
-      : 0;
-
-  // When the user sends, their own pending entry must always be visible at the
-  // bottom, so force stick on a pending-count increase for the active thread.
-  if (pendingCount > prevPendingRef.current) {
-    stickRef.current = true;
-  }
-  prevPendingRef.current = pendingCount;
-
-  // On active-thread change, reset to stick and jump to the latest of the newly
-  // focused thread, and drop any lingering hover highlight (navigating away via
-  // the navigator or breadcrumb does not fire the chip's mouseleave).
-  useLayoutEffect(() => {
-    setHoveredBranchTitle(null);
-    // A breadcrumb "go up" navigation wants to land on the origin chip, not the
-    // bottom: skip the stick-to-bottom jump and let the scroll effect take over.
-    if (scrollToChildRef.current !== null) {
-      stickRef.current = false;
-      return;
-    }
-    // A timeline-initiated cross-lane jump switched into this lane and wants to
-    // land on the message the playhead picked, not the lane's tail. Read the
-    // intent synchronously in this same commit (the overlay set it atomically
-    // with the active-thread switch) and skip the stick-to-bottom jump — the
-    // overlay's scheduleScrollAfterRender places the pane on the target, and
-    // the scroll listener above keeps stick disarmed through the landing.
-    // Branches exactly like the breadcrumb precedent above. Read the store
-    // directly (not the ref mirror) so this does not depend on the
-    // jump-target sync layout effect having run first in this commit.
-    const jumpTarget = useNavStore.getState().activeThreadJumpTarget;
-    if (jumpTarget !== null && jumpTarget.threadId === activeThread?.id) {
-      stickRef.current = false;
-      return;
-    }
-    stickRef.current = true;
-    const el = bodyRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [activeThread?.id, newSession]);
-
   // Leaving the new-session state discards the selection and closes any
   // still-open modal, so a later return starts clean. Clearing the workdir also
   // drops its provenance (any PR pick) and the worktree choice. The selection is
@@ -718,43 +413,6 @@ export function TranscriptPane({
     resetNewSessionProvider,
     closeWorkdirDialog,
   ]);
-
-  // Keyed on the rendered content changing: jump to the bottom after paint when
-  // sticking.
-  useLayoutEffect(() => {
-    if (!stickRef.current) {
-      return;
-    }
-    const el = bodyRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
-    // The live preview grows in place (its own bubble, not a `messages` entry),
-    // so its text length is a content-change signal too — keep following it.
-  }, [messages.length, lastContentLength, pendingCount, streaming?.text.length]);
-
-  // The Panel footer (notifications, Composer, queue, chips) sits outside the
-  // scroll region and has a variable height: when a notice appears or the
-  // composer grows, the footer expands and this `flex-1` body shrinks. That
-  // shrink reduces the scroll viewport without firing a scroll or content
-  // change, so the content effects above never re-run and the latest content
-  // slips below the fold. Observe the body's size and re-stick on resize so the
-  // bottom stays pinned. Setting `scrollTop` does not alter layout, so this
-  // cannot trigger a ResizeObserver feedback loop.
-  useLayoutEffect(() => {
-    const el = bodyRef.current;
-    if (!el) {
-      return;
-    }
-    const observer = new ResizeObserver(() => {
-      if (!stickRef.current) {
-        return;
-      }
-      el.scrollTop = el.scrollHeight;
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
 
   const ancestry = useMemo(
     () => (activeThread ? threadAncestry(threads, activeThread.id) : []),
@@ -871,15 +529,6 @@ export function TranscriptPane({
   // noise — so it stays hidden even when the session has branched elsewhere.
   const isOnSubThread = ancestry.length > 1;
 
-  const showExternalInput =
-    !newSession &&
-    activeThread !== null &&
-    externalInput !== null &&
-    externalInput.threadId === activeThread.id;
-
-  const showSendParked =
-    !newSession && activeThread !== null && sendParked !== null;
-
   // Show the live assistant preview on the thread it belongs to whenever a
   // preview exists with text. `done` only means every chunk of the message has
   // arrived, NOT that the turn ended — the preview stays until the persisted
@@ -931,79 +580,6 @@ export function TranscriptPane({
   // user is reading stays put instead of jumping. The body reserves a fixed
   // bottom padding (below) so resting content clears it.
 
-  // The permission notice renders INLINE at the conversation tail, exactly like
-  // the question card below: the request interrupts the turn the user is
-  // reading, so Allow/Deny sit in the flow where their eyes already are, over
-  // the pane's own background (a floating top-right card was translucent over
-  // transcript text and collided with the Timeline/pane-toggle cluster pinned
-  // to the same corner). Unlike the question card it is NOT gated by thread:
-  // `permission_requested` carries no thread id, so the notice is session-level
-  // and shows on whichever of the session's threads is active. It clears on
-  // dismiss (the entry stays, flagged, so a refetch cannot resurrect the card),
-  // on a decision/resolution, or when the turn completes.
-  const permissionCard = permission && !permission.dismissed && activeThread && (
-    <PermissionNoticeCard
-      notice={permission}
-      providerHasTerminal={providerHasTerminal}
-      providerHasAllowForSession={providerHasAllowForSession}
-      // `readOnly` alone also covers a session that is still starting, which
-      // was never closed; see `spawning`.
-      sessionClosed={readOnly && !spawning}
-      onNotPending={refetchSessions}
-      onOpenTerminal={() => setTerminalOpen(true)}
-      onDismiss={() => dismissPermission(activeThread.session_id)}
-    />
-  );
-
-  // The interactive question card renders INLINE at the conversation tail (in
-  // the scrolling body, after the rendered messages and the live-streamed
-  // bubble), not in the bottom overlay — so the choices "hang off" the
-  // conversation right after the assistant's streamed preamble, where the user
-  // is reading, rather than floating over it. The user answers from here: a
-  // single-select click, a multi-select toggle + Submit, or a per-question
-  // choice across a multi-question call, all POSTed to the answer endpoint,
-  // which injects the selection keystrokes into the session's TUI pane. The
-  // authoritative clear stays the existing resolution path (the `tool_result`
-  // resolving the question's request row), so no extra clear logic is needed.
-  // An "Open terminal" fallback remains in the card for a misfired injection.
-  // Gate the question card to the thread the question was asked on, mirroring
-  // how `showExternalInput` and `showStreaming` gate by `=== activeThread.id`:
-  // AskUserQuestion belongs to the in-flight turn's thread, so the card must
-  // not show on the session's other threads.
-  const questionCard = question &&
-    !question.dismissed &&
-    activeThread &&
-    question.threadId === activeThread.id && (
-    <QuestionCard
-      notice={question}
-      onAnswer={(selections) =>
-        // Return the POST so the card can await it: a 409 (already answered /
-        // stale), a 400 (malformed), or a network failure rejects, and the card
-        // surfaces an inline error, re-enables its controls for a retry, and
-        // emphasizes the terminal fallback. On success the authoritative clear
-        // still arrives via the resolution path.
-        client.answerQuestion(
-          activeThread.session_id,
-          question.requestId,
-          selections,
-        )
-      }
-      onCancel={() =>
-        // Cancel the question in the TUI itself (a single Escape cancels the
-        // whole call). Return the POST so the card can await it: a 409 (already
-        // resolved / stale) or a network failure rejects, and the card surfaces
-        // an inline error, re-enables its controls for a retry, and emphasizes
-        // the terminal fallback. On success the authoritative clear still
-        // arrives via the resolution path (the `is_error` tool_result).
-        client.cancelQuestion(activeThread.session_id, question.requestId)
-      }
-      sessionClosed={readOnly && !spawning}
-      onNotPending={refetchSessions}
-      onOpenTerminal={() => setTerminalOpen(true)}
-      onDismiss={() => dismissQuestion(activeThread.session_id)}
-    />
-  );
-
   // The bottom layer: the composer plus the notices that must stay next to the
   // input — the closed/external-input banners and, crucially, the pending-send
   // strip, which the user reads to decide whether to hold a send. For a
@@ -1025,242 +601,53 @@ export function TranscriptPane({
       </div>
     );
   } else if (composerMode) {
-    // A starting session is not open, so it arrives here `readOnly` — but it was
-    // never closed, and nothing resumes it: a send composed now is accepted and
-    // parked as a `queued` row until its launch registers. The composer's own
-    // "starting" placeholder is what says so; the closed notice would be a
-    // second, wrong explanation.
-    const showClosedNotice = readOnly && !newSession && !spawning;
-    // Only an open session has hooks to lose: once it is closed, the closed
-    // notice (and the resume a send performs) is the whole story.
-    const showHooksUnreachable = hooksUnreachable && !readOnly && !newSession;
-    // Whether the upper (notices) card has anything to show. Each of these
-    // conditions matches exactly one child it gates — `showClosedNotice` the
-    // closed notice, `showExternalInput` the external-input notice, and a non-empty
-    // `pendingEntries` the pending strip (`PendingQueue` itself renders null when
-    // empty) — so the card is omitted entirely rather than rendering an empty
-    // box when none of them are present.
-    const hasNotices =
-      showClosedNotice ||
-      showHooksUnreachable ||
-      (showExternalInput && activeThread !== null) ||
-      (showSendParked && activeThread !== null) ||
-      pendingEntries.length > 0;
     bottomContent = (
-      <>
-        {/* Upper card: status notices + the pending-send strip, kept visually
-            separate from the composer so the (now borderless) textarea has a
-            clean boundary of its own. The question and permission cards are NOT
-            in this stack: they render inline at the conversation tail in the
-            scrolling body (see questionCard/permissionCard above), so they
-            follow the conversation in the flow instead of floating over it. */}
-        {hasNotices && (
-          <div
-            className={`${FLOATING_CARD_CLASS} space-y-2 px-3 py-2`}
-            data-testid="bottom-notices"
-          >
-            {showClosedNotice && (
-              <div
-                className="flex items-center gap-2 rounded border border-border-default bg-surface-elevated px-2 py-1 text-caption text-fg-subtle"
-                data-testid="readonly-notice"
-              >
-                <Badge tone="neutral">closed</Badge>
-                <span>
-                  This session is closed. Sending a message resumes it.
-                </span>
-              </div>
-            )}
-
-            {showHooksUnreachable && (
-              <div
-                className="flex items-center gap-2 rounded border border-danger/30 bg-danger/10 px-2 py-1 text-caption text-danger"
-                data-testid="hooks-unreachable-notice"
-                role="alert"
-              >
-                <Badge className="shrink-0" tone="warning">
-                  lost contact
-                </Badge>
-                <span>
-                  Delta lost contact with this session. Use the terminal, or
-                  choose Close in the session&apos;s menu and send again to
-                  resume.
-                </span>
-              </div>
-            )}
-
-            {showExternalInput && activeThread && (
-              <div
-                className="flex items-start gap-2 rounded border border-info/30 bg-info/10 px-2 py-1 text-caption"
-                data-testid="external-input-notice"
-              >
-                <Badge className="shrink-0" tone="info">
-                  external input
-                </Badge>
-                <span className="min-w-0 flex-1 line-clamp-2 break-words text-fg-muted">
-                  {externalInput.prompt}
-                </span>
-                <Button
-                  className="shrink-0"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => dismissExternalInput(activeThread.session_id)}
-                >
-                  Dismiss
-                </Button>
-              </div>
-            )}
-
-            {showSendParked && activeThread && sendParked && (
-              <div
-                className="flex items-start gap-2 rounded border border-danger/30 bg-danger/10 px-2 py-1 text-caption"
-                data-testid="send-parked-notice"
-                role="alert"
-              >
-                <Badge className="shrink-0" tone="warning">
-                  not delivered
-                </Badge>
-                {/* The message itself is no longer only here: the server put
-                    the send back in the queue, held for an explicit release,
-                    so the `PendingQueue` row rendered just below shows the text
-                    and carries the Send and Cancel actions. This notice only
-                    has to explain WHY it is waiting — hence no copy of the
-                    text, and no "copy it and try again". */}
-                <span className="min-w-0 flex-1 break-words text-fg-muted">
-                  A message never reached the session — the terminal swallowed
-                  it twice, so Delta stopped re-sending it. It is waiting in
-                  the queue below: send it again once the terminal is ready, or
-                  cancel it.
-                </span>
-                <Button
-                  className="shrink-0"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => dismissSendParked(activeThread.session_id)}
-                >
-                  Dismiss
-                </Button>
-              </div>
-            )}
-
-            <PendingQueue
-              entries={pendingEntries}
-              sessionSpawning={spawning}
-            />
-          </div>
-        )}
-
-        {/* The composer card and the rail on its top edge, stacked with no gap
-            so the rail's items rest on the card's top border. The pair is ONE
-            flex child of the overlay, so the overlay's `gap-2` falls above the
-            rail (between the notices card and the rail) and the rail's height
-            is measured with the rest of the overlay — see {@link ComposerRail}
-            for why it must stay in normal flow.
-
-            Being siblings is also why the pair needs a provider around it: the
-            prompt-template button rides the rail but edits the draft inside the
-            card, and cannot reach that textarea through props. */}
-        <ComposerDraftTargetProvider draftKey={composerDraftKey(composerMode)}>
-          <div className="flex flex-col">
-            {/* The template button is on the rail in both modes and is what gives
-                the rail its height; the provider tabs join it only for a new
-                session (the provider is fixed once a session runs). */}
-            <ComposerRail
-              templateSlot={<PromptTemplateButton />}
-              providerTabs={newSession ? <ProviderTabs /> : null}
-            />
-            {/* Composer card: the new-session launch pickers (which parameterize the
-                spawn) sit directly above the input they configure. The focused
-                session's context-window usage rides the card's TOP EDGE as a thin
-                ambient fill (the border doubles as the track), filled from the left
-                to `used_percentage`%, with the numeric `NN%` small at the edge —
-                right where the user is about to send. Omitted entirely when no
-                snapshot is available (or after `/compact`), rather than shown at 0%. */}
-            <div
-              className={`relative ${FLOATING_CARD_CLASS} px-3 py-2`}
-              data-testid="composer-card"
-            >
-              {contextUsage !== undefined && (
-                <div
-                  className="pointer-events-none absolute inset-x-0 top-0"
-                  data-testid="composer-context-bar"
-                >
-                  {/* The card's top border is the track; this fill runs along it
-                      from the RIGHT edge leftward to the usage percentage, so the
-                      bar's growing tip stays next to the `%` readout. A real DOM
-                      bar. The rail above never reaches down onto this line in a
-                      thread: the only item that overlaps the border (the
-                      provider tabs) exists in new-session mode, where there is
-                      no fill to cover. */}
-                  <div
-                    className="absolute right-0 top-0 h-0.5 rounded-tr-md bg-fg-muted"
-                    style={{
-                      width: `${Math.min(100, Math.max(0, contextUsage))}%`,
-                    }}
-                    data-testid="composer-context-fill"
-                    role="meter"
-                    aria-label="Context window usage"
-                    aria-valuenow={Math.round(
-                      Math.min(100, Math.max(0, contextUsage)),
-                    )}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                  />
-                  <span className="group/ctx pointer-events-auto absolute right-0.5 top-0.5 z-10">
-                    <span
-                      className="cursor-help px-1 py-1 text-caption leading-none tabular-nums text-fg-subtle"
-                      data-testid="composer-context-label"
-                      tabIndex={0}
-                      aria-label="Context window usage"
-                    >
-                      {Math.round(contextUsage)}%
-                    </span>
-                    {/* Opens upward (the bar sits at the very top of the composer)
-                        so it never covers the textarea below. */}
-                    <span
-                      role="note"
-                      data-testid="composer-context-popover"
-                      className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 hidden w-max max-w-xs rounded-md border border-border-default bg-surface px-2.5 py-1.5 text-caption text-fg-muted shadow-lg group-hover/ctx:block group-focus-within/ctx:block"
-                    >
-                      Context window usage
-                    </span>
-                  </span>
-                </div>
-              )}
-              {/* Flow content sits in its own `space-y-2` wrapper so the absolute
-                  context bar above is not counted as a spacing sibling (which would
-                  push the composer down by a row gap). */}
-              <div className="space-y-2">
-                {/* Why the provider tabs on the rail are disabled, in the server's
-                    words. It leads the card's stack, directly under the tabs it
-                    explains — the tabs themselves have no room for a reason. */}
-                {newSession && <ProviderUnavailableNotice />}
-                {/* A directory is chosen: show it as a chip with a ✎ to change it
-                    (the ✎ reopens the picker without resetting the selection). The
-                    chip renders nothing when no directory is selected, so there is
-                    no button to (re)open the picker from here — that is done via
-                    "New". */}
-                {newSession && <WorkdirChip onEdit={openWorkdirDialog} />}
-                {/* Below the directory chip: when the selected directory is a git
-                    repo, an opt-in to start the session in a fresh worktree (with a
-                    start-point choice). Renders nothing for a non-git directory. */}
-                {newSession && <WorktreeOptions />}
-                {newSession && <LaunchOptionsPicker />}
-                <Composer mode={composerMode} />
-              </div>
-            </div>
-          </div>
-        </ComposerDraftTargetProvider>
-      </>
+      <TranscriptComposerStack
+        newSession={newSession}
+        activeThread={activeThread}
+        readOnly={readOnly}
+        spawning={spawning}
+        hooksUnreachable={hooksUnreachable}
+        composerMode={composerMode}
+        pendingEntries={pendingEntries}
+      />
     );
   }
+
+  // Whether a bottom overlay is mounted at all. This is the ONLY real state the
+  // measure effect below derives from: the effect re-binds its ResizeObserver
+  // when the overlay node appears or disappears, and the observer itself
+  // handles every subsequent size change (composer auto-grow, banners). Keying
+  // the effect on this boolean instead of `bottomContent`'s JSX identity (a
+  // fresh object every render) stops it from re-running — and rewriting the
+  // body's `scrollTop` while stick is armed — on every unrelated render.
+  const hasBottomOverlay = bottomContent != null;
+  const { bottomOverlayRef, bottomReserve } = useBottomOverlayReserve({
+    hasBottomOverlay,
+    bodyRef,
+    stickRef,
+  });
+  const {
+    breadcrumbOverlayRef,
+    rightClusterOverlayRef,
+    expandedContainerRef,
+    topRegionReserve,
+  } = useTopRegionReserve({
+    timelineExpanded,
+    newSession,
+    activeThread,
+    isOnSubThread,
+    paneToggleButton,
+  });
 
   // The bottom layer floats over the body as a stack of cards inset from the
   // left, right, and bottom edges. This wrapper is transparent and only
   // positions and MEASURES the stack (the body reserves bottom padding equal to
-  // its measured height — see the effect below — so resting content clears it
-  // however tall the composer grows); its children carry the actual floating-card
-  // chrome ({@link FLOATING_CARD_CLASS}). For a resume-impossible session the
-  // single "cannot resume" notice floats on its own with no composer beneath it.
+  // its measured height — see `useBottomOverlayReserve` — so resting content
+  // clears it however tall the composer grows); its children carry the actual
+  // floating-card chrome (`FLOATING_CARD_CLASS` in `floatingCard.ts`). For a
+  // resume-impossible session the single "cannot resume" notice floats on its
+  // own with no composer beneath it.
   const bottomOverlay = bottomContent && (
     <div
       ref={bottomOverlayRef}
@@ -1270,334 +657,21 @@ export function TranscriptPane({
       {bottomContent}
     </div>
   );
-  // Whether a bottom overlay is mounted at all. This is the ONLY real state the
-  // measure effect below derives from: the effect re-binds its ResizeObserver
-  // when the overlay node appears or disappears, and the observer itself
-  // handles every subsequent size change (composer auto-grow, banners). Keying
-  // the effect on this boolean instead of `bottomContent`'s JSX identity (a
-  // fresh object every render) stops it from re-running — and rewriting the
-  // body's `scrollTop` while stick is armed — on every unrelated render.
-  const hasBottomOverlay = bottomContent != null;
 
-  // Track the bottom overlay's actual height and drive the body's bottom padding
-  // from it (height + the overlay inset as a gap), so resting content clears the
-  // composer however tall it grows — the last turn sits just above it rather than
-  // being covered by a fixed reserve. When the overlay grows (the composer
-  // expands as you type, or a banner appears) the body's padding grows and so
-  // does its scrollHeight; re-stick in the same measurement so, while sticking,
-  // the tail stays pinned just above the composer.
-  //
-  // This observes the OVERLAY, never the body, and only ever writes
-  // `bottomReserve` (the body's padding) and the body's `scrollTop` — never the
-  // overlay's own size — so it cannot feed its own observation back into a loop.
-  // The body's ResizeObserver (above) observes the body and only writes
-  // `scrollTop`, so the two stay independent. Re-bind when the overlay's presence
-  // changes (e.g. a resume-unavailable session drops the composer) so the ref
-  // tracks the live node; clear the reserve when there is no overlay so the body
-  // falls back to the fixed token.
-  //
-  // The per-commit re-measure below passes `onlyIfChanged`, so on the renders
-  // that leave the overlay's height alone it costs one read and changes nothing.
-  useLayoutEffect(() => {
-    const overlay = bottomOverlayRef.current;
-    if (!overlay) {
-      // No bottom overlay (e.g. resume-unavailable drops the composer): clear
-      // the measured reserve so the body falls back to the fixed token below.
-      setBottomReserve(null);
-      return;
-    }
-    let applied: number | null = null;
-    const apply = (onlyIfChanged: boolean) => {
-      // While a branch is being composed, the "Branch from selected text" banner
-      // adds height to this overlay. Folding that into the body's bottom reserve
-      // (and the stick-to-bottom re-scroll) shifts the transcript the instant
-      // text is selected — moving the very selection the user is trying to
-      // adjust, and making it hard to read. So while a branch is pending, hold
-      // the reserve and skip the re-scroll: the banner floats over the transcript
-      // tail instead of pushing it. The reserve recomputes once the branch is
-      // cleared or sent (this effect re-runs and apply() proceeds normally).
-      if (useComposerStore.getState().branchOrigin !== null) {
-        return;
-      }
-      const reserve =
-        overlay.getBoundingClientRect().height +
-        overlayInsetPx(overlay) +
-        BODY_BOTTOM_READING_GAP_PX;
-      if (onlyIfChanged && reserve === applied) {
-        return;
-      }
-      applied = reserve;
-      setBottomReserve(reserve);
-      const body = bodyRef.current;
-      if (body && stickRef.current) {
-        body.scrollTop = body.scrollHeight;
-      }
-    };
-    apply(false);
-    remeasureBottomReserveRef.current = () => apply(true);
-    const observer = new ResizeObserver(() => apply(false));
-    observer.observe(overlay);
-    return () => {
-      observer.disconnect();
-      remeasureBottomReserveRef.current = null;
-    };
-  }, [hasBottomOverlay]);
-
-  // Re-measure after every commit of this pane as well. A render that changes
-  // what the overlay holds — focusing a closed session adds the read-only notice
-  // above the composer in the very commit that swaps the transcript — resizes
-  // the overlay at once, but the observer reports it only at the next rendering
-  // step, and the reserve it then sets commits in a later task still. In between,
-  // a frame is painted (and the layout can be read) with the conversation sized
-  // for the old overlay. A state update made here commits synchronously, before
-  // the browser gets control back, so the reserve lands with the change that
-  // caused it. Growth that happens without this pane re-rendering (the composer
-  // auto-growing as you type) is still the observer's to report.
-  useLayoutEffect(() => {
-    remeasureBottomReserveRef.current?.();
-  });
-
-  // Track whichever top-region surface is currently mounted and drive
-  // the body's `--delta-top-region-reserve` CSS variable from its
-  // measured height. The variable feeds both the body's `padding-top`
-  // (so the first message does not render under the pinned region) and
-  // the `scroll-margin-top` rule on `article[data-message-uuid]` (see
-  // index.css), so a timeline-jump `scrollIntoView({ block: 'start' })`
-  // lands the destination article just below the pinned region rather
-  // than hidden underneath it.
-  //
-  // The observation targets switch with `timelineExpanded`:
-  //   - collapsed: observe BOTH `breadcrumbOverlayRef` and
-  //     `rightClusterOverlayRef` (the two independent absolute floating
-  //     cards) and write `max(breadcrumbHeight, rightClusterHeight)` —
-  //     the visual row height those two cards form together.
-  //   - expanded: observe the single `expandedContainerRef` (the
-  //     absolute container pinned to the top of the Panel's body region,
-  //     holding the timeline card and the breadcrumb+pane-toggle under-row
-  //     in normal flow) and write the container's total height.
-  //
-  // Re-running the effect on the `timelineExpanded` flip disconnects
-  // the previous observer and binds a fresh one to the new state's
-  // node(s). The single ResizeObserver instance per render handles its
-  // own cleanup; observing nodes that no longer exist is impossible
-  // because the JSX for the unmounted state is not rendered. Re-bind
-  // also fires when the collapsed cards' presence may have flipped (a
-  // new-session ↔ active-thread swap, or the breadcrumb appearing for
-  // a sub-thread navigation) so the initial measurement still lands on
-  // the new nodes. The observer reads the cards/container size only
-  // and writes the body's CSS variable, never the observed nodes' own
-  // size, so it cannot feed back into a loop.
-  useLayoutEffect(() => {
-    if (timelineExpanded) {
-      const container = expandedContainerRef.current;
-      if (!container) {
-        setTopRegionReserve(null);
-        return;
-      }
-      const apply = () => {
-        setTopRegionReserve(container.getBoundingClientRect().height);
-      };
-      apply();
-      const observer = new ResizeObserver(apply);
-      observer.observe(container);
-      return () => observer.disconnect();
-    }
-    const breadcrumb = breadcrumbOverlayRef.current;
-    const cluster = rightClusterOverlayRef.current;
-    if (!breadcrumb && !cluster) {
-      setTopRegionReserve(null);
-      return;
-    }
-    const apply = () => {
-      const breadcrumbHeight = breadcrumb
-        ? breadcrumb.getBoundingClientRect().height
-        : 0;
-      const clusterHeight = cluster
-        ? cluster.getBoundingClientRect().height
-        : 0;
-      setTopRegionReserve(Math.max(breadcrumbHeight, clusterHeight));
-    };
-    apply();
-    const observer = new ResizeObserver(apply);
-    if (breadcrumb) {
-      observer.observe(breadcrumb);
-    }
-    if (cluster) {
-      observer.observe(cluster);
-    }
-    return () => observer.disconnect();
-  }, [
-    // Re-bind when the observed surface flips (collapsed ↔ expanded) or
-    // when the collapsed cards' presence may have changed, so the
-    // initial measurement still lands on the new node(s) (or the
-    // reserve is cleared when no node is present).
-    timelineExpanded,
-    newSession,
-    activeThread?.id,
-    isOnSubThread,
-    paneToggleButton,
-  ]);
-
-  // The top region layout splits into two distinct shapes by
-  // `timelineExpanded`:
-  //
-  //   1. COLLAPSED (default): two independent absolute floating cards
-  //      sit at the top of the conversation panel —
-  //         [breadcrumb]                    [{Thread} {pane toggle}]
-  //      The breadcrumb pins to top-left; the {Thread + pane toggle}
-  //      cluster pins to top-right. Both share the same `overlay-inset`
-  //      top/side offsets so they read as one row even though they are
-  //      two boxes, and the conversation shows through the gap between
-  //      them — there is NO full-width white bar. Each piece keeps its
-  //      own card chrome (a breadcrumb card; the Thread/pane-toggle
-  //      pills already carry `bg-surface shadow-md` via
-  //      `TIMELINE_TOGGLE_BUTTON_CLASS` / `PANE_TOGGLE_BUTTON_CLASS`)
-  //      so the floating elements stay legible against any conversation
-  //      content scrolling underneath. The body reserves
-  //      `padding-top: var(--delta-top-region-reserve)` equal to the
-  //      taller of the two cards, so the first message clears them on
-  //      initial paint.
-  //
-  //   2. EXPANDED: a SINGLE absolute container pinned to the top of
-  //      the Panel's body region holds the entire top region —
-  //         [expanded timeline card                                  ]
-  //         [breadcrumb] [flex-1 spacer]               [{pane toggle}]
-  //      The container is `absolute top-0 left-0 right-0 z-20`, so it
-  //      anchors to the Panel's relative wrapper (outside the
-  //      scrolling body) and STAYS PINNED across conversation scroll.
-  //      Inside the container the children use normal flow — the
-  //      timeline card on top, the breadcrumb + pane-toggle row directly
-  //      underneath — no child carries its own absolute positioning.
-  //      Pinning the container — not its children — is what fixes the
-  //      v18 regression where the expanded timeline scrolled away with
-  //      the conversation after the first scrub, breaking subsequent
-  //      scrubs. The body reserves `padding-top` equal to the
-  //      container's measured height (same `--delta-top-region-reserve`
-  //      mechanism as collapsed) so the first message clears it. No
-  //      Thread icon in the under-row — the expanded card itself
-  //      replaces it.
-  //
-  // The Panel's body wrapper (`Panel.tsx`) already carries
-  // `position: relative`, so the absolute floating cards / container
-  // anchor to the scroll viewport rather than to the scrolling content
-  // itself — they stay glued to the top edge while the conversation
-  // scrolls underneath. A high z-index (`z-20`) keeps them above any
-  // other in-flow content (streaming bubble, chip rows).
-  const showTimeline = !newSession && activeThread !== null;
-  const showBreadcrumb = isOnSubThread;
-  // The single floating breadcrumb card (collapsed state only) — pinned
-  // top-left via `top-overlay-inset` / `left-overlay-inset`, with the
-  // same card chrome as the in-flow breadcrumb used in the expanded
-  // state. The ref drives one half of the body's measured reserve.
-  const collapsedBreadcrumbCard = showBreadcrumb && (
-    <div
-      ref={breadcrumbOverlayRef}
-      data-testid="transcript-breadcrumb-overlay"
-      className={`${FLOATING_CARD_CLASS} pointer-events-auto absolute left-overlay-inset top-overlay-inset z-20 self-start px-3 py-1.5`}
-    >
-      <Breadcrumb items={breadcrumbItems} />
-    </div>
-  );
-  // The single floating right-side cluster (collapsed state only) —
-  // pinned top-right via `top-overlay-inset` / `right-overlay-inset`,
-  // with the Thread toggle and the pane-toggle pill side-by-side inside it.
-  // The cluster wrapper carries NO shared background or border on
-  // purpose: each pill already has its own white card chrome via
-  // `TIMELINE_TOGGLE_BUTTON_CLASS` / `PANE_TOGGLE_BUTTON_CLASS`, so
-  // wrapping them in another white bar would re-introduce the v17
-  // top-bar look the v18 design retracts.
-  const showRightCluster = showTimeline || paneToggleButton;
-  const collapsedRightCluster = showRightCluster && (
-    <div
-      ref={rightClusterOverlayRef}
-      data-testid="transcript-top-row"
-      data-expanded="false"
-      className="pointer-events-auto absolute right-overlay-inset top-overlay-inset z-20 flex items-start gap-2"
-    >
-      {showTimeline && activeThread !== null && (
-        <ThreadTimelineOverlay
-          threads={threads}
-          activeThreadId={activeThread.id}
-          conversationBodyRef={bodyRef}
-        />
-      )}
-      {paneToggleButton}
-    </div>
-  );
-  // The top region itself. Two completely different shapes by
-  // `timelineExpanded` (see the comment above for the full rationale):
-  //
-  //   - collapsed: a transparent, layout-less wrapper
-  //     (`display: contents`) hosting two independent absolute floating
-  //     cards (each pinned to its own corner of the Panel body region).
-  //
-  //   - expanded: a SINGLE absolute container pinned to the top of the
-  //     Panel body region (`absolute top-0 left-0 right-0 z-20`)
-  //     holding the expanded timeline card on top and a single
-  //     normal-flow row of breadcrumb + pane toggle underneath it. The
-  //     container itself takes no layout space inside the scrolling
-  //     body — the body reserves matching `padding-top` from the
-  //     ResizeObserver-driven `--delta-top-region-reserve`, mirroring
-  //     the collapsed state's mechanism.
-  //
-  // Neither shape paints a shared white bar across the full top edge,
-  // so the v17 look the v18 design retracted is not re-introduced. The
-  // outer `transcript-top-region` wrapper carries the testid in both
-  // states for tests to locate.
-  const topRegion = timelineExpanded ? (
-    showTimeline ? (
-      <div
-        ref={expandedContainerRef}
-        data-testid="transcript-top-region"
-        data-expanded="true"
-        // Single absolute container pinned to the top of the Panel
-        // body region; anchored to Panel's relative wrapper (outside
-        // the scrolling body), so it STAYS PINNED across conversation
-        // scroll — the v19 fix for the v18 regression. Children use
-        // normal flow inside.
-        className="pointer-events-auto absolute left-0 right-0 top-0 z-20 flex flex-col gap-2 px-3 pt-3"
-      >
-        {activeThread !== null && (
-          <ThreadTimelineOverlay
-            threads={threads}
-            activeThreadId={activeThread.id}
-            conversationBodyRef={bodyRef}
-          />
-        )}
-        {(showBreadcrumb || paneToggleButton) && (
-          <div
-            data-testid="transcript-top-row"
-            data-expanded="true"
-            className="flex items-center gap-2 pb-2"
-          >
-            {showBreadcrumb ? (
-              <div className={`${FLOATING_CARD_CLASS} px-3 py-1.5`}>
-                <Breadcrumb items={breadcrumbItems} />
-              </div>
-            ) : (
-              <span />
-            )}
-            <span className="flex-1" />
-            {paneToggleButton}
-          </div>
-        )}
-      </div>
-    ) : null
-  ) : (
-    (showBreadcrumb || showRightCluster) && (
-      <div
-        data-testid="transcript-top-region"
-        data-expanded="false"
-        // Layout-less wrapper: zero height in the document flow, just a
-        // host for the two absolute children below. The body's measured
-        // padding-top reserve (driven by Math.max of the two children's
-        // heights) clears space for them above the first message.
-        className="contents"
-      >
-        {collapsedBreadcrumbCard}
-        {collapsedRightCluster}
-      </div>
-    )
+  const topRegion = (
+    <TranscriptTopRegion
+      timelineExpanded={timelineExpanded}
+      newSession={newSession}
+      threads={threads}
+      activeThread={activeThread}
+      isOnSubThread={isOnSubThread}
+      paneToggleButton={paneToggleButton}
+      breadcrumbItems={breadcrumbItems}
+      bodyRef={bodyRef}
+      breadcrumbOverlayRef={breadcrumbOverlayRef}
+      rightClusterOverlayRef={rightClusterOverlayRef}
+      expandedContainerRef={expandedContainerRef}
+    />
   );
 
   return (
@@ -1712,102 +786,19 @@ export function TranscriptPane({
           </p>
         )}
 
-      {renderedMessages.map((message) => {
-        const children = childMap.get(message.uuid) ?? [];
-        // A nested aside card is tightened and left-indented so it reads as a
-        // nested step rather than prose. Two independent things make a message
-        // one, and they are kept separate on purpose.
-        //
-        // Its *shape*: it renders only standalone cards, never prose — an
-        // assistant tool call (`tool_use`), an orphan tool result (`tool_result`;
-        // paired results are already dropped as empty-rendering, so any that
-        // survive are orphans Claude delivers as `role: user`), or the model's
-        // reasoning when a provider delivers it as its own message. This is the
-        // same `messageRendersProse` question `MessageItem` asks for the prose
-        // bubble, so the indent, the tightened gaps and the bubble cannot
-        // disagree, and a new card-rendering block kind is covered everywhere at
-        // once. It is asked before the user/prose split, so an orphan
-        // tool_result is treated as a card rather than a user turn.
-        //
-        // Its *category*: the harness-injected task-notification card (a
-        // collapsed `<task-notification>` user turn), meta lines, and the
-        // unknown-command system notice all carry prose yet are still asides —
-        // the notice is a system aside, not the agent's reply. These are semantic
-        // categories rather than rendering shapes, so they stay explicit terms.
-        const isNestedCard =
-          !messageRendersProse(message, pairing) ||
-          isTaskNotificationMessage(message) ||
-          message.role === 'meta' ||
-          isUnknownCommandNoticeMessage(message);
-        const topGap = isNestedCard
-          ? 'pt-0.5'
-          : message.role === 'user'
-            ? 'pt-2'
-            : 'pt-1.5';
-        const bottomGap = isNestedCard
-          ? 'pb-0.5'
-          : message.role === 'user'
-            ? 'pb-1'
-            : 'pb-2';
-        // Inset a nested card (left margin) so it reads as a nested step.
-        const indent = isNestedCard ? 'ml-6 mr-0' : '';
-        return (
-          // One block per message: the message and its sub-thread chips. The
-          // block owns the vertical rhythm (not the message article), so adjacent
-          // messages are separated by a consistent gap while the chips hug their
-          // parent message just below it (see their small pt).
-          <div key={message.uuid} className={`${topGap} ${bottomGap} ${indent}`}>
-            <MessageItem
-              message={message}
-              pairing={pairing}
-              isLatest={message.uuid === latestAssistantUuid}
-              onSelectQuote={handleSelectQuote}
-            />
-            {children.length > 0 && (
-              <div className="flex flex-wrap justify-end gap-1.5 px-3 pt-1.5">
-                {children.map((child) => (
-                  // The wrapper carries the scroll target id so a breadcrumb
-                  // "go up" can bring this chip into view (see scrollToChildRef).
-                  <span
-                    key={child.id}
-                    data-child-thread-id={child.id}
-                    className="inline-flex"
-                  >
-                    <Chip
-                      // The chip's clickable pill shape conveys that it enters
-                      // the branch, so no "[enter →]" label is shown. The
-                      // accessible name still says "Enter <title>" for screen
-                      // readers (and to distinguish it from the navigator tree
-                      // node of the same branch).
-                      ariaLabel={`Enter ${child.title}`}
-                      // Briefly ring the chip after a breadcrumb "go up" scrolls
-                      // it into view, so the eye catches where the branch began.
-                      className={
-                        flashChildId === child.id
-                          ? 'ring-2 ring-accent-hover ring-offset-1'
-                          : undefined
-                      }
-                      // Clear the hover highlight on click: entering the branch
-                      // does not fire mouseleave, so the mark would otherwise
-                      // linger across the whole child thread.
-                      onClick={() => {
-                        setHoveredBranchTitle(null);
-                        setActiveThread(child.id);
-                      }}
-                      // Hovering the chip marks every occurrence of its text in
-                      // the body, so it is clear what the branch was about.
-                      onMouseEnter={() => setHoveredBranchTitle(child.title)}
-                      onMouseLeave={() => setHoveredBranchTitle(null)}
-                    >
-                      ⤷ {child.title}
-                    </Chip>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {renderedMessages.map((message) => (
+        <TranscriptMessageBlock
+          key={message.uuid}
+          message={message}
+          childMap={childMap}
+          pairing={pairing}
+          latestAssistantUuid={latestAssistantUuid}
+          handleSelectQuote={handleSelectQuote}
+          flashChildId={flashChildId}
+          setHoveredBranchTitle={setHoveredBranchTitle}
+          setActiveThread={setActiveThread}
+        />
+      ))}
 
       {/* The provisional live assistant bubble, appended at the tail while the
           turn streams. It mirrors MessageItem's assistant styling (left, plain
@@ -1859,19 +850,13 @@ export function TranscriptPane({
         <SubagentRunningIndicator subagents={subagents} />
       )}
 
-      {/* The interactive cards, inline at the very tail of the conversation:
-          after the rendered messages and the live-streamed bubble. The question
-          card comes first so its choices appear right after the assistant's
-          streamed preamble; the permission notice follows at the very end.
-          Inset to align with the prose, in their own block so the bottom
-          padding (pb-composer-reserve) keeps them clear of the floating
-          composer. */}
-      {(questionCard || permissionCard) && (
-        <div className="space-y-2 px-3 pt-1.5 pb-2">
-          {questionCard}
-          {permissionCard}
-        </div>
-      )}
+      <TranscriptTailCards
+        activeThread={activeThread}
+        readOnly={readOnly}
+        spawning={spawning}
+        providerHasTerminal={providerHasTerminal}
+        providerHasAllowForSession={providerHasAllowForSession}
+      />
     </Panel>
   );
 }

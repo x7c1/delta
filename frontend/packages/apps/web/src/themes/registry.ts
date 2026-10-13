@@ -12,8 +12,8 @@
  *      true, otherwise `light`) so native controls follow the theme.
  *   2. Add a {@link ThemeMeta} entry to {@link THEMES} below.
  *   3. The Appearance picker (see `AppearanceSection` in
- *      `src/features/settings/SettingsView.tsx`) enumerates `THEMES`, so the
- *      new option appears in the UI automatically.
+ *      `src/features/settings/AppearanceSection.tsx`) enumerates `THEMES`,
+ *      so the new option appears in the UI automatically.
  *
  * The `sepia` entry below is a working example of the recipe, showing both
  * how to register a new theme and what a non-built-in entry looks like.

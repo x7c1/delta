@@ -12,22 +12,19 @@ import type {
   SessionEvent,
   SessionsResponse,
 } from '@delta/wire-gen';
+import { createHandlers, createMockApi } from './handlers';
+import { MOCK_CLOSED_WHILE_STARTING_REASON } from './sessionHandlers';
+import { mockSpawnSessionId } from './fixtures';
 import {
-  createHandlers,
-  createMockApi,
-  MOCK_CLOSED_WHILE_STARTING_REASON,
-} from './handlers';
-import {
-  mockSpawnSessionId,
   FILLER_SESSION_COUNT,
-  MOCK_GIT_REPO_ROOT,
   SESSIONS_PAGE_SIZE,
   SESSION_ID,
   SESSION_ID_2,
   SESSION_ID_3,
   MAIN_THREAD_ID,
   SESSION_3_MAIN_THREAD_ID,
-} from './fixtures';
+} from './sessionFixtures';
+import { MOCK_GIT_REPO_ROOT } from './workdirFixtures';
 
 /**
  * The `GET /api/sessions` mock is cursor-paginated so the infinite-scroll path
@@ -421,7 +418,7 @@ describe('new-session send mock (eager rows)', () => {
     // Pins the mock to the real server's acceptance: a plain send during the
     // spawn window is recorded `queued` (the server types it at the bind), so a
     // frontend that keeps Send enabled there exercises the same path the server
-    // takes (see the guard in `handlers.ts`).
+    // takes (see the guard in `sendHandlers.ts`).
     const { handlers, applyEvent } = createMockApi();
     const httpHandlers = handlers as HttpHandler[];
 

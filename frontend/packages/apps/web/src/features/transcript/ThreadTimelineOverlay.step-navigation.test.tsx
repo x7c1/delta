@@ -16,7 +16,7 @@ import {
   vi,
 } from 'vitest';
 import type { Message } from '@delta/wire-gen';
-import { LANE_LEFT_PAD_PX } from './ThreadTimelineOverlay';
+import { LANE_LEFT_PAD_PX } from './TimelineLaneRow';
 import {
   makeMessage,
   makeThread,
