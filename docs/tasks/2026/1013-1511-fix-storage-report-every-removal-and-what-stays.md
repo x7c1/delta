@@ -84,5 +84,5 @@ report's unit tests.
 
 ### Before merge (verified outside the check command)
 
-- [ ] In a running Delta, Settings → Storage lists the downloaded update, and
+- [x] In a running Delta, Settings → Storage lists the downloaded update, and
       Escape on an open confirmation returns to the Storage section.
