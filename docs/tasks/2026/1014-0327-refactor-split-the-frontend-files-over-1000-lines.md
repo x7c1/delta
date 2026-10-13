@@ -88,10 +88,10 @@ checks are listed.
 
 ### Before merge (verified outside the check command)
 
-- [ ] The number of frontend unit test cases is the same on `main` and on
+- [x] The number of frontend unit test cases is the same on `main` and on
       this branch.
-- [ ] `make check-frontend-file-length` fails, naming the file, when one file
+- [x] `make check-frontend-file-length` fails, naming the file, when one file
       is padded past 1000 lines locally.
-- [ ] The diff moves code without changing it, apart from imports, exports
+- [x] The diff moves code without changing it, apart from imports, exports
       and the props or parameters a moved piece needs (reviewed with
       `git diff --color-moved=dimmed-zebra`).
