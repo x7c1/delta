@@ -81,7 +81,7 @@ Report in the PR what each investigation found, including what was ruled out.
 
 ### Before merge (verified outside the check command)
 
-- [ ] The PR states the cause found for each of the three specs (or, for any
+- [x] The PR states the cause found for each of the three specs (or, for any
       quarantined one, what was ruled out).
-- [ ] `comms-pane.spec.ts` passes `--repeat-each 20` with the suite's worker
+- [x] `comms-pane.spec.ts` passes `--repeat-each 20` with the suite's worker
       count.
