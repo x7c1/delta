@@ -125,7 +125,12 @@ process running as the user) can write there could be swapped after that
 check, so nothing that runs as root trusts it: the update helper below copies
 the file out and checks the copy again. The macOS install, which runs as the
 user, checks it again too before using it. Files there for a release the
-running app is not older than are removed at startup.
+running app is not older than are removed at startup. A download of the newer
+release that an earlier run left there is not taken as verified either: once
+the first release check names that release, its file is opened without
+following a symlink, refused unless it is a regular file, and its sha256
+compared with the release's digest again before it is offered for install; a
+file that fails is removed, as is every file of another release.
 
 ## Updates
 

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use delta_usecase::{ReleaseCheck, ReleaseFeed};
+use delta_usecase::{with_causes, ReleaseCheck, ReleaseFeed};
 use release_feed::GithubReleaseFeed;
 
 use crate::Config;
@@ -22,7 +22,7 @@ pub fn release_check(config: &Config, current_version: &str) -> ReleaseCheck {
     match GithubReleaseFeed::new(url.clone()) {
         Ok(feed) => ReleaseCheck::new(Arc::new(feed) as Arc<dyn ReleaseFeed>, current_version),
         Err(err) => {
-            tracing::warn!(error = %err, "the release check is turned off");
+            tracing::warn!(error = %with_causes(&err), "the release check is turned off");
             ReleaseCheck::disabled()
         }
     }

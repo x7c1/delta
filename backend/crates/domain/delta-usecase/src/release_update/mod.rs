@@ -52,6 +52,14 @@
 //! read. A request while one runs joins it rather than starting a second; a
 //! request after a failure starts over; a request after the same release is
 //! ready (or installed) answers that without doing it again.
+//!
+//! # After a restart
+//!
+//! The states live in memory, but a verified download outlives the run that
+//! fetched it. Once the first check after startup names the newer release,
+//! [`ReleaseUpdate::restore`] verifies that release's file again, if an
+//! earlier run left one, and makes the download ready without fetching it;
+//! every other file there is removed.
 
 mod asset_choice;
 pub use asset_choice::{
@@ -81,6 +89,7 @@ mod update_restart;
 pub use update_restart::UpdateRestart;
 
 mod install;
+mod restore;
 mod start;
 
 #[cfg(test)]
@@ -98,6 +107,11 @@ pub struct ReleaseUpdate {
     availability: Availability,
     download: Arc<Mutex<Option<UpdateDownload>>>,
     install: Arc<Mutex<Option<UpdateInstall>>>,
+    /// `Some` while [`Self::restore`] checks a file an earlier run left,
+    /// holding the release a download request asked for in the meantime
+    /// (`None` until one does), so a check that finds no file continues that
+    /// request as a download. Locked only under `download`.
+    restoring: Mutex<Option<Option<NewerRelease>>>,
 }
 
 enum Availability {
@@ -162,6 +176,7 @@ impl ReleaseUpdate {
             availability,
             download: Arc::new(Mutex::new(None)),
             install: Arc::new(Mutex::new(None)),
+            restoring: Mutex::new(None),
         }
     }
 

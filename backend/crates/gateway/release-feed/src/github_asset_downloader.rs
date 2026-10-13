@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use reqwest::header::USER_AGENT;
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use delta_usecase::{AssetDownloadError, AssetDownloader, DownloadProgress, ReleaseAsset};
 
@@ -117,12 +117,80 @@ impl AssetDownloader for GithubAssetDownloader {
                 Err(err) => Err(err),
             };
         if let Err(err) = verified {
-            remove_leftover(&temp).await;
+            remove_logged(&temp, "could not remove a partial download").await;
             return Err(err);
         }
         remove_others(dir, &asset.name).await;
         Ok(target)
     }
+
+    async fn reverify(
+        &self,
+        asset: &ReleaseAsset,
+        dir: &Path,
+    ) -> Result<Option<PathBuf>, AssetDownloadError> {
+        let expected = asset
+            .sha256()
+            .ok_or_else(|| AssetDownloadError::NoDigest(asset.name.clone()))?;
+        if !is_plain_file_name(&asset.name) {
+            return Err(AssetDownloadError::BadName(asset.name.clone()));
+        }
+        let target = dir.join(&asset.name);
+        let verified = match sha256_of_regular_file(&target).await {
+            Ok(None) => Ok(None),
+            Ok(Some(actual)) if actual == expected => Ok(Some(target.clone())),
+            Ok(Some(actual)) => Err(AssetDownloadError::DigestMismatch { expected, actual }),
+            Err(err) => Err(err),
+        };
+        if verified.is_err() {
+            remove_logged(
+                &target,
+                "could not remove a download that failed its check again",
+            )
+            .await;
+        }
+        remove_others(dir, &asset.name).await;
+        verified
+    }
+}
+
+/// The sha256 of the regular file at `path` as lowercase hex, or `None`
+/// when there is nothing at `path`.
+///
+/// A symlink is refused without being followed, and anything but a regular
+/// file without being read; a FIFO does not block the open.
+async fn sha256_of_regular_file(path: &Path) -> Result<Option<String>, AssetDownloadError> {
+    let not_regular = || AssetDownloadError::NotRegularFile {
+        path: path.to_path_buf(),
+    };
+    let unreadable = |source| AssetDownloadError::Unreadable {
+        path: path.to_path_buf(),
+        source,
+    };
+    let opened = tokio::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .await;
+    let mut file = match opened {
+        Ok(file) => file,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(err) if err.raw_os_error() == Some(libc::ELOOP) => return Err(not_regular()),
+        Err(err) => return Err(unreadable(err)),
+    };
+    if !file.metadata().await.map_err(unreadable)?.is_file() {
+        return Err(not_regular());
+    }
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).await.map_err(unreadable)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(Some(to_hex(&hasher.finalize())))
 }
 
 /// Whether `name` names a file directly in a directory.
@@ -134,26 +202,28 @@ fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// Remove a partial download. A failure is logged: the file is then left
-/// under its temporary name, never under the asset's.
-async fn remove_leftover(path: &Path) {
+/// Remove the file at `path`, if there is one. A failure is logged with
+/// `failure` as its message.
+async fn remove_logged(path: &Path, failure: &str) {
     match tokio::fs::remove_file(path).await {
         Ok(()) => {}
         Err(err) if err.kind() == ErrorKind::NotFound => {}
         Err(err) => tracing::warn!(
             path = %path.display(),
             error = %err,
-            "could not remove a partial download"
+            "{failure}"
         ),
     }
 }
 
 /// Remove every file in `dir` but `keep`: the files of other versions, and
-/// any partial download an earlier run left behind. A failure is logged and
-/// the rest are still removed.
+/// any partial download an earlier run left behind. A missing `dir` has
+/// nothing to remove; any other failure is logged and the rest are still
+/// removed.
 async fn remove_others(dir: &Path, keep: &str) {
     let mut entries = match tokio::fs::read_dir(dir).await {
         Ok(entries) => entries,
+        Err(err) if err.kind() == ErrorKind::NotFound => return,
         Err(err) => {
             tracing::warn!(
                 dir = %dir.display(),
@@ -404,6 +474,116 @@ mod tests {
         result.unwrap();
         assert_eq!(files_in(&dir), [NAME]);
         server.await.unwrap();
+    }
+
+    /// Create `dir` holding [`NAME`] with `body`, when given, and each of
+    /// `others` with its name as its contents.
+    fn updates_with(dir: &Path, body: Option<&[u8]>, others: &[&str]) {
+        std::fs::create_dir_all(dir).unwrap();
+        if let Some(body) = body {
+            std::fs::write(dir.join(NAME), body).unwrap();
+        }
+        for name in others {
+            std::fs::write(dir.join(name), name).unwrap();
+        }
+    }
+
+    async fn reverify(dir: &Path) -> Result<Option<PathBuf>, AssetDownloadError> {
+        let asset = asset(
+            format!("http://127.0.0.1:9/{NAME}"),
+            Some(format!("sha256:{}", sha256_hex(BODY))),
+        );
+        GithubAssetDownloader::new()
+            .unwrap()
+            .reverify(&asset, dir)
+            .await
+    }
+
+    #[tokio::test]
+    async fn a_matching_file_left_behind_is_verified_again_and_kept_alone() {
+        let data = tempfile::tempdir().unwrap();
+        let dir = data.path().join("updates");
+        updates_with(
+            &dir,
+            Some(BODY),
+            &[
+                "delta-desktop_0.5.1_amd64.deb",
+                "delta-desktop_0.6.0_amd64.deb.part",
+            ],
+        );
+
+        assert_eq!(reverify(&dir).await.unwrap(), Some(dir.join(NAME)));
+        assert_eq!(files_in(&dir), [NAME]);
+        assert_eq!(std::fs::read(dir.join(NAME)).unwrap(), BODY);
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_file_left_behind_is_removed() {
+        let data = tempfile::tempdir().unwrap();
+        let dir = data.path().join("updates");
+        updates_with(&dir, Some(b"pretend this is a debian packagf"), &[]);
+
+        let err = reverify(&dir).await.unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                AssetDownloadError::DigestMismatch { expected, .. } if *expected == sha256_hex(BODY)
+            ),
+            "{err:?}"
+        );
+        assert_eq!(files_in(&dir), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn a_file_of_an_older_release_is_removed_and_nothing_is_found() {
+        let data = tempfile::tempdir().unwrap();
+        let dir = data.path().join("updates");
+        // A verified download of v0.5.1, left behind when v0.6.0 came out.
+        updates_with(&dir, None, &["delta-desktop_0.5.1_amd64.deb"]);
+
+        assert_eq!(reverify(&dir).await.unwrap(), None);
+        assert_eq!(files_in(&dir), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn no_file_left_behind_finds_nothing() {
+        let data = tempfile::tempdir().unwrap();
+        let dir = data.path().join("updates");
+        assert_eq!(reverify(&dir).await.unwrap(), None);
+        updates_with(&dir, None, &[]);
+        assert_eq!(reverify(&dir).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_symlink_left_behind_is_not_followed_and_is_removed() {
+        let data = tempfile::tempdir().unwrap();
+        let dir = data.path().join("updates");
+        updates_with(&dir, None, &[]);
+        // Even to a file that would match: what the link names can change.
+        let elsewhere = data.path().join("elsewhere.deb");
+        std::fs::write(&elsewhere, BODY).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, dir.join(NAME)).unwrap();
+
+        let err = reverify(&dir).await.unwrap_err();
+        assert!(
+            matches!(&err, AssetDownloadError::NotRegularFile { path } if *path == dir.join(NAME)),
+            "{err:?}"
+        );
+        assert_eq!(files_in(&dir), Vec::<String>::new());
+        assert_eq!(std::fs::read(&elsewhere).unwrap(), BODY);
+    }
+
+    #[tokio::test]
+    async fn a_directory_left_behind_under_the_assets_name_is_refused() {
+        let data = tempfile::tempdir().unwrap();
+        let dir = data.path().join("updates");
+        std::fs::create_dir_all(dir.join(NAME)).unwrap();
+
+        let err = reverify(&dir).await.unwrap_err();
+        assert!(
+            matches!(&err, AssetDownloadError::NotRegularFile { .. }),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]

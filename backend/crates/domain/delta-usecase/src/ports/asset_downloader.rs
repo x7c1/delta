@@ -4,7 +4,9 @@
 //! and verifies it against the digest the feed stated for it. Which asset to
 //! fetch, and whether its URL is one Delta trusts, is the release update's
 //! job ([`crate::ReleaseUpdate`]); the downloader only fetches what it is
-//! handed, and refuses to fetch anything it cannot verify.
+//! handed, and refuses to fetch anything it cannot verify. It also verifies
+//! again a file an earlier download left behind
+//! ([`AssetDownloader::reverify`]), so a restarted app need not fetch it again.
 
 use std::path::{Path, PathBuf};
 
@@ -21,7 +23,8 @@ pub struct DownloadProgress {
     pub total: Option<u64>,
 }
 
-/// Why an asset was not downloaded.
+/// Why an asset was not downloaded, or a file an earlier download left
+/// behind was not verified again.
 ///
 /// Whatever the failure, no file is left behind: not under the asset's name,
 /// and not under the temporary name it was written to.
@@ -55,6 +58,18 @@ pub enum AssetDownloadError {
         #[source]
         source: std::io::Error,
     },
+    /// The file an earlier download left behind is a symlink, which is not
+    /// followed, or not a regular file at all.
+    #[error("{} is not a regular file", path.display())]
+    NotRegularFile { path: PathBuf },
+    /// The file an earlier download left behind could not be opened or
+    /// read.
+    #[error("could not read {}", path.display())]
+    Unreadable {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Fetches release assets.
@@ -73,4 +88,21 @@ pub trait AssetDownloader: Send + Sync {
         dir: &Path,
         progress: &(dyn Fn(DownloadProgress) + Send + Sync),
     ) -> Result<PathBuf, AssetDownloadError>;
+
+    /// Verify again the file an earlier [`Self::download`] of `asset` left
+    /// in `dir`, `dir/<asset name>`, against the asset's digest, fetching
+    /// nothing.
+    ///
+    /// `dir` is the user's to write to, so the file is not trusted on the
+    /// strength of the check it passed when it was downloaded: it is read
+    /// without following a symlink, refused unless it is a regular file, and
+    /// its sha256 computed again. Returns its path when it matches, and
+    /// `None` when there is no such file (or no `dir`). A file that fails is
+    /// removed. Every other file in `dir` — another release's, a partial
+    /// download — is removed either way, as after a download.
+    async fn reverify(
+        &self,
+        asset: &ReleaseAsset,
+        dir: &Path,
+    ) -> Result<Option<PathBuf>, AssetDownloadError>;
 }

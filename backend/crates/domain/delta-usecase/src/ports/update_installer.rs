@@ -32,7 +32,7 @@ pub enum InstallError {
     /// The program the install needs is there but could not be started.
     /// Delta cannot install the update itself, as for
     /// [`Self::Unavailable`]; the user can still install it by hand.
-    #[error("Delta cannot install the update itself: could not run {}: {source}", program.display())]
+    #[error("Delta cannot install the update itself: could not run {}", program.display())]
     Unrunnable {
         program: PathBuf,
         #[source]

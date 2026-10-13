@@ -13,10 +13,14 @@ use semver::Version;
 /// restarted into) does not linger in the data directory. A file's release is
 /// read from its name, by the release workflow's asset naming
 /// (`delta-desktop_<version>_amd64.deb`, `Delta_<version>_aarch64.dmg`), and
-/// a file named for a newer release is kept, ready or not. A file whose name
-/// names no version is left alone: the next download clears the directory.
+/// a file named for a newer release is kept, ready or not: once the newest
+/// release is known, its file is verified again and the rest removed
+/// ([`AssetDownloader::reverify`]). A file whose name names no version is left
+/// alone here; that, or the next download, clears the directory.
 /// A missing directory removes nothing; a file that cannot be removed is
 /// logged and kept.
+///
+/// [`AssetDownloader::reverify`]: delta_usecase::AssetDownloader::reverify
 pub fn remove_stale_updates(dir: &Path, running: &Version) -> Vec<PathBuf> {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,

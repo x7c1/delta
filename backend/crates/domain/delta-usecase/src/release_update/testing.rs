@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use semver::Version;
-use tokio::sync::{mpsc, Mutex, Notify};
+use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
 use super::{lock, Platform, ReleaseUpdate, UpdateDownload, RELEASE_DOWNLOAD_PREFIX};
 use crate::ports::{
@@ -52,8 +52,14 @@ pub(super) fn newer_release(version: &str, assets: Vec<ReleaseAsset>) -> NewerRe
 
 /// A downloader whose every transfer reports [`Self::PROGRESS`], then waits
 /// until the test hands it an outcome with [`Self::finish`].
+///
+/// What it finds left behind for [`AssetDownloader::reverify`] is set with
+/// [`Self::leave_behind`]: nothing unless set.
 pub(super) struct GatedDownloader {
     calls: AtomicUsize,
+    left_behind: std::sync::Mutex<Option<Result<bool, AssetDownloadError>>>,
+    reverified: std::sync::Mutex<Vec<String>>,
+    reverify_gate: std::sync::Mutex<Option<oneshot::Receiver<()>>>,
     started: Notify,
     outcome_tx: mpsc::UnboundedSender<Result<(), AssetDownloadError>>,
     outcome_rx: Mutex<mpsc::UnboundedReceiver<Result<(), AssetDownloadError>>>,
@@ -70,6 +76,9 @@ impl GatedDownloader {
         let (outcome_tx, outcome_rx) = mpsc::unbounded_channel();
         Arc::new(Self {
             calls: AtomicUsize::new(0),
+            left_behind: std::sync::Mutex::new(None),
+            reverified: std::sync::Mutex::new(Vec::new()),
+            reverify_gate: std::sync::Mutex::new(None),
             started: Notify::new(),
             outcome_tx,
             outcome_rx: Mutex::new(outcome_rx),
@@ -84,6 +93,26 @@ impl GatedDownloader {
     /// End the running (or next) transfer with `outcome`.
     pub(super) fn finish(&self, outcome: Result<(), AssetDownloadError>) {
         self.outcome_tx.send(outcome).unwrap();
+    }
+
+    /// Have the next [`AssetDownloader::reverify`] find a matching file
+    /// (`Ok(true)`), none (`Ok(false)`), or one that fails (`Err`).
+    pub(super) fn leave_behind(&self, outcome: Result<bool, AssetDownloadError>) {
+        *self.left_behind.lock().unwrap() = Some(outcome);
+    }
+
+    /// Have the next [`AssetDownloader::reverify`] wait, once it has
+    /// recorded the asset it was asked about, until the returned sender
+    /// sends.
+    pub(super) fn hold_reverify(&self) -> oneshot::Sender<()> {
+        let (tx, rx) = oneshot::channel();
+        *self.reverify_gate.lock().unwrap() = Some(rx);
+        tx
+    }
+
+    /// The asset names [`AssetDownloader::reverify`] was asked about.
+    pub(super) fn reverified(&self) -> Vec<String> {
+        self.reverified.lock().unwrap().clone()
     }
 
     /// Wait until a transfer has reported its progress.
@@ -105,6 +134,23 @@ impl AssetDownloader for GatedDownloader {
         self.started.notify_one();
         let outcome = self.outcome_rx.lock().await.recv().await.unwrap();
         outcome.map(|()| dir.join(&asset.name))
+    }
+
+    async fn reverify(
+        &self,
+        asset: &ReleaseAsset,
+        dir: &Path,
+    ) -> Result<Option<PathBuf>, AssetDownloadError> {
+        self.reverified.lock().unwrap().push(asset.name.clone());
+        let gate = self.reverify_gate.lock().unwrap().take();
+        if let Some(gate) = gate {
+            gate.await.unwrap();
+        }
+        match self.left_behind.lock().unwrap().take() {
+            Some(Ok(true)) => Ok(Some(dir.join(&asset.name))),
+            Some(Ok(false)) | None => Ok(None),
+            Some(Err(err)) => Err(err),
+        }
     }
 }
 

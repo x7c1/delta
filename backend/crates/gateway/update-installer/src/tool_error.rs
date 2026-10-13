@@ -7,7 +7,7 @@ pub enum ToolError {
     #[error("{} is not installed", program.display())]
     Missing { program: PathBuf },
     /// The program is there but could not be started.
-    #[error("could not run {}: {source}", program.display())]
+    #[error("could not run {}", program.display())]
     Unrunnable {
         program: PathBuf,
         #[source]

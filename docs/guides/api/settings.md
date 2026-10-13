@@ -632,7 +632,14 @@ installing is [`POST /api/latest-release/install`](#post-apilatest-releaseinstal
 At startup the server removes the files in `updates/` whose release is not
 newer than its own version (read from the asset name), so an update that was
 installed and restarted into does not linger; a download of a newer release
-is kept.
+is kept. Once the first release check after startup names the newer release,
+the server verifies that release's file in `updates/` again against its
+`sha256` digest, if an earlier run left one: a file that matches makes the
+download `ready` without fetching it again, and a file that does not (or is a
+symlink, or not a regular file) is removed, as is every file of another
+release. While it checks, the download reports `downloading`, and a request
+joins the check; if the check finds no file that passes, that request
+continues as a download of the release.
 
 ### `POST /api/latest-release/install`
 

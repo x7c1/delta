@@ -10,7 +10,9 @@
 //! [`GithubAssetDownloader`] downloads one asset into a directory, computing
 //! its sha256 while it streams in and comparing it with the asset's
 //! `sha256:<hex>` digest; which asset, and whether its URL is trusted, is the
-//! release update's decision in `delta-usecase`.
+//! release update's decision in `delta-usecase`. After a restart it verifies
+//! again the file an earlier download left there, without following a
+//! symlink, rather than trusting it.
 //!
 //! [`remove_stale_updates`] clears the downloads the running app has caught
 //! up with out of that directory, at startup.

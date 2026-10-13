@@ -122,6 +122,15 @@ impl AssetDownloader for GatedDownloader {
         let outcome = self.outcome_rx.lock().await.recv().await.unwrap();
         outcome.map(|()| dir.join(&asset.name))
     }
+
+    /// Nothing is ever left behind by an earlier run here.
+    async fn reverify(
+        &self,
+        _asset: &ReleaseAsset,
+        _dir: &Path,
+    ) -> Result<Option<PathBuf>, AssetDownloadError> {
+        Ok(None)
+    }
 }
 
 /// An installer of `asset` (the platform's asset of [`NEWER_TAG`]) whose

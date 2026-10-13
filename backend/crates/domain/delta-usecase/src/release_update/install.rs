@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use super::{lock, ReleaseUpdate, UpdateDownload, UpdateInstall, UpdateRefusal};
 use crate::ports::InstallError;
-use crate::NewerRelease;
+use crate::{with_causes, NewerRelease};
 
 impl ReleaseUpdate {
     /// Start installing the verified download of `newer`, or report the
@@ -82,15 +82,16 @@ impl ReleaseUpdate {
                     None
                 }
                 Err(err @ (InstallError::Unavailable(_) | InstallError::Unrunnable { .. })) => {
+                    let cause = with_causes(&err);
                     tracing::warn!(
                         version = %version,
-                        error = %err,
+                        error = %cause,
                         manual = ?manual,
                         "Delta cannot install the newer release itself"
                     );
                     Some(UpdateInstall::Unavailable {
                         version,
-                        cause: err.to_string(),
+                        cause,
                         manual,
                     })
                 }
@@ -312,6 +313,29 @@ mod tests {
             Some(UpdateInstall::Installed { .. })
         ));
         assert_eq!(installer.asked().len(), 2);
+    }
+
+    /// An installer that could not be started is shown with the I/O error
+    /// that stopped it, named once.
+    #[tokio::test]
+    async fn an_install_that_could_not_start_names_its_cause_once() {
+        let installer = GatedInstaller::new();
+        let update = ready_linux_update(&installer).await;
+        update.install(Some(v060())).unwrap();
+        installer.finish(Err(InstallError::Unrunnable {
+            program: "/usr/bin/pkexec".into(),
+            source: std::io::Error::other("permission denied by the test"),
+        }));
+        assert_eq!(
+            install_settled(&update).await,
+            Some(UpdateInstall::Unavailable {
+                version: "v0.6.0".into(),
+                cause: "Delta cannot install the update itself: could not run /usr/bin/pkexec: \
+                        permission denied by the test"
+                    .into(),
+                manual: manual(),
+            })
+        );
     }
 
     #[tokio::test]
