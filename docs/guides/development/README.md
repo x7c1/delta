@@ -78,19 +78,20 @@ regress:
 Quality gate — `make build`, `make test`, and `make lint` each cover both
 parts and stay fast, for the inner loop. `make check` is the pre-PR gate: it
 runs the whole thing for both parts at once (build, test, lint, the frontend
-typecheck, the backend's rustdoc, the generated-bindings freshness check, the vendored Codex schema's
-stored form, the canary gate's, the re-vendor script's and the freshness
-check's own stubbed tests) **plus both Playwright suites**, so passing it means
-CI will pass. It needs tmux, because `make e2e-fake` drives the real backend
-through one, and `jq`, which is what the vendored schema's stored form is
-defined in terms of.
+typecheck, the backend's rustdoc, the backend source-file length, the
+generated-bindings freshness check, the vendored Codex schema's stored form,
+the canary gate's, the re-vendor script's and the freshness check's own stubbed
+tests) **plus both Playwright suites**, so passing it means CI will pass. It
+needs tmux, because `make e2e-fake` drives the real backend through one, and
+`jq`, which is what the vendored schema's stored form is defined in terms of.
 
 `make check` is a dependency graph, not a script: each step is a target that
 depends only on what it needs (the backend tests, clippy and the freshness
 check on the backend build; the frontend typecheck, tests, lint and mock e2e
 on the frontend build; the fake-mode e2e and the rustdoc check on both builds;
-the script checks on nothing). Run it with `-j` to let independent steps overlap — the wall clock
-then approaches CI's longest job instead of the sum of all steps:
+the file-length check and the script checks on nothing). Run it with `-j` to
+let independent steps overlap — the wall clock then approaches CI's longest job
+instead of the sum of all steps:
 
 ```bash
 make -j4 check      # parallel; add -O to keep each step's output together
@@ -109,6 +110,16 @@ reachable or stop linking to it.
 
 It needs the frontend build because `--workspace` takes in the desktop shell,
 which embeds the web app's `dist/`.
+
+The file-length check, `check-backend-file-length`, fails when a `*.rs` file
+under `backend/crates/` is longer than 1000 lines, and names each one. A file
+that long mixes responsibilities, so split it into a directory module whose
+submodules each own one: one type per module, and tests next to what they test
+or in a `tests/` directory split by behaviour. Pick the seams from what the
+code does, not from line counts — a submodule that ends near the limit is a
+sign the seam is wrong. A generated file that crosses the limit is exempted by
+its path in `BACKEND_FILE_LENGTH_EXCLUDE` in the `Makefile`. The check needs no
+build, and CI's backend job runs it too.
 
 The graph is spelled out above the `check` target in the `Makefile`. The two
 Playwright suites run side by side safely: each has its own ports and its own

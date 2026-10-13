@@ -32,8 +32,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      # The .deb archives are cached so a run normally installs from the cache
-      # instead of the Ubunt      # tmux is a hard prerequisite for this job: the composition root
+      # tmux is a hard prerequisite for this job: the composition root
       # probes for it at startup, so every test that wires the production root
       # fails without it — except the fake-claude full-loop test, which wires
       # that same root to drive a real tmux server but probes `PATH` itself
@@ -43,6 +42,12 @@ jobs:
       - name: Install tmux
         timeout-minutes: 10
         run: sudo apt-get update && sudo apt-get install -y tmux
+
+      # A source file past 1000 lines mixes responsibilities. The check only
+      # counts lines, so it runs before the build to fail fast.
+      - name: Check no backend source file exceeds 1000 lines
+        working-directory: .
+        run: make check-backend-file-length
 
       - name: Build
         run: cargo build --locked
