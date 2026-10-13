@@ -53,6 +53,10 @@ pub use session_actor::runtime::{
 
 #[cfg(test)]
 mod testing;
+/// The tmux fake, for the crate-root tests of [`crate::PaneTokenMinter`] and
+/// [`crate::pane_token::PaneToken`], which probe tmux through it.
+#[cfg(test)]
+pub(crate) use testing::FakeTmux;
 
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -114,7 +114,7 @@ where
             return Err(Error::ResumeUnavailable(id.as_str().to_owned()));
         };
 
-        let token = self.mint_free_token().await?;
+        let token = self.minter.mint_free(&self.tmux).await?;
         let workdir = session.cwd.clone();
         // Re-write the settings file before resuming, in case the port is
         // fresh or the file was lost. It lives at a Delta-owned path, not in

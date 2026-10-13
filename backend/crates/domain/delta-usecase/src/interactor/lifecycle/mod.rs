@@ -18,7 +18,6 @@ mod delete_session;
 mod dispatch_ready_resumes;
 mod finish_launch;
 mod launch_prep;
-mod mint_free_token;
 mod open_session;
 mod reap_stale_spawns;
 mod reap_tick;
