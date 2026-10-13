@@ -70,11 +70,11 @@ being one of several configs that together cover every file.
 
 ### Before merge (verified outside the check command)
 
-- [ ] Introducing a type error into one file of each previously unchecked
+- [x] Introducing a type error into one file of each previously unchecked
       group (a `src` test, an `e2e/` spec, `vite.config.ts`) makes
       `pnpm -r typecheck` fail, and reverting it makes it pass.
-- [ ] The diff adds no `any`, `@ts-ignore`, `@ts-expect-error` or non-null
+- [x] The diff adds no `any`, `@ts-ignore`, `@ts-expect-error` or non-null
       assertion to silence an error (reviewed in the diff).
-- [ ] `pnpm -r build` emits no declarations for test files
+- [x] `pnpm -r build` emits no declarations for test files
       (`find frontend/packages -path '*/dist-types/*' -name '*.test.d.ts'`
       prints nothing).
