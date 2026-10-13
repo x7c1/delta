@@ -1,12 +1,8 @@
 {
-  "extends": "../../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist",
-    "jsx": "react-jsx",
-    "types": ["react"]
-  },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
-  "references": [{ "path": "../../domain/model" }, { "path": "../wire-gen" }]
+  "//": "Solution config: lists every config of this package so `tsc -b` (the `typecheck` script) and editors cover all of its files. The layout is described in docs/guides/development/README.md (Frontend, TypeScript configs).",
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.build.json" },
+    { "path": "./tsconfig.test.json" }
+  ]
 }

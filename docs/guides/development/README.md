@@ -419,6 +419,29 @@ comment explains why the SPA is deliberately one unsplit chunk), so
 `make check`, CI and `make web-dist` all catch a dependency that bloats the
 bundle.
 
+### TypeScript configs
+
+Vitest, Vite and Playwright strip types without checking them, so `tsc` is the
+only type check, and every `.ts` / `.tsx` file in a package must belong to one
+of its configs. Each package under `frontend/packages/` uses the same layout:
+
+| File | Covers | Emits |
+|---|---|---|
+| `tsconfig.json` | Nothing itself: a solution config whose `references` list the package's other configs | — |
+| `tsconfig.build.json` | The package's entry point (`src/index.ts`; `src/main.tsx` in `@delta/web`) and everything it imports | `dist/` (`dist-types/` in `@delta/web`) |
+| `tsconfig.test.json` | All of `src/`, tests and test helpers included; extends the build config | nothing |
+| `tsconfig.node.json` | Files outside `src/` that run under Node: tool configs (`vite.config.ts`, `vitest.config.ts`, `playwright*.config.ts`), the Playwright suites and their helpers. Only in packages that have such files | nothing |
+
+The build config lists entry points in `files` rather than all of `src` so that
+tests never reach the emitted output; the test config is what makes sure no
+file in `src` goes unchecked. Configs do not use `exclude`: a file is left out
+of one config only because another one covers it. `build` runs
+`tsc -p tsconfig.build.json`; `typecheck` runs `tsc -b --noEmit`, which checks
+every config the solution lists. Packages do not reference each other's
+configs — they import one another's built `dist/`, and `pnpm -r` builds them in
+dependency order. A new package copies this layout and adds its configs to its
+`tsconfig.json`.
+
 ### Generated wire bindings (`@delta/wire-gen`)
 
 `frontend/packages/gateway/wire-gen` contains TypeScript generated from the

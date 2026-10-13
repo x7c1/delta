@@ -51,6 +51,15 @@ function timelineExpandedKey(sessionId: string = SESSION_ID): string {
 }
 import { TranscriptPane } from './TranscriptPane';
 
+// Per-message metadata the cases below do not depend on.
+const NO_METADATA = {
+  model: null,
+  git_branch: null,
+  cwd: null,
+  response_time_ms: null,
+  provider_item_id: null,
+} as const;
+
 const server = setupServer(...createHandlers());
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
@@ -196,6 +205,7 @@ describe('TranscriptPane', () => {
       useLiveStore.getState().applyEvent({
         kind: 'turn_completed',
         session_id: SESSION_ID,
+        thread_id: MAIN_THREAD_ID,
         stop_reason: null,
       });
     });
@@ -250,6 +260,7 @@ describe('TranscriptPane', () => {
               content_text: 'What is a delta?',
               content: [{ type: 'text', text: 'What is a delta?' }],
               created_at: '2026-01-01T00:00:01Z',
+              ...NO_METADATA,
             },
             {
               uuid: 'm-assistant',
@@ -263,6 +274,7 @@ describe('TranscriptPane', () => {
               content_text: reply,
               content: [{ type: 'text', text: reply }],
               created_at: '2026-01-01T00:00:02Z',
+              ...NO_METADATA,
             },
           ],
         };
@@ -319,6 +331,7 @@ describe('TranscriptPane', () => {
               content_text: 'What is a delta?',
               content: [{ type: 'text', text: 'What is a delta?' }],
               created_at: '2026-01-01T00:00:01Z',
+              ...NO_METADATA,
             },
             {
               uuid: 'm-assistant-text',
@@ -332,6 +345,7 @@ describe('TranscriptPane', () => {
               content_text: reply,
               content: [{ type: 'text', text: reply }],
               created_at: '2026-01-01T00:00:02Z',
+              ...NO_METADATA,
             },
             {
               // The tool_use block of the SAME reply, persisted as its own line
@@ -349,6 +363,7 @@ describe('TranscriptPane', () => {
                 { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } },
               ],
               created_at: '2026-01-01T00:00:03Z',
+              ...NO_METADATA,
             },
           ],
         };
@@ -403,6 +418,7 @@ describe('TranscriptPane', () => {
               content_text: 'first question',
               content: [{ type: 'text', text: 'first question' }],
               created_at: '2026-01-01T00:00:01Z',
+              ...NO_METADATA,
             },
             {
               uuid: 'm-assistant',
@@ -416,6 +432,7 @@ describe('TranscriptPane', () => {
               content_text: earlierReply,
               content: [{ type: 'text', text: earlierReply }],
               created_at: '2026-01-01T00:00:02Z',
+              ...NO_METADATA,
             },
           ],
         };
@@ -596,6 +613,7 @@ describe('TranscriptPane', () => {
               content_text: 'hello there',
               content: [{ type: 'text', text: 'hello there' }],
               created_at: '2026-01-01T00:00:01Z',
+              ...NO_METADATA,
             },
             {
               uuid: 'm-system',
@@ -609,6 +627,7 @@ describe('TranscriptPane', () => {
               content_text: 'SECRET SYSTEM NOISE',
               content: [{ type: 'text', text: 'SECRET SYSTEM NOISE' }],
               created_at: '2026-01-01T00:00:02Z',
+              ...NO_METADATA,
             },
             {
               uuid: 'm-other',
@@ -622,6 +641,7 @@ describe('TranscriptPane', () => {
               content_text: 'OTHER NOISE',
               content: [{ type: 'text', text: 'OTHER NOISE' }],
               created_at: '2026-01-01T00:00:03Z',
+              ...NO_METADATA,
             },
             {
               uuid: 'm-meta',
@@ -635,6 +655,7 @@ describe('TranscriptPane', () => {
               content_text: 'INJECTED META BODY',
               content: [{ type: 'text', text: 'INJECTED META BODY' }],
               created_at: '2026-01-01T00:00:04Z',
+              ...NO_METADATA,
             },
           ],
         };
@@ -687,6 +708,7 @@ describe('TranscriptPane', () => {
               content_text: '/review-pr',
               content: [{ type: 'text', text: '/review-pr' }],
               created_at: '2026-01-01T00:00:01Z',
+              ...NO_METADATA,
             },
             {
               uuid: 'm-unknown-cmd',
@@ -700,6 +722,7 @@ describe('TranscriptPane', () => {
               content_text: 'Unknown command: /review-pr',
               content: [{ type: 'text', text: 'Unknown command: /review-pr' }],
               created_at: '2026-01-01T00:00:02Z',
+              ...NO_METADATA,
             },
           ],
         };
@@ -743,6 +766,7 @@ describe('TranscriptPane', () => {
               content_text: 'ordinary prose turn',
               content: [{ type: 'text', text: 'ordinary prose turn' }],
               created_at: '2026-01-01T00:00:01Z',
+              ...NO_METADATA,
             },
             {
               uuid: 'm-task-notification',
@@ -758,6 +782,7 @@ describe('TranscriptPane', () => {
                 { type: 'text', text: '<task-notification>background job done' },
               ],
               created_at: '2026-01-01T00:00:02Z',
+              ...NO_METADATA,
             },
           ],
         };
@@ -812,6 +837,7 @@ describe('TranscriptPane', () => {
               content_text: 'the answer',
               content: [{ type: 'text', text: 'the answer' }],
               created_at: '2026-01-01T00:00:01Z',
+              ...NO_METADATA,
             },
             {
               uuid: 'm-reasoning',
@@ -825,6 +851,7 @@ describe('TranscriptPane', () => {
               content_text: 'weighing the options',
               content: [{ type: 'thinking', thinking: 'weighing the options' }],
               created_at: '2026-01-01T00:00:02Z',
+              ...NO_METADATA,
             },
             {
               uuid: 'm-tool',
@@ -840,6 +867,7 @@ describe('TranscriptPane', () => {
                 { type: 'tool_use', id: 't1', name: 'Bash', input: {} },
               ],
               created_at: '2026-01-01T00:00:03Z',
+              ...NO_METADATA,
             },
             {
               uuid: 'm-reply-with-tool',
@@ -856,6 +884,7 @@ describe('TranscriptPane', () => {
                 { type: 'tool_use', id: 't2', name: 'Bash', input: {} },
               ],
               created_at: '2026-01-01T00:00:04Z',
+              ...NO_METADATA,
             },
           ],
         };

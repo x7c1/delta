@@ -19,6 +19,11 @@ function message(
     content_text: '',
     content,
     created_at: '2026-01-01T00:00:00Z',
+    model: null,
+    git_branch: null,
+    cwd: null,
+    response_time_ms: null,
+    provider_item_id: null,
   };
 }
 

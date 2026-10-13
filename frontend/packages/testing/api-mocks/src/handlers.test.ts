@@ -251,6 +251,7 @@ describe('GET /api/sessions/{id}/sends mock', () => {
       kind: 'turn_started',
       session_id: SESSION_ID,
       send_id: first.send.id,
+      thread_id: MAIN_THREAD_ID,
       matched_uuid: 'uuid-m1',
     });
     sends = (await getOpenSends(httpHandlers, SESSION_ID)).sends;
@@ -260,6 +261,7 @@ describe('GET /api/sessions/{id}/sends mock', () => {
     applyEvent({
       kind: 'turn_completed',
       session_id: SESSION_ID,
+      thread_id: MAIN_THREAD_ID,
       stop_reason: null,
     });
     sends = (await getOpenSends(httpHandlers, SESSION_ID)).sends;

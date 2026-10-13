@@ -31,7 +31,7 @@ test('the running indicator appears then clears as a turn completes', async ({
     session_id: SESSION_ID,
     thread_id: MAIN_THREAD_ID,
     send_id: 1,
-    matched_uuid: null,
+    matched_uuid: 'pending-lifecycle-turn-1',
   });
   await expect(running).toBeVisible();
 
@@ -71,7 +71,7 @@ test('the running indicator clears when a turn is interrupted', async ({
     session_id: SESSION_ID,
     thread_id: MAIN_THREAD_ID,
     send_id: 1,
-    matched_uuid: null,
+    matched_uuid: 'pending-lifecycle-turn-1',
   });
   await expect(running).toBeVisible();
 

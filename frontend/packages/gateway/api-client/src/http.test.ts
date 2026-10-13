@@ -696,6 +696,7 @@ describe('ApiClient', () => {
     const result = await client.createLaunchOption({
       name: '--permission-mode',
       value: 'auto',
+      default_enabled: false,
     });
     expect(result).toEqual(created);
     const [url, init] = fetchFn.mock.calls[0];
@@ -704,6 +705,7 @@ describe('ApiClient', () => {
     expect(JSON.parse(init.body)).toEqual({
       name: '--permission-mode',
       value: 'auto',
+      default_enabled: false,
     });
   });
 

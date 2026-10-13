@@ -21,7 +21,9 @@ import { bootServer, type ServerHandle } from './server';
  * that never name it; the restart spec additionally declares `server` in its
  * args to reach {@link ServerHandle.restart}.
  */
-export const test = base.extend<Record<string, never>, { server: ServerHandle }>({
+// No test-scoped fixtures: `Record<never, never>` is the empty object type. (A
+// `Record<string, never>` would claim every key — `server` included — is `never`.)
+export const test = base.extend<Record<never, never>, { server: ServerHandle }>({
   server: [
     // Playwright requires the fixtures argument to be a destructuring pattern;
     // this worker fixture depends on none, hence the empty pattern.

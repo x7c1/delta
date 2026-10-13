@@ -5,6 +5,7 @@ import { SubagentRunningIndicator } from './SubagentRunningIndicator';
 
 function subagent(overrides: Partial<SubagentActivity> = {}): SubagentActivity {
   return {
+    threadId: 1,
     toolUseId: 'toolu_a1',
     subagentType: 'general-purpose',
     description: 'Probe the codebase',

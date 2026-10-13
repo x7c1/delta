@@ -50,6 +50,14 @@ import {
   waitForPlayheadAt,
 } from './ThreadTimelineOverlay.testkit';
 
+// The suites below drive `performance.now` and `requestAnimationFrame` through
+// their own stubs, so fake timers must leave those two alone: fake only the
+// timer queue (the scroll debounce) and `Date`, not Vitest's default of every
+// timing API.
+const TIMERS_ONLY: Parameters<typeof vi.useFakeTimers>[0] = {
+  toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+};
+
 describe('ThreadTimelineOverlay cross-lane jump in-flight guard', () => {
   // Regression suite for the tail-jump race: a cross-lane wheel-scrub near
   // the left edge occasionally snapped the playhead to the right-edge (tail)
@@ -265,7 +273,7 @@ describe('ThreadTimelineOverlay cross-lane jump in-flight guard', () => {
       ).getAllByText(/msg-/);
       const io = await getLiveIO(fake, articles.length);
       const msgBArticle = articles.find((a) => a.textContent === 'msg-b')!;
-      vi.useFakeTimers();
+      vi.useFakeTimers(TIMERS_ONLY);
       try {
         act(() => {
           io.emit([
@@ -305,7 +313,7 @@ describe('ThreadTimelineOverlay cross-lane jump in-flight guard', () => {
       // After the counter releases AND the time-based guard expires, a
       // genuine IO emit (user manually scrolling) IS honoured normally.
       // Emit msg-b again as if the user scrolled down.
-      vi.useFakeTimers();
+      vi.useFakeTimers(TIMERS_ONLY);
       try {
         act(() => {
           io.emit([
@@ -458,7 +466,7 @@ describe('ThreadTimelineOverlay cross-lane jump in-flight guard', () => {
       // tail) keeps the expectation non-trivial: if the flag were NOT cleared,
       // the flush would bail, and the playhead would stay at 0px.
       const msgBArticle = articles.find((a) => a.textContent === 'msg-b')!;
-      vi.useFakeTimers();
+      vi.useFakeTimers(TIMERS_ONLY);
       try {
         // Advance past the time-based guard window so only the state-based
         // flag (if still set) could block the flush.
@@ -737,7 +745,7 @@ describe('ThreadTimelineOverlay cross-lane jump guard hand-off and stacked jumps
       ).getAllByText(/msg-/);
       const io = await getLiveIO(fake, articles.length);
       const msgAArticle = articles.find((a) => a.textContent === 'msg-a')!;
-      vi.useFakeTimers();
+      vi.useFakeTimers(TIMERS_ONLY);
       try {
         act(() => {
           io.emit([
@@ -774,7 +782,7 @@ describe('ThreadTimelineOverlay cross-lane jump guard hand-off and stacked jumps
       // scroll's own IO ripple. The flush must bail because the time-based
       // guard window started at nowMs=10_500 and has not yet expired.
       nowMs += 50;
-      vi.useFakeTimers();
+      vi.useFakeTimers(TIMERS_ONLY);
       try {
         act(() => {
           io.emit([
@@ -1019,7 +1027,7 @@ describe('ThreadTimelineOverlay cross-lane jump guard hand-off and stacked jumps
       // msg-b and the stand-in are observed.
       await Promise.resolve();
       const io = await getLiveIO(fake, 2);
-      vi.useFakeTimers();
+      vi.useFakeTimers(TIMERS_ONLY);
       try {
         act(() => {
           io.emit([
