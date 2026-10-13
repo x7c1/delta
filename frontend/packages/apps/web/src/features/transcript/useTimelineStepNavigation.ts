@@ -36,9 +36,7 @@ interface TimelineWheelStepNavigationArgs extends TimelineStepNavigationArgs {
 /**
  * Wheel scrubbing over the timeline axis: discrete steps through the
  * large-message subset, with the rolling-window velocity staircase and the
- * output-side cooldown described in `timelineWheel.ts`. Extracted move-only
- * from `ThreadTimelineOverlay` — the handler body, its refs, and the effect
- * deps are unchanged.
+ * output-side cooldown described in `timelineWheel.ts`.
  */
 export function useTimelineWheelStepNavigation({
   expanded,
@@ -197,9 +195,7 @@ export function useTimelineWheelStepNavigation({
 
 /**
  * ArrowLeft / ArrowRight stepping while the timeline is expanded — the
- * deterministic keyboard counterpart to the wheel scrub. Extracted move-only
- * from `ThreadTimelineOverlay`; the rationale comment below and the handler
- * body are unchanged.
+ * deterministic keyboard counterpart to the wheel scrub.
  */
 export function useTimelineKeyboardStepNavigation({
   expanded,

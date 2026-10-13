@@ -78,18 +78,19 @@ regress:
 Quality gate — `make build`, `make test`, and `make lint` each cover both
 parts and stay fast, for the inner loop. `make check` is the pre-PR gate: it
 runs the whole thing for both parts at once (build, test, lint, the frontend
-typecheck, the backend's rustdoc, the backend source-file length, the
-generated-bindings freshness check, the vendored Codex schema's stored form,
-the canary gate's, the re-vendor script's and the freshness check's own stubbed
-tests) **plus both Playwright suites**, so passing it means CI will pass. It
-needs tmux, because `make e2e-fake` drives the real backend through one, and
-`jq`, which is what the vendored schema's stored form is defined in terms of.
+typecheck, the backend's rustdoc, the backend and frontend source-file
+lengths, the generated-bindings freshness check, the vendored Codex schema's
+stored form, the canary gate's, the re-vendor script's and the freshness
+check's own stubbed tests) **plus both Playwright suites**, so passing it means
+CI will pass. It needs tmux, because `make e2e-fake` drives the real backend
+through one, and `jq`, which is what the vendored schema's stored form is
+defined in terms of.
 
 `make check` is a dependency graph, not a script: each step is a target that
 depends only on what it needs (the backend tests, clippy and the freshness
 check on the backend build; the frontend typecheck, tests, lint and mock e2e
 on the frontend build; the fake-mode e2e and the rustdoc check on both builds;
-the file-length check and the script checks on nothing). Run it with `-j` to
+the file-length checks and the script checks on nothing). Run it with `-j` to
 let independent steps overlap — the wall clock then approaches CI's longest job
 instead of the sum of all steps:
 
@@ -423,6 +424,18 @@ The quality gate (build, typecheck, test, and `lint` = ESLint +
 dependency-cruiser) is covered by `make check` — which also runs both Playwright
 suites — or by the individual `make build` / `make test` / `make lint` targets
 when a faster loop is wanted.
+
+The file-length check, `check-frontend-file-length`, fails when a tracked
+`*.ts` / `*.tsx` file under `frontend/` is longer than 1000 lines, and names
+each one. A file that long mixes responsibilities, so split it into sibling
+modules that each own one: a component's sub-components, the hooks that hold
+its state and its pure helpers; an API client or mock module's resources; a
+test file's behaviours, one `*.test.ts(x)` per behaviour with the setup they
+share in a `*.testkit.ts(x)` beside them. Pick the seams from what the code
+does, not from line counts — a module that ends near the limit is a sign the
+seam is wrong. A generated file that crosses the limit is exempted by its path
+in `FRONTEND_FILE_LENGTH_EXCLUDE` in the `Makefile`. The check needs no build;
+it is part of `make check`, and CI's frontend job runs it too.
 
 The `@delta/web` build fails when any JavaScript chunk exceeds 1200 kB
 (`BUNDLE_BUDGET_KB` in `frontend/packages/apps/web/vite.config.ts`, whose

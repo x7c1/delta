@@ -93,6 +93,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A source file past 1000 lines mixes responsibilities. The check only
+      # counts lines, so it runs before the install to fail fast.
+      - name: Check no frontend source file exceeds 1000 lines
+        working-directory: .
+        run: make check-frontend-file-length
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:

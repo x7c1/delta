@@ -10,7 +10,7 @@ import {
 /**
  * A controllable `matchMedia` stub: tests flip `matches` and then dispatch a
  * `change` event to mimic a real OS toggle. Mirrors the matchMedia stubbing
- * pattern other tests in this app use (see WorkspaceScreen.test.tsx), but
+ * pattern other tests in this app use (see WorkspaceScreen.testkit.tsx), but
  * extended with a working listener registry so `'system'` reactivity is
  * exercisable.
  */

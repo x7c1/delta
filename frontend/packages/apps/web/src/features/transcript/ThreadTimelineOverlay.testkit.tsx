@@ -1,10 +1,8 @@
 /**
  * Shared fixtures and helpers for the `ThreadTimelineOverlay.*.test.tsx`
- * family. The overlay's unit suites live in several behavior-grouped files
- * (chrome, lanes, playhead, step navigation, scroll follow, pane follow,
- * cross-lane jump, external thread change); every file renders the same
- * overlay-plus-conversation-body harness and shares the thread/message
- * factories and jsdom layout stubs defined here.
+ * family. The overlay's unit suites live in several behavior-grouped files;
+ * every file renders the same overlay-plus-conversation-body harness and
+ * shares the thread/message factories and jsdom layout stubs defined here.
  *
  * Not a test file itself: the `.testkit.` segment keeps it outside vitest's
  * `*.test.*` include glob.
@@ -261,3 +259,11 @@ export async function waitForPlayheadAt(expectedPx: string): Promise<void> {
     ).toBe(expectedPx);
   });
 }
+
+// The cross-lane jump suites drive `performance.now` and
+// `requestAnimationFrame` through their own stubs, so fake timers must leave
+// those two alone: fake only the timer queue (the scroll debounce) and `Date`,
+// not Vitest's default of every timing API.
+export const TIMERS_ONLY: Parameters<typeof vi.useFakeTimers>[0] = {
+  toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+};

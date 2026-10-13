@@ -17,7 +17,7 @@ import {
   vi,
 } from 'vitest';
 import { useNavStore } from '../../store/navStore';
-import { LANE_LEFT_PAD_PX } from './ThreadTimelineOverlay';
+import { LANE_LEFT_PAD_PX } from './TimelineLaneRow';
 import {
   makeThread,
   makeUserText,

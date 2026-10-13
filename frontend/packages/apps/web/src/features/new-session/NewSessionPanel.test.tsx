@@ -276,7 +276,8 @@ describe('RepositoryTab spawn flow', () => {
 
     // The composer store now holds the picked dir, ready for the Composer
     // to send as `workdir`. The send body assembly itself is exercised by
-    // Composer.test.tsx; pinning the store contract here is enough.
+    // Composer.new-session.test.tsx; pinning the store contract here is
+    // enough.
     await waitFor(() =>
       expect(useComposerStore.getState().newSessionWorkdir).toBe(
         '/home/dev/projects/delta-fork',
