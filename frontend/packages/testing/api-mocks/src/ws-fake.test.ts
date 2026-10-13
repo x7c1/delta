@@ -7,7 +7,7 @@ describe('FakeEventSource', () => {
     const queue: Array<() => void> = [];
     const script: SessionEvent[] = [
       { kind: 'session_registered', session_id: 'sess-1' },
-      { kind: 'turn_completed', session_id: 'sess-1', stop_reason: null },
+      { kind: 'turn_completed', session_id: 'sess-1', thread_id: 1, stop_reason: null },
     ];
     const source = new FakeEventSource({
       script,
@@ -30,7 +30,7 @@ describe('FakeEventSource', () => {
   it('stops emitting once closed', async () => {
     const queue: Array<() => void> = [];
     const source = new FakeEventSource({
-      script: [{ kind: 'turn_completed', session_id: 'sess-1', stop_reason: null }],
+      script: [{ kind: 'turn_completed', session_id: 'sess-1', thread_id: 1, stop_reason: null }],
       scheduler: (cb) => queue.push(cb),
     });
     const events: SessionEvent[] = [];

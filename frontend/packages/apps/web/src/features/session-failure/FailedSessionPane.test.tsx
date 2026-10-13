@@ -45,7 +45,20 @@ function failedSession(overrides: Partial<Session> = {}): SessionListItem {
       ...overrides,
     },
     open: false,
+    pane_starting: false,
+    hooks_unreachable: false,
     main_thread_id: 7,
+    threads: [
+      {
+        id: 7,
+        session_id: FAILED_ID,
+        title: 'main',
+        parent_thread_id: null,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:00:00Z',
+        last_activity_at: null,
+      },
+    ],
     last_activity_at: null,
   };
 }

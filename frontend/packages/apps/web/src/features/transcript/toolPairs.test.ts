@@ -6,7 +6,7 @@ function message(uuid: string, content: ContentBlock[]): Message {
   return {
     uuid,
     session_id: 's',
-    thread_id: 't',
+    thread_id: 1,
     role: 'assistant',
     linear_parent_uuid: null,
     semantic_parent_uuid: null,
@@ -15,6 +15,11 @@ function message(uuid: string, content: ContentBlock[]): Message {
     content_text: null,
     content,
     created_at: '2026-01-01T00:00:00Z',
+    model: null,
+    git_branch: null,
+    cwd: null,
+    response_time_ms: null,
+    provider_item_id: null,
   };
 }
 

@@ -100,7 +100,9 @@ const inFlightEnvelope: SendsResponse = {
   sends: [],
   turn: { state: 'in_flight', send_id: 1, thread_id: 1 } satisfies Turn,
   permission: null,
+  permission_count: 0,
   question: null,
+  running_subagents: [],
 };
 
 describe('usePendingSends active-turn seeding', () => {
@@ -268,14 +270,17 @@ describe('usePendingSends on a starting session', () => {
       status: 'dispatched' as const,
       matched_uuid: null,
       created_at: '2026-01-01T00:00:00Z',
+      held_at: null,
     };
     server.use(
       http.get('*/api/sessions/:id/sends', () =>
         HttpResponse.json({
           sends: [send],
-          turn: { state: 'idle' } satisfies Turn,
+          turn: { state: 'idle', send_id: null, thread_id: null } satisfies Turn,
           permission: null,
+          permission_count: 0,
           question: null,
+          running_subagents: [],
         } satisfies SendsResponse),
       ),
     );
@@ -355,9 +360,11 @@ describe('usePendingSends on the new-session surface', () => {
       http.get('*/api/sessions/:id/sends', () =>
         HttpResponse.json({
           sends: [],
-          turn: { state: 'idle' } satisfies Turn,
+          turn: { state: 'idle', send_id: null, thread_id: null } satisfies Turn,
           permission: null,
+          permission_count: 0,
           question: null,
+          running_subagents: [],
         } satisfies SendsResponse),
       ),
     );

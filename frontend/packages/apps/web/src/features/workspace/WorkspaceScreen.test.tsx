@@ -229,6 +229,7 @@ function trackedSpawn(sessionId: string) {
     launchOptionIds: [],
     provider: 'claude' as const,
     worktree: null,
+    pullRequestNumber: null,
     status: 'spawning' as const,
   };
 }

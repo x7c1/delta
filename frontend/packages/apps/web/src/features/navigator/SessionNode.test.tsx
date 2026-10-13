@@ -121,8 +121,11 @@ const item: SessionListItem = {
     provider_session_id: null,
     provider_thread_id: null,
     pull_request_number: null,
+    failure_reason: null,
   },
   open: true,
+  pane_starting: false,
+  hooks_unreachable: false,
   main_thread_id: 1,
   threads: [
     {
@@ -618,9 +621,9 @@ describe('SessionNode kebab menu', () => {
     // `Remove` drops Delta's rows for the session, so the click must reach
     // `DELETE /api/sessions/{id}` with this session's id — and with no
     // confirmation step in between.
-    const removed = vi.fn<(id: string | readonly string[]) => void>();
+    const removed = vi.fn<(id: string) => void>();
     server.use(
-      http.delete('*/api/sessions/:id', ({ params }) => {
+      http.delete<{ id: string }>('*/api/sessions/:id', ({ params }) => {
         removed(params.id);
         return new HttpResponse(null, { status: 204 });
       }),
@@ -705,9 +708,9 @@ describe('SessionNode kebab menu', () => {
     // and without it the amber card has no way out. The request is the same
     // endpoint a bound session's Close hits; the server decides which outcome
     // it gets.
-    const closed = vi.fn<(id: string | readonly string[]) => void>();
+    const closed = vi.fn<(id: string) => void>();
     server.use(
-      http.post('*/api/sessions/:id/close', ({ params }) => {
+      http.post<{ id: string }>('*/api/sessions/:id/close', ({ params }) => {
         closed(params.id);
         return new HttpResponse(null, { status: 204 });
       }),
@@ -746,9 +749,9 @@ describe('SessionNode kebab menu', () => {
     // The close mutation is now wired inside the row (previously an `onClose`
     // prop), so assert the click reaches `POST /api/sessions/{id}/close` with
     // this session's id.
-    const closed = vi.fn<(id: string | readonly string[]) => void>();
+    const closed = vi.fn<(id: string) => void>();
     server.use(
-      http.post('*/api/sessions/:id/close', ({ params }) => {
+      http.post<{ id: string }>('*/api/sessions/:id/close', ({ params }) => {
         closed(params.id);
         return new HttpResponse(null, { status: 204 });
       }),

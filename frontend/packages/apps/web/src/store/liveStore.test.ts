@@ -105,6 +105,7 @@ function beginNewSessionSending(overrides: { id?: string } = {}) {
       launchOptionIds: [],
       provider: 'claude',
       worktree: null,
+      pullRequestNumber: null,
     },
     text: 'hi',
     status: 'sending',
@@ -463,10 +464,12 @@ describe('liveStore turn tracking', () => {
       sessionId: 'sess-9',
       threadId: 42,
       text: 'first message',
+      firstSendId: 9,
       workdir: null,
       launchOptionIds: [],
       provider: 'claude',
       worktree: null,
+      pullRequestNumber: null,
     });
     useLiveStore.getState().applyEvent({
       kind: 'permission_requested',
@@ -694,6 +697,7 @@ describe('liveStore sending (pre-acceptance submits)', () => {
         launchOptionIds: [7],
         provider: 'claude',
         worktree: null,
+        pullRequestNumber: null,
       },
       text: 'start a new session',
       status: 'sending',
@@ -726,6 +730,7 @@ describe('liveStore spawn tracking', () => {
       launchOptionIds: [],
       provider: 'claude',
       worktree: null,
+      pullRequestNumber: null,
     });
   }
 
@@ -745,6 +750,7 @@ describe('liveStore spawn tracking', () => {
         launchOptionIds: [],
         provider: 'claude',
         worktree: null,
+        pullRequestNumber: null,
       },
       text: 'start a new session',
       status: 'sending',
@@ -829,6 +835,7 @@ describe('liveStore spawn tracking', () => {
       launchOptionIds: [4],
       provider: 'codex',
       worktree,
+      pullRequestNumber: null,
     });
 
     useLiveStore.getState().applyEvent({

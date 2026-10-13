@@ -53,7 +53,7 @@ function makeMessageWithContent(
   return {
     uuid: 'm-1',
     session_id: 's',
-    thread_id: 't',
+    thread_id: 1,
     role,
     linear_parent_uuid: null,
     semantic_parent_uuid: null,

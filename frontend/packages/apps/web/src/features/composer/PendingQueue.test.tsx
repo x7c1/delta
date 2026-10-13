@@ -63,7 +63,7 @@ function reset() {
     sending: [],
     localSends: {},
     spawns: [],
-    activeTurns: {},
+    runningThreads: {},
     notices: {},
   });
   useNotificationStore.setState({ notifications: [] });
@@ -154,6 +154,7 @@ describe('PendingQueue server sends', () => {
             launchOptionIds: [],
             provider: 'claude',
             worktree: null,
+            pullRequestNumber: null,
           },
           text,
           status: 'failed',
@@ -836,6 +837,7 @@ describe('PendingQueue failed submit', () => {
             launchOptionIds: [7],
             provider: 'claude',
             worktree: null,
+            pullRequestNumber: null,
           },
           text: 'start a new session',
           status: 'failed',
@@ -867,6 +869,7 @@ describe('PendingQueue failed submit', () => {
             launchOptionIds: [7],
             provider: 'claude',
             worktree: null,
+            pullRequestNumber: null,
           },
           text: 'start a new session',
           status: 'failed',

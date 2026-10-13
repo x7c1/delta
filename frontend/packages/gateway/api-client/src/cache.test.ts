@@ -31,7 +31,7 @@ function message(uuid: string, role: Message['role'], seq: number): Message {
   return {
     uuid,
     session_id: 's',
-    thread_id: 't',
+    thread_id: 1,
     role,
     linear_parent_uuid: null,
     semantic_parent_uuid: null,
@@ -40,6 +40,11 @@ function message(uuid: string, role: Message['role'], seq: number): Message {
     content_text: null,
     content: [],
     created_at: '2026-01-01T00:00:00Z',
+    model: null,
+    git_branch: null,
+    cwd: null,
+    response_time_ms: null,
+    provider_item_id: null,
   };
 }
 
@@ -169,7 +174,7 @@ describe('seedSessionThreads', () => {
           session: {
             id: sessionId,
             cwd: '/work',
-            transcript_path: null,
+            transcript_path: '/work/transcript.jsonl',
             title: null,
             status: 'active',
             created_at: '2026-01-01T00:00:00Z',

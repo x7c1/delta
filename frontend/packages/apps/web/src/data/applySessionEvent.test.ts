@@ -20,6 +20,7 @@ function serverSend(overrides: Partial<Send> = {}): Send {
     status: 'dispatched',
     matched_uuid: null,
     created_at: '2026-01-01T00:00:00Z',
+    held_at: null,
     ...overrides,
   };
 }
@@ -45,11 +46,13 @@ function seedSessionList(queryClient: QueryClient, ids: readonly string[]) {
       provider_session_id: null,
       provider_thread_id: null,
       pull_request_number: null,
+      failure_reason: null,
     },
     open: false,
     pane_starting: false,
     hooks_unreachable: false,
     main_thread_id: 1,
+    threads: [],
     last_activity_at: null,
   }));
   queryClient.setQueryData(queryKeys.sessions, {
@@ -238,7 +241,6 @@ describe('applySessionEvent', () => {
       {
         kind: 'subagent_finished',
         session_id: FOCUSED,
-        thread_id: 5,
         tool_use_id: 'toolu_1',
       },
       queryClient,
@@ -579,6 +581,7 @@ describe('applySessionEvent', () => {
       launchOptionIds: [],
       provider: 'claude',
       worktree: null,
+      pullRequestNumber: null,
     });
     queryClient.setQueryData(queryKeys.sessionSends('sess-spawned'), {
       sends: [serverSend({ session_id: 'sess-spawned', thread_id: 42 })],
@@ -651,6 +654,7 @@ describe('applySessionEvent', () => {
       launchOptionIds: [],
       provider: 'claude',
       worktree: null,
+      pullRequestNumber: null,
     });
 
     applySessionEvent(

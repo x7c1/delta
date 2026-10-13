@@ -70,8 +70,11 @@ function makeItem(
       provider_session_id: null,
       provider_thread_id: null,
       pull_request_number: null,
+      failure_reason: null,
     },
     open: true,
+    pane_starting: false,
+    hooks_unreachable: false,
     main_thread_id: mainThreadId,
     threads: [
       {
@@ -318,7 +321,7 @@ describe('NavigatorPane launched-session placement', () => {
     expect(ids.length).toBeLessThan(serverOrder.length);
     expect(ids).toEqual(openIds.slice(0, ids.length));
     expect(
-      screen.queryByRole('status', { name: 'Failed', exact: true }),
+      screen.queryByRole('status', { name: 'Failed' }),
     ).not.toBeInTheDocument();
   });
 
@@ -329,7 +332,7 @@ describe('NavigatorPane launched-session placement', () => {
 
     const rows = screen.getAllByRole('listitem');
     expect(
-      within(rows[0]).getByRole('status', { name: 'Failed', exact: true }),
+      within(rows[0]).getByRole('status', { name: 'Failed' }),
     ).toBeInTheDocument();
     const ids = renderedIds();
     expect(ids[0]).toBe(FAILED_ID);
