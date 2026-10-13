@@ -81,7 +81,7 @@ impl ReleaseUpdate {
                     );
                     None
                 }
-                Err(err @ (InstallError::Unavailable(_) | InstallError::Unrunnable { .. })) => {
+                Err(err @ (InstallError::Unavailable { .. } | InstallError::Unrunnable { .. })) => {
                     let cause = with_causes(&err);
                     tracing::warn!(
                         version = %version,
@@ -152,8 +152,8 @@ mod tests {
     use std::path::Path;
 
     use super::super::testing::{
-        asset, installed_app, newer_release, settled, test_sha256, update_on, v060,
-        GatedDownloader, GatedInstaller, LINUX_DEB, MAC_DMG,
+        asset, installed_app, newer_release, settled, test_sha256, unlocated, update_on, v060,
+        GatedDownloader, GatedInstaller, LINUX_DEB, MAC_DMG, UNLOCATED_CAUSE,
     };
     use super::*;
     use crate::release_update::{InstallUnavailable, ManualInstall, NotOffered, Platform};
@@ -291,9 +291,7 @@ mod tests {
         let installer = GatedInstaller::new();
         let update = ready_linux_update(&installer).await;
         update.install(Some(v060())).unwrap();
-        installer.finish(Err(InstallError::Unavailable(
-            "no authentication agent".into(),
-        )));
+        installer.finish(Err(InstallError::unavailable("no authentication agent")));
         assert_eq!(
             install_settled(&update).await,
             Some(UpdateInstall::Unavailable {
@@ -497,17 +495,15 @@ mod tests {
         settled(&mac).await;
 
         mac.install(Some(v060_mac())).unwrap();
-        installer.finish(Err(InstallError::Unavailable(
-            "Delta runs from a translocated copy".into(),
-        )));
+        // The installer's reason and the I/O error behind it, each named
+        // once.
+        installer.finish(Err(unlocated()));
         let image = Path::new("/data/updates").join(MAC_DMG);
         assert_eq!(
             install_settled(&mac).await,
             Some(UpdateInstall::Unavailable {
                 version: "v0.6.0".into(),
-                cause:
-                    "Delta cannot install the update itself: Delta runs from a translocated copy"
-                        .into(),
+                cause: UNLOCATED_CAUSE.into(),
                 manual: ManualInstall::DiskImage(image.clone()),
             })
         );
@@ -531,11 +527,12 @@ mod tests {
 
     /// An installer that says at startup it cannot install here (on macOS,
     /// a translocated or unwritable bundle) turns Install off: a ready
-    /// download comes with the reason and the disk image to open instead.
+    /// download comes with the reason, rendered once with its causes, and
+    /// the disk image to open instead.
     #[tokio::test]
     async fn an_installer_unavailable_at_startup_offers_the_way_by_hand_once_ready() {
         let downloader = GatedDownloader::new();
-        let installer = GatedInstaller::unavailable_because("Delta runs from a translocated copy");
+        let installer = GatedInstaller::unavailable_because(unlocated);
         let mac = update_on(Platform::new("macos", "aarch64"), &downloader, &installer);
         let v060_mac = || newer_release("0.6.0", vec![asset(MAC_DMG)]);
         assert!(!mac.installs());
@@ -550,9 +547,7 @@ mod tests {
         assert_eq!(
             mac.install_unavailable_of(Some(&v060_mac())),
             Some(InstallUnavailable {
-                cause:
-                    "Delta cannot install the update itself: Delta runs from a translocated copy"
-                        .into(),
+                cause: UNLOCATED_CAUSE.into(),
                 manual: ManualInstall::DiskImage(Path::new("/data/updates").join(MAC_DMG)),
             })
         );
