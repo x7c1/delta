@@ -7,7 +7,8 @@ use std::sync::Arc;
 use delta_model::SessionId;
 
 use crate::interactor::testing::*;
-use crate::pull_request::{PullRequest, PullRequestLens};
+use crate::pull_request::PullRequest;
+use crate::pull_request_lens::PullRequestLens;
 
 /// Paths the lazy-GC stat reliably resolves on every host. The store
 /// derives a clone from these so the Repository tab's filter keeps them.

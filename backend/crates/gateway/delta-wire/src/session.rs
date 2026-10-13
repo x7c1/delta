@@ -1,70 +1,11 @@
 //! The wire form of [`Session`].
 
-use delta_model::{AgentProvider, Session, SessionStatus};
-use serde::{Deserialize, Serialize};
+use delta_model::Session;
+use serde::Serialize;
 use ts_rs::TS;
 
-/// JSON shape of a session's lifecycle status.
-///
-/// Mirrors the domain [`SessionStatus`] variant-for-variant; this wire twin
-/// carries the serialization concerns the domain type must not know about:
-/// the lowercase variant names and the TypeScript export.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(rename = "SessionStatus")]
-pub enum WireSessionStatus {
-    Spawning,
-    Active,
-    Ended,
-    Failed,
-}
-
-impl From<SessionStatus> for WireSessionStatus {
-    fn from(status: SessionStatus) -> Self {
-        match status {
-            SessionStatus::Spawning => WireSessionStatus::Spawning,
-            SessionStatus::Active => WireSessionStatus::Active,
-            SessionStatus::Ended => WireSessionStatus::Ended,
-            SessionStatus::Failed => WireSessionStatus::Failed,
-        }
-    }
-}
-
-/// JSON shape of a session's AI-agent provider.
-///
-/// Mirrors the domain [`AgentProvider`] variant-for-variant; this wire twin
-/// carries the serialization concerns the domain type must not know about: the
-/// lowercase variant tokens (matching the persisted `session.provider` values)
-/// and the TypeScript export the UI uses to render the provider badge.
-///
-/// Also accepted inbound (`Deserialize`) as the optional `provider` selector on
-/// a new-session send, so the same token set names a provider in both
-/// directions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(rename = "AgentProvider")]
-pub enum WireAgentProvider {
-    Claude,
-    Codex,
-}
-
-impl From<AgentProvider> for WireAgentProvider {
-    fn from(provider: AgentProvider) -> Self {
-        match provider {
-            AgentProvider::Claude => WireAgentProvider::Claude,
-            AgentProvider::Codex => WireAgentProvider::Codex,
-        }
-    }
-}
-
-impl From<WireAgentProvider> for AgentProvider {
-    fn from(provider: WireAgentProvider) -> Self {
-        match provider {
-            WireAgentProvider::Claude => AgentProvider::Claude,
-            WireAgentProvider::Codex => AgentProvider::Codex,
-        }
-    }
-}
+use crate::agent_provider::WireAgentProvider;
+use crate::session_status::WireSessionStatus;
 
 /// JSON shape of a session record on the REST surface.
 ///
@@ -161,6 +102,8 @@ impl From<Session> for WireSession {
 mod tests {
     use super::*;
 
+    use delta_model::{AgentProvider, SessionStatus};
+
     use delta_model::SessionId;
 
     #[test]
@@ -231,20 +174,5 @@ mod tests {
             serde_json::Value::Null,
             "a session started from a directory carries no PR number"
         );
-    }
-
-    #[test]
-    fn every_status_serializes_lowercase() {
-        for (status, expected) in [
-            (SessionStatus::Spawning, "spawning"),
-            (SessionStatus::Active, "active"),
-            (SessionStatus::Ended, "ended"),
-            (SessionStatus::Failed, "failed"),
-        ] {
-            assert_eq!(
-                serde_json::to_value(WireSessionStatus::from(status)).unwrap(),
-                serde_json::json!(expected),
-            );
-        }
     }
 }

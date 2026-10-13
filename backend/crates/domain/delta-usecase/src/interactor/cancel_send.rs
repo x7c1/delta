@@ -9,15 +9,15 @@
 //! [`dispatch_queued_send`](super::enqueue)). Until that dispatch the send has
 //! not touched the pane, so cancelling it is a pure state transition: flip the
 //! row to `SendStatus::Cancelled` and the idle dispatch path
-//! ([`next_queued_send`](crate::ports::SessionStore::next_queued_send), which
+//! ([`next_queued_send`](crate::ports::SendStore::next_queued_send), which
 //! filters on `status = 'queued'`) will simply skip it, and it drops out of the
 //! browser's open-send list. The store guards the transition with
-//! `WHERE status = 'queued'` ([`cancel_queued_send`](crate::ports::SessionStore::cancel_queued_send)),
+//! `WHERE status = 'queued'` ([`cancel_queued_send`](crate::ports::SendStore::cancel_queued_send)),
 //! so a send that left `queued` the instant between the browser's click and
 //! this handler is a clean conflict rather than a clobber. A *held* send —
 //! recovered at boot from a dead process's `dispatched` state (see
-//! [`SessionStore::restore_all_dispatched`]), or parked by the echo deadline
-//! (see [`SessionStore::hold_send_for_release`]) — is covered by this same
+//! [`SendStore::restore_all_dispatched`](crate::ports::SendStore::restore_all_dispatched)), or parked by the echo deadline
+//! (see [`SendStore::hold_send_for_release`](crate::ports::SendStore::hold_send_for_release)) — is covered by this same
 //! queued path: its status is still `queued`, only its hold marker differs, so
 //! the UI keeps the cancel affordance on held rows with no extra case here.
 //!
@@ -52,7 +52,7 @@
 //! A `dispatched` row that no turn state claims at all — the turn is `Idle`,
 //! mid an *external* turn, or tracking a *different* send — is an invariant
 //! violation: the boot-time reconcile (see
-//! [`SessionStore::restore_all_dispatched`]) restores every `dispatched` row
+//! [`SendStore::restore_all_dispatched`](crate::ports::SendStore::restore_all_dispatched)) restores every `dispatched` row
 //! a dead process left behind precisely so this state never arises. Should it
 //! arise anyway, cancelling such a row is a pure state transition: flip it to
 //! `cancelled`, inject **no** keystrokes (there is no composer buffer Delta
@@ -66,7 +66,7 @@
 //! lands. In that case the prompt has already submitted, but the
 //! `UserPromptSubmit` hook fires *after* this handler has cancelled the row
 //! and dropped state back to Idle. The hook's
-//! [`head_dispatched_send`](crate::ports::SessionStore::head_dispatched_send)
+//! [`head_dispatched_send`](crate::ports::SendStore::head_dispatched_send)
 //! query returns `None` (the cancelled row is filtered), so the prompt
 //! classifies as [`TurnInput::PromptSubmitted`] consuming no send — exactly
 //! the existing treatment for an untracked external prompt. No stuck state, no

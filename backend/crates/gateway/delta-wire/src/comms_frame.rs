@@ -8,55 +8,12 @@
 //! ring buffer before tailing live rather than pretending the stream is
 //! complete.
 
-use delta_usecase::{CommsDirection, CommsEntry, CommsFrameKind};
+use delta_usecase::CommsEntry;
 use serde::Serialize;
 use ts_rs::TS;
 
-/// Which way one frame travelled. Wire twin of [`CommsDirection`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(rename = "CommsDirection")]
-pub enum WireCommsDirection {
-    /// Delta → agent: a frame Delta wrote.
-    ToAgent,
-    /// Agent → Delta: a frame Delta read.
-    FromAgent,
-}
-
-impl From<CommsDirection> for WireCommsDirection {
-    fn from(direction: CommsDirection) -> Self {
-        match direction {
-            CommsDirection::ToAgent => WireCommsDirection::ToAgent,
-            CommsDirection::FromAgent => WireCommsDirection::FromAgent,
-        }
-    }
-}
-
-/// What kind of message one frame is. Wire twin of [`CommsFrameKind`].
-///
-/// A server-originated request is `from_agent` + `request`, not a fourth kind —
-/// see the domain type for the full (direction, kind) table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(rename = "CommsFrameKind")]
-pub enum WireCommsFrameKind {
-    /// Carries an id and awaits a correlated response.
-    Request,
-    /// Answers a request, carrying its id.
-    Response,
-    /// Fire and forget: no id, no answer.
-    Notification,
-}
-
-impl From<CommsFrameKind> for WireCommsFrameKind {
-    fn from(kind: CommsFrameKind) -> Self {
-        match kind {
-            CommsFrameKind::Request => WireCommsFrameKind::Request,
-            CommsFrameKind::Response => WireCommsFrameKind::Response,
-            CommsFrameKind::Notification => WireCommsFrameKind::Notification,
-        }
-    }
-}
+use crate::comms_direction::WireCommsDirection;
+use crate::comms_frame_kind::WireCommsFrameKind;
 
 /// One frame on the `/comms` stream.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -107,6 +64,8 @@ impl WireCommsFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use delta_usecase::{CommsDirection, CommsFrameKind};
 
     /// The JSON envelope every client parses, pinned field for field.
     #[test]

@@ -23,23 +23,43 @@
 //! types into the frontend's `@delta/wire-gen` package, so the browser types
 //! can never drift from the Rust contract.
 
+mod comms_direction;
+pub use comms_direction::WireCommsDirection;
 mod comms_frame;
-pub use comms_frame::{WireCommsDirection, WireCommsFrame, WireCommsFrameKind};
+pub use comms_frame::WireCommsFrame;
+mod comms_frame_kind;
+pub use comms_frame_kind::WireCommsFrameKind;
 mod content_block;
 pub use content_block::WireContentBlock;
 pub mod endpoint;
 mod file_change;
-pub use file_change::{WireFileChange, WireFileChangeDetail, WireFileChangeKind};
+pub use file_change::WireFileChange;
+mod file_change_detail;
+pub use file_change_detail::WireFileChangeDetail;
+mod file_change_kind;
+pub use file_change_kind::WireFileChangeKind;
 pub mod hooks;
 mod message;
-pub use message::{WireMessage, WireRole};
+pub use message::WireMessage;
+mod role;
+pub use role::WireRole;
 mod send;
-pub use send::{WireSend, WireSendStatus};
+pub use send::WireSend;
+mod send_status;
+pub use send_status::WireSendStatus;
+mod agent_provider;
 pub mod rest;
+pub use agent_provider::WireAgentProvider;
 mod session;
-pub use session::{WireSession, WireSessionStatus};
+pub use session::WireSession;
+mod session_status;
+pub use session_status::WireSessionStatus;
 mod session_event;
-pub use session_event::{event_kinds, WireRateLimitWindow, WireSessionEvent, WireStatusSnapshot};
+pub use session_event::{event_kinds, WireSessionEvent};
+mod status_snapshot;
+pub use status_snapshot::WireStatusSnapshot;
+mod rate_limit_window;
+pub use rate_limit_window::WireRateLimitWindow;
 mod thread;
 pub use thread::WireThread;
 

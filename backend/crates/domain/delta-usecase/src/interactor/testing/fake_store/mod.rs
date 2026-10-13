@@ -3,7 +3,8 @@
 //! The fake's state and shared stamps live here; the store's behaviour is
 //! split by area into sibling modules (sessions, session history, threads,
 //! sends, messages, permissions, subagent launches, launch options, prompt
-//! templates, clone roots), with [`session_store`] wiring them into the trait.
+//! templates, clone roots), with [`session_store`] wiring them into the stores
+//! [`SessionStore`] gathers.
 //!
 //! [`SessionStore`]: crate::ports::SessionStore
 
@@ -69,11 +70,11 @@ pub(crate) struct FakeStoreInner {
     /// The tmux pane each session row remembers, mirroring the SQL
     /// `session.tmux_session` / `tmux_pane` / `hooks_unreachable` columns.
     pub(crate) remembered_panes: HashMap<SessionId, RememberedPane>,
-    /// When set, [`SessionStore::cancel_send`](crate::ports::SessionStore::cancel_send) fails with a store error, so a
+    /// When set, [`SendStore::cancel_send`](crate::ports::SendStore::cancel_send) fails with a store error, so a
     /// test can make the `TurnInput::Close` of a session with an unechoed send
     /// fail at its row write.
     pub(crate) fail_cancel_send: bool,
-    /// When set, [`SessionStore::clear_subagent_launch`](crate::ports::SessionStore::clear_subagent_launch) fails with a store
+    /// When set, [`SubagentLaunchStore::clear_subagent_launch`](crate::ports::SubagentLaunchStore::clear_subagent_launch) fails with a store
     /// error for this tool_use id (and succeeds for every other), so a test
     /// can make the process-gone subagent sweep hit a failing row write.
     pub(crate) fail_clear_subagent_launch_for: Option<String>,

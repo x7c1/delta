@@ -146,7 +146,7 @@ server are never candidates. `make check` runs the script's own test
 `session_start` timing (`immediate` / `skip` / `{ "delay_ms": N }`), an
 optional `loop`, and an optional `wrap_pastes` that wraps a long pasted prompt
 in Claude Code's `<pasted_content>` block. The full vocabulary is documented in
-the fake's `scenario` module (`backend/crates/apps/fake-claude/src/scenario.rs`).
+the fake's `scenario` module (`backend/crates/apps/fake-claude/src/scenario/mod.rs`).
 A spec selects its scenario through the **first word of the first prompt it
 sends**: sending `"first-send hold then answer"` makes the spawned fake load
 `scenarios/first-send.json`. Keep specs structural — assert presence, absence,
@@ -158,7 +158,7 @@ server fixture pins a single Codex scenario for the whole run
 (`scenarios/codex-parallel-approvals.json`) and every Codex session plays it. Its
 step vocabulary (including `await_approvals`, which suspends a turn until every
 emitted approval has been answered) is documented in
-`backend/crates/apps/fake-codex/src/scenario.rs`.
+`backend/crates/apps/fake-codex/src/scenario/mod.rs`.
 
 Both fakes also back backend-only integration tests (part of `cargo test`) that
 prove the same loops without a browser:

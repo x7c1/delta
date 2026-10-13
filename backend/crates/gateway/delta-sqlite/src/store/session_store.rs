@@ -1,9 +1,10 @@
-//! The [`SessionStore`] impl for [`SqliteStore`].
+//! [`SqliteStore`]'s impls of the stores
+//! [`SessionStore`](delta_usecase::SessionStore) gathers, one per store.
 //!
-//! Rust requires a trait to be implemented in a single `impl` block, so this
-//! is the one place the trait is wired up: every method forwards to the
-//! inherent method of the same name (inherent methods take precedence in
-//! method resolution), and those live in the per-aggregate sibling modules.
+//! Every method forwards to the inherent method of the same name (inherent
+//! methods take precedence in method resolution), and those live in the
+//! per-aggregate sibling modules; `SessionStore` itself comes with the blanket
+//! impl over the gathered stores.
 
 use std::collections::BTreeMap;
 
@@ -15,14 +16,16 @@ use delta_model::{
     Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 use delta_usecase::{
-    CloneRoot, NewSession, RecentWorkdir, RememberedPane, RepositoryCloneRow, SessionPageCursor,
-    SessionPageRow, SessionStore, SpawningSession,
+    CloneRoot, CloneRootStore, LaunchOptionStore, MessageStore, NewSession, PermissionStore,
+    PromptTemplateStore, RecentWorkdir, RememberedPane, RememberedPaneStore, RepositoryCloneRow,
+    SendStore, SessionHistoryStore, SessionPageCursor, SessionPageRow, SessionRecordStore,
+    SpawningSession, SubagentLaunchStore, ThreadStore,
 };
 
 use super::SqliteStore;
 
 #[async_trait]
-impl SessionStore for SqliteStore {
+impl SessionRecordStore for SqliteStore {
     async fn register_session(
         &self,
         new: NewSession,
@@ -93,6 +96,17 @@ impl SessionStore for SqliteStore {
         self.session(id).await
     }
 
+    async fn list_prunable_sessions(
+        &self,
+        cutoff: &str,
+        statuses: &[SessionStatus],
+    ) -> std::result::Result<Vec<SessionId>, delta_usecase::Error> {
+        self.list_prunable_sessions(cutoff, statuses).await
+    }
+}
+
+#[async_trait]
+impl RememberedPaneStore for SqliteStore {
     async fn remember_pane(
         &self,
         id: &SessionId,
@@ -117,14 +131,10 @@ impl SessionStore for SqliteStore {
     ) -> std::result::Result<Vec<(SessionId, RememberedPane)>, delta_usecase::Error> {
         self.remembered_panes().await
     }
+}
 
-    async fn main_thread_id(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<ThreadId, delta_usecase::Error> {
-        self.main_thread_id(session_id).await
-    }
-
+#[async_trait]
+impl SessionHistoryStore for SqliteStore {
     async fn recent_workdirs(
         &self,
         limit: u32,
@@ -134,14 +144,6 @@ impl SessionStore for SqliteStore {
 
     async fn cwd_exists(&self, path: &str) -> std::result::Result<bool, delta_usecase::Error> {
         self.cwd_exists(path).await
-    }
-
-    async fn list_prunable_sessions(
-        &self,
-        cutoff: &str,
-        statuses: &[SessionStatus],
-    ) -> std::result::Result<Vec<SessionId>, delta_usecase::Error> {
-        self.list_prunable_sessions(cutoff, statuses).await
     }
 
     async fn repository_clone_rows(
@@ -158,6 +160,34 @@ impl SessionStore for SqliteStore {
             generated_clone_limit,
         )
         .await
+    }
+}
+
+#[async_trait]
+impl CloneRootStore for SqliteStore {
+    async fn list_clone_roots(&self) -> std::result::Result<Vec<CloneRoot>, delta_usecase::Error> {
+        self.list_clone_roots().await
+    }
+
+    async fn insert_clone_root(
+        &self,
+        path: &str,
+    ) -> std::result::Result<CloneRoot, delta_usecase::Error> {
+        self.insert_clone_root(path).await
+    }
+
+    async fn delete_clone_root(&self, path: &str) -> std::result::Result<(), delta_usecase::Error> {
+        self.delete_clone_root(path).await
+    }
+}
+
+#[async_trait]
+impl ThreadStore for SqliteStore {
+    async fn main_thread_id(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<ThreadId, delta_usecase::Error> {
+        self.main_thread_id(session_id).await
     }
 
     async fn thread(
@@ -191,6 +221,16 @@ impl SessionStore for SqliteStore {
             .await
     }
 
+    async fn latest_user_thread(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<ThreadId>, delta_usecase::Error> {
+        self.latest_user_thread(session_id).await
+    }
+}
+
+#[async_trait]
+impl SendStore for SqliteStore {
     async fn enqueue_send(
         &self,
         session_id: &SessionId,
@@ -305,13 +345,6 @@ impl SessionStore for SqliteStore {
         self.settle_send_delivered(id).await
     }
 
-    async fn latest_user_thread(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<Option<ThreadId>, delta_usecase::Error> {
-        self.latest_user_thread(session_id).await
-    }
-
     async fn cancel_send(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
         self.cancel_send(id).await
     }
@@ -319,19 +352,15 @@ impl SessionStore for SqliteStore {
     async fn cancel_queued_send(&self, id: i64) -> std::result::Result<bool, delta_usecase::Error> {
         self.cancel_queued_send(id).await
     }
+}
 
+#[async_trait]
+impl MessageStore for SqliteStore {
     async fn upsert_messages(
         &self,
         messages: &[Message],
     ) -> std::result::Result<(), delta_usecase::Error> {
         self.upsert_messages(messages).await
-    }
-
-    async fn last_activity_at(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<Option<String>, delta_usecase::Error> {
-        self.last_activity_at(session_id).await
     }
 
     async fn message_count(
@@ -370,6 +399,16 @@ impl SessionStore for SqliteStore {
         self.thread_messages(thread_id).await
     }
 
+    async fn last_activity_at(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<String>, delta_usecase::Error> {
+        self.last_activity_at(session_id).await
+    }
+}
+
+#[async_trait]
+impl PermissionStore for SqliteStore {
     async fn record_permission_request(
         &self,
         session_id: &SessionId,
@@ -407,7 +446,10 @@ impl SessionStore for SqliteStore {
         self.deny_pending_permission_requests(session_id, reason)
             .await
     }
+}
 
+#[async_trait]
+impl SubagentLaunchStore for SqliteStore {
     async fn record_subagent_launch(
         &self,
         session_id: &SessionId,
@@ -442,11 +484,21 @@ impl SessionStore for SqliteStore {
     ) -> std::result::Result<BTreeMap<String, SubagentLaunch>, delta_usecase::Error> {
         self.outstanding_subagent_launches(session_id).await
     }
+}
 
+#[async_trait]
+impl LaunchOptionStore for SqliteStore {
     async fn list_launch_options(
         &self,
     ) -> std::result::Result<Vec<LaunchOption>, delta_usecase::Error> {
         self.list_launch_options().await
+    }
+
+    async fn launch_option(
+        &self,
+        id: i64,
+    ) -> std::result::Result<Option<LaunchOption>, delta_usecase::Error> {
+        self.launch_option(id).await
     }
 
     async fn create_launch_option(
@@ -459,13 +511,6 @@ impl SessionStore for SqliteStore {
     ) -> std::result::Result<LaunchOption, delta_usecase::Error> {
         self.create_launch_option(label, name, value, default_enabled, provider)
             .await
-    }
-
-    async fn launch_option(
-        &self,
-        id: i64,
-    ) -> std::result::Result<Option<LaunchOption>, delta_usecase::Error> {
-        self.launch_option(id).await
     }
 
     async fn set_launch_option_default_enabled(
@@ -499,7 +544,10 @@ impl SessionStore for SqliteStore {
     ) -> std::result::Result<usize, delta_usecase::Error> {
         self.delete_builtin_launch_options_except(keys).await
     }
+}
 
+#[async_trait]
+impl PromptTemplateStore for SqliteStore {
     async fn list_prompt_templates(
         &self,
     ) -> std::result::Result<Vec<PromptTemplate>, delta_usecase::Error> {
@@ -528,20 +576,5 @@ impl SessionStore for SqliteStore {
         id: i64,
     ) -> std::result::Result<(), delta_usecase::Error> {
         self.delete_prompt_template(id).await
-    }
-
-    async fn list_clone_roots(&self) -> std::result::Result<Vec<CloneRoot>, delta_usecase::Error> {
-        self.list_clone_roots().await
-    }
-
-    async fn insert_clone_root(
-        &self,
-        path: &str,
-    ) -> std::result::Result<CloneRoot, delta_usecase::Error> {
-        self.insert_clone_root(path).await
-    }
-
-    async fn delete_clone_root(&self, path: &str) -> std::result::Result<(), delta_usecase::Error> {
-        self.delete_clone_root(path).await
     }
 }

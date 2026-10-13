@@ -5,7 +5,7 @@
 //! request so the browser can show state and keep an audit trail.
 
 use crate::permission_status::PermissionStatus;
-use crate::session::SessionId;
+use crate::session_id::SessionId;
 
 /// A recorded tool-permission request.
 #[derive(Debug, Clone, PartialEq, Eq)]

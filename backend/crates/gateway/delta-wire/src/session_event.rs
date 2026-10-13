@@ -1,11 +1,13 @@
 //! The wire form of [`SessionEvent`].
 
-use delta_usecase::{RateLimitWindow, SessionEvent, StatusSnapshot};
+use delta_usecase::SessionEvent;
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::file_change::WireFileChangeDetail;
-use crate::session::WireAgentProvider;
+use crate::agent_provider::WireAgentProvider;
+use crate::file_change_detail::WireFileChangeDetail;
+use crate::rate_limit_window::WireRateLimitWindow;
+use crate::status_snapshot::WireStatusSnapshot;
 
 /// JSON shape of a session event on the `/ws` stream.
 ///
@@ -253,74 +255,6 @@ pub enum WireSessionEvent {
         /// Why it failed, as `gh` reported it — shown to the user verbatim.
         message: String,
     },
-}
-
-/// The wire form of a session's usage snapshot. Every field is optional (a
-/// session before its provider's first usage report carries `null`s), and a
-/// provider that reports usage on several frames sends one snapshot per frame,
-/// each stating only what that frame said; see `delta_usecase::StatusSnapshot`
-/// for the semantics.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[ts(rename = "StatusSnapshot")]
-pub struct WireStatusSnapshot {
-    /// Which provider's account and session these numbers describe. The client
-    /// keys the account-scoped rate limits by this, so one provider's limits
-    /// are never shown for another's session.
-    pub provider: WireAgentProvider,
-    pub model_id: Option<String>,
-    pub model_display_name: Option<String>,
-    pub context_used_percentage: Option<f64>,
-    pub context_window_size: Option<u64>,
-    pub context_current_usage: Option<u64>,
-    pub total_input_tokens: Option<u64>,
-    /// The account's rate-limit windows, most significant first. `null` means
-    /// this snapshot says nothing about rate limits (so the client keeps what it
-    /// has); `[]` means the account has none to show.
-    pub rate_limits: Option<Vec<WireRateLimitWindow>>,
-    pub total_cost_usd: Option<f64>,
-    pub current_dir: Option<String>,
-}
-
-/// The wire form of one rate-limit window, identified by its duration rather
-/// than by a provider-specific name.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
-#[ts(rename = "RateLimitWindow")]
-pub struct WireRateLimitWindow {
-    /// How long the window is, in seconds — what the client labels the row
-    /// from. `null` when the provider reported a window without its length.
-    pub duration_seconds: Option<i64>,
-    pub used_percentage: Option<f64>,
-    /// Unix epoch seconds at which the window resets.
-    pub resets_at: Option<i64>,
-}
-
-impl From<RateLimitWindow> for WireRateLimitWindow {
-    fn from(window: RateLimitWindow) -> Self {
-        Self {
-            duration_seconds: window.duration_seconds,
-            used_percentage: window.used_percentage,
-            resets_at: window.resets_at,
-        }
-    }
-}
-
-impl From<StatusSnapshot> for WireStatusSnapshot {
-    fn from(snapshot: StatusSnapshot) -> Self {
-        Self {
-            provider: snapshot.provider.into(),
-            model_id: snapshot.model_id,
-            model_display_name: snapshot.model_display_name,
-            context_used_percentage: snapshot.context_used_percentage,
-            context_window_size: snapshot.context_window_size,
-            context_current_usage: snapshot.context_current_usage,
-            total_input_tokens: snapshot.total_input_tokens,
-            rate_limits: snapshot
-                .rate_limits
-                .map(|windows| windows.into_iter().map(WireRateLimitWindow::from).collect()),
-            total_cost_usd: snapshot.total_cost_usd,
-            current_dir: snapshot.current_dir,
-        }
-    }
 }
 
 impl From<SessionEvent> for WireSessionEvent {
@@ -707,7 +641,9 @@ fn sample_events() -> Vec<WireSessionEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::file_change::{WireFileChange, WireFileChangeKind};
+    use crate::file_change::WireFileChange;
+    use crate::file_change_kind::WireFileChangeKind;
+    use delta_usecase::{RateLimitWindow, StatusSnapshot};
 
     use delta_model::{AgentProvider, MessageUuid, SessionId, ThreadId};
 

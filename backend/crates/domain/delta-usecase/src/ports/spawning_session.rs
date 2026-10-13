@@ -2,7 +2,7 @@
 
 use delta_model::{AgentProvider, SessionId};
 
-/// What [`crate::ports::SessionStore::insert_spawning_session`] records: the
+/// What [`crate::ports::SessionRecordStore::insert_spawning_session`] records: the
 /// spawn-time snapshot a fresh session starts from, before its process has
 /// reported anything.
 #[derive(Debug, Clone)]
@@ -42,7 +42,7 @@ pub struct SpawningSession<'a> {
     /// provider such as Codex passes its own value. The provider-minted
     /// conversation ids are not known yet at spawn time — they are learned
     /// from the provider's launch response and written later via
-    /// [`crate::ports::SessionStore::set_provider_ids`].
+    /// [`crate::ports::SessionRecordStore::set_provider_ids`].
     pub provider: AgentProvider,
     /// The GitHub pull request the session was opened from (the new-session
     /// screen's PR tab), or `None` for every other origin. Like the git

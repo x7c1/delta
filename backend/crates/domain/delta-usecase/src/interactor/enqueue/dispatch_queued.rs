@@ -50,7 +50,7 @@ where
     /// `held_at`, whether the boot restore recovered them from a dead process's
     /// `dispatched` state or the echo deadline parked them — are invisible to
     /// this method entirely:
-    /// [`SessionStore::next_queued_send`] filters them out until the user
+    /// [`SendStore::next_queued_send`] filters them out until the user
     /// explicitly releases them, so no trigger here can auto-resend a
     /// possibly-stale message or re-type one the pane keeps swallowing.
     /// Nor is anything typed into a pane whose agent cannot reach this
@@ -61,7 +61,7 @@ where
     /// `DispatchFailed` turn input cancels the row so a failed send cannot
     /// wedge the queue.
     ///
-    /// [`SessionStore::next_queued_send`]: crate::ports::SessionStore::next_queued_send
+    /// [`SendStore::next_queued_send`]: crate::ports::SendStore::next_queued_send
     ///
     /// Returns the [`SessionEvent::SendDispatched`] to broadcast when a send
     /// was promoted, so the browser sees the queued→dispatched transition

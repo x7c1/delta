@@ -54,7 +54,7 @@ pub(crate) mod testing;
 /// `held_at` marker set — before any session actor exists. A restored
 /// row stays visible in the open-send list but never auto-dispatches; the
 /// user explicitly releases (or cancels) it from the UI. See
-/// [`SessionStore::restore_all_dispatched`] for why the sweep is exact at
+/// [`SendStore::restore_all_dispatched`] for why the sweep is exact at
 /// that moment and why the rows are restored rather than requeued or
 /// cancelled.
 ///
@@ -79,7 +79,7 @@ pub(crate) mod testing;
 /// Codex app-server launch — and its `PATH` to the binary detector, so no
 /// spawn site reads global state for it.
 ///
-/// [`SessionStore::restore_all_dispatched`]: delta_usecase::SessionStore::restore_all_dispatched
+/// [`SendStore::restore_all_dispatched`]: delta_usecase::SendStore::restore_all_dispatched
 /// [`launch_option_catalog`]: crate::launch_option_catalog()
 pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<AppInteractor> {
     // Real PATH probe. Constructing it touches no filesystem; the first probe
@@ -92,7 +92,7 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     ensure_tmux_available(binary_detector.as_ref()).await?;
     let layout = config.data_layout();
     let store = SqliteStore::open(&layout.database().to_string_lossy())?;
-    let restored = delta_usecase::SessionStore::restore_all_dispatched(&store).await?;
+    let restored = delta_usecase::SendStore::restore_all_dispatched(&store).await?;
     if restored > 0 {
         tracing::info!(
             restored,
@@ -258,7 +258,7 @@ mod tests {
     /// `make reset`, and the ids stable across an ordinary restart.
     #[tokio::test]
     async fn build_materializes_the_declared_launch_option_catalog() {
-        use delta_usecase::SessionStore;
+        use delta_usecase::LaunchOptionStore;
 
         let dir = tempfile::tempdir().unwrap();
         let config = test_config(&dir);
@@ -304,7 +304,7 @@ mod tests {
     #[tokio::test]
     async fn build_restores_dispatched_sends_left_by_a_previous_process() {
         use delta_model::SendStatus;
-        use delta_usecase::{NewSession, SessionStore};
+        use delta_usecase::{NewSession, SendStore, SessionRecordStore};
 
         let dir = tempfile::tempdir().unwrap();
         let config = test_config(&dir);

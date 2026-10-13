@@ -14,7 +14,7 @@ use crate::interactor::session_actor::runtime::{
 use crate::pane_token::PaneToken;
 use crate::ports::{GitWorktree, SessionStore, SpawningSession, TmuxDriver, Transcript, Workspace};
 use crate::repository::{display_name, identity_key};
-use crate::send_target::WorktreeSpec;
+use crate::worktree_spec::WorktreeSpec;
 
 use super::super::launch_prep::spawn_launch_preparation;
 use super::super::FreshSpawn;

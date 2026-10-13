@@ -1,20 +1,11 @@
 //! A single message in the reconstructed thread graph.
 
 use crate::content::ContentBlock;
-use crate::newtype::string_newtype;
+use crate::message_uuid::MessageUuid;
+use crate::prompt_id::PromptId;
 use crate::role::Role;
-use crate::session::SessionId;
-use crate::thread::ThreadId;
-
-string_newtype! {
-    /// A transcript line uuid; the internal handle for a message.
-    MessageUuid
-}
-
-string_newtype! {
-    /// Claude Code's `promptId`, shared by all lines of one turn.
-    PromptId
-}
+use crate::session_id::SessionId;
+use crate::thread_id::ThreadId;
 
 /// A single message in the reconstructed thread graph.
 ///

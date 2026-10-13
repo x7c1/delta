@@ -51,7 +51,7 @@ where
     /// rows and read cursor catch up to whatever Claude Code already wrote for
     /// this conversation. This matters because the resume's first
     /// `UserPromptSubmit` resolves thread context from already-persisted history:
-    /// `thread_switch_context` reads [`SessionStore::latest_user_thread`]
+    /// `thread_switch_context` reads [`ThreadStore::latest_user_thread`](crate::ports::ThreadStore::latest_user_thread)
     /// and [`Self::sync_transcript`] seeds `carry_thread` from it. If the DB were
     /// behind the transcript at that first prompt (a cold/just-restored DB, or
     /// any DB-behind-transcript state), `latest_user_thread` would report `None`,

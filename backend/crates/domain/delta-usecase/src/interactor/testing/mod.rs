@@ -59,8 +59,11 @@ pub(crate) use transcript_lines::{
     unknown_command_notice_line, user_line, with_prompt_id,
 };
 
-// Re-exported so test files can call `SessionStore` methods on `ix.store()`
-// (e.g. `main_thread_id`, `create_thread`) via the `testing::*` glob without
-// each importing the trait directly, and build the argument to
+// Re-exported so test files can call the session-store methods on
+// `ix.store()` (e.g. `main_thread_id`, `create_thread`) via the `testing::*`
+// glob without each importing the stores directly, and build the argument to
 // `insert_spawning_session` from the [`spawning_session`] default.
-pub(crate) use crate::ports::{SessionStore, SpawningSession};
+pub(crate) use crate::ports::{
+    CloneRootStore, LaunchOptionStore, MessageStore, RememberedPaneStore, SendStore,
+    SessionRecordStore, SpawningSession, SubagentLaunchStore, ThreadStore,
+};

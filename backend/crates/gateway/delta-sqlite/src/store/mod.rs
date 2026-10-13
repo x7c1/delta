@@ -4,8 +4,8 @@
 //! the open/migration path, and the helpers the aggregates share; the
 //! per-aggregate modules hold the methods (as inherent twins of the trait
 //! methods) plus their row mappers and column lists; `session_store` wires
-//! the [`SessionStore`](delta_usecase::SessionStore) trait up by forwarding
-//! to the twins.
+//! up the stores [`SessionStore`](delta_usecase::SessionStore) gathers by
+//! forwarding to the twins.
 
 mod clone_roots;
 mod launch_options;

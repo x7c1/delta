@@ -188,7 +188,7 @@ where
     /// to `queued` for another doomed dispatch.
     ///
     /// The row goes back to `queued` with the hold marker
-    /// ([`SessionStore::hold_send_for_release`]) — the same state the boot
+    /// ([`SendStore::hold_send_for_release`](crate::ports::SendStore::hold_send_for_release)) — the same state the boot
     /// restore leaves an orphaned row in. It therefore stays in the open-send
     /// list, is skipped by every automatic dispatch trigger, and waits for the
     /// user to release it (re-typed once) or cancel it. Cancelling instead

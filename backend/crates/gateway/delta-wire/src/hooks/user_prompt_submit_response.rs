@@ -2,6 +2,8 @@
 
 use serde::Serialize;
 
+use crate::hooks::hook_specific_output::HookSpecificOutput;
+
 /// `UserPromptSubmit` response.
 ///
 /// Claude Code's HTTP `UserPromptSubmit` hook consumes injected context only
@@ -31,13 +33,4 @@ impl UserPromptSubmitResponse {
             },
         }
     }
-}
-
-/// The `hookSpecificOutput` envelope Claude Code expects for `UserPromptSubmit`.
-#[derive(Debug, Serialize)]
-pub struct HookSpecificOutput {
-    #[serde(rename = "hookEventName")]
-    pub hook_event_name: &'static str,
-    #[serde(rename = "additionalContext")]
-    pub additional_context: String,
 }

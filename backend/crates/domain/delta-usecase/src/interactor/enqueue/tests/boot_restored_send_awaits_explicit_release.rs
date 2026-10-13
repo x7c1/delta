@@ -10,7 +10,7 @@
 //!   server died had no turn machine awaiting its echo after the restart, yet
 //!   — as the oldest `dispatched` row — it shadowed `head_dispatched_send`
 //!   for every later `UserPromptSubmit`: an infinite requeue loop. The
-//!   composition root now runs `SessionStore::restore_all_dispatched` once at
+//!   composition root now runs `SendStore::restore_all_dispatched` once at
 //!   boot, restoring the persistent half of the single-outstanding invariant.
 //! - The auto-resend rejection: the first fix requeued the orphan, which made
 //!   it silently re-submit on the next reopen — a message composed before a

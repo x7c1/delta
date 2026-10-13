@@ -64,11 +64,14 @@
 //! inspector open to show it in.
 
 mod adapter;
+mod codex_launch_config;
 mod content;
 mod error;
 mod factory;
 mod file_change_items;
 pub mod schema;
+mod started_thread;
+mod thread_event;
 mod translate;
 pub mod wire;
 
@@ -76,8 +79,11 @@ pub use adapter::{
     is_dangerous_launch_option, launch_option_cardinality, thread_start_params,
     CodexAppServerAdapter, CODEX_CAPABILITIES, CODEX_LAUNCH_OPTION_CATALOG,
 };
+pub use codex_launch_config::CodexLaunchConfig;
 pub use content::{codex_content_source, CodexConversationSource};
 pub use factory::CodexAdapterFactory;
+pub use started_thread::StartedThread;
+pub use thread_event::ThreadEvent;
 
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -92,69 +98,9 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 pub use error::{Error, Result};
-use wire::{parse_incoming, Incoming, Notification, RequestId, ServerRequest};
-
-/// How the connection launches the app-server.
-#[derive(Debug, Clone)]
-pub struct CodexLaunchConfig {
-    /// The program launched to obtain an app-server (`codex` by default). Used
-    /// verbatim as `argv[0]`, so it may be a bare name resolved via `PATH` or an
-    /// absolute path — matching the core's `LaunchConfig::claude_bin`. A test
-    /// points this at the fake app-server binary.
-    pub codex_bin: String,
-    /// Arguments after `argv[0]` (`["app-server"]` by default, so `codex_bin`
-    /// alone spawns the server). A test that points `codex_bin` at a fake
-    /// clears this.
-    pub args: Vec<String>,
-    /// Extra environment variables set on the child, on top of the inherited
-    /// environment. Empty by default; the server fills it with its
-    /// configuration's `child_env` (the desktop app's login-shell `PATH` and
-    /// locale), and a test uses it to hand the fake its scenario without
-    /// mutating the parent process's (shared) environment.
-    pub env: Vec<(String, String)>,
-}
-
-impl Default for CodexLaunchConfig {
-    fn default() -> Self {
-        Self {
-            codex_bin: "codex".to_owned(),
-            args: vec!["app-server".to_owned()],
-            env: Vec::new(),
-        }
-    }
-}
-
-/// A frame delivered to a per-thread channel by the demux — or the terminal
-/// fact that no further frame can arrive.
-///
-/// The two frame variants are deliberately not translated into a neutral
-/// `AgentEvent` here: the transport hands the adapter the raw, thread-scoped
-/// server frames so it can do the translation.
-///
-/// [`ThreadEvent::ConnectionLost`] is not a frame at all. It rides the same
-/// per-thread channel so it is ordered *behind* every frame that did arrive:
-/// the adapter's translation task therefore sees a thread's last real frames
-/// (an approval request the server managed to write before dying, say) before
-/// it learns the connection is gone, and the core settles in that order.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ThreadEvent {
-    /// A server → client notification for this thread (`item/*`, `turn/*`, …).
-    Notification(Notification),
-    /// A server → client request for this thread (`*/requestApproval`), still
-    /// awaiting a response the adapter will send.
-    ServerRequest(ServerRequest),
-    /// The connection carrying this thread died: the reader saw EOF (the
-    /// `codex app-server` process exited) or a read error, so nothing further
-    /// will ever arrive on this channel and no outgoing frame can be answered.
-    ///
-    /// Always the last event a thread receives, and emitted exactly once per
-    /// thread — the connection's reader announces it as it exits. It
-    /// exists so a dead connection is a *fact on the stream* rather than the
-    /// stream merely going quiet: silence is indistinguishable from a slow
-    /// model, and that is precisely how a stuck turn and an unanswerable
-    /// approval dialog survived forever in the field.
-    ConnectionLost,
-}
+#[cfg(doc)]
+use wire::ServerRequest;
+use wire::{parse_incoming, Incoming, RequestId};
 
 /// How many unrouted frames the connection buffers before dropping them.
 ///
@@ -575,18 +521,6 @@ fn thread_id_from_result(result: &Value) -> Option<String> {
         .and_then(|thread| thread.get("id"))
         .and_then(Value::as_str)
         .map(str::to_owned)
-}
-
-/// The result of [`AppServerConnection::start_thread`].
-pub struct StartedThread {
-    /// The provider's thread id (Codex's `thr_...`).
-    pub thread_id: String,
-    /// The thread's event channel — server notifications and server requests
-    /// scoped to this thread arrive here.
-    pub events: mpsc::UnboundedReceiver<ThreadEvent>,
-    /// The raw `thread/start` result, for any provider-specific fields the
-    /// caller wants beyond the thread id.
-    pub result: Value,
 }
 
 /// The reader task: consume the server's stdout frame by frame and dispatch.

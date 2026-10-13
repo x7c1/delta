@@ -18,23 +18,36 @@
 //! (`spawn`), the turn machine (`turn`), the streaming preview (`streaming`),
 //! permission waiters (`permission`), the pending question (`question`),
 //! subagent tracking (`subagents`), and the auto-compact debounce
-//! (`auto_compact`) — keeps its related types and `impl SessionRuntime` block
-//! in its own file.
+//! (`auto_compact`) — keeps its `impl SessionRuntime` block in its own file,
+//! and each public type those families carry has a module named after it.
 
 mod agent;
 mod auto_compact;
 mod live_state;
 mod open;
+mod open_agent_session;
+mod open_handle;
 mod pane_attach;
+mod pending_spawn;
 mod permission;
 mod question;
+mod resuming_session;
 mod spawn;
 mod streaming;
 mod subagents;
 mod turn;
 
+mod adapter_launch;
+pub use adapter_launch::AdapterLaunch;
+
+mod launch_target;
+pub use launch_target::LaunchTarget;
+
 mod launching_spawn;
-pub use launching_spawn::{AdapterLaunch, LaunchTarget, LaunchingSpawn, PaneLaunch};
+pub use launching_spawn::LaunchingSpawn;
+
+mod pane_launch;
+pub use pane_launch::PaneLaunch;
 
 mod listing_state;
 pub use listing_state::SessionListingState;
@@ -43,11 +56,14 @@ mod planned_worktree;
 pub use planned_worktree::PlannedWorktree;
 
 pub use live_state::SessionLiveState;
-pub use open::{OpenAgentSession, OpenHandle};
+pub use open_agent_session::OpenAgentSession;
+pub use open_handle::OpenHandle;
 pub use pane_attach::AttachablePane;
+pub use pending_spawn::PendingSpawn;
 pub use permission::PendingPermission;
 pub use question::PendingQuestion;
-pub use spawn::{PendingSpawn, ResumingSession, PENDING_SPAWN_DEADLINE, RESUME_READY_DEADLINE};
+pub use resuming_session::ResumingSession;
+pub use spawn::{PENDING_SPAWN_DEADLINE, RESUME_READY_DEADLINE};
 // Only the deterministic-timing tests read the settle back through the module
 // root; production code reaches it inside `spawn` itself, so an unconditional
 // re-export would be flagged unused on a non-test build.

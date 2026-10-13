@@ -1,7 +1,7 @@
 //! The worktree an accepted session still has to build, as the accept phase
 //! planned it.
 
-use crate::send_target::WorktreeSpec;
+use crate::worktree_spec::WorktreeSpec;
 
 /// The git worktree an accepted-but-not-yet-launched session still has to
 /// build before its agent can start.

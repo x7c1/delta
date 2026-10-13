@@ -24,8 +24,8 @@ use crate::ports::{
     MessageDisplayHook, SessionEndHook, SessionEvent, SessionStartHook, StopHook,
     UserPromptSubmitHook,
 };
-use crate::send_target::WorktreeSpec;
 use crate::session_removal::SessionRemoval;
+use crate::worktree_spec::WorktreeSpec;
 
 /// The reply channel for an input that produces a result.
 pub(in crate::interactor) type Reply<R> = oneshot::Sender<Result<R>>;

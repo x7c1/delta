@@ -2,7 +2,6 @@ use delta_model::{SessionId, Thread};
 
 use super::listed_ids;
 use crate::interactor::testing::*;
-use crate::ports::SessionStore;
 
 /// Every listed session carries its own threads — trunk and branches, in the
 /// order `list_threads` returns them — and its trunk id, and a page reads them

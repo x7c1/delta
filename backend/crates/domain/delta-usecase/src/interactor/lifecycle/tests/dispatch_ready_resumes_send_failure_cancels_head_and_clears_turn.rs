@@ -4,7 +4,6 @@ use delta_model::SessionId;
 
 use crate::interactor::session_actor::runtime::RESUME_DISPATCH_SETTLE;
 use crate::interactor::testing::*;
-use crate::ports::SessionStore;
 
 /// When the tick dispatch's `send_line` fails, the held first prompt's pending
 /// row is cancelled and the turn returns to idle, mirroring the other dispatch

@@ -2,11 +2,12 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use crate::clone::Clone as RepoClone;
 use crate::error::Result;
 use crate::interactor::repository::scan::scan_one_root;
 use crate::interactor::InteractorCore;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::repository::{display_name, identity_key, Clone as RepoClone, Repository};
+use crate::repository::{display_name, identity_key, Repository};
 
 /// Maximum number of repositories included in the per-repo cap below.
 /// Older repositories are dropped wholesale — they're unlikely to be a
@@ -38,7 +39,7 @@ where
     /// Two clone sets are unioned by `identity_key`:
     ///
     /// 1. Session-derived: every `(repo_root, clone_path)` pair from
-    ///    [`SessionStore::repository_clone_rows`] mapped to a Repository via
+    ///    [`SessionHistoryStore::repository_clone_rows`](crate::ports::SessionHistoryStore::repository_clone_rows) mapped to a Repository via
     ///    `git config --get remote.origin.url` on the `repo_root`
     ///    ([`GitWorktree::origin_url`], cached for the process's lifetime so
     ///    the same root is not re-shelled out per call). Carries per-clone

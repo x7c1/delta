@@ -94,6 +94,9 @@ pub const CLAUDE_CAPABILITIES: AgentCapabilities = AgentCapabilities {
     steer: SteerCapability::None,
 };
 
+mod claude_launch_config;
+pub use claude_launch_config::ClaudeLaunchConfig;
+
 mod launch_option_catalog;
 pub use launch_option_catalog::CLAUDE_LAUNCH_OPTION_CATALOG;
 
@@ -113,19 +116,6 @@ const SESSION_ID_FLAG: &str = "--session-id";
 const RESUME_FLAG: &str = "--resume";
 /// The tmux key name Claude's TUI treats as "interrupt the in-flight turn".
 const INTERRUPT_KEY: &str = "Escape";
-
-/// How the adapter launches `claude`.
-#[derive(Debug, Clone)]
-pub struct ClaudeLaunchConfig {
-    /// The program launched in each tmux session (`claude` by default). Used
-    /// verbatim as `argv[0]`, so it may be a bare name resolved via `PATH` or an
-    /// absolute path — matching the core's `LaunchConfig::claude_bin`.
-    pub claude_bin: String,
-    /// Path to the Delta-owned session settings file passed via `--settings`.
-    /// The file is written by the composition root (it is shared across
-    /// sessions); the adapter only references its path.
-    pub settings_path: String,
-}
 
 /// Per-session event plumbing: the sender the adapter emits through, the
 /// receiver handed out (once) by [`AgentAdapter::events`], and the projection

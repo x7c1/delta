@@ -11,13 +11,13 @@
 /// re-adopt the pane instead of resuming the conversation into a second one
 /// (see [`crate::Interactor::readopt_surviving_sessions`]).
 ///
-/// Written by [`SessionStore::remember_pane`] when a pane is bound (a fresh
+/// Written by [`RememberedPaneStore::remember_pane`] when a pane is bound (a fresh
 /// spawn's first hook, a resume, or a re-adoption) and erased by
-/// [`SessionStore::forget_pane`] when the session is torn down. A row with no
+/// [`RememberedPaneStore::forget_pane`] when the session is torn down. A row with no
 /// record is a session no pane is known to be running for.
 ///
-/// [`SessionStore::remember_pane`]: crate::ports::SessionStore::remember_pane
-/// [`SessionStore::forget_pane`]: crate::ports::SessionStore::forget_pane
+/// [`RememberedPaneStore::remember_pane`]: crate::ports::RememberedPaneStore::remember_pane
+/// [`RememberedPaneStore::forget_pane`]: crate::ports::RememberedPaneStore::forget_pane
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RememberedPane {
     /// The Delta-minted tmux session name (`delta-<n>`) the agent runs in —

@@ -2,87 +2,11 @@
 //! pane-backed provider, and its terminal-less parallel ([`OpenAgentSession`])
 //! for an adapter-backed one, with the bind/remove lifecycle for both.
 
-use std::sync::Arc;
-
-use crate::agent::{AgentAdapter, AgentSessionHandle};
-use crate::pane_token::PaneToken;
-
 use super::SessionRuntime;
+use super::{OpenAgentSession, OpenHandle};
 
-/// A live, bound session: its Claude `session_id` is known and it is mapped to
-/// the tmux pane driving it.
-#[derive(Debug, Clone)]
-pub struct OpenHandle {
-    /// The Delta-minted tmux session name.
-    pub token: PaneToken,
-    /// The pane keystrokes are sent to and the PTY attaches to (`<token>:0.0`).
-    pub pane: String,
-    /// Whether the agent in this pane was launched with hook URLs that no
-    /// longer reach this server — a pane re-adopted after a restart whose hook
-    /// endpoint changed (see [`crate::ports::RememberedPane::hooks_unreachable`]).
-    /// Always `false` for a pane this process launched. Dropped with the
-    /// handle when the session closes, which is what the browser's notice
-    /// tells the user to do.
-    pub hooks_unreachable: bool,
-}
-
-impl OpenHandle {
-    /// The handle of a pane this process just launched for the session: its
-    /// hooks point at this server, so they are reachable by construction.
-    pub fn launched(token: PaneToken, pane: String) -> Self {
-        Self {
-            token,
-            pane,
-            hooks_unreachable: false,
-        }
-    }
-
-    /// The record of this handle the session row keeps, so a restarted Delta
-    /// can find the pane again.
-    pub fn remembered(&self) -> crate::ports::RememberedPane {
-        crate::ports::RememberedPane {
-            tmux_session: self.token.as_str().to_owned(),
-            pane: self.pane.clone(),
-            hooks_unreachable: self.hooks_unreachable,
-        }
-    }
-}
-
-/// A live, terminal-less agent session (e.g. Codex over `codex app-server`).
-///
-/// The parallel of [`OpenHandle`] for a provider that has no tmux pane: it
-/// carries the live [`AgentAdapter`] and the provider's session handle instead
-/// of a pane token. Holding the adapter here is what keeps the underlying
-/// `codex app-server` connection alive for the session's lifetime — dropping it
-/// (e.g. on actor retirement) would tear the connection down — so a session
-/// with an `open_agent` reads as *open* and its actor never retires while it
-/// exists (see [`SessionRuntime::is_empty`]).
-///
-/// There is deliberately no [`OpenHandle`] for such a session, so Claude's
-/// pane-bound path is untouched: [`SessionRuntime::handle`] stays `None` and no
-/// spawn is pending, so the PTY bridge's lookup resolves nothing and refuses to
-/// attach — a Codex
-/// session has nothing to attach to ([`crate::agent::TerminalCapability::NoTerminal`]).
-#[derive(Clone)]
-pub struct OpenAgentSession {
-    /// The live adapter driving the provider. Kept alive here for the session's
-    /// lifetime so its backing connection is not dropped underneath it.
-    pub adapter: Arc<dyn AgentAdapter>,
-    /// The provider's handle for this session (its provider session id + the
-    /// adapter-local key), used to address the session on the adapter.
-    pub handle: AgentSessionHandle,
-}
-
-impl std::fmt::Debug for OpenAgentSession {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // The adapter is a trait object with no `Debug`; print the handle and
-        // the provider it drives, which is the identifying state anyway.
-        f.debug_struct("OpenAgentSession")
-            .field("provider", &self.adapter.provider())
-            .field("handle", &self.handle)
-            .finish_non_exhaustive()
-    }
-}
+#[cfg(doc)]
+use crate::agent::AgentAdapter;
 
 impl SessionRuntime {
     /// Whether a pane is live: bound to the session, spawned and awaiting its
