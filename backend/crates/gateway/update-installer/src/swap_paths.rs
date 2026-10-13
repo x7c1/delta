@@ -1,6 +1,8 @@
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
+use crate::swap_error::SwapError;
+
 /// The name the new bundle is copied to, next to the running one, before
 /// it takes the running one's place: hidden, and without `.app`, so that
 /// neither Finder nor Launch Services shows it as an app.
@@ -38,42 +40,43 @@ impl SwapPaths {
     /// Put the bundle staged at [`Self::staging`] in place of
     /// [`Self::bundle`]: move the bundle to [`Self::backup`], then the staged
     /// one to the bundle's path. If the second move fails, the first is
-    /// undone, so the bundle is never left missing. The running app's files
+    /// undone, so the bundle is left missing only when that fails too
+    /// ([`SwapError::NotRestored`]). The running app's files
     /// are never written to: it keeps running from the backup until it
     /// exits.
-    ///
-    /// `Err` is the one-line reason the update could not be put in place.
-    pub fn swap(&self) -> Result<(), String> {
+    pub fn swap(&self) -> Result<(), SwapError> {
         let Self {
             bundle,
             staging,
             backup,
             ..
         } = self;
-        remove_any(backup)
-            .map_err(|err| format!("could not remove {}: {err}", backup.display()))?;
-        std::fs::rename(bundle, backup).map_err(|err| {
-            format!(
-                "could not move {} aside to {}: {err}",
-                bundle.display(),
-                backup.display()
-            )
+        remove_any(backup).map_err(|source| SwapError::BackupNotRemoved {
+            backup: backup.clone(),
+            source,
         })?;
-        let Err(err) = std::fs::rename(staging, bundle) else {
+        std::fs::rename(bundle, backup).map_err(|source| SwapError::NotMovedAside {
+            bundle: bundle.clone(),
+            backup: backup.clone(),
+            source,
+        })?;
+        let Err(moved) = std::fs::rename(staging, bundle) else {
             return Ok(());
         };
-        let moved = format!(
-            "could not move the new app from {} to {}: {err}",
-            staging.display(),
-            bundle.display()
-        );
-        match std::fs::rename(backup, bundle) {
-            Ok(()) => Err(format!("{moved}; the current app is left as it was")),
-            Err(restore) => Err(format!(
-                "{moved}, nor move the current app back from {}: {restore}",
-                backup.display()
-            )),
-        }
+        Err(match std::fs::rename(backup, bundle) {
+            Ok(()) => SwapError::NotMovedIn {
+                staging: staging.clone(),
+                bundle: bundle.clone(),
+                source: moved,
+            },
+            Err(source) => SwapError::NotRestored {
+                staging: staging.clone(),
+                bundle: bundle.clone(),
+                backup: backup.clone(),
+                moved,
+                source,
+            },
+        })
     }
 
     /// Remove what an update of this bundle may have left next to it: the
@@ -149,12 +152,15 @@ mod tests {
         let paths = SwapPaths::of(&dir.path().join("Delta.app")).unwrap();
         write_bundle(&paths.bundle, "0.5.0");
         // Nothing staged: moving it into place fails.
-        let reason = paths.swap().unwrap_err();
-        assert!(
-            reason.contains("could not move the new app")
-                && reason.ends_with("the current app is left as it was"),
-            "{reason}"
-        );
+        match paths.swap().unwrap_err() {
+            SwapError::NotMovedIn {
+                staging, source, ..
+            } => {
+                assert_eq!(staging, paths.staging);
+                assert_eq!(source.kind(), ErrorKind::NotFound);
+            }
+            other => panic!("{other:?}"),
+        }
         assert_eq!(bundle_version(&paths.bundle), "0.5.0");
         assert!(!paths.backup.exists());
     }
@@ -164,8 +170,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = SwapPaths::of(&dir.path().join("Delta.app")).unwrap();
         write_bundle(&paths.staging, "0.6.0");
-        let reason = paths.swap().unwrap_err();
-        assert!(reason.starts_with("could not move"), "{reason}");
+        match paths.swap().unwrap_err() {
+            SwapError::NotMovedAside { bundle, source, .. } => {
+                assert_eq!(bundle, paths.bundle);
+                assert_eq!(source.kind(), ErrorKind::NotFound);
+            }
+            other => panic!("{other:?}"),
+        }
         assert_eq!(bundle_version(&paths.staging), "0.6.0");
         assert!(!paths.bundle.exists());
     }

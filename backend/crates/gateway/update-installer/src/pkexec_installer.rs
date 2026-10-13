@@ -130,13 +130,13 @@ fn outcome(code: Option<i32>, stderr: &str) -> Result<(), InstallError> {
                 str::to_owned,
             );
             Err(if HELPER_REJECTED_FILE.contains(&code) {
-                InstallError::Rejected(reason)
+                InstallError::rejected(reason)
             } else {
-                InstallError::Failed(reason)
+                InstallError::failed(reason)
             })
         }
-        None => Err(InstallError::Failed(
-            "the update helper was ended by a signal".to_owned(),
+        None => Err(InstallError::failed(
+            "the update helper was ended by a signal",
         )),
     }
 }
@@ -184,7 +184,10 @@ mod tests {
             Some(14),
             "the update file's sha256 is 00, not release v0.6.0's ff\n\n",
         ) {
-            Err(InstallError::Rejected(reason)) => assert_eq!(
+            Err(InstallError::Rejected {
+                reason,
+                source: None,
+            }) => assert_eq!(
                 reason,
                 "the update file's sha256 is 00, not release v0.6.0's ff"
             ),
@@ -193,23 +196,29 @@ mod tests {
         // Every status from 10 to 19 rejects the file; the ones around do not.
         for code in 10..=19 {
             assert!(
-                matches!(outcome(Some(code), ""), Err(InstallError::Rejected(_))),
+                matches!(outcome(Some(code), ""), Err(InstallError::Rejected { .. })),
                 "{code}"
             );
         }
         for code in [2, 3, 9, 25, 26, 29, 31] {
             assert!(
-                matches!(outcome(Some(code), ""), Err(InstallError::Failed(_))),
+                matches!(outcome(Some(code), ""), Err(InstallError::Failed { .. })),
                 "{code}"
             );
         }
         match outcome(Some(20), "") {
-            Err(InstallError::Failed(reason)) => {
+            Err(InstallError::Failed {
+                reason,
+                source: None,
+            }) => {
                 assert_eq!(reason, "the update helper exited with status 20")
             }
             other => panic!("{other:?}"),
         }
-        assert!(matches!(outcome(None, ""), Err(InstallError::Failed(_))));
+        assert!(matches!(
+            outcome(None, ""),
+            Err(InstallError::Failed { .. })
+        ));
     }
 
     #[tokio::test]
@@ -284,7 +293,7 @@ mod tests {
             .install("v0.6.0", &file, SHA256)
             .await;
         assert!(
-            matches!(&result, Err(InstallError::Failed(reason)) if reason == "apt-get could not install the update: E: broken"),
+            matches!(&result, Err(InstallError::Failed { reason, source: None }) if reason == "apt-get could not install the update: E: broken"),
             "{result:?}"
         );
         assert_eq!(

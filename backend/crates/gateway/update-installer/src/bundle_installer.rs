@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use delta_usecase::{with_causes, InstallError, InstalledApp, UpdateInstaller};
 
 use crate::image_check::{check_image, APP_NAME};
+use crate::image_check_error::ImageCheckError;
 use crate::swap_paths::{remove_any, SwapPaths};
 use crate::verified_copy::{copy_verified, CopyError};
 use crate::{BundleLocation, DiskImageTools, SystemDiskImageTools, ToolError};
@@ -94,7 +95,7 @@ impl UpdateInstaller for BundleInstaller {
             install_bundle(tools.as_ref(), &temp_dir, &paths, &version, &file, &sha256)
         })
         .await
-        .map_err(|err| InstallError::Failed(format!("the install stopped unexpectedly: {err}")))?
+        .map_err(|err| InstallError::failed_with("the install stopped unexpectedly", err))?
     }
 
     /// Why no update can replace the running bundle: it is not in a bundle,
@@ -168,25 +169,31 @@ fn install_bundle(
         .prefix("delta-update-")
         .tempdir_in(temp_dir)
         .map_err(|err| {
-            InstallError::Failed(format!(
-                "could not make a working directory in {}: {err}",
-                temp_dir.display()
-            ))
+            InstallError::failed_with(
+                format!(
+                    "could not make a working directory in {}",
+                    temp_dir.display()
+                ),
+                err,
+            )
         })?;
     let image = work.path().join("update.dmg");
     copy_verified(file, sha256, &image).map_err(copy_failure)?;
     let mountpoint = work.path().join("mount");
     std::fs::create_dir(&mountpoint).map_err(|err| {
-        InstallError::Failed(format!(
-            "could not make the mount point {}: {err}",
-            mountpoint.display()
-        ))
+        InstallError::failed_with(
+            format!("could not make the mount point {}", mountpoint.display()),
+            err,
+        )
     })?;
 
     stage_from_image(tools, &image, &mountpoint, version, &paths.staging)?;
-    if let Err(reason) = paths.swap() {
+    if let Err(err) = paths.swap() {
         discard_staging(&paths.staging);
-        return Err(InstallError::Failed(reason));
+        return Err(InstallError::failed_with(
+            "could not put the update in place of the app",
+            err,
+        ));
     }
     tracing::info!(
         bundle = %paths.bundle.display(),
@@ -208,9 +215,11 @@ fn stage_from_image(
     version: &str,
     staging: &Path,
 ) -> Result<(), InstallError> {
-    tools.attach(image, mountpoint).map_err(tool_failure)?;
+    tools
+        .attach(image, mountpoint)
+        .map_err(|err| tool_failure("could not mount the update's disk image", err))?;
     let staged = check_image(mountpoint, version)
-        .map_err(InstallError::Rejected)
+        .map_err(image_check_failure)
         .and_then(|app| copy_app(tools, &app, staging));
     if let Err(err) = tools.detach(mountpoint) {
         tracing::warn!(
@@ -226,11 +235,11 @@ fn stage_from_image(
 /// may have left there. A partial copy is removed.
 fn copy_app(tools: &dyn DiskImageTools, app: &Path, staging: &Path) -> Result<(), InstallError> {
     remove_any(staging).map_err(|err| {
-        InstallError::Failed(format!("could not remove {}: {err}", staging.display()))
+        InstallError::failed_with(format!("could not remove {}", staging.display()), err)
     })?;
     tools.copy_bundle(app, staging).map_err(|err| {
         discard_staging(staging);
-        tool_failure(err)
+        tool_failure(&format!("could not copy the disk image's {APP_NAME}"), err)
     })
 }
 
@@ -246,31 +255,45 @@ fn discard_staging(staging: &Path) {
     }
 }
 
-/// What the verified copy failing means for the install, its text naming
-/// the cause: a file the copy rejects is rejected; a copy that could not be
+/// What the verified copy failing means for the install, `err` kept as its
+/// source: a file the copy rejects is rejected; a copy that could not be
 /// written says nothing about the file, which stays to be installed by hand
 /// or retried.
 fn copy_failure(err: CopyError) -> InstallError {
     if err.rejects_file() {
-        InstallError::Rejected(with_causes(&err))
+        InstallError::rejected_with("the update file did not pass its check", err)
     } else {
-        InstallError::Failed(with_causes(&err))
+        InstallError::failed_with("could not copy the update file to check it", err)
+    }
+}
+
+/// What the disk image's check failing means for the install, `err` kept as
+/// its source: an image whose contents fail the check is rejected; one whose
+/// contents could not be listed says nothing about the update, which stays
+/// to be installed by hand or retried.
+fn image_check_failure(err: ImageCheckError) -> InstallError {
+    if err.rejects_file() {
+        InstallError::rejected_with("the update's disk image did not pass its check", err)
+    } else {
+        InstallError::failed_with("could not check the update's disk image", err)
     }
 }
 
 /// What a disk image tool failing means for the install: a missing tool is
 /// a machine Delta cannot install on, one that cannot be started too; one
-/// that ran and failed is a failed install.
-fn tool_failure(err: ToolError) -> InstallError {
+/// that ran and failed is a failed install, for `reason` and caused by
+/// `err`.
+fn tool_failure(reason: &str, err: ToolError) -> InstallError {
     match err {
         ToolError::Missing { .. } => InstallError::Unavailable(err.to_string()),
         ToolError::Unrunnable { program, source } => InstallError::Unrunnable { program, source },
-        ToolError::Failed { .. } => InstallError::Failed(err.to_string()),
+        ToolError::Failed { .. } => InstallError::failed_with(reason, err),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error as _;
     use std::sync::Mutex;
 
     use sha2::{Digest, Sha256};
@@ -435,7 +458,17 @@ mod tests {
             let machine = Machine::new();
             let tools = Arc::new(image);
             match machine.install(&tools).await {
-                Err(InstallError::Rejected(reason)) => assert_eq!(reason, expected),
+                Err(err @ InstallError::Rejected { .. }) => {
+                    assert_eq!(
+                        with_causes(&err),
+                        format!("the update's disk image did not pass its check: {expected}")
+                    );
+                    assert!(
+                        err.source()
+                            .is_some_and(|source| source.is::<ImageCheckError>()),
+                        "{err:?}"
+                    );
+                }
                 other => panic!("{other:?}"),
             }
             assert_eq!(tools.calls(), ["attach", "detach"]);
@@ -456,11 +489,17 @@ mod tests {
         };
         let tools = Arc::new(tools);
         match machine.install(&tools).await {
-            Err(InstallError::Failed(reason)) => {
+            Err(err @ InstallError::Failed { .. }) => {
                 assert_eq!(
-                    reason,
-                    "/usr/bin/ditto failed: ditto: No space left on device"
-                )
+                    with_causes(&err),
+                    "could not copy the disk image's Delta.app: \
+                     /usr/bin/ditto failed: ditto: No space left on device"
+                );
+                let source = err.source().and_then(|source| source.downcast_ref());
+                assert!(
+                    matches!(source, Some(ToolError::Failed { program, .. }) if program == Path::new("/usr/bin/ditto")),
+                    "{err:?}"
+                );
             }
             other => panic!("{other:?}"),
         }
@@ -482,7 +521,8 @@ mod tests {
         let failing = Arc::new(failing);
         assert!(matches!(
             machine.install(&failing).await,
-            Err(InstallError::Failed(reason)) if reason.contains("no mountable file systems")
+            Err(err @ InstallError::Failed { .. })
+                if with_causes(&err).contains("no mountable file systems")
         ));
         assert_eq!(failing.calls(), ["attach"]);
 
@@ -511,7 +551,7 @@ mod tests {
             .install("v0.6.0", &machine.download(), &"0".repeat(64))
             .await;
         assert!(
-            matches!(&mismatch, Err(InstallError::Rejected(reason)) if reason.contains("sha256")),
+            matches!(&mismatch, Err(err @ InstallError::Rejected { .. }) if with_causes(err).contains("sha256")),
             "{mismatch:?}"
         );
 
@@ -519,7 +559,7 @@ mod tests {
         std::os::unix::fs::symlink(machine.download(), &link).unwrap();
         let symlinked = installer.install("v0.6.0", &link, &dmg_sha256()).await;
         assert!(
-            matches!(&symlinked, Err(InstallError::Rejected(reason)) if reason.contains("symlink")),
+            matches!(&symlinked, Err(err @ InstallError::Rejected { .. }) if with_causes(err).contains("symlink")),
             "{symlinked:?}"
         );
 
@@ -527,7 +567,7 @@ mod tests {
         std::fs::create_dir(&directory).unwrap();
         let odd = installer.install("v0.6.0", &directory, &dmg_sha256()).await;
         assert!(
-            matches!(&odd, Err(InstallError::Rejected(reason)) if reason.contains("not a regular file")),
+            matches!(&odd, Err(err @ InstallError::Rejected { .. }) if with_causes(err).contains("not a regular file")),
             "{odd:?}"
         );
 
@@ -588,37 +628,86 @@ mod tests {
         assert_eq!(Machine::version_of(&machine.bundle()), "0.5.0");
     }
 
-    /// The text of a copy that failed for an I/O error names that error
-    /// once: the copy error's own message leaves it to `source`.
+    /// A copy that failed keeps its error as the source, down to the I/O
+    /// error, and the text rendered with its causes names each once.
     #[test]
-    fn a_failed_copy_names_its_cause_once() {
+    fn a_failed_copy_keeps_its_cause_and_names_it_once() {
         let cause = "input/output error from the test";
         let unreadable = copy_failure(CopyError::Unreadable {
             file: PathBuf::from("/updates/Delta_0.6.0_aarch64.dmg"),
             source: std::io::Error::other(cause),
         });
-        match &unreadable {
-            InstallError::Rejected(reason) => assert_eq!(
-                reason,
-                &format!(
-                    "could not read the update file /updates/Delta_0.6.0_aarch64.dmg: {cause}"
-                )
-            ),
+        assert!(
+            matches!(&unreadable, InstallError::Rejected { .. }),
+            "{unreadable:?}"
+        );
+        match unreadable.source().and_then(|source| source.downcast_ref()) {
+            Some(CopyError::Unreadable { file, source }) => {
+                assert_eq!(file, Path::new("/updates/Delta_0.6.0_aarch64.dmg"));
+                assert_eq!(source.kind(), std::io::ErrorKind::Other);
+            }
             other => panic!("{other:?}"),
         }
+        assert_eq!(
+            with_causes(&unreadable),
+            format!(
+                "the update file did not pass its check: \
+                 could not read the update file /updates/Delta_0.6.0_aarch64.dmg: {cause}"
+            )
+        );
+
         let unwritable = copy_failure(CopyError::Unwritable {
             copy: PathBuf::from("/tmp/delta-update-x/update.dmg"),
             source: std::io::Error::other(cause),
         });
-        match &unwritable {
-            InstallError::Failed(reason) => assert_eq!(
-                reason,
-                &format!(
-                    "could not write the copy of the update file to /tmp/delta-update-x/update.dmg: {cause}"
-                )
+        assert!(
+            matches!(&unwritable, InstallError::Failed { .. }),
+            "{unwritable:?}"
+        );
+        assert!(
+            matches!(
+                unwritable.source().and_then(|source| source.downcast_ref()),
+                Some(CopyError::Unwritable { .. })
             ),
-            other => panic!("{other:?}"),
-        }
+            "{unwritable:?}"
+        );
+        assert_eq!(
+            with_causes(&unwritable),
+            format!(
+                "could not copy the update file to check it: \
+                 could not write the copy of the update file to /tmp/delta-update-x/update.dmg: {cause}"
+            )
+        );
+    }
+
+    /// An image whose contents could not be listed fails the install
+    /// rather than rejecting the update, its I/O error kept as the source
+    /// and named once.
+    #[test]
+    fn an_unlisted_image_fails_and_keeps_its_cause() {
+        let cause = "input/output error from the test";
+        let err = image_check_failure(ImageCheckError::Unlisted(std::io::Error::other(cause)));
+        assert!(matches!(&err, InstallError::Failed { .. }), "{err:?}");
+        assert!(
+            matches!(
+                err.source().and_then(|source| source.downcast_ref()),
+                Some(ImageCheckError::Unlisted(_))
+            ),
+            "{err:?}"
+        );
+        assert_eq!(
+            with_causes(&err),
+            format!(
+                "could not check the update's disk image: \
+                 could not list the disk image's contents: {cause}"
+            )
+        );
+
+        let rejected = image_check_failure(ImageCheckError::NoApp);
+        assert!(
+            matches!(&rejected, InstallError::Rejected { .. }),
+            "{rejected:?}"
+        );
     }
 
     /// A disk image tool that could not be started keeps its I/O error as
@@ -626,10 +715,13 @@ mod tests {
     #[test]
     fn an_unrunnable_tool_names_its_cause_once() {
         let cause = "permission denied by the test";
-        let err = tool_failure(ToolError::Unrunnable {
-            program: PathBuf::from("/usr/bin/hdiutil"),
-            source: std::io::Error::other(cause),
-        });
+        let err = tool_failure(
+            "could not mount the update's disk image",
+            ToolError::Unrunnable {
+                program: PathBuf::from("/usr/bin/hdiutil"),
+                source: std::io::Error::other(cause),
+            },
+        );
         assert!(matches!(err, InstallError::Unrunnable { .. }), "{err:?}");
         assert_eq!(
             with_causes(&err),

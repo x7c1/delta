@@ -95,7 +95,8 @@ impl ReleaseUpdate {
                         manual,
                     })
                 }
-                Err(InstallError::Rejected(cause)) => {
+                Err(err @ InstallError::Rejected { .. }) => {
+                    let cause = with_causes(&err);
                     tracing::warn!(
                         version = %version,
                         path = %path.display(),
@@ -105,7 +106,8 @@ impl ReleaseUpdate {
                     discard(&download, &path);
                     Some(UpdateInstall::Rejected { version, cause })
                 }
-                Err(InstallError::Failed(cause)) => {
+                Err(err @ InstallError::Failed { .. }) => {
+                    let cause = with_causes(&err);
                     tracing::warn!(
                         version = %version,
                         error = %cause,
@@ -356,8 +358,8 @@ mod tests {
         std::fs::write(&file, b"not the release").unwrap();
 
         update.install(Some(v060())).unwrap();
-        installer.finish(Err(InstallError::Rejected(
-            "the update file's sha256 is 00, not release v0.6.0's ff".into(),
+        installer.finish(Err(InstallError::rejected(
+            "the update file's sha256 is 00, not release v0.6.0's ff",
         )));
         let rejected = UpdateInstall::Rejected {
             version: "v0.6.0".into(),
@@ -431,8 +433,8 @@ mod tests {
         let installer = GatedInstaller::new();
         let update = ready_linux_update(&installer).await;
         update.install(Some(v060())).unwrap();
-        installer.finish(Err(InstallError::Failed(
-            "apt-get could not install the update: E: broken".into(),
+        installer.finish(Err(InstallError::failed(
+            "apt-get could not install the update: E: broken",
         )));
         assert_eq!(
             install_settled(&update).await,
@@ -440,6 +442,43 @@ mod tests {
                 version: "v0.6.0".into(),
                 cause: "apt-get could not install the update: E: broken".into(),
                 manual: manual(),
+            })
+        );
+    }
+
+    /// An installer's error carried as a value is named once, after the
+    /// installer's own reason, in what the user sees.
+    #[tokio::test]
+    async fn a_failed_or_rejected_install_names_its_source_once() {
+        let installer = GatedInstaller::new();
+        let update = ready_linux_update(&installer).await;
+        update.install(Some(v060())).unwrap();
+        installer.finish(Err(InstallError::failed_with(
+            "could not make the mount point /tmp/delta-update-x/mount",
+            std::io::Error::other("no space left on the test device"),
+        )));
+        assert_eq!(
+            install_settled(&update).await,
+            Some(UpdateInstall::Failed {
+                version: "v0.6.0".into(),
+                cause: "could not make the mount point /tmp/delta-update-x/mount: \
+                        no space left on the test device"
+                    .into(),
+                manual: manual(),
+            })
+        );
+
+        update.install(Some(v060())).unwrap();
+        installer.finish(Err(InstallError::rejected_with(
+            "the update file did not pass its check",
+            std::io::Error::other("input/output error from the test"),
+        )));
+        assert_eq!(
+            install_settled(&update).await,
+            Some(UpdateInstall::Rejected {
+                version: "v0.6.0".into(),
+                cause: "the update file did not pass its check: input/output error from the test"
+                    .into(),
             })
         );
     }
@@ -474,7 +513,7 @@ mod tests {
         );
 
         mac.install(Some(v060_mac())).unwrap();
-        installer.finish(Err(InstallError::Failed("hdiutil could not attach".into())));
+        installer.finish(Err(InstallError::failed("hdiutil could not attach")));
         assert_eq!(
             install_settled(&mac).await,
             Some(UpdateInstall::Failed {
