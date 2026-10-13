@@ -81,5 +81,5 @@ together), so no placeholder version exists.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On this Mac, with a newer release available: download it, quit Delta,
+- [x] On this Mac, with a newer release available: download it, quit Delta,
       start it again — the footer offers Install without downloading again.
