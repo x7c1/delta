@@ -159,7 +159,7 @@ impl AssetDownloader for GatedDownloader {
 /// An install it ends `Ok` names [`installed_app`]. It may install here
 /// unless made with [`Self::unavailable_because`].
 pub(super) struct GatedInstaller {
-    unavailable: Option<String>,
+    unavailable: Option<Box<dyn Fn() -> InstallError + Send + Sync>>,
     asked: std::sync::Mutex<Vec<(String, PathBuf, String)>>,
     outcome_tx: mpsc::UnboundedSender<Result<(), InstallError>>,
     outcome_rx: Mutex<mpsc::UnboundedReceiver<Result<(), InstallError>>>,
@@ -170,13 +170,15 @@ impl GatedInstaller {
         Self::with(None)
     }
 
-    /// An installer that says up front it cannot install here, for `reason`
-    /// ([`UpdateInstaller::unavailable`]).
-    pub(super) fn unavailable_because(reason: &str) -> Arc<Self> {
-        Self::with(Some(reason.to_owned()))
+    /// An installer that says up front it cannot install here, with the
+    /// error `because` makes ([`UpdateInstaller::unavailable`]).
+    pub(super) fn unavailable_because(
+        because: impl Fn() -> InstallError + Send + Sync + 'static,
+    ) -> Arc<Self> {
+        Self::with(Some(Box::new(because)))
     }
 
-    fn with(unavailable: Option<String>) -> Arc<Self> {
+    fn with(unavailable: Option<Box<dyn Fn() -> InstallError + Send + Sync>>) -> Arc<Self> {
         let (outcome_tx, outcome_rx) = mpsc::unbounded_channel();
         Arc::new(Self {
             unavailable,
@@ -219,8 +221,8 @@ impl UpdateInstaller for GatedInstaller {
             .map(|()| installed_app())
     }
 
-    fn unavailable(&self) -> Option<String> {
-        self.unavailable.clone()
+    fn unavailable(&self) -> Option<InstallError> {
+        self.unavailable.as_ref().map(|because| because())
     }
 }
 
@@ -264,3 +266,21 @@ pub(super) async fn settled(update: &ReleaseUpdate) -> UpdateDownload {
     }
     panic!("the download never settled");
 }
+
+/// An installer's own reason it cannot install, caused by an I/O error, as
+/// an installer that cannot tell where the app runs from has.
+#[derive(Debug, thiserror::Error)]
+#[error("could not tell where Delta runs from")]
+pub(super) struct Unlocated(#[source] pub(super) std::io::Error);
+
+/// [`InstallError::Unavailable`] for [`Unlocated`], caused by "no such file
+/// from the test".
+pub(super) fn unlocated() -> InstallError {
+    InstallError::unavailable(Unlocated(std::io::Error::other(
+        "no such file from the test",
+    )))
+}
+
+/// What the browser is shown for [`unlocated`]: each level once, in order.
+pub(super) const UNLOCATED_CAUSE: &str = "Delta cannot install the update itself: \
+     could not tell where Delta runs from: no such file from the test";

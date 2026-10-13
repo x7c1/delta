@@ -28,10 +28,13 @@
 //!
 //! A missing `pkexec` or helper is [`InstallError::Unavailable`] too, found
 //! before anything is run; a `pkexec` that is there but cannot be started is
-//! [`InstallError::Unrunnable`]. The app to restart into is the one the
-//! `.deb` installs, [`INSTALLED_APP_PATH`]. The helper's reason reaches this
-//! crate only as a line of text, so [`InstallError::Rejected`] and
-//! [`InstallError::Failed`] carry it as their reason, with no source.
+//! [`InstallError::Unrunnable`]. Each [`InstallError::Unavailable`] has a
+//! `PkexecUnavailable` as its source, naming which of these it is (and, for
+//! a missing `pkexec`, keeping the I/O error starting it met). The app to
+//! restart into is the one the `.deb` installs, [`INSTALLED_APP_PATH`]. The
+//! helper's reason reaches this crate only as a line of text, so
+//! [`InstallError::Rejected`] and [`InstallError::Failed`] carry it as their
+//! reason, with no source.
 //!
 //! # macOS
 //!
@@ -58,7 +61,10 @@
 //!
 //! Where a step fails on an error value, [`InstallError::Rejected`] and
 //! [`InstallError::Failed`] keep it as their source, under a reason naming
-//! the step.
+//! the step. [`InstallError::Unavailable`]'s source says which check failed:
+//! an `UnreplaceableBundle` for steps 1 and 2 (and for an app that could not
+//! tell where it runs from, keeping that I/O error), the missing tool's
+//! error for step 4.
 //!
 //! The running app's files are never written to — overwriting a running
 //! binary in place breaks its signature and the kernel kills it — and it
@@ -86,6 +92,8 @@ mod image_check;
 mod image_check_error;
 mod pkexec_installer;
 pub use pkexec_installer::PkexecInstaller;
+mod pkexec_unavailable;
+use pkexec_unavailable::PkexecUnavailable;
 mod swap_error;
 mod swap_paths;
 mod system_disk_image_tools;
@@ -94,6 +102,7 @@ use system_disk_image_tools::SystemDiskImageTools;
 mod testing;
 mod tool_error;
 use tool_error::ToolError;
+mod unreplaceable_bundle;
 mod verified_copy;
 
 /// Where the `.deb` installs Delta's update helper, root-owned: the one path
