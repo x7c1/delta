@@ -57,7 +57,7 @@ TMUX_SOCKET="delta-e2e-real-$$"
 # (which enforces it) and the Vite dev server the Playwright config launches
 # (which injects it into the page as the `delta-auth-token` meta tag, inheriting
 # it from this exported process env) use the same value — the same pattern as
-# the fake suite's `playwright.fake.config.ts` / `e2e-fake/support/server.ts`.
+# the fake suite's `e2e-fake/support/endpoints.ts`.
 export DELTA_AUTH_TOKEN="${DELTA_AUTH_TOKEN:-delta-e2e-real-auth-token}"
 
 log() { printf '\033[1;35m[e2e-real-claude]\033[0m %s\n' "$*"; }

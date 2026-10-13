@@ -84,8 +84,12 @@ The fixture owns the per-run temp database and tmux socket
 (`delta-e2e-fake-<pid>`, killed on teardown), the scripted-claude and
 scripted-codex wrappers, a shortened launch watchdog
 (`DELTA_LAUNCH_DEADLINE_MS`), the dedicated backend
-port (7899), and the `/health` readiness poll; Playwright starts the Vite dev
-server (port 5198) proxied to that backend. A spec that needs a different
+port (7899), and the `/health` readiness poll — and the Vite dev server (port
+5198) proxied to that backend. Neither server is ever adopted: a port still
+held by another process (a concurrent run, or one a killed run left behind)
+fails the boot with that process named. Both are checked around every spec:
+one found down before a spec is restarted, and one that went down during a
+spec fails that spec rather than every spec after it. A spec that needs a different
 server-wide setting (e.g. a shortened echo watchdog, `DELTA_ECHO_DEADLINE_MS`)
 passes it to `restart(env)` for its own server generation, and restores the
 shared configuration with a bare `restart()` in an `afterEach`. A restart
@@ -95,12 +99,13 @@ the spec's own card (`focusedSessionNode`) rather than counting across the
 navigator. They also fill the windowed list ahead of any closed card, which
 may then be unmounted until scrolled to; a failed launch the page itself
 started is the exception, since the navigator pins it to the top. Teardown
-kills the server and the per-run tmux server but keeps the run's temp dir; the
+kills both servers and the per-run tmux server but keeps the run's temp dir; the
 cleanup happens at the start of the next run (see "Test-run residue" below).
 Diagnostics are preserved under `packages/apps/web/test-results/e2e-fake/`,
 all uploaded by CI on failure: each *boot* of the server gets its own
 `boot-<N>/` directory, holding one log file per server generation
-(`server.log`, `server.2.log`, … across restarts) plus the fake transcripts
+(`server.log`, `server.2.log`, … across restarts; `vite.log`, `vite.2.log`,
+… for the dev server) plus the fake transcripts
 copied out on teardown. A run normally boots once (`boot-1/`), but Playwright
 starts a fresh worker after a failed test and the fixture reboots — landing in
 `boot-2/` rather than overwriting the logs that cover the failure. The artifact

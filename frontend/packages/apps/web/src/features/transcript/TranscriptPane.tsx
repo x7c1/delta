@@ -483,6 +483,9 @@ export function TranscriptPane({
   // first paint (or a body without an overlay) never under-reserves.
   const bottomOverlayRef = useRef<HTMLDivElement | null>(null);
   const [bottomReserve, setBottomReserve] = useState<number | null>(null);
+  // The bound overlay's measure-and-apply, so the per-commit re-measure can reuse
+  // it; `null` while no overlay is mounted.
+  const remeasureBottomReserveRef = useRef<(() => void) | null>(null);
 
   // In the COLLAPSED state the top row is rendered as two independent
   // absolute floating cards — the breadcrumb at top-left and the
@@ -1292,6 +1295,9 @@ export function TranscriptPane({
   // changes (e.g. a resume-unavailable session drops the composer) so the ref
   // tracks the live node; clear the reserve when there is no overlay so the body
   // falls back to the fixed token.
+  //
+  // The per-commit re-measure below passes `onlyIfChanged`, so on the renders
+  // that leave the overlay's height alone it costs one read and changes nothing.
   useLayoutEffect(() => {
     const overlay = bottomOverlayRef.current;
     if (!overlay) {
@@ -1300,7 +1306,8 @@ export function TranscriptPane({
       setBottomReserve(null);
       return;
     }
-    const apply = () => {
+    let applied: number | null = null;
+    const apply = (onlyIfChanged: boolean) => {
       // While a branch is being composed, the "Branch from selected text" banner
       // adds height to this overlay. Folding that into the body's bottom reserve
       // (and the stick-to-bottom re-scroll) shifts the transcript the instant
@@ -1312,20 +1319,43 @@ export function TranscriptPane({
       if (useComposerStore.getState().branchOrigin !== null) {
         return;
       }
-      const height = overlay.getBoundingClientRect().height;
-      setBottomReserve(
-        height + overlayInsetPx(overlay) + BODY_BOTTOM_READING_GAP_PX,
-      );
+      const reserve =
+        overlay.getBoundingClientRect().height +
+        overlayInsetPx(overlay) +
+        BODY_BOTTOM_READING_GAP_PX;
+      if (onlyIfChanged && reserve === applied) {
+        return;
+      }
+      applied = reserve;
+      setBottomReserve(reserve);
       const body = bodyRef.current;
       if (body && stickRef.current) {
         body.scrollTop = body.scrollHeight;
       }
     };
-    apply();
-    const observer = new ResizeObserver(apply);
+    apply(false);
+    remeasureBottomReserveRef.current = () => apply(true);
+    const observer = new ResizeObserver(() => apply(false));
     observer.observe(overlay);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      remeasureBottomReserveRef.current = null;
+    };
   }, [hasBottomOverlay]);
+
+  // Re-measure after every commit of this pane as well. A render that changes
+  // what the overlay holds — focusing a closed session adds the read-only notice
+  // above the composer in the very commit that swaps the transcript — resizes
+  // the overlay at once, but the observer reports it only at the next rendering
+  // step, and the reserve it then sets commits in a later task still. In between,
+  // a frame is painted (and the layout can be read) with the conversation sized
+  // for the old overlay. A state update made here commits synchronously, before
+  // the browser gets control back, so the reserve lands with the change that
+  // caused it. Growth that happens without this pane re-rendering (the composer
+  // auto-growing as you type) is still the observer's to report.
+  useLayoutEffect(() => {
+    remeasureBottomReserveRef.current?.();
+  });
 
   // Track whichever top-region surface is currently mounted and drive
   // the body's `--delta-top-region-reserve` CSS variable from its
