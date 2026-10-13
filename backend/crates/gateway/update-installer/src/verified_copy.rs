@@ -17,7 +17,7 @@ pub enum CopyError {
     #[error("the update file {} is not a regular file", file.display())]
     NotRegularFile { file: PathBuf },
     /// The update file could not be opened or read.
-    #[error("could not read the update file {}: {source}", file.display())]
+    #[error("could not read the update file {}", file.display())]
     Unreadable {
         file: PathBuf,
         #[source]
@@ -28,7 +28,7 @@ pub enum CopyError {
     DigestMismatch { expected: String, actual: String },
     /// The copy could not be written: the working directory is full or
     /// out of reach. Nothing is wrong with the update file itself.
-    #[error("could not write the copy of the update file to {}: {source}", copy.display())]
+    #[error("could not write the copy of the update file to {}", copy.display())]
     Unwritable {
         copy: PathBuf,
         #[source]

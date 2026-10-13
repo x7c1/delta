@@ -30,10 +30,10 @@
 //!    resolve, then removes the directory.
 //!
 //! Every refusal and failure exits with a status of its own and prints one
-//! line on stderr saying why ([`Refusal`]), which the server reports. A
-//! status in [`refusal::FILE_REJECTED`] says the file itself is not to be
-//! installed, so the server removes it and has the user download it again;
-//! after any other, the user may still install it from a terminal. The
+//! line on stderr saying why, with its causes ([`Refusal`]), which the server
+//! reports. A status in [`refusal::FILE_REJECTED`] says the file itself is
+//! not to be installed, so the server removes it and has the user download it
+//! again; after any other, the user may still install it from a terminal. The
 //! decisions live in functions the unit tests cover without root; this file
 //! is only the thin shell that runs `dpkg-deb`, `dpkg-query` and `apt-get`.
 
@@ -60,7 +60,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(refusal) => {
-            eprintln!("{refusal}");
+            eprintln!("{}", refusal::with_causes(&refusal));
             let code = refusal.exit_code();
             debug_assert_eq!(
                 refusal::FILE_REJECTED.contains(&code),

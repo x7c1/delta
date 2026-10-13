@@ -5,11 +5,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use delta_usecase::{InstallError, InstalledApp, UpdateInstaller};
+use delta_usecase::{with_causes, InstallError, InstalledApp, UpdateInstaller};
 
 use crate::image_check::{check_image, APP_NAME};
 use crate::swap_paths::{remove_any, SwapPaths};
-use crate::verified_copy::copy_verified;
+use crate::verified_copy::{copy_verified, CopyError};
 use crate::{BundleLocation, DiskImageTools, SystemDiskImageTools, ToolError};
 
 /// The macOS [`UpdateInstaller`]: replaces the running `Delta.app` with the
@@ -174,15 +174,7 @@ fn install_bundle(
             ))
         })?;
     let image = work.path().join("update.dmg");
-    copy_verified(file, sha256, &image).map_err(|err| {
-        // A copy that could not be written says nothing about the file,
-        // which stays to be installed by hand or retried.
-        if err.rejects_file() {
-            InstallError::Rejected(err.to_string())
-        } else {
-            InstallError::Failed(err.to_string())
-        }
-    })?;
+    copy_verified(file, sha256, &image).map_err(copy_failure)?;
     let mountpoint = work.path().join("mount");
     std::fs::create_dir(&mountpoint).map_err(|err| {
         InstallError::Failed(format!(
@@ -223,7 +215,7 @@ fn stage_from_image(
     if let Err(err) = tools.detach(mountpoint) {
         tracing::warn!(
             mountpoint = %mountpoint.display(),
-            error = %err,
+            error = %with_causes(&err),
             "could not detach the update's disk image"
         );
     }
@@ -251,6 +243,18 @@ fn discard_staging(staging: &Path) {
             error = %err,
             "could not remove the copy of the update that was not put in place"
         );
+    }
+}
+
+/// What the verified copy failing means for the install, its text naming
+/// the cause: a file the copy rejects is rejected; a copy that could not be
+/// written says nothing about the file, which stays to be installed by hand
+/// or retried.
+fn copy_failure(err: CopyError) -> InstallError {
+    if err.rejects_file() {
+        InstallError::Rejected(with_causes(&err))
+    } else {
+        InstallError::Failed(with_causes(&err))
     }
 }
 
@@ -582,6 +586,57 @@ mod tests {
 
         assert!(tools.calls().is_empty());
         assert_eq!(Machine::version_of(&machine.bundle()), "0.5.0");
+    }
+
+    /// The text of a copy that failed for an I/O error names that error
+    /// once: the copy error's own message leaves it to `source`.
+    #[test]
+    fn a_failed_copy_names_its_cause_once() {
+        let cause = "input/output error from the test";
+        let unreadable = copy_failure(CopyError::Unreadable {
+            file: PathBuf::from("/updates/Delta_0.6.0_aarch64.dmg"),
+            source: std::io::Error::other(cause),
+        });
+        match &unreadable {
+            InstallError::Rejected(reason) => assert_eq!(
+                reason,
+                &format!(
+                    "could not read the update file /updates/Delta_0.6.0_aarch64.dmg: {cause}"
+                )
+            ),
+            other => panic!("{other:?}"),
+        }
+        let unwritable = copy_failure(CopyError::Unwritable {
+            copy: PathBuf::from("/tmp/delta-update-x/update.dmg"),
+            source: std::io::Error::other(cause),
+        });
+        match &unwritable {
+            InstallError::Failed(reason) => assert_eq!(
+                reason,
+                &format!(
+                    "could not write the copy of the update file to /tmp/delta-update-x/update.dmg: {cause}"
+                )
+            ),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// A disk image tool that could not be started keeps its I/O error as
+    /// the source, named once when the error is rendered with its causes.
+    #[test]
+    fn an_unrunnable_tool_names_its_cause_once() {
+        let cause = "permission denied by the test";
+        let err = tool_failure(ToolError::Unrunnable {
+            program: PathBuf::from("/usr/bin/hdiutil"),
+            source: std::io::Error::other(cause),
+        });
+        assert!(matches!(err, InstallError::Unrunnable { .. }), "{err:?}");
+        assert_eq!(
+            with_causes(&err),
+            format!(
+                "Delta cannot install the update itself: could not run /usr/bin/hdiutil: {cause}"
+            )
+        );
     }
 
     /// What startup asks: the same checks as an install's first steps, with

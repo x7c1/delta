@@ -303,13 +303,17 @@ impl AppState {
     ///
     /// `None` when the check is turned off, so nothing is spawned and nothing
     /// is ever asked. A failed check is logged by the check itself and keeps
-    /// its previous verdict; the loop carries on.
+    /// its previous verdict; the loop carries on. After the first check that
+    /// answers, the download of the newer release an earlier run left behind
+    /// is picked up ([`ReleaseUpdate::restore`]).
     pub fn spawn_release_check(&self) -> Option<tokio::task::JoinHandle<()>> {
         if !self.release_check.is_enabled() {
             return None;
         }
         let check = Arc::clone(&self.release_check);
+        let update = Arc::clone(&self.release_update);
         Some(tokio::spawn(async move {
+            let mut restored = false;
             let mut ticker = tokio::time::interval_at(
                 tokio::time::Instant::now() + RELEASE_CHECK_FIRST_DELAY,
                 RELEASE_CHECK_INTERVAL,
@@ -318,7 +322,10 @@ impl AppState {
             loop {
                 ticker.tick().await;
                 // The error is already logged as one `warn` by the check.
-                let _ = check.check().await;
+                if check.check().await.is_ok() && !restored {
+                    restored = true;
+                    update.restore(check.newer().as_ref()).await;
+                }
             }
         }))
     }

@@ -31,6 +31,8 @@ tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+# The test that a `log` record reaches the log file.
+log = { workspace = true }
 tempfile = { workspace = true }
 # The helper path the server runs, which the bundle config and the polkit
 # policy must name too (tests/update_bundle.rs).

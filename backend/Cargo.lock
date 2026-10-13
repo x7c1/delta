@@ -857,6 +857,7 @@ dependencies = [
  "dirs",
  "glib",
  "gtk",
+ "log",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
@@ -899,6 +900,7 @@ dependencies = [
  "dirs",
  "futures-util",
  "include_dir",
+ "log",
  "portable-pty",
  "serde",
  "serde_json",
@@ -908,6 +910,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "tracing-log",
  "tracing-subscriber",
  "uuid",
 ]
@@ -3419,6 +3422,7 @@ version = "0.6.0"
 dependencies = [
  "async-trait",
  "delta-usecase",
+ "libc",
  "reqwest",
  "rustls",
  "rustls-platform-verifier",

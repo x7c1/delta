@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use delta_usecase::{AssetDownloader, NotOffered, Platform, ReleaseUpdate, UpdateInstaller};
+use delta_usecase::{
+    with_causes, AssetDownloader, NotOffered, Platform, ReleaseUpdate, UpdateInstaller,
+};
 use release_feed::{remove_stale_updates, GithubAssetDownloader};
 use update_installer::{BundleInstaller, PkexecInstaller};
 
@@ -49,7 +51,7 @@ pub fn release_update(config: &Config, current_version: &str) -> ReleaseUpdate {
             installer,
         ),
         Err(err) => {
-            tracing::warn!(error = %err, "updates are not offered");
+            tracing::warn!(error = %with_causes(&err), "updates are not offered");
             ReleaseUpdate::not_offered(NotOffered::NoDownloader)
         }
     }

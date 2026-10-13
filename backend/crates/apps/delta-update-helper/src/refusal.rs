@@ -5,8 +5,10 @@ use std::path::PathBuf;
 /// Why the helper did not install the update.
 ///
 /// Each variant exits with a status of its own ([`Self::exit_code`]) and
-/// prints its message as one line on stderr, which Delta's server shows the
-/// user as the cause. The statuses avoid `126` and `127`, which `pkexec`
+/// prints its message with its causes ([`with_causes`]) as one line on
+/// stderr, which Delta's server shows the user as the cause. A variant's own
+/// message describes only its level and leaves the cause to `source`, so the
+/// line names each cause once. The statuses avoid `126` and `127`, which `pkexec`
 /// itself answers with when the authentication was dismissed or refused, and
 /// `101`, a Rust panic's.
 ///
@@ -29,15 +31,15 @@ pub enum Refusal {
     #[error("refused the update file {}: {reason}", path.display())]
     File { path: PathBuf, reason: String },
     /// The file to install could not be opened or read.
-    #[error("refused the update file {}: {source}", path.display())]
+    #[error("refused the update file {}", path.display())]
     FileUnreadable {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
     /// The release's own digest could not be fetched from GitHub: `what`
-    /// step failed, for `source` (printed with its own causes).
-    #[error("could not read release {tag} from GitHub: {what}: {}", with_causes(source.as_ref()))]
+    /// step failed, for `source`.
+    #[error("could not read release {tag} from GitHub: {what}")]
     ReleaseUnavailable {
         tag: String,
         what: &'static str,
@@ -73,14 +75,16 @@ pub enum Refusal {
     PackageUnreadable { what: &'static str, cause: String },
     /// The installed app's version, as `dpkg-query` printed it, is not a
     /// version.
-    #[error("could not read the installed delta-desktop's version: {installed:?} is not a version: {source}")]
+    #[error(
+        "could not read the installed delta-desktop's version: {installed:?} is not a version"
+    )]
     InstalledVersionMalformed {
         installed: String,
         #[source]
         source: semver::Error,
     },
     /// `dpkg-deb`, `dpkg-query` or `apt-get` could not be started.
-    #[error("could not run {program}: {source}")]
+    #[error("could not run {program}")]
     Unrunnable {
         program: &'static str,
         #[source]
@@ -102,7 +106,7 @@ pub enum Refusal {
     #[error("apt-get could not install the update: {0}")]
     InstallFailed(String),
     /// The helper's own working files could not be set up.
-    #[error("{what}: {source}")]
+    #[error("{what}")]
     Io {
         what: String,
         #[source]
@@ -180,8 +184,9 @@ impl Refusal {
 
 /// `err` and its sources, joined with `: `, so the one line the helper
 /// prints says why all the way down (`reqwest`'s own message, for one,
-/// leaves out the cause of a failed connection).
-fn with_causes(err: &(dyn std::error::Error + 'static)) -> String {
+/// leaves out the cause of a failed connection). The helper shares no code
+/// with Delta's server, so this is its own copy of the server's renderer.
+pub fn with_causes(err: &(dyn std::error::Error + 'static)) -> String {
     let mut text = err.to_string();
     let mut source = err.source();
     while let Some(cause) = source {
@@ -279,5 +284,46 @@ mod tests {
         codes.sort_unstable();
         codes.dedup();
         assert_eq!(codes.len(), all.len());
+    }
+
+    /// The line the helper prints names each cause once: the variant's own
+    /// message leaves the cause to `source`.
+    #[test]
+    fn the_printed_line_names_each_cause_once() {
+        let cause = "permission denied by the test";
+        let io = || std::io::Error::other(cause);
+        let with_a_source = [
+            Refusal::FileUnreadable {
+                path: PathBuf::from("/tmp/delta.deb"),
+                source: io(),
+            },
+            Refusal::ReleaseUnavailable {
+                tag: "v0.6.0".to_owned(),
+                what: "could not send the request",
+                source: Box::new(io()),
+            },
+            Refusal::Unrunnable {
+                program: "/usr/bin/apt-get",
+                source: io(),
+            },
+            Refusal::Io {
+                what: "could not make the working directory".to_owned(),
+                source: io(),
+            },
+        ];
+        for refusal in &with_a_source {
+            let line = with_causes(refusal);
+            assert_eq!(line.matches(cause).count(), 1, "{line}");
+            assert_eq!(line, format!("{refusal}: {cause}"));
+        }
+
+        let malformed = Refusal::InstalledVersionMalformed {
+            installed: "garbage".to_owned(),
+            source: semver::Version::parse("garbage").unwrap_err(),
+        };
+        let semver_said = semver::Version::parse("garbage").unwrap_err().to_string();
+        let line = with_causes(&malformed);
+        assert_eq!(line.matches(&semver_said).count(), 1, "{line}");
+        assert_eq!(line, format!("{malformed}: {semver_said}"));
     }
 }

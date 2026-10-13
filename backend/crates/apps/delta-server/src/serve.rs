@@ -10,6 +10,10 @@ use std::time::Duration;
 
 use delta_usecase::{EraseReport, UpdateRestart};
 use tokio::net::TcpListener;
+use tracing::level_filters::LevelFilter;
+use tracing::Subscriber;
+use tracing_log::AsLog;
+use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::EnvFilter;
 
 use crate::config::hook_state::{HookStateError, HookStateFile};
@@ -68,11 +72,46 @@ impl ServerStopped {
 /// stdout only, filtered by `RUST_LOG` when set, `info` otherwise. The desktop
 /// app installs its own, which also writes a log file and reads a filter file.
 pub fn init_tracing() {
+    install_tracing(server_subscriber(
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        std::io::stdout,
+    ));
+}
+
+/// The `delta-server` binary's subscriber: plain lines to `writer`, filtered
+/// by `filter`.
+fn server_subscriber<W>(filter: EnvFilter, writer: W) -> impl Subscriber + Send + Sync + 'static
+where
+    W: for<'w> MakeWriter<'w> + Send + Sync + 'static,
+{
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
+        .with_env_filter(filter)
+        .with_writer(writer)
+        .finish()
+}
+
+/// Install `subscriber` as the process's global `tracing` subscriber, and
+/// route the records of the `log` crate into it.
+///
+/// Delta logs through `tracing`, but some dependencies log through `log`
+/// (`rustls-platform-verifier`, for one, warns through it about a system
+/// certificate it cannot read). Their records become `tracing` events, so
+/// they pass the same filter and reach the same outputs — stdout, and the
+/// desktop app's log file — as Delta's own. Each binary calls this once, at
+/// startup, with the subscriber it builds.
+///
+/// # Panics
+///
+/// When a global subscriber or a `log` logger is already installed.
+pub fn install_tracing(subscriber: impl Subscriber + Send + Sync + 'static) {
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("the global tracing subscriber is installed only once");
+    // After the subscriber, so `log` skips at its call site whatever the
+    // filter would drop anyway.
+    tracing_log::LogTracer::builder()
+        .with_max_level(LevelFilter::current().as_log())
+        .init()
+        .expect("the `log` logger is installed only once");
 }
 
 /// Bind `127.0.0.1:<port>`. Port `0` takes a free port; read it back from
@@ -368,5 +407,57 @@ mod tests {
         });
         let message = user_facing_startup_error(&err).expect("user-facing");
         assert!(message.contains("/data/delta-hook-state.json"), "{message}");
+    }
+
+    /// Where the subscriber under test writes.
+    #[derive(Clone, Default)]
+    struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl Captured {
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for Captured {
+        type Writer = Captured;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    #[test]
+    fn a_log_record_reaches_the_installed_subscriber_through_its_filter() {
+        // The only test in this binary that installs the global subscriber.
+        // Its filter admits only this test's target, so the other tests'
+        // events stay out of it.
+        let captured = Captured::default();
+        install_tracing(server_subscriber(
+            EnvFilter::new("delta_log_bridge=info"),
+            captured.clone(),
+        ));
+
+        log::warn!(target: "delta_log_bridge", "could not read a system certificate");
+        log::debug!(target: "delta_log_bridge", "below the filter");
+
+        let text = captured.text();
+        assert!(text.contains("WARN"), "{text}");
+        assert!(text.contains("delta_log_bridge"), "{text}");
+        assert_eq!(
+            text.matches("could not read a system certificate").count(),
+            1,
+            "{text}"
+        );
+        assert!(!text.contains("below the filter"), "{text}");
     }
 }

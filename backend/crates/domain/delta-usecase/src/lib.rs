@@ -25,6 +25,7 @@ mod session_page;
 mod session_prune;
 mod session_removal;
 mod turn;
+mod with_causes;
 mod worktree_dir;
 
 pub use agent::{
@@ -81,6 +82,7 @@ pub use session_removal::{DiskItem, KeepReason, KeptItem, SessionRemoval};
 pub use turn::{
     transition, turn_input_for_agent_event, OrphanedSend, Transition, TurnInput, TurnState,
 };
+pub use with_causes::with_causes;
 pub use worktree_dir::{WorktreeBranch, WorktreeDir};
 
 // Re-export the domain types the transport layer needs, so the server can

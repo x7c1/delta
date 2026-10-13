@@ -13,6 +13,10 @@ requests the server receives.
   `log-filter` file in its data directory, otherwise `info`.
 - Every HTTP request is logged at `debug` under the `delta_server::http`
   target. `info,delta_server::http=debug` turns that log on and nothing else.
+- Dependencies that log through the `log` crate rather than `tracing` (such as
+  `rustls-platform-verifier`, warning about a system certificate it cannot
+  read) go through the same filter to the same outputs, under their module
+  path as the target.
 
 ## The desktop app's log file
 

@@ -29,10 +29,13 @@ tokio = { workspace = true }
 tower = { workspace = true, optional = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing-log = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
+# The test that a `log` record reaches the installed subscriber.
+log = { workspace = true }
 delta-attribution = { workspace = true }
 delta-model = { workspace = true }
 delta-sqlite = { workspace = true }

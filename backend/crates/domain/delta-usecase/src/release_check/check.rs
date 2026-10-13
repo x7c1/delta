@@ -1,4 +1,5 @@
-use super::{judge_release, ReleaseCheck, ReleaseCheckError};
+use super::{judge_release, EnabledCheck, ReleaseCheck, ReleaseCheckError};
+use crate::with_causes;
 
 impl ReleaseCheck {
     /// Ask the feed once and record the verdict.
@@ -7,11 +8,11 @@ impl ReleaseCheck {
     /// keeps the previous verdict; it is also returned, for the caller's tests. A turned-off check
     /// asks nothing and succeeds.
     pub async fn check(&self) -> Result<(), ReleaseCheckError> {
-        let Some(feed) = &self.feed else {
+        let Some(EnabledCheck { feed, current }) = &self.enabled else {
             return Ok(());
         };
         let verdict = match feed.latest_release().await {
-            Ok(release) => judge_release(&self.current, release),
+            Ok(release) => judge_release(current, release),
             Err(err) => Err(err.into()),
         };
         match verdict {
@@ -37,23 +38,6 @@ impl ReleaseCheck {
             }
         }
     }
-}
-
-/// `err` followed by each of its causes, joined with `: `.
-///
-/// A feed failure's own `Display` names only its kind (reqwest's says just
-/// "error sending request"); what a user needs in the log — DNS, a refused
-/// connection, a timeout, a certificate the trust store rejects — is further
-/// down the chain.
-pub(crate) fn with_causes(err: &dyn std::error::Error) -> String {
-    let mut message = err.to_string();
-    let mut source = err.source();
-    while let Some(cause) = source {
-        message.push_str(": ");
-        message.push_str(&cause.to_string());
-        source = cause.source();
-    }
-    message
 }
 
 #[cfg(test)]

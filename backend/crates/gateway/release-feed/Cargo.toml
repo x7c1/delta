@@ -8,6 +8,8 @@ repository.workspace = true
 [dependencies]
 delta-usecase = { workspace = true }
 async-trait = { workspace = true }
+# `O_NOFOLLOW` when reading a download an earlier run left behind.
+libc = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
 # Verifies GitHub's certificate against the operating system's trust store

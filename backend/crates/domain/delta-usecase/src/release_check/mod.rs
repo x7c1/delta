@@ -27,7 +27,6 @@
 //! all read as no newer release.
 
 mod check;
-pub(crate) use check::with_causes;
 mod judge_release;
 use judge_release::judge_release;
 mod newer_release;
@@ -47,12 +46,20 @@ use crate::ports::ReleaseFeed;
 /// The only place a release's page may be: Delta's own GitHub Releases.
 pub const RELEASE_PAGE_PREFIX: &str = "https://github.com/x7c1/delta/releases/";
 
-/// The release check: a feed, this build's version, and the last verdict.
+/// The release check: what it asks and compares against, and the last
+/// verdict.
 pub struct ReleaseCheck {
     /// `None` when the check is turned off; it then never asks anything.
-    feed: Option<Arc<dyn ReleaseFeed>>,
-    current: Version,
+    enabled: Option<EnabledCheck>,
     newer: Mutex<Option<NewerRelease>>,
+}
+
+/// What a check that is turned on asks, and what it compares the answer
+/// against.
+struct EnabledCheck {
+    feed: Arc<dyn ReleaseFeed>,
+    /// This build's version.
+    current: Version,
 }
 
 impl ReleaseCheck {
@@ -63,11 +70,7 @@ impl ReleaseCheck {
     /// `error` logged: there would be nothing to compare against.
     pub fn new(feed: Arc<dyn ReleaseFeed>, current_version: &str) -> Self {
         match Version::parse(current_version) {
-            Ok(current) => Self {
-                feed: Some(feed),
-                current,
-                newer: Mutex::new(None),
-            },
+            Ok(current) => Self::with(Some(EnabledCheck { feed, current })),
             Err(err) => {
                 tracing::error!(
                     version = current_version,
@@ -82,16 +85,19 @@ impl ReleaseCheck {
     /// A check that is turned off: it never asks, and never has a newer
     /// release.
     pub fn disabled() -> Self {
+        Self::with(None)
+    }
+
+    fn with(enabled: Option<EnabledCheck>) -> Self {
         Self {
-            feed: None,
-            current: Version::new(0, 0, 0),
+            enabled,
             newer: Mutex::new(None),
         }
     }
 
     /// Whether the check asks a feed at all.
     pub fn is_enabled(&self) -> bool {
-        self.feed.is_some()
+        self.enabled.is_some()
     }
 
     /// The newer release the last successful check found, if any.

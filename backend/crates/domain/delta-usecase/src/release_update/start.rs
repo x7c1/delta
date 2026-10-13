@@ -6,7 +6,7 @@ use super::{
     downloadable_asset, lock, ReleaseUpdate, UpdateDownload, UpdateInstall, UpdateRefusal,
 };
 use crate::ports::DownloadProgress;
-use crate::release_check::with_causes;
+use crate::with_causes;
 use crate::NewerRelease;
 
 impl ReleaseUpdate {
@@ -18,7 +18,9 @@ impl ReleaseUpdate {
     /// ([`downloadable_asset`]). Otherwise answers the download's
     /// state: the one running (whichever release it is of), `Ready` when this
     /// release is already downloaded, or a fresh `Downloading` whose transfer
-    /// now runs in the background (a failed download starts over). A fresh
+    /// now runs in the background (a failed download starts over). A request
+    /// that joins [`Self::restore`]'s check of a file left behind is
+    /// remembered, and continues as a download if the check finds none. A fresh
     /// download clears an install whose file was rejected
     /// ([`UpdateInstall::Rejected`]), so the new file is offered for install.
     pub fn start(&self, newer: Option<NewerRelease>) -> Result<UpdateDownload, UpdateRefusal> {
@@ -28,7 +30,12 @@ impl ReleaseUpdate {
 
         let mut current = lock(&self.download);
         match &*current {
-            Some(running @ UpdateDownload::Downloading { .. }) => return Ok(running.clone()),
+            Some(running @ UpdateDownload::Downloading { .. }) => {
+                if let Some(joined) = &mut *lock(&self.restoring) {
+                    *joined = Some(newer);
+                }
+                return Ok(running.clone());
+            }
             Some(ready @ UpdateDownload::Ready { version: done, .. }) if *done == version => {
                 return Ok(ready.clone())
             }
