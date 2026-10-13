@@ -101,10 +101,10 @@ to these scripts; it needs no separate PR.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On this Mac, `make sweep-test-residue-test` passes, including "a dead
+- [x] On this Mac, `make sweep-test-residue-test` passes, including "a dead
       run's live delta-server is killed".
-- [ ] `make check-version-change-test` fails when the script is reverted to
+- [x] `make check-version-change-test` fails when the script is reverted to
       the `main` version (the new test catches the original bug), and passes
       with the fix.
-- [ ] The `## desktop:` line states that restarting refreshes the icon the
+- [x] The `## desktop:` line states that restarting refreshes the icon the
       Dock and Cmd-Tab show.
