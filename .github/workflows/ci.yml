@@ -70,6 +70,15 @@ jobs:
       - name: Check the vendored codex schema is key-sorted
         run: ../scripts/vendor-codex-schema.sh --check
 
+      # The Release workflow decides whether to cut a release with
+      # scripts/check-version-change.sh, and runs only after this workflow
+      # passes on main. Testing the script here catches a break before it
+      # reaches main. It builds scratch git repositories with a minimal
+      # workspace and needs only git, cargo and jq — all on the runner.
+      - name: Test the release version check
+        working-directory: .
+        run: make check-version-change-test
+
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 20

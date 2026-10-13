@@ -71,7 +71,7 @@ desktop-dev:
 desktop-dev-build: web-dist
 	scripts/dev.sh --desktop-build
 
-## desktop: build the installed app (make desktop-build), then install it — Linux: `sudo apt install --reinstall` the new .deb; macOS: replace /Applications/Delta.app (restart a running Delta afterwards)
+## desktop: build the installed app (make desktop-build), then install it — Linux: `sudo apt install --reinstall` the new .deb; macOS: replace /Applications/Delta.app (restart a running Delta afterwards: with an unchanged version it keeps handing the old icon to the Dock and Cmd-Tab, which `killall Dock` does not fix)
 # --reinstall because a local build keeps the release's version number, which
 # apt would otherwise treat as already installed. The newest .deb is the one
 # just built; older ones may still sit in the bundle directory.
@@ -161,7 +161,7 @@ lint:
 	cd backend && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint + the embedded-server build (`embed-web`) + the desktop-shell build/test/clippy + both Playwright suites (needs tmux) — plus the canary gate's, the re-vendor script's and gen-check's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
+## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint + the embedded-server build (`embed-web`) + the desktop-shell build/test/clippy + both Playwright suites (needs tmux) + the release version check's scratch-repo test — plus the canary gate's, the re-vendor script's, gen-check's and the test-residue sweep's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
 # The point of this target is that passing it means CI will pass, so it has to
 # stay a superset of what the workflow runs — including BOTH Playwright suites.
 # `e2e` is the mock-backed one and `e2e-fake` drives the real backend through
@@ -178,7 +178,7 @@ lint:
 #   check-frontend-build → { check-frontend-typecheck, check-frontend-test, check-frontend-lint, check-e2e }
 #   { check-backend-build, check-frontend-build } → { check-e2e-fake, check-embedded, check-desktop-build }
 #   vendor-codex-schema-check, vendor-codex-schema-test, e2e-real-gate-test,
-#   sweep-test-residue-test, gen-check-test (no prerequisites)
+#   sweep-test-residue-test, gen-check-test, check-version-change-test (no prerequisites)
 #
 # Without -j, make walks the same graph left to right, which is the serial
 # order the gate always had. The cargo steps share backend/target and take
@@ -192,7 +192,7 @@ lint:
 CHECK_STEPS := \
 	check-backend-test check-backend-clippy check-gen \
 	vendor-codex-schema-check vendor-codex-schema-test e2e-real-gate-test sweep-test-residue-test \
-	gen-check-test \
+	gen-check-test check-version-change-test \
 	check-frontend-typecheck check-frontend-test check-frontend-lint \
 	check-e2e check-e2e-fake check-embedded check-desktop-build
 
@@ -278,6 +278,11 @@ e2e-real-gate-test:
 .PHONY: sweep-test-residue-test
 sweep-test-residue-test:
 	bash scripts/tests/sweep-test-residue.test.sh
+
+## check-version-change-test: exercise the Release workflow's version check (scripts/check-version-change.sh) against scratch git repos with a minimal backend workspace (needs cargo and jq, no network; part of `make check` and of CI's backend job)
+.PHONY: check-version-change-test
+check-version-change-test:
+	bash scripts/tests/check-version-change.test.sh
 
 ## e2e-real-codex: run the real-codex canaries against the real `codex app-server` — one safe turn end-to-end + the thread-metadata wire fields + the worktree sandbox git grant + schema drift detection (local only; only the turn consumes Codex quota; never in CI). DELTA_CODEX_BIN overrides the binary.
 .PHONY: e2e-real-codex
