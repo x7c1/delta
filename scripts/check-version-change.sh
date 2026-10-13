@@ -13,33 +13,41 @@ set -euo pipefail
 #   - The version is read through `cargo metadata` rather than by grepping
 #     TOML, so the `[workspace.package]` section boundary is honoured by
 #     cargo itself.
-#   - The previous version is obtained by temporarily checking out
-#     backend/Cargo.toml from HEAD~1 and running cargo metadata against
-#     that snapshot, then restoring the working-tree copy. cargo metadata
-#     only reads Cargo.toml + Cargo.lock; no network access is required.
+#   - The current version is read from the working tree's backend/.
+#   - The previous version is read from a copy of HEAD~1's backend/ alone,
+#     extracted with `git archive` into a temporary directory. Reading
+#     HEAD~1's root manifest against HEAD's member manifests would mix two
+#     trees: when HEAD adds a [workspace.dependencies] entry that a member
+#     inherits (`foo.workspace = true`), the old root lacks it and cargo
+#     cannot load the member. `cargo metadata --no-deps` reads only the
+#     manifests (and the target sources they imply); no Cargo.lock and no
+#     network access are required.
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-CARGO_TOML="${REPO_ROOT}/backend/Cargo.toml"
 
 read_workspace_version() {
     # delta-server pulls its version from [workspace.package].version, so
     # reading any workspace member would do — picking one explicitly keeps
     # the intent obvious.
-    (cd "${REPO_ROOT}/backend" && \
+    local backend_dir="$1"
+    local version
+    version=$(cd "$backend_dir" && \
         cargo metadata --no-deps --format-version 1 \
-        | jq -r '.packages[] | select(.name == "delta-server") | .version')
+        | jq -r '.packages[] | select(.name == "delta-server") | .version') || return 1
+    if [ -z "$version" ]; then
+        echo "check-version-change: no delta-server package in ${backend_dir}" >&2
+        return 1
+    fi
+    printf '%s\n' "$version"
 }
 
-current_version=$(read_workspace_version)
+current_version=$(read_workspace_version "${REPO_ROOT}/backend")
 
-# Stash the working-tree Cargo.toml so we can restore it after reading
-# the HEAD~1 snapshot.
-backup=$(mktemp)
-cp "$CARGO_TOML" "$backup"
-trap 'cp "$backup" "$CARGO_TOML"; rm -f "$backup"' EXIT
+previous_tree=$(mktemp -d "${TMPDIR:-/tmp}/delta-version-check.XXXXXX")
+trap 'rm -rf "$previous_tree"' EXIT
 
-git show HEAD~1:backend/Cargo.toml > "$CARGO_TOML"
-previous_version=$(read_workspace_version)
+git -C "$REPO_ROOT" archive --format=tar HEAD~1 backend | tar -x -C "$previous_tree"
+previous_version=$(read_workspace_version "${previous_tree}/backend")
 
 echo "Current version: ${current_version}"
 echo "Previous version: ${previous_version}"
