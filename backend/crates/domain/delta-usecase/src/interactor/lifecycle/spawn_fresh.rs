@@ -182,8 +182,9 @@ where
             .flat_map(LaunchOptionSpec::to_argv)
             .collect();
 
-        // The minter is atomic, so token uniqueness needs no coordination here.
-        let token = self.mint_free_token().await?;
+        // The minter is atomic, so token uniqueness needs no coordination here,
+        // and it skips any name a surviving tmux session still holds.
+        let token = self.minter.mint_free(&self.tmux).await?;
         let pane = pane_for(token.as_str());
 
         // `seed_trust` records whether the effective launch directory is a git

@@ -84,7 +84,8 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// waits on a launch. Production defaults via [`LaunchConfig::default`];
     /// overridden through [`Interactor::with_launch_config`].
     pub(in crate::interactor) launch: LaunchConfig,
-    /// Mints unique [`PaneToken`]s for fresh spawns.
+    /// Mints the [`PaneToken`] of every pane the core creates (fresh spawns and
+    /// resumes), skipping names a surviving tmux session still holds.
     ///
     /// [`PaneToken`]: crate::pane_token::PaneToken
     pub(in crate::interactor) minter: PaneTokenMinter,

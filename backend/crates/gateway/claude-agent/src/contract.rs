@@ -41,8 +41,8 @@ use std::sync::Mutex;
 
 use agent_contract::{drain, launch_request};
 use delta_usecase::{
-    AgentAdapter, AgentEvent, AgentProvider, LaunchOptionSpec, LaunchRequest, Result, SendRequest,
-    TmuxDriver,
+    AgentAdapter, AgentEvent, AgentProvider, LaunchOptionSpec, LaunchRequest, Result,
+    ResumeRequest, SendRequest, TmuxDriver,
 };
 
 use crate::{ClaudeCodePtyHookAdapter, ClaudeLaunchConfig};
@@ -65,12 +65,16 @@ struct RecordingTmux {
     sent: Mutex<Vec<(String, String)>>,
     keyed: Mutex<Vec<(String, Vec<String>)>>,
     killed: Mutex<Vec<String>>,
+    /// Sessions that already exist without this fake having created them —
+    /// `delta-<n>` panes that survived an earlier server run.
+    preexisting: Vec<String>,
 }
 
 #[async_trait]
 impl TmuxDriver for RecordingTmux {
     async fn has_session(&self, name: &str) -> Result<bool> {
-        Ok(self.created.lock().unwrap().iter().any(|c| c.name == name))
+        Ok(self.preexisting.iter().any(|n| n == name)
+            || self.created.lock().unwrap().iter().any(|c| c.name == name))
     }
 
     async fn create_session(&self, name: &str, workdir: &str, command: &[String]) -> Result<()> {
@@ -205,6 +209,50 @@ async fn claude_launch_builds_the_expected_command() {
             "do the thing".to_owned(),
         ]
     );
+}
+
+/// Claude-specific: `launch` and `resume` name their tmux session with a name
+/// tmux reports as free. The minter restarts at `delta-1` on every server
+/// start, so a `delta-1` pane that survived the restart must be skipped, or
+/// `tmux new-session` would fail with "duplicate session".
+#[tokio::test]
+async fn launch_and_resume_skip_a_surviving_tmux_session_name() {
+    let adapter = ClaudeCodePtyHookAdapter::new(
+        RecordingTmux {
+            preexisting: vec!["delta-1".to_owned()],
+            ..Default::default()
+        },
+        ClaudeLaunchConfig {
+            claude_bin: "claude".to_owned(),
+            settings_path: "/settings.json".to_owned(),
+        },
+    );
+
+    let launched = adapter
+        .launch(launch_request())
+        .await
+        .expect("launch does not collide");
+    let resumed = adapter
+        .resume(ResumeRequest {
+            session_id: "sid-old".to_owned(),
+            provider_session_id: "sid-old".to_owned(),
+            workdir: "/work".to_owned(),
+            worktree_repo_root: None,
+        })
+        .await
+        .expect("resume does not collide");
+
+    assert_eq!(launched.key, "delta-2", "the surviving delta-1 is skipped");
+    assert_eq!(resumed.key, "delta-3", "the next free name after delta-2");
+    let created: Vec<String> = adapter
+        .tmux
+        .created
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|c| c.name.clone())
+        .collect();
+    assert_eq!(created, vec!["delta-2".to_owned(), "delta-3".to_owned()]);
 }
 
 // --- Claude adapter: pending (Phase B) scaffolds ----------------------------

@@ -8,11 +8,15 @@
 //! Delta owns, not the conversation id.
 //!
 //! Tokens are minted by [`PaneTokenMinter`], which hands out `delta-<n>` for a
-//! monotonically increasing `n`. The counter is atomic, so minting is
-//! collision-free without relying on randomness or wall-clock seeds.
-//! `delta-<n>` is always a valid tmux session name (no `.` or `:`).
+//! monotonically increasing `n`. The counter is atomic, so two mints never
+//! collide (no randomness or wall-clock seeds involved), and
+//! [`PaneTokenMinter::mint_free`] — the only way a token leaves the minter —
+//! skips every `n` whose tmux session is still alive (one that survived a
+//! server restart). `delta-<n>` is always a valid tmux session name (no `.` or
+//! `:`).
 //!
 //! [`PaneTokenMinter`]: crate::PaneTokenMinter
+//! [`PaneTokenMinter::mint_free`]: crate::PaneTokenMinter::mint_free
 
 /// A Delta-minted tmux session name, e.g. `delta-1`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -56,7 +60,8 @@ impl PaneToken {
     /// survived it. Not minted, because the name already exists in tmux: the
     /// whole point is to address *that* session again. The minter never hands
     /// such a name out a second time while the session is alive, because
-    /// minting skips every name tmux still knows.
+    /// [`PaneTokenMinter::mint_free`](crate::PaneTokenMinter::mint_free) probes
+    /// tmux and skips every name it still knows.
     pub(crate) fn adopted(name: String) -> Self {
         Self(name)
     }
@@ -79,10 +84,11 @@ impl std::fmt::Display for PaneToken {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interactor::FakeTmux;
     use crate::PaneTokenMinter;
 
-    #[test]
-    fn adapter_launch_key_is_derived_from_the_session_id_and_never_minted() {
+    #[tokio::test]
+    async fn adapter_launch_key_is_derived_from_the_session_id_and_never_minted() {
         let minter = PaneTokenMinter::new();
         let session_id = delta_model::SessionId::from("sess-1");
         let key = PaneToken::for_adapter_launch(&session_id);
@@ -91,7 +97,11 @@ mod tests {
         assert_eq!(key, PaneToken::for_adapter_launch(&session_id));
         // …and costs the tmux namespace nothing: the minter is untouched, and
         // the key could not collide with a `delta-<n>` pane even if it leaked.
-        assert_eq!(minter.mint().as_str(), "delta-1");
+        let next = minter
+            .mint_free(&FakeTmux::default())
+            .await
+            .expect("probe succeeds");
+        assert_eq!(next.as_str(), "delta-1");
         assert!(!key.as_str().starts_with("delta-"));
     }
 }

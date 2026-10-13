@@ -11,9 +11,11 @@
 //!
 //! The adapter changes the *dependency direction* — the core will drive Claude
 //! through this trait rather than reaching for a tmux driver directly — without
-//! changing behaviour. It wraps the existing [`TmuxDriver`] port and reuses the
-//! existing [`PaneTokenMinter`], so nothing about how Claude is launched or
-//! driven differs.
+//! changing behaviour. It wraps the existing [`TmuxDriver`] port and names each
+//! tmux session with [`PaneTokenMinter::mint_free`], as the core's spawn path
+//! does, so nothing about how Claude is launched or driven differs. The adapter
+//! owns its own minter; only the core's is used in production until the spawn
+//! path is rerouted through the adapter.
 //!
 //! The event-source side of Claude — HTTP hooks and the JSONL transcript tail —
 //! is fed in through the ingestion seam below rather than pushed by Claude. The
@@ -138,6 +140,8 @@ struct SessionChannel {
 pub struct ClaudeCodePtyHookAdapter<T: TmuxDriver> {
     tmux: T,
     config: ClaudeLaunchConfig,
+    /// Names each launched or resumed tmux session, skipping names a surviving
+    /// tmux session still holds.
     minter: PaneTokenMinter,
     /// Per-session event channels, keyed by the session's tmux pane token
     /// (which is [`AgentSessionHandle::key`]).
@@ -286,7 +290,7 @@ impl<T: TmuxDriver> AgentAdapter for ClaudeCodePtyHookAdapter<T> {
     }
 
     async fn launch(&self, req: LaunchRequest) -> Result<AgentSessionHandle> {
-        let token = self.minter.mint();
+        let token = self.minter.mint_free(&self.tmux).await?;
         // Claude pins the Delta-minted id via `--session-id`, so the provider
         // session id IS that id.
         let mut command = vec![
@@ -318,7 +322,7 @@ impl<T: TmuxDriver> AgentAdapter for ClaudeCodePtyHookAdapter<T> {
     }
 
     async fn resume(&self, req: ResumeRequest) -> Result<AgentSessionHandle> {
-        let token = self.minter.mint();
+        let token = self.minter.mint_free(&self.tmux).await?;
         let command = vec![
             self.config.claude_bin.clone(),
             SETTINGS_FLAG.to_owned(),
