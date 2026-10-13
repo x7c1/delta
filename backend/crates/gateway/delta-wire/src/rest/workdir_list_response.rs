@@ -1,25 +1,10 @@
 //! Response for `GET /api/workdir/list`.
 
-use delta_usecase::{DirEntry, DirListing};
+use delta_usecase::DirListing;
 use serde::Serialize;
 use ts_rs::TS;
 
-/// One subdirectory in a browse listing: its bare name and absolute path.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[ts(rename = "WorkdirEntry")]
-pub struct WireWorkdirEntry {
-    pub name: String,
-    pub path: String,
-}
-
-impl From<DirEntry> for WireWorkdirEntry {
-    fn from(entry: DirEntry) -> Self {
-        WireWorkdirEntry {
-            name: entry.name,
-            path: entry.path,
-        }
-    }
-}
+use crate::rest::workdir_entry::WireWorkdirEntry;
 
 /// Response for `GET /api/workdir/list`: one level of a directory browse.
 ///
@@ -52,6 +37,8 @@ impl From<DirListing> for WireWorkdirListResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use delta_usecase::DirEntry;
 
     #[test]
     fn a_listing_serializes_with_the_rest_field_names() {

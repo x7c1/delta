@@ -19,7 +19,7 @@ use crate::ports::{
     GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace, WorktreeStartPoint,
 };
 use crate::repository::worktree_dir_slug;
-use crate::send_target::WorktreeSpec;
+use crate::worktree_spec::WorktreeSpec;
 
 /// Where a requested worktree will put the session, decided before any git
 /// work runs.

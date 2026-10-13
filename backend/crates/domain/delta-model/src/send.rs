@@ -5,10 +5,10 @@
 //! incoming prompt against the head of this FIFO to confirm a turn start and
 //! correlate it with the resulting transcript message.
 
-use crate::message::MessageUuid;
+use crate::message_uuid::MessageUuid;
 use crate::send_status::SendStatus;
-use crate::session::SessionId;
-use crate::thread::ThreadId;
+use crate::session_id::SessionId;
+use crate::thread_id::ThreadId;
 
 /// A recorded user input awaiting correlation with the transcript.
 ///

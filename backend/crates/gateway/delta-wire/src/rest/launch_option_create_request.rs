@@ -3,7 +3,7 @@
 use serde::Deserialize;
 use ts_rs::TS;
 
-use crate::session::WireAgentProvider;
+use crate::agent_provider::WireAgentProvider;
 
 /// Request body for `POST /api/launch-options`.
 ///

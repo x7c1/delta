@@ -84,7 +84,7 @@ async fn session_start_compact_redispatches_only_the_awaited_send() {
     // A second `Dispatched` row seeded straight through the store — the
     // dispatch path only ever promotes one at a time, so this is the only way
     // to put a row the turn machine knows nothing about in front of the
-    // helper. `SessionStore::enqueue_send` records it already `Dispatched`
+    // helper. `SendStore::enqueue_send` records it already `Dispatched`
     // (the store-level seam the actor calls after typing the keystrokes).
     let bystander = ix
         .store()

@@ -5,8 +5,9 @@ use delta_usecase::SendTarget;
 use serde::Deserialize;
 use ts_rs::TS;
 
-use super::worktree_spec::WireWorktreeSpec;
-use crate::session::WireAgentProvider;
+use crate::agent_provider::WireAgentProvider;
+use crate::rest::send_target_error::SendTargetError;
+use crate::rest::worktree_spec::WireWorktreeSpec;
 
 /// Request body for `POST /api/sends`.
 ///
@@ -95,42 +96,6 @@ pub struct WireCreateSendRequest {
     #[serde(default)]
     #[ts(optional)]
     pub pull_request_number: Option<i64>,
-}
-
-/// Why a [`WireCreateSendRequest`] could not be resolved to a [`SendTarget`].
-///
-/// These are request-shape conflicts the schema alone cannot express, so they
-/// are surfaced as `400 Bad Request` rather than a use-case error.
-#[derive(Debug, PartialEq, Eq)]
-pub enum SendTargetError {
-    /// Neither `thread_id` nor `new_session` was given.
-    Unspecified,
-    /// Both `thread_id` and `new_session: true` were given.
-    Conflicting,
-    /// `new_session: true` was combined with a branch (`semantic_parent_uuid`),
-    /// which has no message to branch from yet.
-    BranchOnNewSession,
-    /// `pull_request_number` was given as zero or a negative number. Pull
-    /// requests are numbered from 1, so nothing could ever resolve it.
-    NonPositivePullRequestNumber,
-}
-
-impl SendTargetError {
-    /// A human-readable reason, used as the `400` response body.
-    pub fn message(&self) -> &'static str {
-        match self {
-            SendTargetError::Unspecified => {
-                "a send must target a thread (`thread_id`) or start a new session (`new_session`)"
-            }
-            SendTargetError::Conflicting => "`thread_id` and `new_session` are mutually exclusive",
-            SendTargetError::BranchOnNewSession => {
-                "`new_session` cannot be combined with a branch (`semantic_parent_uuid`)"
-            }
-            SendTargetError::NonPositivePullRequestNumber => {
-                "`pull_request_number` must be a positive pull request number"
-            }
-        }
-    }
 }
 
 impl WireCreateSendRequest {
@@ -591,7 +556,7 @@ mod tests {
             workdir: None,
             launch_option_ids: None,
             worktree: Some(WireWorktreeSpec {
-                start_point: super::super::worktree_spec::WireWorktreeStartPoint::Head,
+                start_point: super::super::worktree_start_point::WireWorktreeStartPoint::Head,
             }),
             provider: None,
             pull_request_number: None,

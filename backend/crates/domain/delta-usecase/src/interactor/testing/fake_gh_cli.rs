@@ -10,7 +10,8 @@ use tokio::sync::Semaphore;
 
 use crate::error::{Error, Result};
 use crate::ports::GhCli;
-use crate::pull_request::{PullRequest, PullRequestLens};
+use crate::pull_request::PullRequest;
+use crate::pull_request_lens::PullRequestLens;
 
 /// File the fake writes into every clone it produces, so a test can tell the
 /// directory that ended up at the destination apart from a stale one.

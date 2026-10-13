@@ -14,7 +14,7 @@ use crate::ports::{
     pane_for, GitWorktree, SessionStore, SpawningSession, TmuxDriver, Transcript, Workspace,
 };
 use crate::repository::{display_name, identity_key};
-use crate::send_target::WorktreeSpec;
+use crate::worktree_spec::WorktreeSpec;
 
 use super::launch_prep::spawn_launch_preparation;
 use super::{SESSION_ID_FLAG, SETTINGS_FLAG};

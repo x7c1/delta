@@ -7,7 +7,7 @@ use serde_json::json;
 use tower::ServiceExt;
 
 use delta_sqlite::SqliteStore;
-use delta_usecase::{SessionEvent, SessionStore};
+use delta_usecase::{PermissionStore, SessionEvent};
 
 use crate::support::{
     await_turn_completion, build_app, build_app_with, get, post_json, ScenarioGuard, TIMEOUT,

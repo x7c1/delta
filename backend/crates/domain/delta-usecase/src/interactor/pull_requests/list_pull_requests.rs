@@ -7,7 +7,9 @@ use std::time::Instant;
 use crate::error::Result;
 use crate::interactor::{InteractorCore, PrSearchCacheEntry, PR_SEARCH_CACHE_TTL};
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::pull_request::{PullRequest, PullRequestLens, PullRequestList};
+use crate::pull_request::PullRequest;
+use crate::pull_request_lens::PullRequestLens;
+use crate::pull_request_list::PullRequestList;
 
 /// The host segment GitHub uses for the canonical `identity_key`. `gh`
 /// only ever talks to GitHub, so PR identity keys always sit under this

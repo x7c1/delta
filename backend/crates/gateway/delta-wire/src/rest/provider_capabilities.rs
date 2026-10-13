@@ -1,0 +1,71 @@
+//! The UI-relevant slice of a provider's capability profile.
+
+#[cfg(doc)]
+use delta_usecase::SessionScopedAllowCapability;
+use delta_usecase::{AgentCapabilities, LaunchCapability, TerminalCapability};
+use serde::Serialize;
+use ts_rs::TS;
+
+use crate::rest::launch_option_style::WireLaunchOptionStyle;
+
+/// The UI-relevant slice of a provider's capability profile.
+///
+/// A *curated* projection of the internal [`AgentCapabilities`]: it carries only
+/// the capabilities the frontend acts on today, not the whole contract (which
+/// names launch/permission/transcript concepts the UI never branches on). The
+/// UI keys behaviour off these flags rather than off the provider name — a
+/// provider with no terminal hides the terminal tab whatever it is called.
+///
+/// Kept as a struct (rather than a bare flag on the parent) so a further
+/// UI-relevant capability can join it without reshaping the response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(rename = "ProviderCapabilities")]
+pub struct WireProviderCapabilities {
+    /// Whether the provider offers a terminal the browser can attach to.
+    /// Derived from the internal [`TerminalCapability`]:
+    /// [`TerminalCapability::AttachablePty`] (Claude's tmux pane) → `true`;
+    /// [`TerminalCapability::NoPtyNeeded`] / [`TerminalCapability::NoTerminal`]
+    /// (Codex's headless app-server) → `false`. The workspace hides the terminal
+    /// toggle and pane for a provider whose value is `false`.
+    pub has_terminal: bool,
+    /// Whether the browser can inspect the frames Delta exchanges with this
+    /// provider — i.e. whether this provider's sessions get the comms-log pane
+    /// (the `/comms` stream) as their right-pane window.
+    ///
+    /// Derived from the internal [`LaunchCapability`], the same field
+    /// [`Self::launch_option_style`] follows, because *how Delta drives a
+    /// provider* is what decides whether there are frames to show:
+    /// [`LaunchCapability::JsonRpcAppServer`] means Delta itself writes and reads
+    /// every message, so the exchange is inspectable by construction → `true`;
+    /// [`LaunchCapability::PtyCommand`] means Delta launched a terminal program
+    /// and holds no message-level view of it — its window is the terminal
+    /// instead → `false`.
+    ///
+    /// So the two flags are complementary, not independent: the right pane is the
+    /// terminal when [`Self::has_terminal`], and the comms log when this is set.
+    pub has_comms_log: bool,
+    /// Whether this provider understands a permission decision scoped to the
+    /// whole session (`allow_for_session`), rather than only to the one request
+    /// being answered. Derived from the internal
+    /// [`SessionScopedAllowCapability`]. The permission notice offers its
+    /// session-scoped button only where this is `true` — a button that would
+    /// earn a `400 permission_decision_unsupported` when pressed is worse than
+    /// no button, so an unknown capability hides it.
+    pub has_allow_for_session: bool,
+    /// How this provider reads a registered launch option's `(name, value?)`
+    /// pair. Settings words its launch-option form from this, so a user
+    /// registering an option for a field-style provider is told to write
+    /// `model`, not `--model`.
+    pub launch_option_style: WireLaunchOptionStyle,
+}
+
+impl From<AgentCapabilities> for WireProviderCapabilities {
+    fn from(capabilities: AgentCapabilities) -> Self {
+        WireProviderCapabilities {
+            has_terminal: matches!(capabilities.terminal, TerminalCapability::AttachablePty),
+            has_comms_log: matches!(capabilities.launch, LaunchCapability::JsonRpcAppServer),
+            has_allow_for_session: capabilities.supports_session_scoped_allow(),
+            launch_option_style: capabilities.launch.into(),
+        }
+    }
+}

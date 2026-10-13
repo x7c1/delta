@@ -1,190 +1,15 @@
 //! Response for `GET /api/sessions/{id}/sends`.
 
 use delta_model::Send;
-use delta_usecase::{
-    PendingPermission, PendingQuestion, RunningSubagent, SessionLiveState, TurnState,
-};
+use delta_usecase::SessionLiveState;
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::file_change::WireFileChangeDetail;
+use crate::rest::pending_permission::WirePendingPermission;
+use crate::rest::pending_question::WirePendingQuestion;
+use crate::rest::running_subagent::WireRunningSubagent;
+use crate::rest::turn::WireTurn;
 use crate::send::WireSend;
-
-/// The phase of a session's turn state machine, as reported on the REST
-/// surface. Mirrors the domain `TurnState` variants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(rename = "TurnPhase")]
-pub enum WireTurnPhase {
-    Idle,
-    AwaitingEcho,
-    InFlight,
-}
-
-/// A session's current turn state: the phase plus, when a Delta-dispatched
-/// send drives the turn, its send id. `send_id` is `null` while idle and for a
-/// turn started by external pane input.
-///
-/// This is queryable runtime state (not an event), so a client reconnecting
-/// after a missed event window can rebuild its in-progress indicator from a
-/// plain refetch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[ts(rename = "Turn")]
-pub struct WireTurn {
-    pub state: WireTurnPhase,
-    pub send_id: Option<i64>,
-    /// The thread the in-flight turn is running on, so a reconnecting client can
-    /// re-seed its per-thread running indicator on the exact thread. `null`
-    /// while idle.
-    pub thread_id: Option<i64>,
-}
-
-impl WireTurn {
-    fn from_state(state: TurnState, in_progress_thread: Option<i64>) -> Self {
-        match state {
-            TurnState::Idle => WireTurn {
-                state: WireTurnPhase::Idle,
-                send_id: None,
-                thread_id: None,
-            },
-            TurnState::AwaitingEcho { send_id, .. } => WireTurn {
-                state: WireTurnPhase::AwaitingEcho,
-                send_id: Some(send_id),
-                thread_id: in_progress_thread,
-            },
-            TurnState::InFlight { send_id } => WireTurn {
-                state: WireTurnPhase::InFlight,
-                send_id,
-                thread_id: in_progress_thread,
-            },
-        }
-    }
-}
-
-/// A permission dialog currently awaiting a human answer, as reported on the
-/// REST surface.
-///
-/// This is the queryable counterpart of the `permission_requested` event
-/// (same fields, minus the session id the URL already names): the event is
-/// lost for a client whose socket was down when it fired, so a reconnecting
-/// client rebuilds its permission notice from this instead.
-///
-/// Several requests can be pending at once (a provider running tool calls in
-/// parallel), and the envelope reports the queue's **head** here plus the depth
-/// in `permission_count` — the dialog to show, and how many answers are owed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[ts(rename = "PendingPermission")]
-pub struct WirePendingPermission {
-    /// The request row id `POST /api/permissions/{id}/decision` answers.
-    pub request_id: i64,
-    pub tool_name: String,
-    /// The tool input, serialized as JSON text.
-    pub tool_input: String,
-    /// What allowing the request would do to files on disk, when the provider
-    /// stated it. The same detail the `permission_requested` event carries, so a
-    /// client that missed that event rebuilds the *same* card from this refetch
-    /// rather than one degraded to the input summary.
-    ///
-    /// Absent from the envelope entirely when nothing is known, which is every
-    /// request that is not a file change.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub file_change: Option<WireFileChangeDetail>,
-    /// A directory the request also asks to be allowed to write under for the
-    /// rest of the session, when the provider asked for one — the same field the
-    /// `permission_requested` event carries, and independent of `file_change` in
-    /// the same way: a request can carry this and no change set at all.
-    ///
-    /// Absent from the envelope entirely when the provider asked for no root.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub grant_root: Option<String>,
-}
-
-impl From<&PendingPermission> for WirePendingPermission {
-    fn from(pending: &PendingPermission) -> Self {
-        WirePendingPermission {
-            request_id: pending.request_id,
-            tool_name: pending.tool_name.clone(),
-            tool_input: pending.tool_input_json.clone(),
-            file_change: pending.file_change.as_ref().map(WireFileChangeDetail::from),
-            grant_root: pending.grant_root.clone(),
-        }
-    }
-}
-
-/// An `AskUserQuestion` tool call currently presenting its options in the TUI,
-/// as reported on the REST surface.
-///
-/// The queryable counterpart of the `question_asked` event (same fields, minus
-/// the session id the URL already names): the event is lost for a client whose
-/// socket was down when it fired, so a reconnecting client rebuilds its
-/// question card from this instead.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[ts(rename = "PendingQuestion")]
-pub struct WirePendingQuestion {
-    /// The `PreToolUse` row id whose `tool_result` resolves this question.
-    pub request_id: i64,
-    /// The in-flight turn's thread, so a reconnecting client shows the question
-    /// card only on the thread it belongs to.
-    pub thread_id: i64,
-    /// The raw `{"questions":[…]}` tool input, serialized as JSON text.
-    pub tool_input: String,
-}
-
-impl From<PendingQuestion> for WirePendingQuestion {
-    fn from(pending: PendingQuestion) -> Self {
-        WirePendingQuestion {
-            request_id: pending.request_id,
-            thread_id: pending.thread_id.0,
-            tool_input: pending.tool_input_json,
-        }
-    }
-}
-
-/// A subagent currently running for the session, as reported on the REST
-/// surface: an `Agent`/`Task` tool call inside a turn, or the background agent
-/// Claude Code forks for a slash command's skill, which runs with no turn in
-/// flight at all.
-///
-/// The queryable counterpart of the `subagent_started` event (minus the session
-/// id the URL already names): the start/finish events are lost for a client
-/// whose socket was down when they fired, so a reconnecting client rebuilds its
-/// running-subagent indicator from this list instead.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[ts(rename = "RunningSubagent")]
-pub struct WireRunningSubagent {
-    /// The thread that launched the subagent, so a reconnecting client can keep
-    /// that thread's running indicator lit — and its unread badge suppressed —
-    /// until the subagent finishes, which for a background subagent outlives the
-    /// launching turn.
-    pub thread_id: i64,
-    /// The launch's `tool_use_id`, its stable key — synthetic
-    /// (`forked-skill:<agentId>`) for a forked skill, which makes no tool call.
-    pub tool_use_id: String,
-    /// The subagent type (e.g. `general-purpose`), a forked skill's skill name,
-    /// or null if the launch carried none.
-    pub subagent_type: Option<String>,
-    /// The short task description, if the launch carried one, for display.
-    pub description: Option<String>,
-    /// Whether the launch runs in the background — `run_in_background: true` for
-    /// a tool call, and always true for a forked skill. A reconnecting client
-    /// carries this so its turn-end sweep keeps a surviving background subagent
-    /// while dropping foreground ones.
-    pub background: bool,
-}
-
-impl From<RunningSubagent> for WireRunningSubagent {
-    fn from(subagent: RunningSubagent) -> Self {
-        WireRunningSubagent {
-            thread_id: subagent.thread_id.0,
-            tool_use_id: subagent.tool_use_id,
-            subagent_type: subagent.subagent_type,
-            description: subagent.description,
-            background: subagent.background,
-        }
-    }
-}
 
 /// Response for `GET /api/sessions/{id}/sends`: the session's open
 /// (non-terminal) sends — status `queued` or `dispatched` — oldest first, plus
@@ -233,43 +58,10 @@ impl WireSendsResponse {
 mod tests {
     use super::*;
 
+    use delta_usecase::{PendingPermission, PendingQuestion, RunningSubagent, TurnState};
+
     use delta_model::ThreadId;
     use delta_usecase::{AgentFileChange, AgentFileChangeDetail, AgentFileChangeKind};
-
-    #[test]
-    fn turn_state_serializes_with_snake_case_phase_and_optional_send_id() {
-        assert_eq!(
-            serde_json::to_value(WireTurn::from_state(TurnState::Idle, Some(3))).unwrap(),
-            serde_json::json!({ "state": "idle", "send_id": null, "thread_id": null }),
-        );
-        assert_eq!(
-            serde_json::to_value(WireTurn::from_state(
-                TurnState::AwaitingEcho {
-                    send_id: 7,
-                    slash_command: false,
-                },
-                Some(3),
-            ))
-            .unwrap(),
-            serde_json::json!({ "state": "awaiting_echo", "send_id": 7, "thread_id": 3 }),
-        );
-        assert_eq!(
-            serde_json::to_value(WireTurn::from_state(
-                TurnState::InFlight { send_id: Some(7) },
-                Some(3),
-            ))
-            .unwrap(),
-            serde_json::json!({ "state": "in_flight", "send_id": 7, "thread_id": 3 }),
-        );
-        assert_eq!(
-            serde_json::to_value(WireTurn::from_state(
-                TurnState::InFlight { send_id: None },
-                None,
-            ))
-            .unwrap(),
-            serde_json::json!({ "state": "in_flight", "send_id": null, "thread_id": null }),
-        );
-    }
 
     #[test]
     fn sends_response_carries_sends_turn_permission_and_question() {

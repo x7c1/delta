@@ -80,6 +80,7 @@ mod runner;
 mod send;
 mod session;
 mod step;
+mod step_kind;
 mod subagent;
 mod sync_cursor;
 mod thread;
@@ -90,7 +91,8 @@ mod tests;
 pub(crate) use runner::migrate;
 #[cfg(test)]
 pub(crate) use send::UNDO_HELD_AT_RENAME;
-pub(crate) use step::{Step, StepKind};
+pub(crate) use step::Step;
+pub(crate) use step_kind::StepKind;
 
 use crate::error::{Error, Result};
 

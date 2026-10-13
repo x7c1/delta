@@ -5,7 +5,8 @@ use delta_model::SessionId;
 use crate::error::{Error, Result};
 use crate::interactor::InteractorCore;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::worktree_dir::{WorktreeBranch, WorktreeDir};
+use crate::worktree_branch::WorktreeBranch;
+use crate::worktree_dir::WorktreeDir;
 use crate::WorktreeInspection;
 
 use super::child_path;

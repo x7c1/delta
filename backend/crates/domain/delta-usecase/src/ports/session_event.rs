@@ -1,8 +1,10 @@
 //! An event the Interactor emits for the browser to render.
 
-use delta_model::{AgentProvider, MessageUuid, SessionId, ThreadId};
+use delta_model::{MessageUuid, SessionId, ThreadId};
 
 use crate::agent::AgentFileChangeDetail;
+
+use super::StatusSnapshot;
 
 /// An event the Interactor emits for the browser to render.
 ///
@@ -64,7 +66,7 @@ pub enum SessionEvent {
     /// the echo deadline expires and returns the send to `queued` to be
     /// re-typed on the next idle. The turn machine allows that retry once and
     /// then *parks* the send: the row goes back to `queued` with the hold
-    /// marker (`SessionStore::hold_send_for_release`), so it stays in the
+    /// marker (`SendStore::hold_send_for_release`), so it stays in the
     /// open-send list, is skipped by every automatic dispatch, and waits for
     /// the user to release it (typed once more) or cancel it — the same state
     /// the boot restore leaves an orphaned row in. The event is still sent
@@ -489,102 +491,4 @@ pub enum SessionEvent {
         /// different reactions, and only the message distinguishes them.
         message: String,
     },
-}
-
-/// A snapshot of a session's usage state, as its provider's own edge reported
-/// it.
-///
-/// Every field is optional, because every provider reports a different subset
-/// at a different time: before a Claude session's first API response
-/// `current_usage` / `used_percentage` are `null`, while Codex reports token
-/// usage and account rate limits on two independent notifications, so a given
-/// snapshot may speak to only one of them. See [`Self::rate_limits`] for how
-/// "this frame says nothing about rate limits" (`None`) is distinguished from
-/// "the account has none" (`Some(vec![])`, which is what a non-Pro/Max Claude
-/// account's status line reports — not an absent field).
-///
-/// **The neutral layer never computes any of these numbers.** Each provider's
-/// adapter (or hook) is the authority for its own: Claude Code precomputes
-/// `used_percentage` against the correct window size and Delta forwards it
-/// verbatim; the Codex adapter derives its percentage from the counts and the
-/// `modelContextWindow` the server reports, and omits it when the server
-/// reports no window. Recomputing here would mean guessing a window size the
-/// core does not know.
-#[derive(Debug, Clone, PartialEq)]
-pub struct StatusSnapshot {
-    /// Which provider's account and session these numbers describe.
-    ///
-    /// Load-bearing rather than decorative: rate limits are scoped to an
-    /// account × provider, so the browser keys them by this and can never show
-    /// one provider's limits while another provider's session is focused.
-    pub provider: AgentProvider,
-    /// The selected model's stable id (e.g. `claude-opus-4-...`).
-    pub model_id: Option<String>,
-    /// The selected model's human-readable name (e.g. `Opus 4.8`).
-    pub model_display_name: Option<String>,
-    /// Percentage of the context window in use, as computed by the provider's
-    /// own edge — never recomputed here. `None` when the provider does not
-    /// expose enough to say (e.g. Codex before the server reports a
-    /// `modelContextWindow`), which reads as "no bar", never as 0%.
-    pub context_used_percentage: Option<f64>,
-    /// The context window's total size in tokens.
-    pub context_window_size: Option<u64>,
-    /// Tokens currently occupying the context window.
-    pub context_current_usage: Option<u64>,
-    /// Total input tokens sent this session.
-    pub total_input_tokens: Option<u64>,
-    /// The account's rate-limit windows, most significant first.
-    ///
-    /// `None` means this snapshot makes **no statement** about rate limits (a
-    /// Codex token-usage frame says nothing about them, and must not clear
-    /// what an earlier account frame reported). `Some(windows)` replaces the
-    /// account's windows wholesale — including `Some(vec![])`, which is how a
-    /// provider says "this account has no windows to show".
-    pub rate_limits: Option<Vec<RateLimitWindow>>,
-    /// Total session cost in USD.
-    pub total_cost_usd: Option<f64>,
-    /// The session's working directory.
-    pub current_dir: Option<String>,
-}
-
-impl StatusSnapshot {
-    /// An empty snapshot for `provider`: it states nothing at all, so a caller
-    /// fills in only the facts its frame actually carried. There is no
-    /// `Default`, because a snapshot with no provider would be a snapshot whose
-    /// rate limits belong to nobody.
-    pub fn new(provider: AgentProvider) -> Self {
-        Self {
-            provider,
-            model_id: None,
-            model_display_name: None,
-            context_used_percentage: None,
-            context_window_size: None,
-            context_current_usage: None,
-            total_input_tokens: None,
-            rate_limits: None,
-            total_cost_usd: None,
-            current_dir: None,
-        }
-    }
-}
-
-/// One rate-limit window from a [`StatusSnapshot`].
-///
-/// Windows are identified by their **duration**, not by a name. Claude reports
-/// two fixed windows (5 hours and 7 days) and Codex reports anonymous
-/// `primary` / `secondary` windows carrying an explicit `windowDurationMins`,
-/// so mapping either provider's windows onto the other's names would be a
-/// fiction. Carrying the duration as data lets the browser label and pace a
-/// window it has never seen before.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct RateLimitWindow {
-    /// How long the window is, in seconds — its identity, and what the browser
-    /// labels the row from (`5h`, `7d`). `None` when the provider reports a
-    /// window without saying how long it is; the window is still shown (its
-    /// percentage is real), just unlabelled.
-    pub duration_seconds: Option<i64>,
-    /// Percentage of the window consumed.
-    pub used_percentage: Option<f64>,
-    /// Unix epoch seconds at which the window resets.
-    pub resets_at: Option<i64>,
 }

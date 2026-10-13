@@ -22,7 +22,7 @@ where
     /// For a Delta launch the row already exists as `spawning` (written when the
     /// id was minted), so this *activates* it — `spawning` → `active`, filling
     /// in the hook-reported transcript path; for an external `claude` the row is
-    /// inserted fresh (see [`SessionStore::register_session`]).
+    /// inserted fresh (see [`SessionRecordStore::register_session`](crate::ports::SessionRecordStore::register_session)).
     ///
     /// Takes the raw identifying fields rather than a specific hook type, because
     /// two hooks register a session — the first `UserPromptSubmit` and

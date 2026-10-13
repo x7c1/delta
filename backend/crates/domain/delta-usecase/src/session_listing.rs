@@ -46,11 +46,11 @@ pub struct SessionListing {
     /// The id of the session's trunk (`main`) thread, for drilling in.
     pub main_thread_id: ThreadId,
     /// Every thread of the session — the trunk and its branches — ascending
-    /// `id`, the order [`SessionStore::list_threads`] returns them in. Carried
+    /// `id`, the order [`ThreadStore::list_threads`] returns them in. Carried
     /// on the row so the navigator can draw a session's thread tree without a
     /// request per row.
     ///
-    /// [`SessionStore::list_threads`]: crate::ports::SessionStore::list_threads
+    /// [`ThreadStore::list_threads`]: crate::ports::ThreadStore::list_threads
     pub threads: Vec<Thread>,
     /// The timestamp of the session's most recent message (ISO-8601 UTC), or
     /// `None` when the session has no messages yet. Read from the denormalized

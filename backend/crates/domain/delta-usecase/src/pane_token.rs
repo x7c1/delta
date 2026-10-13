@@ -11,8 +11,8 @@
 //! monotonically increasing `n`. The counter is atomic, so minting is
 //! collision-free without relying on randomness or wall-clock seeds.
 //! `delta-<n>` is always a valid tmux session name (no `.` or `:`).
-
-use std::sync::atomic::{AtomicU64, Ordering};
+//!
+//! [`PaneTokenMinter`]: crate::PaneTokenMinter
 
 /// A Delta-minted tmux session name, e.g. `delta-1`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -22,6 +22,12 @@ impl PaneToken {
     /// The token as a tmux session name.
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// The `n`th token [`PaneTokenMinter`](crate::PaneTokenMinter) hands out:
+    /// `delta-<n>`.
+    pub(crate) fn minted(n: u64) -> Self {
+        Self(format!("delta-{n}"))
     }
 
     /// The launch key of an **adapter-backed** (terminal-less) session, derived
@@ -36,6 +42,8 @@ impl PaneToken {
     /// minting one) keeps [`PaneTokenMinter`]'s counter — and the `delta-<n>`
     /// namespace tmux really uses — untouched, and makes the key both unique
     /// and reproducible without probing tmux for a free name.
+    ///
+    /// [`PaneTokenMinter`]: crate::PaneTokenMinter
     ///
     /// The `adapter-` prefix is what keeps it out of that namespace: a token
     /// that reached tmux by mistake could never collide with a real pane.
@@ -68,41 +76,10 @@ impl std::fmt::Display for PaneToken {
     }
 }
 
-/// Mints unique [`PaneToken`]s as `delta-<n>` with a monotonic counter.
-///
-/// The counter is atomic, so minting is collision-free without any external
-/// lock — a fresh spawn mints its token before taking the registry mutex.
-#[derive(Debug, Default)]
-pub struct PaneTokenMinter {
-    next: AtomicU64,
-}
-
-impl PaneTokenMinter {
-    /// Create a minter starting from `delta-1`.
-    pub fn new() -> Self {
-        Self {
-            next: AtomicU64::new(1),
-        }
-    }
-
-    /// Mint the next unique token.
-    pub fn mint(&self) -> PaneToken {
-        let n = self.next.fetch_add(1, Ordering::Relaxed);
-        PaneToken(format!("delta-{n}"))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn mints_monotonic_unique_tokens() {
-        let minter = PaneTokenMinter::new();
-        assert_eq!(minter.mint().as_str(), "delta-1");
-        assert_eq!(minter.mint().as_str(), "delta-2");
-        assert_eq!(minter.mint().as_str(), "delta-3");
-    }
+    use crate::PaneTokenMinter;
 
     #[test]
     fn adapter_launch_key_is_derived_from_the_session_id_and_never_minted() {
@@ -116,13 +93,5 @@ mod tests {
         // the key could not collide with a `delta-<n>` pane even if it leaked.
         assert_eq!(minter.mint().as_str(), "delta-1");
         assert!(!key.as_str().starts_with("delta-"));
-    }
-
-    #[test]
-    fn token_is_a_valid_tmux_session_name() {
-        // tmux session names must not contain `.` or `:`; `delta-<n>` never does.
-        let token = PaneTokenMinter::new().mint();
-        assert!(!token.as_str().contains('.'));
-        assert!(!token.as_str().contains(':'));
     }
 }

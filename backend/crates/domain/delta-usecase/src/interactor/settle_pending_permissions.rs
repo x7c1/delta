@@ -39,7 +39,7 @@ where
     /// caller to announce.
     ///
     /// `reason` is the `decision_reason` the trail carries (see
-    /// [`SessionStore::deny_pending_permission_requests`]): `denied` alone would
+    /// [`PermissionStore::deny_pending_permission_requests`]): `denied` alone would
     /// be indistinguishable from a user's Deny, so each caller passes a sentence
     /// naming why nobody could answer.
     ///
@@ -77,7 +77,7 @@ where
     /// A sweep failure is logged and the rest of the settle continues: a stuck
     /// dialog is worse than an unsettled audit row.
     ///
-    /// [`SessionStore::deny_pending_permission_requests`]: crate::ports::SessionStore::deny_pending_permission_requests
+    /// [`PermissionStore::deny_pending_permission_requests`]: crate::ports::PermissionStore::deny_pending_permission_requests
     /// [`SessionRuntime::clear_pending_permissions`]: crate::interactor::session_actor::runtime::SessionRuntime::clear_pending_permissions
     pub(in crate::interactor) async fn settle_pending_permissions(
         &mut self,

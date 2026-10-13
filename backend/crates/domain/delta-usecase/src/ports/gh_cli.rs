@@ -9,7 +9,8 @@
 use async_trait::async_trait;
 
 use crate::error::Result;
-use crate::pull_request::{PullRequest, PullRequestLens};
+use crate::pull_request::PullRequest;
+use crate::pull_request_lens::PullRequestLens;
 
 /// Drives the `gh` CLI for the new-session PR tab.
 ///

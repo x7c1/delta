@@ -2,6 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::hooks::permission_decision_body::PermissionDecisionBody;
+use crate::hooks::permission_hook_output::PermissionHookOutput;
+
 /// `PermissionRequest` response.
 ///
 /// Claude Code's HTTP `PermissionRequest` hook consumes a decision only from
@@ -38,21 +41,6 @@ impl PermissionRequestResponse {
             },
         }
     }
-}
-
-/// The `hookSpecificOutput` envelope Claude Code expects for
-/// `PermissionRequest`.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PermissionHookOutput {
-    #[serde(rename = "hookEventName")]
-    pub hook_event_name: String,
-    pub decision: PermissionDecisionBody,
-}
-
-/// The decision body: `behavior` is `"allow"` or `"deny"`.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PermissionDecisionBody {
-    pub behavior: String,
 }
 
 #[cfg(test)]

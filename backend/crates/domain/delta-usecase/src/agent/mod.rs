@@ -34,7 +34,7 @@ pub use capabilities::{
     SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability, TerminalCapability,
     TranscriptCapability,
 };
-pub use content_source::{AgentContentSource, NullContentSource};
+pub use content_source::AgentContentSource;
 pub use event::{
     AgentEvent, AgentFileChange, AgentFileChangeDetail, AgentFileChangeKind,
     AgentPermissionRequest, AgentTokenUsage, SessionEndReason, TurnStatus,
@@ -47,6 +47,9 @@ pub use launch_option_cardinality::LaunchOptionCardinality;
 
 mod launch_option_vocabulary;
 pub use launch_option_vocabulary::LaunchOptionVocabulary;
+
+mod null_content_source;
+pub use null_content_source::NullContentSource;
 
 mod null_launch_option_vocabulary;
 pub use null_launch_option_vocabulary::NullLaunchOptionVocabulary;

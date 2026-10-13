@@ -74,25 +74,9 @@ pub trait AgentContentSource: Send + Sync + std::fmt::Debug {
     /// any of the turn's item frames are ingested. The default is a no-op: a
     /// provider that pulls its content elsewhere (Claude's transcript,
     /// [`NullContentSource`]) has no per-turn push context to set.
+    ///
+    /// [`NullContentSource`]: crate::agent::NullContentSource
     fn begin_turn(&mut self, thread_id: ThreadId, semantic_parent: Option<MessageUuid>) {
         let _ = (thread_id, semantic_parent);
-    }
-}
-
-/// A content source that produces nothing.
-///
-/// The default [`AgentContentSource`] a provider that does not push structured
-/// content frames returns from [`crate::agent::AgentAdapter::content_source`].
-/// Claude pulls its conversation content from a JSONL transcript
-/// (`ConversationSource`), so its event pump — were one ever run — would fold no
-/// content here; this is the harmless seam it gets. The event pump only runs for
-/// a push-based provider (Codex), whose adapter overrides the default with a
-/// real accumulator, so this is never actually fed in production.
-#[derive(Debug, Default)]
-pub struct NullContentSource;
-
-impl AgentContentSource for NullContentSource {
-    fn ingest(&mut self, _event: &AgentEvent) -> (Vec<Message>, Vec<Effect>) {
-        (Vec::new(), Vec::new())
     }
 }

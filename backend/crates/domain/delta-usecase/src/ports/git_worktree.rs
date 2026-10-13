@@ -4,69 +4,9 @@
 use async_trait::async_trait;
 
 use crate::error::Result;
-use crate::ports::{BranchDeletion, WorktreeInspection, WorktreeRemoval};
-
-/// Where a new session's worktree should start from, and whether it gets its
-/// own `delta-<id>` branch or works on an existing branch directly.
-///
-/// A fresh session opts into a worktree by naming a start point:
-/// - `Head` / `RemoteBranch` cut a *new* `delta-<id>` branch — from the current
-///   checkout, or from a named remote branch (fetched first so the worktree
-///   always starts from the latest remote tip).
-/// - `UseRemoteBranch` instead works on the named branch *itself* in the
-///   worktree (no `delta-<id>` branch). Because git forbids checking one branch
-///   out in two worktrees, the orchestration reuses the worktree that already
-///   has that branch checked out (including the main working tree) when one
-///   exists, and otherwise creates a worktree that checks the branch out.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorktreeStartPoint {
-    /// Cut a new `delta-<id>` branch off the repository's current `HEAD`. No
-    /// network access.
-    Head,
-    /// Cut a new `delta-<id>` branch off `origin/<name>`, fetched first so it
-    /// reflects the latest remote tip. The carried name is the remote branch's
-    /// short name (no `origin/` prefix), e.g. `main`.
-    RemoteBranch(String),
-    /// Work on the branch `<name>` itself in the worktree (no `delta-<id>`
-    /// branch). The carried name is the branch's short name (no `origin/`
-    /// prefix). The orchestration reuses an existing worktree that already has
-    /// `<name>` checked out, or creates one that checks it out (creating a
-    /// local tracking branch off `origin/<name>` first when no local branch
-    /// exists yet).
-    UseRemoteBranch(String),
-}
-
-/// Git facts about a candidate working directory, for the detection endpoint.
-///
-/// `repo_root` is the repository root containing the queried path (`None` when
-/// it is not inside a git repository), and `default_branch` is that
-/// repository's default branch short name when known. Computed without any
-/// network access (no fetch).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GitRepoInfo {
-    /// The repository root containing the queried path, or `None` when the path
-    /// is not inside a git repository.
-    pub repo_root: Option<String>,
-    /// The repository's default branch short name (e.g. `main`), or `None` when
-    /// it is unset or the path is not a git repository.
-    pub default_branch: Option<String>,
-}
-
-/// The remote branches of a repository, with its default branch highlighted.
-///
-/// Returned by [`GitWorktree::fetch_remote_branches`] to back the branch picker:
-/// `branches` are the remote branch short names (no `origin/` prefix), and
-/// `default_branch` is the repository's default branch short name when it can be
-/// determined (`None` when `origin/HEAD` is unset).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RemoteBranches {
-    /// The repository's default branch short name (e.g. `main`), or `None` when
-    /// `origin/HEAD` is unset.
-    pub default_branch: Option<String>,
-    /// The remote branch short names (no `origin/` prefix), excluding the
-    /// `origin/HEAD` symref entry.
-    pub branches: Vec<String>,
-}
+use crate::ports::{
+    BranchDeletion, RemoteBranches, WorktreeInspection, WorktreeRemoval, WorktreeStartPoint,
+};
 
 /// Detects git repositories, and creates and removes per-session git worktrees.
 ///

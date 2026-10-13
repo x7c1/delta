@@ -2,7 +2,7 @@
 
 use super::*;
 use axum::http::StatusCode;
-use delta_usecase::{NewSession, SessionEvent, SessionId, SessionStore};
+use delta_usecase::{NewSession, SessionEvent, SessionId};
 
 /// Register a closed session that ran in a directory of its own (not a Delta
 /// worktree, so its removal touches no git).

@@ -4,10 +4,10 @@
 //! out of both:
 //!
 //! - the boot-time reconcile (see
-//!   [`SessionStore::restore_all_dispatched`]),
+//!   [`SendStore::restore_all_dispatched`](crate::ports::SendStore::restore_all_dispatched)),
 //!   which recovers every `dispatched` row a dead server process left behind;
 //! - the echo-deadline park (see
-//!   [`SessionStore::hold_send_for_release`]),
+//!   [`SendStore::hold_send_for_release`](crate::ports::SendStore::hold_send_for_release)),
 //!   for a send whose keystrokes vanished without a trace twice running.
 //!
 //! Such a row is deliberately **never dispatched automatically**: a restored
@@ -25,7 +25,7 @@
 //! ordinary enqueue would — because a restored row typically belongs to a
 //! session the restart left closed, and with no live pane nothing else
 //! would ever dispatch (or even reopen) it. Then the marker clears
-//! ([`SessionStore::release_held_send`]):
+//! ([`SendStore::release_held_send`](crate::ports::SendStore::release_held_send)):
 //! only a still-`queued`, still-held row transitions, so a release racing
 //! a cancel (or a duplicate release) is a clean
 //! [`Error::SendNotReleasable`] conflict rather than a clobber. On success

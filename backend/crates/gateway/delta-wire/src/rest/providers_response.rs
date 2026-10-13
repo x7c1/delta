@@ -1,143 +1,11 @@
 //! The wire form of the provider-availability listing (`GET /api/providers`).
 
 use delta_model::ProviderAvailability;
-#[cfg(doc)]
-use delta_usecase::SessionScopedAllowCapability;
-use delta_usecase::{AgentCapabilities, LaunchCapability, TerminalCapability};
+use delta_usecase::AgentCapabilities;
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::session::WireAgentProvider;
-
-/// The UI-relevant slice of a provider's capability profile.
-///
-/// A *curated* projection of the internal [`AgentCapabilities`]: it carries only
-/// the capabilities the frontend acts on today, not the whole contract (which
-/// names launch/permission/transcript concepts the UI never branches on). The
-/// UI keys behaviour off these flags rather than off the provider name — a
-/// provider with no terminal hides the terminal tab whatever it is called.
-///
-/// Kept as a struct (rather than a bare flag on the parent) so a further
-/// UI-relevant capability can join it without reshaping the response.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[ts(rename = "ProviderCapabilities")]
-pub struct WireProviderCapabilities {
-    /// Whether the provider offers a terminal the browser can attach to.
-    /// Derived from the internal [`TerminalCapability`]:
-    /// [`TerminalCapability::AttachablePty`] (Claude's tmux pane) → `true`;
-    /// [`TerminalCapability::NoPtyNeeded`] / [`TerminalCapability::NoTerminal`]
-    /// (Codex's headless app-server) → `false`. The workspace hides the terminal
-    /// toggle and pane for a provider whose value is `false`.
-    pub has_terminal: bool,
-    /// Whether the browser can inspect the frames Delta exchanges with this
-    /// provider — i.e. whether this provider's sessions get the comms-log pane
-    /// (the `/comms` stream) as their right-pane window.
-    ///
-    /// Derived from the internal [`LaunchCapability`], the same field
-    /// [`Self::launch_option_style`] follows, because *how Delta drives a
-    /// provider* is what decides whether there are frames to show:
-    /// [`LaunchCapability::JsonRpcAppServer`] means Delta itself writes and reads
-    /// every message, so the exchange is inspectable by construction → `true`;
-    /// [`LaunchCapability::PtyCommand`] means Delta launched a terminal program
-    /// and holds no message-level view of it — its window is the terminal
-    /// instead → `false`.
-    ///
-    /// So the two flags are complementary, not independent: the right pane is the
-    /// terminal when [`Self::has_terminal`], and the comms log when this is set.
-    pub has_comms_log: bool,
-    /// Whether this provider understands a permission decision scoped to the
-    /// whole session (`allow_for_session`), rather than only to the one request
-    /// being answered. Derived from the internal
-    /// [`SessionScopedAllowCapability`]. The permission notice offers its
-    /// session-scoped button only where this is `true` — a button that would
-    /// earn a `400 permission_decision_unsupported` when pressed is worse than
-    /// no button, so an unknown capability hides it.
-    pub has_allow_for_session: bool,
-    /// How this provider reads a registered launch option's `(name, value?)`
-    /// pair. Settings words its launch-option form from this, so a user
-    /// registering an option for a field-style provider is told to write
-    /// `model`, not `--model`.
-    pub launch_option_style: WireLaunchOptionStyle,
-}
-
-/// How a provider interprets a launch option's `name` and `value`.
-///
-/// A registered launch option is a provider-neutral `(name, value?)` pair; what
-/// the pair *means* depends on how the provider is launched, which is why this
-/// is a capability rather than something the UI derives from the provider name.
-/// Delta validates neither names nor values (the agent that receives them owns
-/// that vocabulary), so telling the user which vocabulary to write in is the
-/// only guard-rail there is — hence carrying it on the wire.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(rename = "LaunchOptionStyle")]
-pub enum WireLaunchOptionStyle {
-    /// `name` is a command-line flag and `value` its argument
-    /// (`--permission-mode auto`). A valueless option is a bare flag.
-    CliFlag,
-    /// `name` is a field of the provider's session-start request and `value`
-    /// that field's value (Codex's `thread/start`: `model` → `gpt-5.6-sol`). A
-    /// valueless option sets a bare boolean field.
-    RequestField,
-}
-
-impl From<AgentCapabilities> for WireProviderCapabilities {
-    fn from(capabilities: AgentCapabilities) -> Self {
-        WireProviderCapabilities {
-            has_terminal: matches!(capabilities.terminal, TerminalCapability::AttachablePty),
-            has_comms_log: matches!(capabilities.launch, LaunchCapability::JsonRpcAppServer),
-            has_allow_for_session: capabilities.supports_session_scoped_allow(),
-            launch_option_style: capabilities.launch.into(),
-        }
-    }
-}
-
-impl From<LaunchCapability> for WireLaunchOptionStyle {
-    /// Derived from *how the provider is launched*, the same profile field that
-    /// decides which session path it takes: a provider Delta launches as a
-    /// command line takes its options as argv flags, while one Delta drives over
-    /// a structured request takes them as fields of that request. Deriving it
-    /// keeps the adapter's capability profile the single source of truth, so a
-    /// new provider cannot ship a launch style the UI has never heard of.
-    fn from(launch: LaunchCapability) -> Self {
-        match launch {
-            LaunchCapability::PtyCommand => WireLaunchOptionStyle::CliFlag,
-            LaunchCapability::JsonRpcAppServer => WireLaunchOptionStyle::RequestField,
-        }
-    }
-}
-
-/// JSON shape of one provider's launch availability plus its capability profile.
-///
-/// `provider`/`available`/`detail` mirror the domain [`ProviderAvailability`]:
-/// `available` reports whether the provider's launch binary is present on the
-/// server host (v1 checks binary presence only); `detail` carries a
-/// human-readable reason when it is not, which the new-session selector shows
-/// next to the disabled option. The `detail`-carrying shape leaves room for a
-/// future version-compatibility verdict without a breaking reshape (see the
-/// domain type's docs). `capabilities` carries the UI-relevant capability
-/// profile — resolved statically per provider, so it is present even for an
-/// unavailable provider.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[ts(rename = "ProviderAvailability")]
-pub struct WireProviderAvailability {
-    pub provider: WireAgentProvider,
-    pub available: bool,
-    /// A reason string when `available` is `false`; `null` when available.
-    pub detail: Option<String>,
-    pub capabilities: WireProviderCapabilities,
-}
-
-impl From<(ProviderAvailability, AgentCapabilities)> for WireProviderAvailability {
-    fn from((availability, capabilities): (ProviderAvailability, AgentCapabilities)) -> Self {
-        WireProviderAvailability {
-            provider: availability.provider.into(),
-            available: availability.available,
-            detail: availability.detail,
-            capabilities: capabilities.into(),
-        }
-    }
-}
+use crate::rest::provider_availability::WireProviderAvailability;
 
 /// JSON shape of `GET /api/providers`: launch availability for every known
 /// provider.
@@ -163,11 +31,14 @@ impl From<Vec<(ProviderAvailability, AgentCapabilities)>> for WireProvidersRespo
 mod tests {
     use super::*;
 
+    use crate::rest::launch_option_style::WireLaunchOptionStyle;
+    use crate::rest::provider_capabilities::WireProviderCapabilities;
+
     use delta_model::AgentProvider;
     use delta_usecase::{
         ContextInjectionCapability, EventCapability, ForkCapability, InterruptCapability,
         LaunchCapability, PermissionCapability, ResumeCapability, SessionIdentityCapability,
-        SessionScopedAllowCapability, SteerCapability, TranscriptCapability,
+        SessionScopedAllowCapability, SteerCapability, TerminalCapability, TranscriptCapability,
     };
 
     /// A capability profile with the given terminal surface and launch

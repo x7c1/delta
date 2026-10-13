@@ -25,7 +25,7 @@ where
     /// missing signal.
     ///
     /// Must be called *before* `sync_transcript`, so the current user line is
-    /// not yet ingested and [`SessionStore::latest_user_thread`] still reports
+    /// not yet ingested and [`ThreadStore::latest_user_thread`](crate::ports::ThreadStore::latest_user_thread) still reports
     /// the PREVIOUS thread the user was in. Four cases:
     ///
     /// 1. No queued send matched this prompt → external input → inject nothing.

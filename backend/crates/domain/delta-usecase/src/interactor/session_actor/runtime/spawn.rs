@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use crate::pane_token::PaneToken;
 
 use super::{OpenHandle, SessionRuntime};
+use super::{PendingSpawn, ResumingSession};
 
 /// How long a spawn may sit unbound before the watchdog reaps it.
 ///
@@ -58,102 +59,6 @@ pub const RESUME_READY_DEADLINE: Duration = Duration::from_secs(30);
 /// deterministic. Compared against an injected `now`, like the watchdog
 /// deadlines, so it is testable without wall-clock sleeps.
 pub const RESUME_DISPATCH_SETTLE: Duration = Duration::from_millis(200);
-
-/// A spawn whose pane is being (or has been) created, awaiting its first
-/// `UserPromptSubmit`.
-///
-/// Delta pins the conversation's `session_id` at spawn time by passing a
-/// freshly-minted UUID to `claude --session-id <uuid>`, so the first
-/// `UserPromptSubmit` hook reports exactly that id — which routes the hook to
-/// this spawn's actor, whose pending entry this is. The session row (and any
-/// first prompt's send row) is written eagerly at spawn time, so binding only
-/// activates that row and maps the pane.
-///
-/// Recorded *just before* the pane is created, never after: the launch task
-/// awaits the actor's `LaunchPrepared` reply before it calls `create_session`,
-/// so this entry is always in place by the time the launched agent can fire a
-/// hook against it.
-#[derive(Debug, Clone)]
-pub struct PendingSpawn {
-    /// The Delta-minted tmux session name.
-    pub token: PaneToken,
-    /// The pane keystrokes are sent to (`<token>:0.0`).
-    pub pane: String,
-    /// When this spawn's bind deadline started running.
-    ///
-    /// A spawn is fire-and-forget: only the first `UserPromptSubmit` hook binds
-    /// it, so a launch that crashes/hangs before that hook never times out on
-    /// its own. The reaper compares `now - created_at` against
-    /// [`PENDING_SPAWN_DEADLINE`] to detect and clean up such a stuck spawn.
-    /// `Instant` is monotonic, so it measures elapsed wall time without being
-    /// perturbed by system-clock changes.
-    ///
-    /// Normally the moment the spawn was recorded, but not for a pane a browser
-    /// has been attached to: the last bridge leaving restarts the deadline from
-    /// there (see [`SessionRuntime::restart_pending_deadline`]).
-    pub created_at: Instant,
-    /// Whether the tmux session behind [`Self::pane`] actually exists yet.
-    ///
-    /// The entry is recorded a beat *before* `create_session` runs — the hooks
-    /// the launched agent fires bind this record, so it has to be in place
-    /// first — which leaves a short window where the pane is named but not
-    /// there. Nothing may attach in that window, so the launch flips this when
-    /// it reports success, at the same point the browser is told the pane is up
-    /// (`SessionEvent::SpawnPaneReady`). Binding does not depend on it: a hook
-    /// arriving from inside `create_session` binds the spawn as it always did.
-    pub pane_created: bool,
-}
-
-/// A resumed-but-not-yet-ready session: its pane is bound, but its first prompt
-/// is held until the resume's `SessionStart` (`source=resume`) hook arrives and,
-/// crucially, until a beat *after* that hook returns.
-///
-/// Unlike a fresh spawn, a resume's `session_id` is known up front, so the pane
-/// binds immediately. But `claude --resume` needs a couple of seconds to replay
-/// the transcript and make its TUI input ready, far longer than any fixed
-/// settle could safely cover. So Delta does not type the first prompt at
-/// resume time; it records the resume here.
-///
-/// Readiness arrives in two stages, tracked by [`Self::ready_at`]:
-///
-/// 1. **Mark ready** — `SessionStart(source=resume)` fires. That hook blocks
-///    `claude` until its HTTP handler returns, so the handler must *not* type
-///    the held prompt (the keystroke would land while `claude` is still inside
-///    the hook and not accepting input, and be lost). It only stamps
-///    [`Self::ready_at`] and returns immediately, unblocking `claude`.
-/// 2. **Dispatch** — on a later background tick, once `now - ready_at` has
-///    reached [`RESUME_DISPATCH_SETTLE`], the held keystroke is dispatched on
-///    the normal `send_line` path. By then the hook has returned and `claude`
-///    is input-ready, so the keystroke submits.
-///
-/// The `send` row for that first prompt is written normally (its thread,
-/// branch, and locator-quote semantics are persisted up front) — only the
-/// physical keystroke is held.
-#[derive(Debug, Clone)]
-pub struct ResumingSession {
-    /// The Delta-minted tmux session name backing the resumed pane, killed by
-    /// the watchdog if the resume never becomes ready.
-    pub token: PaneToken,
-    /// The pane the held first prompt is dispatched into once ready.
-    pub pane: String,
-    /// The held first prompt's keystroke text, if a send is waiting on this
-    /// resume's readiness. A resume opened with no immediate send (e.g. an
-    /// explicit `open_session` with no following dispatch) carries `None`.
-    pub held_prompt: Option<String>,
-    /// When the resume was recorded, for the readiness watchdog deadline. Like
-    /// [`PendingSpawn::created_at`] this is a monotonic `Instant`, so the
-    /// deadline check is immune to system-clock changes.
-    pub created_at: Instant,
-    /// When `SessionStart(source=resume)` marked this resume ready, or `None`
-    /// while still not-ready.
-    ///
-    /// `None` means the readiness hook has not arrived: the held prompt is
-    /// parked and the watchdog may reap the resume if [`RESUME_READY_DEADLINE`]
-    /// passes. `Some(t)` means the hook fired at `t` and the resume is pending
-    /// dispatch — the watchdog must leave it alone, and the dispatch tick types
-    /// the held prompt once `now - t` reaches [`RESUME_DISPATCH_SETTLE`].
-    pub ready_at: Option<Instant>,
-}
 
 impl SessionRuntime {
     /// Record the spawn whose pane is about to be created, awaiting its first

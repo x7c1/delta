@@ -5,7 +5,8 @@ use delta_model::{SessionId, Thread};
 use crate::error::{Error, Result};
 use crate::ports::{GitWorktree, SessionPageRow, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::session_listing::SessionListing;
-use crate::session_page::{SessionPage, SessionPageCursor};
+use crate::session_page::SessionPage;
+use crate::session_page_cursor::SessionPageCursor;
 use crate::Interactor;
 
 impl<T, X, S, W, G> Interactor<T, X, S, W, G>
@@ -35,7 +36,7 @@ where
     /// index. Two phases:
     ///
     /// 1. On the first page only (`cursor: None`), the live sessions' rows are
-    ///    fetched by id ([`SessionStore::list_sessions_by_ids`]) and emitted
+    ///    fetched by id ([`SessionRecordStore::list_sessions_by_ids`](crate::ports::SessionRecordStore::list_sessions_by_ids)) and emitted
     ///    first. The set is bounded by the number of live panes.
     /// 2. Every page then draws from the store's recency stream, over-fetching
     ///    by the live count and dropping the live rows, so at least `limit`

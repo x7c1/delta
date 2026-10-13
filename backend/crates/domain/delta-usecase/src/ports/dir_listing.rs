@@ -1,17 +1,6 @@
 //! Read-only directory-browsing data the [`crate::Workspace`] port returns.
 
-/// A single subdirectory entry in a directory listing.
-///
-/// Only directories are ever listed (the picker browses folders, not files), so
-/// every entry names a directory: `name` is the bare directory name and `path`
-/// is its absolute path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DirEntry {
-    /// The bare directory name (the final path component).
-    pub name: String,
-    /// The absolute path to the directory.
-    pub path: String,
-}
+use super::DirEntry;
 
 /// One level of a directory browse: a canonical directory, its parent, and its
 /// immediate subdirectories.

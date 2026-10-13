@@ -20,6 +20,12 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::hooks::status_line_context_window::StatusLineContextWindow;
+use crate::hooks::status_line_cost::StatusLineCost;
+use crate::hooks::status_line_model::StatusLineModel;
+use crate::hooks::status_line_rate_limits::StatusLineRateLimits;
+use crate::hooks::status_line_workspace::StatusLineWorkspace;
+
 /// `statusLine` payload: a snapshot of session state Claude Code pipes to its
 /// configured status-line command on every refresh.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -40,80 +46,4 @@ pub struct StatusLinePayload {
     /// example of a field Delta tolerates without modeling it everywhere.
     #[serde(default)]
     pub fast_mode: Option<bool>,
-}
-
-/// The selected model.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
-pub struct StatusLineModel {
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub display_name: Option<String>,
-}
-
-/// Context-window usage. `current_usage` / `used_percentage` are `null` before
-/// the session's first API response.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
-pub struct StatusLineContextWindow {
-    /// Percentage of the context window in use, precomputed by Claude Code
-    /// against `context_window_size`. Forwarded verbatim — Delta never
-    /// recomputes it from token counts.
-    #[serde(default)]
-    pub used_percentage: Option<f64>,
-    #[serde(default)]
-    pub context_window_size: Option<u64>,
-    /// Per-bucket token breakdown of the current context occupancy. Claude Code
-    /// sends this as an object (not a scalar); `null` before the first API
-    /// response.
-    #[serde(default)]
-    pub current_usage: Option<StatusLineCurrentUsage>,
-    #[serde(default)]
-    pub total_input_tokens: Option<u64>,
-}
-
-/// The per-bucket token breakdown inside `context_window.current_usage`.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
-pub struct StatusLineCurrentUsage {
-    #[serde(default)]
-    pub input_tokens: Option<u64>,
-    #[serde(default)]
-    pub output_tokens: Option<u64>,
-    #[serde(default)]
-    pub cache_creation_input_tokens: Option<u64>,
-    #[serde(default)]
-    pub cache_read_input_tokens: Option<u64>,
-}
-
-/// Rate-limit windows. Absent entirely before the first API response and on
-/// accounts without a Pro/Max subscription.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
-pub struct StatusLineRateLimits {
-    #[serde(default)]
-    pub five_hour: Option<StatusLineRateLimitWindow>,
-    #[serde(default)]
-    pub seven_day: Option<StatusLineRateLimitWindow>,
-}
-
-/// One rate-limit window.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
-pub struct StatusLineRateLimitWindow {
-    #[serde(default)]
-    pub used_percentage: Option<f64>,
-    /// Unix epoch seconds at which this window resets.
-    #[serde(default)]
-    pub resets_at: Option<i64>,
-}
-
-/// Session cost.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
-pub struct StatusLineCost {
-    #[serde(default)]
-    pub total_cost_usd: Option<f64>,
-}
-
-/// Workspace location.
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
-pub struct StatusLineWorkspace {
-    #[serde(default)]
-    pub current_dir: Option<String>,
 }

@@ -9,24 +9,31 @@
 //! gateway crates; the composition root wires them together.
 
 mod agent;
+mod clone;
 mod erase_report;
 mod error;
 mod interactor;
 mod launch_config;
 mod pane_token;
+mod pane_token_minter;
 mod ports;
 mod pull_request;
+mod pull_request_lens;
+mod pull_request_list;
 mod release_check;
 mod release_update;
 mod repository;
 mod send_target;
 mod session_listing;
 mod session_page;
+mod session_page_cursor;
 mod session_prune;
 mod session_removal;
 mod turn;
 mod with_causes;
+mod worktree_branch;
 mod worktree_dir;
+mod worktree_spec;
 
 pub use agent::{
     AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentContentSource, AgentEvent,
@@ -39,6 +46,7 @@ pub use agent::{
     SessionEndReason, SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability,
     TerminalCapability, TranscriptCapability, TurnStatus,
 };
+pub use clone::Clone;
 pub use erase_report::EraseReport;
 pub use error::{Error, Result};
 pub use interactor::{
@@ -51,30 +59,36 @@ pub use launch_config::{
     PENDING_SPAWN_DEADLINE, PERMISSION_DECISION_DEADLINE, RESUME_READY_DEADLINE,
     SLASH_COMMAND_ECHO_DEADLINE,
 };
-pub use pane_token::{PaneToken, PaneTokenMinter};
+pub use pane_token::PaneToken;
+pub use pane_token_minter::PaneTokenMinter;
 pub use ports::{
     pane_for, AssetDownloadError, AssetDownloader, AsyncEventReceiver, AsyncEventSink,
-    BinaryDetector, BranchDeletion, CloneRoot, CommsDirection, CommsEntry, CommsFrameKind,
-    CommsLogSink, DirEntry, DirListing, DownloadProgress, ExternalOpener, FeedCause, GhCli,
-    GitRepoInfo, GitWorktree, InstallError, InstalledApp, MessageDisplayHook, NewSession,
-    NullCommsLog, PublishedRelease, RateLimitWindow, RecentWorkdir, ReleaseAsset, ReleaseFeed,
-    ReleaseFeedError, RememberedPane, RemoteBranches, RepositoryCloneRow, SessionEndHook,
-    SessionEvent, SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore,
-    SpawningSession, StatusSnapshot, StopHook, TmuxDriver, Transcript, TranscriptMessage,
-    TranscriptRead, UpdateInstaller, UserPromptSubmitHook, Workspace, WorktreeInspection,
-    WorktreeRemoval, WorktreeStartPoint,
+    BinaryDetector, BranchDeletion, CloneRoot, CloneRootStore, CommsDirection, CommsEntry,
+    CommsFrameKind, CommsLogSink, DirEntry, DirListing, DownloadProgress, ExternalOpener,
+    FeedCause, GhCli, GitRepoInfo, GitWorktree, InstallError, InstalledApp, LaunchOptionStore,
+    MessageDisplayHook, MessageStore, NewSession, NullCommsLog, PermissionStore,
+    PromptTemplateStore, PublishedRelease, RateLimitWindow, RecentWorkdir, ReleaseAsset,
+    ReleaseFeed, ReleaseFeedError, RememberedPane, RememberedPaneStore, RemoteBranches,
+    RepositoryCloneRow, SendStore, SessionEndHook, SessionEvent, SessionHistoryStore,
+    SessionLifecycle, SessionPageRow, SessionRecordStore, SessionStartHook, SessionStore,
+    SpawningSession, StatusSnapshot, StopHook, SubagentLaunchStore, ThreadStore, TmuxDriver,
+    Transcript, TranscriptMessage, TranscriptRead, UpdateInstaller, UserPromptSubmitHook,
+    Workspace, WorktreeInspection, WorktreeRemoval, WorktreeStartPoint,
 };
-pub use pull_request::{PullRequest, PullRequestLens, PullRequestList};
+pub use pull_request::PullRequest;
+pub use pull_request_lens::PullRequestLens;
+pub use pull_request_list::PullRequestList;
 pub use release_check::{NewerRelease, ReleaseCheck, ReleaseCheckError, RELEASE_PAGE_PREFIX};
 pub use release_update::{
     check_download_url, choose_asset, downloadable_asset, BuildOrigin, InstallUnavailable,
     Launcher, ManualInstall, NotOffered, Platform, ReleaseUpdate, UpdateDownload, UpdateInstall,
     UpdateOffer, UpdateRefusal, UpdateRestart, RELEASE_DOWNLOAD_PREFIX,
 };
-pub use repository::{display_name, identity_key, worktree_dir_slug, Clone, Repository};
-pub use send_target::{SendTarget, WorktreeSpec};
+pub use repository::{display_name, identity_key, worktree_dir_slug, Repository};
+pub use send_target::SendTarget;
 pub use session_listing::SessionListing;
-pub use session_page::{SessionPage, SessionPageCursor};
+pub use session_page::SessionPage;
+pub use session_page_cursor::SessionPageCursor;
 pub use session_prune::{
     PruneCriteria, PruneReport, PruneStatus, SessionKeptItem, SkipReason, SkippedSession,
 };
@@ -83,7 +97,9 @@ pub use turn::{
     transition, turn_input_for_agent_event, OrphanedSend, Transition, TurnInput, TurnState,
 };
 pub use with_causes::with_causes;
-pub use worktree_dir::{WorktreeBranch, WorktreeDir};
+pub use worktree_branch::WorktreeBranch;
+pub use worktree_dir::WorktreeDir;
+pub use worktree_spec::WorktreeSpec;
 
 // Re-export the domain types the transport layer needs, so the server can
 // depend on the use-case surface without reaching across to delta-model for

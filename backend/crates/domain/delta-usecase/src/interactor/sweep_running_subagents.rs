@@ -46,7 +46,7 @@ where
     /// - emits `SubagentFinished` (mirroring the `Effect::SubagentCompleted`
     ///   sync path) so a live viewer's indicator / unread badge clears
     ///   immediately rather than waiting for a notification that never comes;
-    /// - calls [`SessionStore::clear_subagent_launch`] to drop the persisted
+    /// - calls [`SubagentLaunchStore::clear_subagent_launch`](crate::ports::SubagentLaunchStore::clear_subagent_launch) to drop the persisted
     ///   launch row, so a later stray notification cannot double-fire and a
     ///   resume cannot resurrect the entry from persisted state.
     ///
