@@ -62,9 +62,9 @@ checks are listed.
 
 ### Before merge (verified outside the check command)
 
-- [ ] `make check-backend-file-length` fails, naming the file, when one file
+- [x] `make check-backend-file-length` fails, naming the file, when one file
       is padded past 1000 lines locally.
-- [ ] The diff moves code without changing it: each split file's items are
+- [x] The diff moves code without changing it: each split file's items are
       the same before and after, apart from `mod` / `use` lines and
       visibility needed by the move (reviewed with
       `git diff --color-moved=dimmed-zebra`).
