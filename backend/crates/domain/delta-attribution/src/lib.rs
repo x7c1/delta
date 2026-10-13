@@ -15,7 +15,7 @@
 //! advances the cursor. Because the fold is pure and state threads through
 //! explicitly, attribution is *replayable*: folding a whole transcript in one
 //! batch is exactly equivalent to folding it in arbitrary cursor-sized
-//! batches ([`replay`] and the golden-corpus tests pin this).
+//! batches ([`replay()`] and the golden-corpus tests pin this).
 //!
 //! The textual conventions Claude Code uses on the wire (interrupt markers,
 //! task-notification prompts) live in [`claude_format`], so that knowledge

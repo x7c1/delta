@@ -161,7 +161,7 @@ lint:
 	cd backend && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint + the embedded-server build (`embed-web`) + the desktop-shell build/test/clippy + both Playwright suites (needs tmux) + the release version check's scratch-repo test — plus the canary gate's, the re-vendor script's, gen-check's and the test-residue sweep's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
+## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy/rustdoc + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint + the embedded-server build (`embed-web`) + the desktop-shell build/test/clippy + both Playwright suites (needs tmux) + the release version check's scratch-repo test — plus the canary gate's, the re-vendor script's, gen-check's and the test-residue sweep's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
 # The point of this target is that passing it means CI will pass, so it has to
 # stay a superset of what the workflow runs — including BOTH Playwright suites.
 # `e2e` is the mock-backed one and `e2e-fake` drives the real backend through
@@ -176,7 +176,7 @@ lint:
 #
 #   check-backend-fmt → check-backend-build → { check-backend-test, check-backend-clippy, check-gen }
 #   check-frontend-build → { check-frontend-typecheck, check-frontend-test, check-frontend-lint, check-e2e }
-#   { check-backend-build, check-frontend-build } → { check-e2e-fake, check-embedded, check-desktop-build }
+#   { check-backend-build, check-frontend-build } → { check-backend-doc, check-e2e-fake, check-embedded, check-desktop-build }
 #   vendor-codex-schema-check, vendor-codex-schema-test, e2e-real-gate-test,
 #   sweep-test-residue-test, gen-check-test, check-version-change-test (no prerequisites)
 #
@@ -190,7 +190,7 @@ lint:
 # `make gen-check`, …) keep working on their own: the check-* wrappers add the
 # ordering, not the behaviour.
 CHECK_STEPS := \
-	check-backend-test check-backend-clippy check-gen \
+	check-backend-test check-backend-clippy check-backend-doc check-gen \
 	vendor-codex-schema-check vendor-codex-schema-test e2e-real-gate-test sweep-test-residue-test \
 	gen-check-test check-version-change-test \
 	check-frontend-typecheck check-frontend-test check-frontend-lint \
@@ -210,6 +210,14 @@ check-backend-test: check-backend-build
 
 check-backend-clippy: check-backend-build
 	cd backend && cargo clippy --all-targets -- -D warnings
+
+# Every crate's rustdoc, private items included, with warnings denied
+# (docs/guides/development/README.md says why one run suffices). `--workspace`
+# takes in the desktop shell, whose `embed-web` dependency compiles in the
+# `dist/` check-frontend-build produces. `--no-deps` keeps third-party docs out
+# of the run.
+check-backend-doc: check-backend-build check-frontend-build
+	cd backend && RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
 # `gen-check` runs export-ts through `cargo run`, which reuses this build.
 check-gen: check-backend-build

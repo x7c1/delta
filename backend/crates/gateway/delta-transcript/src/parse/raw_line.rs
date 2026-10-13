@@ -40,7 +40,7 @@ pub(super) struct RawLine {
     pub attachment: Option<RawAttachment>,
     /// Set on harness-injected lines (skill bodies, system reminders) that
     /// Claude records as `type: "user"` but are not human-authored turns.
-    /// Drives [`Role::Meta`] classification. Note: the current Claude Code
+    /// Drives [`Role::Meta`](delta_model::Role::Meta) classification. Note: the current Claude Code
     /// shape records local-command output as a `type: "system"` /
     /// `subtype: "local_command"` line carrying a top-level [`content`] instead
     /// (see that field); the legacy shape recorded it as `type: "user"`.
@@ -57,7 +57,7 @@ pub(super) struct RawLine {
     pub is_api_error_message: Option<bool>,
     /// Set on the synthetic user line Claude Code writes when `/compact` runs,
     /// carrying the previous-conversation summary. Not a human-authored turn;
-    /// classified as [`Role::CompactSummary`] so attribution skips it (never
+    /// classified as [`Role::CompactSummary`](delta_model::Role::CompactSummary) so attribution skips it (never
     /// matches an outstanding send, never resets `carry_thread`).
     #[serde(rename = "isCompactSummary")]
     pub is_compact_summary: Option<bool>,

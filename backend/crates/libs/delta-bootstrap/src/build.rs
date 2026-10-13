@@ -68,9 +68,9 @@ pub(crate) mod testing;
 /// it has to protect.
 ///
 /// Host requirements: `tmux` must be resolvable before anything else is wired.
-/// See [`ensure_tmux_available()`] for why that is checked here rather than
+/// See `ensure_tmux_available` for why that is checked here rather than
 /// left to the first launch. The probe searches the `PATH` the spawns run with
-/// ([`child_path()`]) and takes no substitute detector, so every caller needs
+/// (`child_path`) and takes no substitute detector, so every caller needs
 /// tmux installed — the tests that wire this root (the server's route tests
 /// among them) as much as a real boot.
 ///

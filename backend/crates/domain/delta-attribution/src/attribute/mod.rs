@@ -3,7 +3,7 @@
 //!
 //! Split into one file per concern: the public data types
 //! ([`OutstandingSend`], [`SubagentLaunch`], [`AttributionState`], [`Effect`],
-//! [`Attributed`]), the [`attribute_lines`] orchestration loop, and the two
+//! [`Attributed`]), the [`attribute_lines()`] orchestration loop, and the two
 //! large per-line phases it delegates to — `content_blocks` (permission /
 //! background-launch / indicator handling for a line's content blocks) and
 //! `thread_resolution` (the thread the line is attributed to, and the send /

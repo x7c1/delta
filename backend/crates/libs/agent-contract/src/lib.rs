@@ -2,7 +2,7 @@
 //! [`AgentAdapter`] implementation.
 //!
 //! Each case is written generically over `&impl AgentAdapter` and reads the
-//! adapter's declared [`AgentCapabilities`] to decide what to assert, so the
+//! adapter's declared [`AgentCapabilities`](delta_usecase::AgentCapabilities) to decide what to assert, so the
 //! *same* case body runs against the Claude adapter and the Codex adapter (and
 //! any future provider) unchanged. A concrete adapter's test module supplies the
 //! fixture and calls the case; this crate owns the assertions.

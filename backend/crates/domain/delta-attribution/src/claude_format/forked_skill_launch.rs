@@ -42,7 +42,7 @@ pub struct ForkedSkillLaunch {
 
 impl ForkedSkillLaunch {
     /// The synthetic `tool_use_id` this launch is tracked under: the payload's
-    /// `agentId` behind the [`FORKED_SKILL_TOOL_USE_PREFIX`] namespace. A
+    /// `agentId` behind the `FORKED_SKILL_TOOL_USE_PREFIX` namespace. A
     /// forked skill writes no `tool_use` block, so it has no real id — but the
     /// running-subagent indicator, the persisted launch row, and the completion
     /// correlation are all keyed by `tool_use_id`, so one is minted here.

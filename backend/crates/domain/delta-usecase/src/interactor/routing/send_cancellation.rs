@@ -19,7 +19,7 @@ where
     /// whose echo has not arrived (typically the user pressed `Escape` in the
     /// TUI to discard the composer buffer, leaving no signal Delta can
     /// observe — see the module doc on
-    /// [`cancel_send`](crate::interactor::cancel_send)).
+    /// `interactor::cancel_send`).
     ///
     /// The cancel request carries only the send id (in its URL), so the
     /// owning session is derived from the send row here — mirroring how
@@ -57,7 +57,7 @@ where
     /// Release a *held* send — one the boot-time reconcile recovered from a
     /// dead process's `dispatched` state, or one the echo deadline parked —
     /// back into the normal queued flow (see the module doc on
-    /// [`release_send`](crate::interactor::release_send)).
+    /// `interactor::release_send`).
     ///
     /// Like a cancel, the release request carries only the send id (in its
     /// URL), so the owning session is derived from the send row here and the

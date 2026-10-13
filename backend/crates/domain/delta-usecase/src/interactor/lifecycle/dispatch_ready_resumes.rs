@@ -27,10 +27,10 @@ where
     /// outside any hook handler, after the hook has returned and `claude` is
     /// input-ready.
     ///
-    /// When the resume's `now - ready_at` has reached
-    /// [`RESUME_DISPATCH_SETTLE`], this takes it off the runtime state and, if a
-    /// first prompt was held, types it into the resumed pane via the normal
-    /// [`TmuxDriver::send_line`] path — the same path every other send takes. The
+    /// When the resume's `now - ready_at` has reached `RESUME_DISPATCH_SETTLE`,
+    /// this takes it off the runtime state and, if a first prompt was held,
+    /// types it into the resumed pane via the normal [`TmuxDriver::send_line`]
+    /// path — the same path every other send takes. The
     /// `send` row for that first prompt was already written (with its
     /// thread/branch/quote semantics) when the send was first enqueued; only the
     /// physical keystroke was held, so this completes a normal send.
@@ -60,8 +60,6 @@ where
     /// `now` is injected (rather than read here) so the dispatch is deterministic
     /// under test, mirroring the watchdog reap: the server loop passes
     /// `Instant::now()`, while tests advance a controlled instant.
-    ///
-    /// [`RESUME_DISPATCH_SETTLE`]: crate::interactor::session_actor::runtime::RESUME_DISPATCH_SETTLE
     pub(in crate::interactor) async fn dispatch_ready_resume(
         &mut self,
         now: Instant,

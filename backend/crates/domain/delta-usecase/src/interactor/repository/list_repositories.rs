@@ -224,7 +224,8 @@ where
     }
 }
 
-/// Running per-`identity_key` accumulator used by [`list_repositories`].
+/// Running per-`identity_key` accumulator used by
+/// [`InteractorCore::list_repositories`](crate::interactor::InteractorCore::list_repositories).
 struct RepoAcc {
     identity_key: String,
     /// The most-recent clone's path (becomes `recently_used_clone_path`).

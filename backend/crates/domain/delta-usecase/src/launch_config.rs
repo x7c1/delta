@@ -2,7 +2,9 @@
 
 use std::time::Duration;
 
-use crate::interactor::session_actor::runtime::{
+// Re-exported (through the crate root) beside `LaunchConfig`, whose field docs
+// defer to each constant for why its production value is what it is.
+pub use crate::interactor::session_actor::runtime::{
     ECHO_DEADLINE, PENDING_SPAWN_DEADLINE, RESUME_READY_DEADLINE, SLASH_COMMAND_ECHO_DEADLINE,
 };
 
@@ -52,7 +54,7 @@ pub const LAUNCH_PREP_DEADLINE: Duration = Duration::from_secs(600);
 #[derive(Debug, Clone)]
 pub struct LaunchConfig {
     /// The program launched in each tmux session (`claude` by default). Used
-    /// verbatim as the command's argv[0], so it may be a bare name resolved via
+    /// verbatim as the command's `argv[0]`, so it may be a bare name resolved via
     /// `PATH` or an absolute path.
     pub claude_bin: String,
     /// How long an accepted session's background launch preparation (worktree

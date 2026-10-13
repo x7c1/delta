@@ -6,7 +6,7 @@
 //! its adapter exists. Doing that eagerly at startup would make a machine
 //! without the provider installed fail to boot, so the composition root holds
 //! this factory (which carries only launch configuration) instead of a live
-//! adapter, and defers [`Self::connect`] to the moment a session actually
+//! adapter, and defers [`AgentAdapterFactory::connect`] to the moment a session actually
 //! needs the provider.
 //!
 //! Providers whose adapter is cheap to build (no process, no handshake) do not

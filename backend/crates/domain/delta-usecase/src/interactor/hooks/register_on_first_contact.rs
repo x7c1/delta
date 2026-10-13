@@ -19,7 +19,8 @@ where
     ///
     /// Reached only when no pending spawn matched the id (so this is not a
     /// Delta launch — those have an eagerly-created session row and are
-    /// activated by [`Self::bind_pending_spawn`]) and no session row exists: a
+    /// activated by
+    /// [`SessionContext::bind_pending_spawn`](crate::interactor::session_actor::actor::SessionContext::bind_pending_spawn)) and no session row exists: a
     /// `claude` started outside Delta. The session is registered as a
     /// known-but-closed data session (no [`OpenHandle`]) and a warning is
     /// logged, preserving today's external-input behaviour.

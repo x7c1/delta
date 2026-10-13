@@ -32,7 +32,7 @@ where
     ///
     /// This method is only the I/O shell. It pulls a batch of canonical
     /// conversation content from the provider's
-    /// [`ConversationSource`](super::conversation_source::ConversationSource)
+    /// [`ConversationSource`]
     /// — for Claude, the JSONL transcript read plus the pure attribution fold,
     /// seeded from the store *inside* that source — and then runs the
     /// provider-neutral persistence pipeline

@@ -5,8 +5,8 @@
 //! the client writes request/notification frames to the server's stdin and
 //! reads response/notification/server-request frames from its stdout. This
 //! binary speaks exactly that surface — nothing else — so the real client
-//! transport ([`codex_agent`]) runs its spawn → handshake → thread → turn loop
-//! end to end against a deterministic script instead of a model.
+//! transport (the `codex-agent` crate) runs its spawn → handshake → thread →
+//! turn loop end to end against a deterministic script instead of a model.
 //!
 //! It is the app-server analogue of `fake-claude`: where `fake-claude` scripts a
 //! tmux + hooks + JSONL conversation, `fake-codex` scripts a JSON-RPC one. It is

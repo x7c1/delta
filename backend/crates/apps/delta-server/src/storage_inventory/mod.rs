@@ -23,10 +23,10 @@ use delta_wire::rest::WireStorageFile;
 const SNAPSHOT_INFIX: &str = ".bak-v";
 
 /// The paths a running server writes, fixed at startup, from which
-/// [`Self::report`] builds the storage inventory.
+/// `Self::report` builds the storage inventory.
 ///
 /// Holds paths only — never the hook secret or the auth token — and no sizes:
-/// those are read from disk on every [`Self::report`], so a reopened Settings
+/// those are read from disk on every `Self::report`, so a reopened Settings
 /// category shows the database as it is now.
 #[derive(Debug, Clone)]
 pub struct StorageInventory {

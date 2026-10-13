@@ -8,7 +8,7 @@ pub const STAGING_NAME: &str = ".delta-update-new";
 
 /// The name the running bundle is moved to, next to where it was, when the
 /// new one takes its place. Removed at the next launch
-/// ([`remove_leftovers`]).
+/// ([`SwapPaths::remove_leftovers`]).
 pub const BACKUP_NAME: &str = ".delta-update-backup";
 
 /// Where an update of the bundle at `bundle` is staged and where the bundle

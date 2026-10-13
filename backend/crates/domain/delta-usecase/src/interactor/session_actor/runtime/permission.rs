@@ -25,7 +25,7 @@ use super::SessionRuntime;
 ///
 /// Several of these can be outstanding at once: an adapter-backed provider
 /// (Codex) runs tool calls in parallel, so one turn can raise N approvals in the
-/// same instant. See [`SessionRuntime::enqueue_pending_permission`].
+/// same instant. See `SessionRuntime::enqueue_pending_permission`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingPermission {
     /// The `permission_request` row id (the decision endpoint's key).

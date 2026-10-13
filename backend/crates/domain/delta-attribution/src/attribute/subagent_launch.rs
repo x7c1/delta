@@ -8,6 +8,7 @@ use delta_model::ThreadId;
 /// keys these by the launching tool_use id.
 ///
 /// [`task_id`]: SubagentLaunch::task_id
+/// [`AttributionState::launched_threads`]: crate::AttributionState::launched_threads
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubagentLaunch {
     /// The thread the launching `Agent`/`Task`/`Bash` tool_use was attributed

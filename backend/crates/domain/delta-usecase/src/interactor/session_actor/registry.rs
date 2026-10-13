@@ -8,12 +8,12 @@
 //!
 //! ## Unknown/dead sessions
 //!
-//! - **Commands and hooks** spawn an actor on first contact ([`Self::post`]):
+//! - **Commands and hooks** spawn an actor on first contact ([`SessionRegistry::post`]):
 //!   a hook may legitimately name a stored-but-quiet session (or register an
 //!   external one), and a command for a truly unknown id fails inside the
 //!   handler with the same store-backed error as before. An actor left with
 //!   no runtime state retires on its own.
-//! - **Queries and ticks** never spawn ([`Self::post_existing`]): a session
+//! - **Queries and ticks** never spawn ([`SessionRegistry::post_existing`]): a session
 //!   with no actor is closed/idle by definition, so the caller substitutes
 //!   that default instead of materializing an actor just to read it.
 //! - A message posted while the interactor is being torn down (the core is

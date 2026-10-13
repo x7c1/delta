@@ -68,10 +68,10 @@ fn is_unknown_command_notice_marker(text: &str) -> bool {
 
 /// Parse one JSONL line into a message, ignoring non-message outcomes.
 ///
-/// Thin wrapper over [`parse_line_outcome`] kept for callers (and tests) that
+/// Thin wrapper over `parse_line_outcome` kept for callers (and tests) that
 /// only care about message lines: a `turn_duration` system line — which carries
 /// no message — collapses to `Ok(None)` here, exactly like a blank or no-uuid
-/// line. The reader uses [`parse_line_outcome`] directly so it can correlate a
+/// line. The reader uses `parse_line_outcome` directly so it can correlate a
 /// turn's duration onto its assistant message.
 pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::Error> {
     Ok(match parse_line_outcome(line)? {

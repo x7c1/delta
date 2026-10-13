@@ -28,7 +28,7 @@ use crate::TMUX_BIN;
 /// (`tmux -L <socket>`), kept separate from the user's default tmux server. This
 /// isolation means Delta's sessions never clutter the user's `tmux ls` and
 /// teardown can kill the whole server at once. The server also starts with
-/// Delta's fixed config (`-f`, see [`conf::DELTA_TMUX_CONF`]) instead of the
+/// Delta's fixed config (`-f`, see `conf::DELTA_TMUX_CONF`) instead of the
 /// user's `~/.tmux.conf`, so the embedded pane is identical on every machine.
 #[derive(Debug, Clone)]
 pub struct Tmux {

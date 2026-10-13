@@ -6,7 +6,7 @@
 //!    depth so a hand-crafted request cannot open an arbitrary directory).
 //! 2. Resolves the handler from the internal registry (defaults to VS Code).
 //! 3. Spawns the handler's command with the path as a single argument via the
-//!    [`ExternalOpener`] port.
+//!    [`ExternalOpener`](crate::ExternalOpener) port.
 //!
 //! Only one handler ships initially — VS Code — but the shape is a registry
 //! rather than a hard-coded call so a future entry (IntelliJ, Zed, …) only
@@ -35,7 +35,7 @@ pub type ExternalHandlerId = &'static str;
 /// display name for menus, and the command Delta shells out to.
 ///
 /// The initial registry contains one entry (VS Code); adding another handler
-/// is a single [`registry`] row. Argument rendering is intentionally minimal
+/// is a single `REGISTRY` row. Argument rendering is intentionally minimal
 /// — every current handler takes the target path as a single trailing
 /// argument, so a `Vec<String>` built from `[path]` covers it. If a future
 /// handler needs more shape (a `--project` flag, multiple positional args),
@@ -49,7 +49,7 @@ pub struct ExternalHandler {
     /// Human-facing name for menus and error messages (`Visual Studio Code`).
     pub display_name: &'static str,
     /// The command Delta invokes (e.g. `code`). Passed to
-    /// [`ExternalOpener::open`] as-is; the path is appended as the sole arg.
+    /// [`ExternalOpener::open`](crate::ExternalOpener::open) as-is; the path is appended as the sole arg.
     pub command: &'static str,
 }
 

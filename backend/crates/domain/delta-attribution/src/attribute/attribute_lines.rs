@@ -79,7 +79,7 @@ use super::{Attributed, AttributionState, Effect};
 /// command whose skill runs in the background — reaches the same effects from a
 /// different signal: it writes no `tool_use` block at all, only a
 /// `<forked-skill-launch>` element on the command's system line (see
-/// [`process_forked_skill_launch`]). Its `agentId` is known at launch, so the
+/// `process_forked_skill_launch`). Its `agentId` is known at launch, so the
 /// `SubagentLaunched` it emits already carries the `task_id` its completion
 /// `<task-notification>` will be matched by.
 pub fn attribute_lines(

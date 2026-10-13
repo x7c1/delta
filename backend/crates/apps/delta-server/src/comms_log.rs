@@ -2,7 +2,7 @@
 //! out to the browsers watching a session.
 //!
 //! This is the transport layer's implementation of
-//! [`CommsLogSink`](delta_usecase::CommsLogSink) — the only place a recorded
+//! [`CommsLogSink`] — the only place a recorded
 //! frame is ever held. Nothing here reaches the database, the conversation event
 //! stream, or attribution: the log is a **live view**, and a server restart
 //! starts it empty by design (a deliberate v1 trade: these frames are not worth

@@ -401,7 +401,7 @@ impl CodexAppServerAdapter {
     }
 
     /// How many file-change items this session is currently correlating for its
-    /// approval cards (see [`FileChangeItems`]). `0` for an unknown or closed
+    /// approval cards (see `FileChangeItems`). `0` for an unknown or closed
     /// session.
     ///
     /// The map is live display state with a lifecycle — entries go when the item
@@ -549,10 +549,10 @@ impl CodexAppServerAdapter {
 ///   JSON field can only be set once, so a second option carrying the same name
 ///   would silently discard the first. The exception is `config`, which is not
 ///   one setting but an object holding many: two `config` options are
-///   **deep-merged** (see [`config_merge::merge_config`]), and only a genuine
+///   **deep-merged** (see `config_merge::merge_config`), and only a genuine
 ///   disagreement between them — two values for one setting — is rejected, with
 ///   every such disagreement reported together. Which names are single-valued
-///   is [`launch_option_cardinality`], the same classification the domain
+///   is [`launch_option_cardinality()`], the same classification the domain
 ///   enforces before a launch reaches this builder; the check stays here too so
 ///   the builder is correct on its own (the canary lane drives it directly).
 ///

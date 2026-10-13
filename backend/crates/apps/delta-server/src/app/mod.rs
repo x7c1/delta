@@ -23,13 +23,13 @@ use crate::ws;
 
 /// Build the application router with all routes wired to shared state, plus the
 /// built web frontend when the `embed-web` feature is on, every request logged
-/// by [`crate::request_log`].
+/// by `crate::request_log`.
 ///
 /// # Panics
 ///
 /// If the bound routes are not exactly the declared ones — see `RouteBinder` —
 /// or, with `embed-web`, if the embedded build is broken — see
-/// [`static_web::mount`].
+/// `static_web::mount`.
 pub fn router(state: AppState) -> Router {
     #[cfg(feature = "embed-web")]
     let app = {

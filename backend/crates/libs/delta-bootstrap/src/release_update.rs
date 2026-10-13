@@ -11,7 +11,7 @@ use crate::Config;
 /// The in-app update `config` allows: offered only to a desktop app built by
 /// the release workflow ([`NotOffered::of_build`]), downloading this
 /// platform's asset into [`DataLayout::updates`](crate::DataLayout::updates)
-/// and installing it through [`installer`].
+/// and installing it through the `installer` module.
 ///
 /// First removes the downloads in that directory that `current_version`, the
 /// running app's version, is not older than ([`remove_stale_updates`]), so an
