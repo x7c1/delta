@@ -77,5 +77,5 @@ two minters in this task.
 
 ### Before merge (verified outside the check command)
 
-- [ ] The doc of `PaneToken::adopted` and the minter's docs describe the
+- [x] The doc of `PaneToken::adopted` and the minter's docs describe the
       skipping where it actually happens (reviewed in the diff).
