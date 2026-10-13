@@ -31,6 +31,8 @@ async fn list_worktree_dirs_marks_the_ones_a_session_works_in() {
         in_use,
         repo_root: Some(REPO_ROOT.to_owned()),
         dirty: Some(dirty),
+        branch: None,
+        launch_branch: None,
     };
     assert_eq!(
         dirs,
@@ -42,6 +44,8 @@ async fn list_worktree_dirs_marks_the_ones_a_session_works_in() {
                 in_use: false,
                 repo_root: None,
                 dirty: None,
+                branch: None,
+                launch_branch: None,
             },
             registered(&owned, true, false),
         ]

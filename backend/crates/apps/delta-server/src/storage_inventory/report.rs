@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use delta_wire::rest::{WireStorageFile, WireStorageResponse};
 
-use super::{display, file_bytes, snapshots_of, StorageInventory};
+use super::{dir_bytes, display, file_bytes, snapshots_of, StorageInventory};
 
 /// The suffixes SQLite gives the files it keeps beside the database in WAL
 /// mode. Counted into the database's size: a user sees one number for "the
@@ -21,8 +21,9 @@ impl StorageInventory {
     /// a missing file silently (the `-wal`/`-shm` files come and go), any
     /// other failure with a warning.
     ///
-    /// Blocking file-system calls, but only a handful of `stat`s and one
-    /// directory listing, so the handler runs it inline.
+    /// Blocking file-system calls, but only a handful of `stat`s and two
+    /// small directory listings (the snapshots beside the database, and the
+    /// one or two downloads in `updates/`), so the handler runs it inline.
     pub(crate) fn report(&self, tmux_socket: &str, version: String) -> WireStorageResponse {
         let database = self.layout.database();
         let database_bytes = file_bytes(&database)
@@ -39,6 +40,10 @@ impl StorageInventory {
                 bytes: database_bytes,
             },
             snapshots: snapshots_of(&database),
+            updates: WireStorageFile {
+                path: display(&self.layout.updates()),
+                bytes: dir_bytes(&self.layout.updates()),
+            },
             hook_state: display(&self.layout.hook_state()),
             sessions_dir: display(&self.layout.sessions()),
             session_settings: display(&self.layout.session_settings(self.port)),
@@ -111,6 +116,26 @@ mod tests {
                 ("delta.db.bak-v10".into(), 3)
             ],
         );
+    }
+
+    #[test]
+    fn the_updates_size_sums_every_file_under_the_updates_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let updates = dir.path().join("updates");
+        std::fs::create_dir_all(updates.join("partial")).unwrap();
+        std::fs::write(updates.join("Delta_0.7.0_aarch64.app.tar.gz"), vec![0; 300]).unwrap();
+        std::fs::write(updates.join("partial").join("chunk"), vec![0; 40]).unwrap();
+        let report = inventory(dir.path()).report("sock", "v0".into());
+        assert_eq!(report.updates.path, display(&updates));
+        assert_eq!(report.updates.bytes, 340);
+    }
+
+    #[test]
+    fn a_missing_updates_directory_reports_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let report = inventory(dir.path()).report("sock", "v0".into());
+        assert_eq!(report.updates.path, display(&dir.path().join("updates")));
+        assert_eq!(report.updates.bytes, 0);
     }
 
     #[test]

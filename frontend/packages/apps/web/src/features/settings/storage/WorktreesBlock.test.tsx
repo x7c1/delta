@@ -148,6 +148,24 @@ describe('WorktreesBlock', () => {
     expect(within(row).getByRole('button', { name: 'Remove and lose changes' })).toBeDisabled();
   });
 
+  it('gives the focus back to the row\'s Remove when the confirmation is cancelled', async () => {
+    renderWithApi(<WorktreesBlock active />);
+    const row = await rowOf(clean.path);
+    const opener = () => within(row).getByRole('button', { name: /^Remove worktree/ });
+
+    fireEvent.click(opener());
+    fireEvent.click(within(row).getByRole('button', { name: 'Cancel' }));
+
+    expect(within(row).queryByTestId('storage-worktree-confirm')).toBeNull();
+    expect(opener()).toHaveFocus();
+
+    fireEvent.click(opener());
+    fireEvent.keyDown(within(row).getByRole('button', { name: 'Cancel' }), { key: 'Escape' });
+
+    expect(within(row).queryByTestId('storage-worktree-confirm')).toBeNull();
+    expect(opener()).toHaveFocus();
+  });
+
   it('says so when there are no worktrees, and fetches nothing while inactive', async () => {
     let fetched = 0;
     server.use(

@@ -4,6 +4,7 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { createHandlers, MOCK_DATA_DIR, MOCK_WORKTREE_BASE } from '@delta/api-mocks';
+import type { StorageWorktree, StorageWorktreeBranch } from '@delta/wire-gen';
 import { EraseBlock } from './EraseBlock';
 import { renderWithApi } from './testSupport';
 
@@ -12,6 +13,33 @@ const server = setupServer(...createHandlers());
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 beforeEach(() => server.resetHandlers(...createHandlers()));
 afterAll(() => server.close());
+
+/** A branch Delta cut for a session it lists, merged or not (`null`: not asked). */
+function ours(name: string, merged: boolean | null): StorageWorktreeBranch {
+  return { name, created_for_session: true, merged };
+}
+
+/** A branch Delta did not cut for a session it lists. */
+function notOurs(name: string): StorageWorktreeBranch {
+  return { name, created_for_session: false, merged: null };
+}
+
+/** A registered worktree under the mock base, checked out on `branch`. */
+function worktree(
+  name: string,
+  state: { dirty?: boolean; in_use: boolean },
+  branch: StorageWorktreeBranch | null,
+  launchBranch: StorageWorktreeBranch | null = null,
+): StorageWorktree {
+  return {
+    path: `${MOCK_WORKTREE_BASE}/${name}`,
+    in_use: state.in_use,
+    repo_root: '/home/u/src/delta',
+    dirty: state.dirty ?? false,
+    branch,
+    launch_branch: launchBranch,
+  };
+}
 
 /** Open the confirmation and return the confirming button. */
 function openConfirmation(): HTMLElement {
@@ -41,6 +69,71 @@ describe('EraseBlock', () => {
     expect(screen.queryByTestId('storage-erase-confirm')).toBeNull();
   });
 
+  it('names the branches that will stay, and why, before anything is confirmed', async () => {
+    server.use(
+      http.get('*/api/storage/worktrees', () =>
+        HttpResponse.json({
+          worktrees: [
+            worktree('dirty', { dirty: true, in_use: true }, ours('delta-dirty', null)),
+            worktree('leftover', { in_use: false }, notOurs('delta-gone')),
+            worktree('merged', { in_use: true }, ours('delta-merged', true)),
+            worktree('started-on-feature', { in_use: true }, notOurs('feature')),
+            worktree('unmerged', { in_use: true }, ours('delta-unmerged', false)),
+            worktree('detached', { in_use: true }, null),
+            // Sessions that checked out another branch in their worktree.
+            worktree(
+              'switched',
+              { in_use: true },
+              notOurs('fix'),
+              ours('delta-switched', false),
+            ),
+            worktree(
+              'switched-merged',
+              { in_use: true },
+              notOurs('fix-2'),
+              ours('delta-switched-merged', true),
+            ),
+          ],
+        }),
+      ),
+    );
+    renderWithApi(<EraseBlock active />);
+
+    const branches = await screen.findByTestId('storage-erase-kept-branches');
+    const lines = within(branches)
+      .getAllByRole('listitem')
+      .map((item) => item.textContent);
+    expect(lines).toEqual([
+      'delta-dirty, because its worktree has changes and stays.',
+      'delta-gone, because no session Delta lists owns it.',
+      'feature, because Delta did not create it.',
+      'delta-unmerged, because it is not merged.',
+      'fix, because Delta did not create it.',
+      'delta-switched, because it is not merged.',
+      'fix-2, because Delta did not create it.',
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Erase everything…' }));
+    expect(screen.getByTestId('storage-erase-confirm')).toHaveTextContent(
+      'The worktrees and branches listed above stay on disk.',
+    );
+    expect(screen.getByTestId('storage-erase-kept-branches')).toBeInTheDocument();
+  });
+
+  it('says so when no branch will stay', async () => {
+    server.use(
+      http.get('*/api/storage/worktrees', () =>
+        HttpResponse.json({
+          worktrees: [worktree('merged', { in_use: true }, ours('delta-merged', true))],
+        }),
+      ),
+    );
+    renderWithApi(<EraseBlock active />);
+
+    expect(await screen.findByTestId('storage-erase-kept-branches')).toHaveTextContent(
+      "No branch of Delta's worktrees will stay.",
+    );
+  });
+
   it('holds the button back until the word is typed', async () => {
     renderWithApi(<EraseBlock active />);
 
@@ -55,6 +148,7 @@ describe('EraseBlock', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByTestId('storage-erase-confirm')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Erase everything…' })).toHaveFocus();
     expect(openConfirmation()).toBeDisabled();
   });
 
@@ -100,9 +194,10 @@ describe('EraseBlock', () => {
     renderWithApi(<EraseBlock active />);
 
     expect(await screen.findByTestId('storage-erase-kept-error')).toHaveTextContent(
-      'Could not list the worktrees that will stay',
+      'Could not list the worktrees and branches that will stay',
     );
     expect(screen.queryByTestId('storage-erase-kept')).toBeNull();
+    expect(screen.queryByTestId('storage-erase-kept-branches')).toBeNull();
   });
 
   it('still shows the report when the block was left while the erase ran', async () => {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ApiError,
   useRemoveStorageWorktreeMutation,
@@ -103,6 +103,8 @@ function WorktreeRow({ worktree }: { worktree: StorageWorktree }) {
   const remove = useRemoveStorageWorktreeMutation(client);
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState('');
+  // Wraps the Remove button alone: the row's first control is its Copy button.
+  const openerRef = useRef<HTMLSpanElement>(null);
   const state = stateOf(worktree);
   const name = baseName(worktree.path);
   // Destroying work needs the name typed; a clean worktree goes through git's
@@ -124,15 +126,17 @@ function WorktreeRow({ worktree }: { worktree: StorageWorktree }) {
         <PathText value={worktree.path} />
         <CopyButton value={worktree.path} label={`worktree path ${name}`} />
         {state !== 'in_use' && !confirming && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="shrink-0"
-            onClick={() => setConfirming(true)}
-            aria-label={`Remove worktree ${name}`}
-          >
-            Remove
-          </Button>
+          <span ref={openerRef} className="contents">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="shrink-0"
+              onClick={() => setConfirming(true)}
+              aria-label={`Remove worktree ${name}`}
+            >
+              Remove
+            </Button>
+          </span>
         )}
       </div>
       <div className="flex flex-wrap items-center gap-x-3 text-caption text-fg-muted">
@@ -156,6 +160,7 @@ function WorktreeRow({ worktree }: { worktree: StorageWorktree }) {
           pending={remove.isPending}
           error={remove.isError ? refusalText(remove.error) : null}
           testId="storage-worktree-confirm"
+          returnFocusTo={openerRef}
         >
           {force ? (
             <>

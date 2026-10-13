@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   usePrunePreviewQuery,
   usePruneSessionsMutation,
@@ -66,6 +66,7 @@ export function PruneSessionsBlock({ active }: { active: boolean }) {
   const [daysText, setDaysText] = useState(String(DEFAULT_DAYS));
   const [choice, setChoice] = useState<StatusChoice>('both');
   const [confirming, setConfirming] = useState(false);
+  const openerRef = useRef<HTMLDivElement>(null);
   const prune = usePruneSessionsMutation(client);
 
   const days = parseDays(daysText);
@@ -142,6 +143,7 @@ export function PruneSessionsBlock({ active }: { active: boolean }) {
           onCancel={() => setConfirming(false)}
           pending={prune.isPending}
           testId="storage-prune-confirm"
+          returnFocusTo={openerRef}
         >
           <p>
             Remove {countOf(count, noun)}
@@ -150,7 +152,7 @@ export function PruneSessionsBlock({ active }: { active: boolean }) {
           </p>
         </ConfirmPanel>
       ) : (
-        <div>
+        <div ref={openerRef}>
           <Button
             size="sm"
             onClick={() => {

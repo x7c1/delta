@@ -367,6 +367,16 @@ session as skipped instead of failing. A session whose removal fails for any
 other reason is skipped too, and the rest are still removed. `session_removed`
 is broadcast for each removed session, as the single route does.
 
+Two sessions can share one worktree (the second was started on the first one's
+branch). Removing them one at a time, the first one's removal keeps the
+worktree because the second still works in it, and the second's removes it. So
+once every matching session is removed, each one whose worktree was kept only
+for another session is revisited under the same rule: its merged `delta-<id>`
+branch is deleted when the worktree has gone, and the worktree itself is
+removed when no remaining session works in it. `kept` then lists only what is
+left: an item the batch removed is not listed, and an item two sessions kept is
+listed once, against the session it says the most about.
+
 - **200**:
 
   ```json

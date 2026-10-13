@@ -81,7 +81,7 @@ pub use session_removal::{DiskItem, KeepReason, KeptItem, SessionRemoval};
 pub use turn::{
     transition, turn_input_for_agent_event, OrphanedSend, Transition, TurnInput, TurnState,
 };
-pub use worktree_dir::WorktreeDir;
+pub use worktree_dir::{WorktreeBranch, WorktreeDir};
 
 // Re-export the domain types the transport layer needs, so the server can
 // depend on the use-case surface without reaching across to delta-model for

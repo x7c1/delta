@@ -947,7 +947,8 @@ const MOCK_WORKTREE_REPO = '/home/u/src/delta';
  * `GET /api/storage/worktrees` lists, sorted by name, one per state the
  * Worktrees block renders: a clean leftover, a leftover with uncommitted
  * changes, a leftover git no longer knows, and one a listed session still
- * works in.
+ * works in, on the unmerged branch Delta created for it — so the erase
+ * confirmation has a branch to name for each reason it keeps one.
  */
 export const mockStorageWorktrees: StorageWorktree[] = [
   {
@@ -955,24 +956,32 @@ export const mockStorageWorktrees: StorageWorktree[] = [
     in_use: false,
     repo_root: MOCK_WORKTREE_REPO,
     dirty: false,
+    branch: { name: 'delta-leftover-clean', created_for_session: false, merged: null },
+    launch_branch: null,
   },
   {
     path: `${MOCK_WORKTREE_BASE}/x7c1-delta-leftover-dirty`,
     in_use: false,
     repo_root: MOCK_WORKTREE_REPO,
     dirty: true,
+    branch: { name: 'delta-leftover-dirty', created_for_session: false, merged: null },
+    launch_branch: null,
   },
   {
     path: `${MOCK_WORKTREE_BASE}/x7c1-delta-leftover-unregistered`,
     in_use: false,
     repo_root: null,
     dirty: null,
+    branch: null,
+    launch_branch: null,
   },
   {
     path: `${MOCK_WORKTREE_BASE}/x7c1-delta-session-1`,
     in_use: true,
     repo_root: MOCK_WORKTREE_REPO,
     dirty: false,
+    branch: { name: 'delta-session-1', created_for_session: true, merged: false },
+    launch_branch: null,
   },
 ];
 
@@ -994,6 +1003,7 @@ export const mockStorage: StorageResponse = {
     { path: `${MOCK_DATA_DIR}/delta.db.bak-v3`, bytes: 1_048_576 },
     { path: `${MOCK_DATA_DIR}/delta.db.bak-v5`, bytes: 2_097_152 },
   ],
+  updates: { path: `${MOCK_DATA_DIR}/updates`, bytes: 9_437_184 },
   hook_state: `${MOCK_DATA_DIR}/delta-hook-state.json`,
   sessions_dir: `${MOCK_DATA_DIR}/sessions`,
   session_settings: `${MOCK_DATA_DIR}/settings/7878.json`,

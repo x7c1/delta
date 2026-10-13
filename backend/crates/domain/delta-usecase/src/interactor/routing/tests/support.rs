@@ -28,13 +28,24 @@ pub(super) fn under_base(name: &str) -> String {
 /// Register `id` as a closed session that ran in the worktree Delta cut for
 /// it, `<base>/x7c1-delta-<id>` on `delta-<id>`.
 pub(super) async fn closed_worktree_session(ix: &TestInteractor, id: &str) -> SessionId {
+    closed_session_in_worktree_of(ix, id, id).await
+}
+
+/// Register `id` as a closed session that ran in the worktree Delta cut for
+/// session `owner`, on `owner`'s `delta-<owner>` branch: a second session
+/// started on a branch that already had a worktree, which shares it.
+pub(super) async fn closed_session_in_worktree_of(
+    ix: &TestInteractor,
+    id: &str,
+    owner: &str,
+) -> SessionId {
     let (session, _) = ix
         .store()
         .register_session(NewSession {
             id: id.into(),
-            cwd: worktree_of(id),
+            cwd: worktree_of(owner),
             transcript_path: format!("/transcripts/{id}.jsonl"),
-            branch_at_launch: Some(format!("delta-{id}")),
+            branch_at_launch: Some(format!("delta-{owner}")),
             repo_root: Some(REPO_ROOT.into()),
             repository_display_name: None,
         })

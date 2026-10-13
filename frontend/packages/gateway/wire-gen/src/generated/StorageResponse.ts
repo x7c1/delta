@@ -24,4 +24,10 @@ database: StorageFile,
  * The migration runner's `delta.db.bak-v<N>` snapshots beside the
  * database, in ascending `<N>`; empty when there are none.
  */
-snapshots: Array<StorageFile>, hook_state: string, sessions_dir: string, session_settings: string, tmux_conf: string, tmux_socket: string, worktree_base: string, transcript_root: string, };
+snapshots: Array<StorageFile>, 
+/**
+ * The `updates/` directory where the desktop app keeps the newer release
+ * it downloaded, with `bytes` summing every file in it; zero when there
+ * is none (or the directory does not exist).
+ */
+updates: StorageFile, hook_state: string, sessions_dir: string, session_settings: string, tmux_conf: string, tmux_socket: string, worktree_base: string, transcript_root: string, };

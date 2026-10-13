@@ -45,6 +45,7 @@ describe('StorageSection', () => {
       mockStorage.session_settings,
       mockStorage.tmux_conf,
       mockStorage.tmux_socket,
+      mockStorage.updates.path,
       mockStorage.worktree_base,
       mockStorage.transcript_root,
     ]) {
@@ -66,6 +67,15 @@ describe('StorageSection', () => {
       within(snapshots).getByTitle(mockStorage.snapshots[0].path, { exact: true }),
     ).toBeInTheDocument();
     expect(within(snapshots).getByText('1.0 MB')).toBeInTheDocument();
+  });
+
+  it('shows the downloaded updates with their size', async () => {
+    renderSection();
+
+    const updates = await screen.findByTestId('storage-updates');
+    expect(updates).toHaveTextContent('Downloaded updates');
+    expect(within(updates).getByTitle(mockStorage.updates.path, { exact: true })).toBeInTheDocument();
+    expect(within(updates).getByText('9.0 MB')).toHaveAttribute('title', '9,437,184 bytes');
   });
 
   it('says so in one line when there are no snapshots', async () => {

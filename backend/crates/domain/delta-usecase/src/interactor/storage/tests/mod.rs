@@ -1,6 +1,8 @@
 //! Settings → Storage worktree use-case tests.
 
 mod list_worktree_dirs_marks_the_ones_a_session_works_in;
+mod list_worktree_dirs_tells_the_branch_its_session_switched_away_from;
+mod list_worktree_dirs_tells_which_branch_removing_its_session_would_delete;
 mod remove_worktree_dir_needs_force_for_a_dirty_or_unregistered_worktree;
 mod remove_worktree_dir_refuses_a_path_outside_the_base;
 mod remove_worktree_dir_refuses_a_worktree_a_session_works_in;

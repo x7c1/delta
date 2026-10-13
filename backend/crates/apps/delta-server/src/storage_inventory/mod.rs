@@ -136,6 +136,40 @@ fn file_bytes(path: &Path) -> u64 {
     }
 }
 
+/// The size of every file under the directory `dir`, at any depth, or zero
+/// when it does not exist. An entry that cannot be read is skipped with a
+/// warning; symbolic links are not followed.
+fn dir_bytes(dir: &Path) -> u64 {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return 0,
+        Err(err) => {
+            tracing::warn!(dir = %dir.display(), error = %err, "could not list a directory for the storage inventory");
+            return 0;
+        }
+    };
+    let mut bytes = 0;
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                tracing::warn!(dir = %dir.display(), error = %err, "could not read a directory entry for the storage inventory");
+                continue;
+            }
+        };
+        let path = entry.path();
+        match entry.file_type() {
+            Ok(kind) if kind.is_dir() => bytes += dir_bytes(&path),
+            Ok(kind) if kind.is_file() => bytes += file_bytes(&path),
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(path = %path.display(), error = %err, "could not read a file type for the storage inventory");
+            }
+        }
+    }
+    bytes
+}
+
 fn display(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }

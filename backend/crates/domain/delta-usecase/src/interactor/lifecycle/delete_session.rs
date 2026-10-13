@@ -1,10 +1,11 @@
 //! Removing a closed session from Delta's list, with the worktree and branch
 //! Delta created for it when they hold no work.
 
-use delta_model::{Session, SessionStatus};
+use delta_model::{Session, SessionId, SessionStatus};
 
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
+use crate::interactor::InteractorCore;
 use crate::ports::{
     BranchDeletion, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace, WorktreeRemoval,
 };
@@ -28,7 +29,7 @@ where
     /// permission requests, subagents, the sync cursor). Then, if the session
     /// ran in a worktree Delta created, that worktree is removed when it is
     /// clean and its `delta-<session id>` branch deleted when it is merged —
-    /// see [`Self::remove_owned_worktree`] for the exact rule. Whatever holds
+    /// see [`InteractorCore::remove_owned_worktree`] for the exact rule. Whatever holds
     /// work is kept and reported in the returned [`SessionRemoval`], for the
     /// transport to log. The agent's own
     /// transcript and state files (Claude Code's JSONL, Codex's thread) are
@@ -83,12 +84,43 @@ where
         // and a kept running entry would pin this doomed actor alive for the
         // process's lifetime.
         self.state.forget_turn();
-        Ok(self.remove_owned_worktree(&session).await)
+        Ok(self.core.remove_owned_worktree(self.id, &session).await)
     }
+}
 
-    /// Remove the worktree and branch Delta created for `session` (whose row is
-    /// already deleted) when they hold no work, and report what was removed
-    /// and what was kept.
+/// The worktree Delta created for a session and the branch it worked on, read
+/// off the session's row.
+struct OwnedWorktree<'a> {
+    path: &'a str,
+    repo_root: &'a str,
+    /// The `delta-<session id>` branch Delta would cut for the session.
+    delta_branch: String,
+    /// The branch the session worked on: Delta's own `delta-<id>` branch
+    /// (no reason), or an existing branch the user started it on (never
+    /// Delta's to delete, with the reason it is kept).
+    branch: Option<(DiskItem, Option<KeepReason>)>,
+}
+
+impl OwnedWorktree<'_> {
+    /// Keep the session's branch, for `reason` unless it is not Delta's.
+    fn keep_branch(&self, removal: &mut SessionRemoval, reason: KeepReason) {
+        if let Some((item, own_reason)) = &self.branch {
+            removal.kept(item.clone(), own_reason.clone().unwrap_or(reason));
+        }
+    }
+}
+
+impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
+where
+    T: TmuxDriver,
+    X: Transcript,
+    S: SessionStore,
+    W: Workspace,
+    G: GitWorktree,
+{
+    /// Remove the worktree and branch Delta created for session `id` (whose
+    /// row, `session`, is already deleted) when they hold no work, and report
+    /// what was removed and what was kept.
     ///
     /// - The session's `cwd` is a worktree Delta created **iff** it lies under
     ///   `worktree_base` and `repo_root` (the repository the worktree was cut
@@ -110,53 +142,38 @@ where
     ///
     /// A git failure other than git's own refusal is logged at `warn` and the
     /// item counts as kept; nothing here fails the removal.
-    async fn remove_owned_worktree(&self, session: &Session) -> SessionRemoval {
+    ///
+    /// Also what a bulk removal runs again for a session whose worktree was
+    /// kept only because a later session of the same batch still worked in it
+    /// (see `Interactor::remove_sessions`).
+    pub(in crate::interactor) async fn remove_owned_worktree(
+        &self,
+        id: &SessionId,
+        session: &Session,
+    ) -> SessionRemoval {
         let mut removal = SessionRemoval::default();
-        let path = session.cwd.as_str();
-        let Some(repo_root) = session.repo_root.as_deref() else {
+        let Some(owned) = self.owned_worktree(id, session) else {
             return removal;
         };
-        if !super::is_under_worktree_base(&self.worktree_base, path)
-            || super::is_at_or_below(repo_root, path)
-        {
-            return removal;
-        }
+        let (path, repo_root) = (owned.path, owned.repo_root);
         let worktree = DiskItem::Worktree(path.to_owned());
-        let delta_branch = format!("delta-{}", self.id.as_str());
-        // The branch the session worked on: Delta's own `delta-<id>` branch, or
-        // an existing branch the user started it on (never Delta's to delete).
-        let branch = session.branch_at_launch.as_deref().map(|name| {
-            if name == delta_branch {
-                (DiskItem::Branch(delta_branch.clone()), None)
-            } else {
-                (
-                    DiskItem::Branch(name.to_owned()),
-                    Some(KeepReason::NotCreatedByDelta),
-                )
-            }
-        });
-        let keep_branch = |removal: &mut SessionRemoval, reason: KeepReason| {
-            if let Some((item, own_reason)) = &branch {
-                removal.kept(item.clone(), own_reason.clone().unwrap_or(reason));
-            }
-        };
 
         match self.store.cwd_exists(path).await {
             Ok(false) => {}
             Ok(true) => {
                 removal.kept(worktree, KeepReason::InUseByAnotherSession);
-                keep_branch(&mut removal, KeepReason::WorktreeKept);
+                owned.keep_branch(&mut removal, KeepReason::WorktreeKept);
                 return removal;
             }
             Err(err) => {
                 tracing::warn!(
-                    session_id = %self.id,
+                    session_id = %id,
                     path,
                     error = %err,
                     "could not check whether another session uses the worktree; keeping it"
                 );
                 removal.kept(worktree, KeepReason::Failed(err.to_string()));
-                keep_branch(&mut removal, KeepReason::WorktreeKept);
+                owned.keep_branch(&mut removal, KeepReason::WorktreeKept);
                 return removal;
             }
         }
@@ -165,19 +182,19 @@ where
             Ok(WorktreeRemoval::Removed) => removal.removed(worktree),
             Ok(WorktreeRemoval::KeptDirty) => {
                 removal.kept(worktree, KeepReason::Dirty);
-                keep_branch(&mut removal, KeepReason::WorktreeKept);
+                owned.keep_branch(&mut removal, KeepReason::WorktreeKept);
                 return removal;
             }
             Err(err) => {
                 tracing::warn!(
-                    session_id = %self.id,
+                    session_id = %id,
                     repo_root,
                     path,
                     error = %err,
                     "removing the session's worktree failed; keeping it"
                 );
                 removal.kept(worktree, KeepReason::Failed(err.to_string()));
-                keep_branch(&mut removal, KeepReason::WorktreeKept);
+                owned.keep_branch(&mut removal, KeepReason::WorktreeKept);
                 return removal;
             }
         }
@@ -186,7 +203,7 @@ where
         // (the worktree is already gone, and a later prune catches the entry).
         if let Err(err) = self.git_worktree.prune_worktrees(repo_root).await {
             tracing::warn!(
-                session_id = %self.id,
+                session_id = %id,
                 repo_root,
                 error = %err,
                 "git worktree prune failed after removing the session's worktree"
@@ -197,7 +214,7 @@ where
             Ok(()) => removal.removed(trust),
             Err(err) => {
                 tracing::warn!(
-                    session_id = %self.id,
+                    session_id = %id,
                     path,
                     error = %err,
                     "forgetting the removed worktree's trust entry failed"
@@ -206,31 +223,93 @@ where
             }
         }
 
-        match branch {
+        self.remove_owned_branch(id, &owned, &mut removal).await;
+        removal
+    }
+
+    /// The branch step of [`Self::remove_owned_worktree`] alone, for session
+    /// `id` (whose row, `session`, is already deleted) whose worktree another
+    /// session's removal has already removed, prune and trust entry included.
+    pub(in crate::interactor) async fn remove_owned_branch_of_removed_worktree(
+        &self,
+        id: &SessionId,
+        session: &Session,
+    ) -> SessionRemoval {
+        let mut removal = SessionRemoval::default();
+        if let Some(owned) = self.owned_worktree(id, session) {
+            self.remove_owned_branch(id, &owned, &mut removal).await;
+        }
+        removal
+    }
+
+    /// The worktree Delta created for session `id` per its row `session`, or
+    /// `None` when the session did not run in one (see
+    /// [`Self::remove_owned_worktree`]).
+    fn owned_worktree<'a>(
+        &self,
+        id: &SessionId,
+        session: &'a Session,
+    ) -> Option<OwnedWorktree<'a>> {
+        let path = session.cwd.as_str();
+        let repo_root = session.repo_root.as_deref()?;
+        if !super::is_under_worktree_base(&self.worktree_base, path)
+            || super::is_at_or_below(repo_root, path)
+        {
+            return None;
+        }
+        let delta_branch = format!("delta-{}", id.as_str());
+        let branch = session.branch_at_launch.as_deref().map(|name| {
+            if name == delta_branch {
+                (DiskItem::Branch(delta_branch.clone()), None)
+            } else {
+                (
+                    DiskItem::Branch(name.to_owned()),
+                    Some(KeepReason::NotCreatedByDelta),
+                )
+            }
+        });
+        Some(OwnedWorktree {
+            path,
+            repo_root,
+            delta_branch,
+            branch,
+        })
+    }
+
+    /// Delete the session's `delta-<id>` branch when it is merged, its
+    /// worktree being gone; keep any other branch with its reason.
+    async fn remove_owned_branch(
+        &self,
+        id: &SessionId,
+        owned: &OwnedWorktree<'_>,
+        removal: &mut SessionRemoval,
+    ) {
+        match &owned.branch {
             None => {}
-            Some((item, Some(reason))) => removal.kept(item, reason),
+            Some((item, Some(reason))) => removal.kept(item.clone(), reason.clone()),
             Some((item, None)) => {
                 match self
                     .git_worktree
-                    .delete_branch_if_merged(repo_root, &delta_branch)
+                    .delete_branch_if_merged(owned.repo_root, &owned.delta_branch)
                     .await
                 {
-                    Ok(BranchDeletion::Deleted) => removal.removed(item),
-                    Ok(BranchDeletion::KeptUnmerged) => removal.kept(item, KeepReason::Unmerged),
+                    Ok(BranchDeletion::Deleted) => removal.removed(item.clone()),
+                    Ok(BranchDeletion::KeptUnmerged) => {
+                        removal.kept(item.clone(), KeepReason::Unmerged)
+                    }
                     Ok(BranchDeletion::Absent) => {}
                     Err(err) => {
                         tracing::warn!(
-                            session_id = %self.id,
-                            repo_root,
-                            branch = %delta_branch,
+                            session_id = %id,
+                            repo_root = owned.repo_root,
+                            branch = %owned.delta_branch,
                             error = %err,
                             "deleting the session's branch failed; keeping it"
                         );
-                        removal.kept(item, KeepReason::Failed(err.to_string()));
+                        removal.kept(item.clone(), KeepReason::Failed(err.to_string()));
                     }
                 }
             }
         }
-        removal
     }
 }

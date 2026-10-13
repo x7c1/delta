@@ -57,6 +57,7 @@ It holds:
 - `updates/`, a newer release the desktop app downloaded and verified, kept
   until it is installed; a download of another version replaces it, and the
   app removes it at startup once it runs that version or a newer one.
+  Settings → Storage shows its size.
 
 The directory is readable by you only (mode `0700`) when the app creates it. A
 directory an earlier version created keeps its mode; the hook state file and the
@@ -158,8 +159,10 @@ created on this machine and holds none of your work, then stops:
   once nothing else is left in it.
 
 It never deletes work: a worktree with uncommitted or untracked changes, an
-unmerged branch, and a branch Delta did not create are kept, and a browser is
-left showing them with the reason. The desktop app closes its window, lists
+unmerged branch, and a branch Delta did not create are kept. Before you confirm,
+the Erase block lists the worktrees that will stay and the branches of those
+worktrees that will stay, each with the reason; afterwards a browser is left
+showing what was kept, with the reason. The desktop app closes its window, lists
 what was kept in a message dialog, and quits when you dismiss it. As it quits
 it removes its own files too — the
 [webview storage](#where-the-app-keeps-its-data) and every other directory it

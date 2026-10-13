@@ -11,7 +11,7 @@ import { WorktreesBlock } from './WorktreesBlock';
 
 /**
  * Storage category content: where this running Delta keeps its files on this
- * machine, and how large the database is — read from `GET /api/storage`, so it
+ * machine, and how large the database and the downloaded updates are — read from `GET /api/storage`, so it
  * names the directories *this* install actually uses rather than the
  * documented defaults.
  *
@@ -96,6 +96,12 @@ function StorageInventory({ storage }: { storage: StorageResponse }) {
         />
         <StorageRow label="tmux configuration" value={storage.tmux_conf} />
         <StorageRow label="tmux socket name" value={storage.tmux_socket} />
+        <StorageRow
+          label="Downloaded updates"
+          value={storage.updates.path}
+          bytes={storage.updates.bytes}
+          testId="storage-updates"
+        />
         <StorageRow label="Worktrees" value={storage.worktree_base} />
         <StorageRow
           label="Claude Code transcripts"

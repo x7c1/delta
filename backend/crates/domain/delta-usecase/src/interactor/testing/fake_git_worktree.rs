@@ -297,7 +297,10 @@ impl FakeGitWorktree {
         self
     }
 
-    /// Script `delete_branch_if_merged(_, branch)` to answer `answer`.
+    /// Script `delete_branch_if_merged(_, branch)` to answer `answer`, and
+    /// `is_branch_merged(_, branch)` to agree with it (`Deleted` is merged,
+    /// `KeptUnmerged` is not, `Absent` is no such branch, a failure is an
+    /// error).
     pub(crate) fn with_branch_deletion(
         self,
         branch: &str,
@@ -487,6 +490,22 @@ impl GitWorktree for FakeGitWorktree {
             BranchDeletion::Deleted,
         )
         .into_result("branch -d")
+    }
+
+    async fn is_branch_merged(&self, _repo_root: &str, branch: &str) -> Result<Option<bool>> {
+        Ok(
+            match scripted(
+                &self.branch_deletion_script,
+                branch,
+                BranchDeletion::Deleted,
+            )
+            .into_result("merge-base --is-ancestor")?
+            {
+                BranchDeletion::Deleted => Some(true),
+                BranchDeletion::KeptUnmerged => Some(false),
+                BranchDeletion::Absent => None,
+            },
+        )
     }
 
     async fn prune_worktrees(&self, repo_root: &str) -> Result<()> {

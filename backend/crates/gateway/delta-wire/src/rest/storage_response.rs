@@ -28,6 +28,10 @@ pub struct WireStorageResponse {
     /// The migration runner's `delta.db.bak-v<N>` snapshots beside the
     /// database, in ascending `<N>`; empty when there are none.
     pub snapshots: Vec<WireStorageFile>,
+    /// The `updates/` directory where the desktop app keeps the newer release
+    /// it downloaded, with `bytes` summing every file in it; zero when there
+    /// is none (or the directory does not exist).
+    pub updates: WireStorageFile,
     pub hook_state: String,
     pub sessions_dir: String,
     pub session_settings: String,
@@ -52,6 +56,7 @@ mod tests {
             data_dir: "/d".to_owned(),
             database: file("/d/delta.db", 4096),
             snapshots: vec![file("/d/delta.db.bak-v3", 1024)],
+            updates: file("/d/updates", 8_388_608),
             hook_state: "/d/delta-hook-state.json".to_owned(),
             sessions_dir: "/d/sessions".to_owned(),
             session_settings: "/d/settings/7878.json".to_owned(),
@@ -96,6 +101,10 @@ mod tests {
             serde_json::json!({ "path": "/d/delta.db", "bytes": 4096 }),
         );
         assert_eq!(value["snapshots"][0]["path"], "/d/delta.db.bak-v3");
+        assert_eq!(
+            value["updates"],
+            serde_json::json!({ "path": "/d/updates", "bytes": 8_388_608 }),
+        );
         assert_eq!(value["tmux_socket"], "io.github.x7c1.delta");
     }
 }

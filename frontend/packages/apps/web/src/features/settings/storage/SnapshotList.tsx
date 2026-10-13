@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useDeleteSnapshotMutation } from '@delta/api-client';
 import type { StorageFile } from '@delta/wire-gen';
 import { Button } from '@delta/ui-kit';
@@ -43,6 +43,8 @@ function SnapshotRow({ snapshot }: { snapshot: StorageFile }) {
   const client = useApiClient();
   const deleteSnapshot = useDeleteSnapshotMutation(client);
   const [confirming, setConfirming] = useState(false);
+  // Wraps the Delete button alone: the row's first control is its Copy button.
+  const openerRef = useRef<HTMLSpanElement>(null);
   const name = baseName(snapshot.path);
 
   const cancel = () => {
@@ -57,15 +59,17 @@ function SnapshotRow({ snapshot }: { snapshot: StorageFile }) {
         <Size bytes={snapshot.bytes} />
         <CopyButton value={snapshot.path} label="snapshot path" />
         {!confirming && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="shrink-0"
-            onClick={() => setConfirming(true)}
-            aria-label={`Delete snapshot ${name}`}
-          >
-            Delete
-          </Button>
+          <span ref={openerRef} className="contents">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="shrink-0"
+              onClick={() => setConfirming(true)}
+              aria-label={`Delete snapshot ${name}`}
+            >
+              Delete
+            </Button>
+          </span>
         )}
       </div>
       {confirming && (
@@ -76,6 +80,7 @@ function SnapshotRow({ snapshot }: { snapshot: StorageFile }) {
           pending={deleteSnapshot.isPending}
           error={deleteSnapshot.isError ? errorMessage(deleteSnapshot.error) : null}
           testId="storage-snapshot-confirm"
+          returnFocusTo={openerRef}
         >
           <p>
             Delete <span className="font-mono">{name}</span> (

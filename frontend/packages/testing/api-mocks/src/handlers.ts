@@ -1357,7 +1357,8 @@ export function createMockApi(): MockApi {
         kept: [],
       };
       for (const worktree of store.storageWorktrees) {
-        if (worktree.dirty === true || worktree.repo_root === null) {
+        const keepsWorktree = worktree.dirty === true || worktree.repo_root === null;
+        if (keepsWorktree) {
           response.kept.push({
             session_id: null,
             kind: 'worktree',
@@ -1367,6 +1368,25 @@ export function createMockApi(): MockApi {
           });
         } else {
           response.removed.worktrees.push(worktree.path);
+        }
+        // Only the branch Delta created for a listed session goes, once its
+        // worktree has gone and it is merged; the real erase reports a kept
+        // branch against its session, which the mock does not model.
+        for (const branch of [worktree.branch, worktree.launch_branch]) {
+          if (branch === null) {
+            continue;
+          }
+          if (!keepsWorktree && branch.created_for_session && branch.merged === true) {
+            response.removed.branches.push(branch.name);
+          } else if (!keepsWorktree && branch.created_for_session) {
+            response.kept.push({
+              session_id: null,
+              kind: 'branch',
+              target: branch.name,
+              reason: 'unmerged',
+              detail: null,
+            });
+          }
         }
       }
       store.storageWorktrees = store.storageWorktrees.filter(
