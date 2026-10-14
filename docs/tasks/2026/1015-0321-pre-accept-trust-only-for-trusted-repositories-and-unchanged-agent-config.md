@@ -118,7 +118,15 @@ commit) in `docs/guides/security.md`, and update the module docs in
 
 ### Before merge (verified outside the check command)
 
-- [ ] In the desktop app, starting a session from a PR that does not touch
-      the compared paths launches with no dialog, and from a branch that
-      changes `.claude/settings.json` shows the dialog with that diff;
-      accepting launches the session.
+- [x] Against a running server (`make dev`) and a scratch repository with
+      two remote branches: before the repository is trusted, both branches
+      need confirmation (`repository_untrusted`); a send carrying the
+      confirmed commit launches the session and records trust for the
+      repository root; afterwards the branch that leaves the compared paths
+      alone needs no confirmation, and the branch that changes
+      `.claude/settings.json` reports that path with its diff; a send whose
+      confirmed commit does not match the checked-out worktree fails with the
+      refusal reason. (Exercised through the API the dialog calls; the
+      dialog's rendering and buttons are covered by the frontend tests, and
+      clicking through it in the desktop window was not possible from the
+      verifying session.)
