@@ -81,5 +81,5 @@ Paths are under `backend/crates/`.
 
 ### Before merge (verified outside the check command)
 
-- [ ] Reading `release.yml`: on a dry run the trusted comment's version is the
+- [x] Reading `release.yml`: on a dry run the trusted comment's version is the
       dry-run tag's version, not the workspace version.
