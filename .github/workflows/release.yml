@@ -262,6 +262,8 @@ jobs:
     permissions: {}
     env:
       VERSION: ${{ needs.plan.outputs.version }}
+      DRY_RUN: ${{ needs.plan.outputs.dry_run }}
+      TAG: ${{ needs.plan.outputs.tag }}
       BUNDLES: ${{ needs.plan.outputs.bundles }}
       # minisign 0.12's Linux release archive (jedisct1/minisign), and its
       # sha256, taken when it was pinned (it also verified against the
@@ -292,7 +294,12 @@ jobs:
           echo "${RUNNER_TEMP}/minisign-linux/x86_64" >> "$GITHUB_PATH"
 
       # The trusted comment, which the signature covers, names the file and
-      # the version; the app refuses a signature naming anything else.
+      # the version; the app refuses a signature naming anything else. A dry
+      # run's bundles carry the branch's real version in their file names,
+      # but its signatures name the dry run's own version (0.0.0-dryrun.<run
+      # id>, its tag without the `v`): a dry-run bundle is signed with the
+      # production key, and must never carry a signature the app would accept
+      # as the release of that version.
       - name: Sign the bundles
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
@@ -312,6 +319,18 @@ jobs:
               *) printf 'untrusted comment: minisign secret key\n%s\n' "$MINISIGN_SECRET_KEY" ;;
             esac > "$key"
           )
+          if [ "$DRY_RUN" = true ]; then
+            signed_version="${TAG#v}"
+            case "$signed_version" in
+              0.0.0-dryrun.*) ;;
+              *)
+                echo "::error::A dry run's tag ${TAG} is not v0.0.0-dryrun.<run id>."
+                exit 1
+                ;;
+            esac
+          else
+            signed_version="$VERSION"
+          fi
           mkdir signatures
           read -ra expected <<< "$BUNDLES"
           for name in "${expected[@]}"; do
@@ -319,7 +338,7 @@ jobs:
               echo "::error::The bundles job produced no ${name}."
               exit 1
             fi
-            comment="file:${name} version:${VERSION}"
+            comment="file:${name} version:${signed_version}"
             minisign -S -s "$key" -m "bundles/${name}" \
               -x "signatures/${name}.minisig" -t "$comment" < /dev/null
             verified=$(minisign -V -Q -P "$MINISIGN_PUBLIC_KEY" \

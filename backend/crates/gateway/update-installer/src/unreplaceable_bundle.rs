@@ -23,6 +23,20 @@ pub enum UnreplaceableBundle {
     NoParent { bundle: PathBuf },
     /// This user may not write to `dir`, where `bundle` is.
     NotWritable { dir: PathBuf, bundle: PathBuf },
+    /// Someone else may replace entries of `dir`, where `bundle` is, for
+    /// `reason` (owned by another user, or writable by a group or everyone
+    /// without the sticky bit), so an installed update could be swapped.
+    SharedDir {
+        dir: PathBuf,
+        bundle: PathBuf,
+        reason: String,
+    },
+    /// Who may write to `dir`, where `bundle` is, could not be read.
+    Unchecked {
+        dir: PathBuf,
+        bundle: PathBuf,
+        source: io::Error,
+    },
 }
 
 impl fmt::Display for UnreplaceableBundle {
@@ -48,6 +62,23 @@ impl fmt::Display for UnreplaceableBundle {
                 dir.display(),
                 bundle.display()
             ),
+            Self::SharedDir {
+                dir,
+                bundle,
+                reason,
+            } => write!(
+                f,
+                "{}, where {} is, {reason}, so someone else could replace the update: \
+                 move Delta to a folder only you or an administrator may change",
+                dir.display(),
+                bundle.display()
+            ),
+            Self::Unchecked { dir, bundle, .. } => write!(
+                f,
+                "could not tell who may change {}, where {} is",
+                dir.display(),
+                bundle.display()
+            ),
         }
     }
 }
@@ -59,10 +90,12 @@ impl std::error::Error for UnreplaceableBundle {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Unlocated(source) => Some(source.as_ref()),
+            Self::Unchecked { source, .. } => Some(source),
             Self::NotInBundle { .. }
             | Self::Translocated
             | Self::NoParent { .. }
-            | Self::NotWritable { .. } => None,
+            | Self::NotWritable { .. }
+            | Self::SharedDir { .. } => None,
         }
     }
 }

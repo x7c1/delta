@@ -11,10 +11,24 @@ use std::path::{Path, PathBuf};
 /// replaces the app bundle on macOS.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManualInstall {
-    /// Linux: the command that installs the verified `.deb` from the user's
-    /// own terminal, `sudo apt install <path>`, the path quoted for a POSIX
-    /// shell when it needs to be ([`Self::apt_install`]).
-    Command(String),
+    /// Linux: commands to run in a terminal outside Delta, built by
+    /// [`Self::apt_install`].
+    ///
+    /// Outside Delta, because a Delta session's pane is one the agents on
+    /// its tmux socket can type into, and `sudo` is about to be given the
+    /// user's password there.
+    Command {
+        /// The commands that check the file before it is installed, one per
+        /// line: `sha256sum <path>`, to compare with the digest on the
+        /// release page, and `minisign -Vm <path> -P <release key>`, which
+        /// checks it against the signature Delta kept beside it
+        /// (`<path>.minisig`) with the release key.
+        check: Vec<String>,
+        /// The command that installs it, `sudo -k apt install <path>`: `-k`
+        /// makes `sudo` ask for the password and leave no cached
+        /// authentication behind for anything else in that terminal.
+        install: String,
+    },
     /// macOS: open the verified disk image at this absolute path, quit
     /// Delta (Finder does not replace an app that is open), drag Delta to
     /// Applications, and start Delta again.
@@ -22,12 +36,17 @@ pub enum ManualInstall {
 }
 
 impl ManualInstall {
-    /// `sudo apt install <path>`, for the verified `.deb` at `path`.
+    /// The commands that check and install the verified `.deb` at `path`,
+    /// each path quoted for a POSIX shell when it needs to be.
     pub fn apt_install(path: &Path) -> Self {
-        Self::Command(format!(
-            "sudo apt install {}",
-            shell_quoted(&path.to_string_lossy())
-        ))
+        let path = shell_quoted(&path.to_string_lossy());
+        Self::Command {
+            check: vec![
+                format!("sha256sum {path}"),
+                format!("minisign -Vm {path} -P {}", release_signature::PUBLIC_KEY),
+            ],
+            install: format!("sudo -k apt install {path}"),
+        }
     }
 }
 
@@ -46,32 +65,48 @@ fn shell_quoted(word: &str) -> String {
 mod tests {
     use super::*;
 
-    fn command(path: &str) -> String {
+    const DEB: &str =
+        "/home/u/.local/share/io.github.x7c1.delta/updates/delta-desktop_0.6.0_amd64.deb";
+
+    fn commands(path: &str) -> (Vec<String>, String) {
         match ManualInstall::apt_install(Path::new(path)) {
-            ManualInstall::Command(command) => command,
+            ManualInstall::Command { check, install } => (check, install),
             other => panic!("{other:?}"),
         }
     }
 
     #[test]
-    fn a_plain_path_is_given_as_it_is() {
+    fn the_install_asks_sudo_for_the_password_and_keeps_no_authentication() {
+        let (_, install) = commands(DEB);
+        assert_eq!(install, format!("sudo -k apt install {DEB}"));
+    }
+
+    #[test]
+    fn the_file_is_checked_by_digest_and_by_signature_with_the_release_key() {
+        let (check, _) = commands(DEB);
         assert_eq!(
-            command(
-                "/home/u/.local/share/io.github.x7c1.delta/updates/delta-desktop_0.6.0_amd64.deb"
-            ),
-            "sudo apt install /home/u/.local/share/io.github.x7c1.delta/updates/delta-desktop_0.6.0_amd64.deb"
+            check,
+            [
+                format!("sha256sum {DEB}"),
+                format!("minisign -Vm {DEB} -P {}", release_signature::PUBLIC_KEY),
+            ]
         );
     }
 
     #[test]
     fn a_path_a_shell_would_split_or_expand_is_quoted() {
-        assert_eq!(
-            command("/home/a user/updates/d.deb"),
-            "sudo apt install '/home/a user/updates/d.deb'"
+        let (check, install) = commands("/home/a user/updates/d.deb");
+        assert_eq!(install, "sudo -k apt install '/home/a user/updates/d.deb'");
+        assert_eq!(check[0], "sha256sum '/home/a user/updates/d.deb'");
+        assert!(
+            check[1].starts_with("minisign -Vm '/home/a user/updates/d.deb' -P "),
+            "{}",
+            check[1]
         );
+        let (_, install) = commands("/home/o'neil/$HOME/d.deb");
         assert_eq!(
-            command("/home/o'neil/$HOME/d.deb"),
-            r"sudo apt install '/home/o'\''neil/$HOME/d.deb'"
+            install,
+            r"sudo -k apt install '/home/o'\''neil/$HOME/d.deb'"
         );
     }
 }

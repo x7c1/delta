@@ -14,9 +14,12 @@
 //! and trusts nothing in it beyond which version to install and which file
 //! holds it. Before installing, it checks everything itself:
 //!
-//! 1. copies the file into a new root-owned directory (mode 0700), refusing a
-//!    symlink or anything but a regular file, so the file cannot be swapped
-//!    after it is checked ([`StagedCopy`]);
+//! 1. copies the file into a new directory (mode 0700) under its fixed
+//!    working directory, [`work_dir::WORK_DIR`], refusing a symlink or
+//!    anything but a regular file, so the file cannot be swapped after it is
+//!    checked ([`StagedCopy`]); the working directory is created mode 0700,
+//!    and the helper refuses to go on unless it and its parent are owned by
+//!    root and writable by no one else ([`work_dir::prepare`]);
 //! 2. asks GitHub for the release the tag names
 //!    (`https://api.github.com/repos/x7c1/delta/releases/tags/<tag>`) and
 //!    compares the copy's sha256 with the digest it states for the `.deb`
@@ -36,6 +39,13 @@
 //! 5. installs the copy with `apt-get install -y <path>`, so its dependencies
 //!    resolve, then removes the directory.
 //!
+//! It runs in an environment it does not trust: `pkexec` clears most of it,
+//! but the helper relies on none of what is left. It never reads `TMPDIR`,
+//! its HTTPS client uses no proxy and trusts only the system's CA bundle at
+//! its fixed path ([`github`]), and it runs `dpkg-deb`, `dpkg-query` and
+//! `apt-get` by absolute path with an environment of its own
+//! ([`root_command`]).
+//!
 //! Every refusal and failure exits with a status of its own and prints one
 //! line on stderr saying why, with its causes ([`Refusal`]), which the server
 //! reports. A status in [`refusal::FILE_REJECTED`] says the file itself is
@@ -44,6 +54,8 @@
 //! decisions live in functions the unit tests cover without root; this file
 //! is only the thin shell that runs `dpkg-deb`, `dpkg-query` and `apt-get`.
 
+#[cfg(test)]
+mod child_env;
 mod github;
 mod install_request;
 mod package_check;
@@ -51,6 +63,7 @@ mod refusal;
 mod release_digest;
 mod signature_check;
 mod staged_copy;
+mod work_dir;
 
 use std::path::Path;
 use std::process::{Command, ExitCode, Output};
@@ -66,6 +79,10 @@ use staged_copy::StagedCopy;
 const DPKG_DEB: &str = "/usr/bin/dpkg-deb";
 const DPKG_QUERY: &str = "/usr/bin/dpkg-query";
 const APT_GET: &str = "/usr/bin/apt-get";
+
+/// The `PATH` the programs the helper runs get, for the ones they run in
+/// turn (`apt-get` runs `dpkg`): the system's directories only.
+const ROOT_PATH: &str = "/usr/sbin:/usr/bin:/sbin:/bin";
 
 fn main() -> ExitCode {
     match run() {
@@ -89,7 +106,9 @@ fn run() -> Result<(), Refusal> {
         return Err(Refusal::NotRoot);
     }
 
-    let staged = StagedCopy::copy(&request.file, &std::env::temp_dir())?;
+    let work_dir = Path::new(work_dir::WORK_DIR);
+    work_dir::prepare(work_dir, 0)?;
+    let staged = StagedCopy::copy(&request.file, work_dir)?;
 
     let asset = release_digest::deb_asset_name(
         &request.version,
@@ -148,7 +167,7 @@ fn run_reading(
     what: &'static str,
 ) -> Result<String, Refusal> {
     let unreadable = |cause: String| Refusal::PackageUnreadable { what, cause };
-    let output = Command::new(program)
+    let output = root_command(program)
         .args(args)
         .output()
         .map_err(|source| Refusal::Unrunnable { program, source })?;
@@ -163,10 +182,22 @@ fn run_reading(
         .map_err(|_| unreadable(format!("{program} printed something that is not UTF-8")))
 }
 
+/// `program`, to run with none of the helper's own environment but
+/// [`ROOT_PATH`] and the C locale, so no variable its caller left (one
+/// naming another configuration file for `apt-get`, say) reaches it.
+fn root_command(program: &str) -> Command {
+    let mut command = Command::new(program);
+    command
+        .env_clear()
+        .env("PATH", ROOT_PATH)
+        .env("LC_ALL", "C");
+    command
+}
+
 /// Install the package at `path` with `apt-get`, so that new dependencies are
 /// installed with it.
 fn install(path: &Path) -> Result<(), Refusal> {
-    let output = Command::new(APT_GET)
+    let output = root_command(APT_GET)
         .args(["install", "-y"])
         .arg(path)
         .env("DEBIAN_FRONTEND", "noninteractive")

@@ -570,9 +570,14 @@ async fn ready_state(installer: &Arc<GatedInstaller>) -> AppState {
 
 /// How the ready Linux download is installed by hand.
 fn manual() -> serde_json::Value {
+    let deb = format!("/data/updates/{LINUX_ASSET}");
     serde_json::json!({
         "kind": "command",
-        "command": format!("sudo apt install /data/updates/{LINUX_ASSET}"),
+        "check": [
+            format!("sha256sum {deb}"),
+            format!("minisign -Vm {deb} -P {}", release_signature::PUBLIC_KEY),
+        ],
+        "install": format!("sudo -k apt install {deb}"),
     })
 }
 

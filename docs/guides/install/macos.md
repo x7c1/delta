@@ -75,8 +75,13 @@ The app can replace itself only when:
 - **you can write to the folder `Delta.app` is in.** An administrator account
   can write to `/Applications`; a standard account usually cannot, and the
   app never asks for an administrator's password to do it.
+- **no one else can change that folder.** It must be owned by you or root,
+  and not writable by everyone or by a group other than `wheel` / `admin`,
+  unless its sticky bit is set. `/Applications` as macOS ships it
+  (`root:admin`, mode 0775) qualifies; elsewhere another user could swap the
+  installed `Delta.app` for an app of their own.
 
-The app checks both when it starts. Where either fails, it offers no
+The app checks all three when it starts. Where any fails, it offers no
 **Install**: once the update is downloaded, the footer says why (for a
 read-only copy, to move Delta to `/Applications`) and shows the
 [manual way](#updating-by-hand), which puts the new Delta in `Applications`.

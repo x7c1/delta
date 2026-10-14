@@ -60,10 +60,10 @@ const problem = (node: ReactNode): UpdateControlView => ({
  *   while the system asks for the password too), then **Restart** once
  *   installed. A failed install, and an install Delta cannot run here, show
  *   how to install the file by hand ({@link ManualInstallSteps}): the
- *   command for the user's own terminal on Linux, the disk image to open on
- *   macOS. A failed install offers a retry, and so does an install Delta
- *   cannot run on Linux; on macOS the reason shows as a line instead
- *   ({@link InstallUnavailableBox}). Where the app found at startup that it
+ *   commands that check and install it from a terminal outside Delta on
+ *   Linux, the disk image to open on macOS. A failed install offers a
+ *   retry, and so does an install Delta cannot run on Linux; on macOS the
+ *   reason shows as a line instead ({@link InstallUnavailableBox}). Where the app found at startup that it
  *   cannot install (`install_unavailable`: on macOS, it does not run from a
  *   `Delta.app` this user may replace), ready offers no Install: it shows
  *   that reason and the way by hand at once. A release Delta cannot verify
@@ -367,7 +367,7 @@ function InstallUnavailableBox({
           title={error}
         >
           {manual.kind === 'command'
-            ? 'Install it from a terminal'
+            ? 'Install it from a terminal outside Delta'
             : 'Install it from the disk image'}
         </span>
         {retry !== null && (
@@ -449,11 +449,15 @@ const WELL =
   'block select-text break-all rounded border border-border-default bg-surface-sunken px-1.5 py-1 font-mono text-code text-fg';
 
 /**
- * The way out when the app cannot install the update, with a copy button
+ * The way out when the app cannot install the update, with copy buttons
  * and a link to the release page:
  *
- * - `command` (Linux): the exact command that installs the verified file
- *   from the user's own terminal, after which Delta is restarted.
+ * - `command` (Linux): to run in a terminal outside Delta — not a Delta
+ *   session's pane, which the agents on its tmux socket can type into, and
+ *   where `sudo` is about to be given the password. First the commands that
+ *   check the file (its sha256, to compare with the release page's digest,
+ *   and its signature with the release key), then the exact command that
+ *   installs it, `sudo -k apt install …`, after which Delta is restarted.
  * - `disk_image` (macOS): the absolute path of the verified disk image, to
  *   open, then quit Delta (Finder does not replace an app that is open),
  *   drag Delta to Applications and start Delta again.
@@ -465,30 +469,66 @@ function ManualInstallSteps({
   manual: ManualInstall;
   newer: NewerRelease;
 }) {
-  const [steps, value, testId, label] =
-    manual.kind === 'command'
-      ? [
-          'Run in a terminal, then restart Delta:',
-          manual.command,
-          'update-manual-command',
-          'install command',
-        ]
-      : [
-          'Open the downloaded disk image, quit Delta, drag Delta to Applications, then start Delta again:',
-          manual.path,
-          'update-manual-image',
-          'disk image path',
-        ];
+  if (manual.kind === 'disk_image') {
+    return (
+      <div className="flex flex-col gap-1" data-testid="update-manual">
+        <span>
+          Open the downloaded disk image, quit Delta, drag Delta to
+          Applications, then start Delta again:
+        </span>
+        <CopyableWell
+          value={manual.path}
+          testId="update-manual-image"
+          label="disk image path"
+        />
+        <ReleasePageLink newer={newer} />
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-1" data-testid="update-manual">
-      <span>{steps}</span>
-      <code className={WELL} data-testid={testId}>
+      <span>
+        In a terminal outside Delta (not one of Delta&apos;s sessions), check
+        the file: its sha256 must match the digest on the release page, and
+        minisign (Ubuntu&apos;s <code>minisign</code> package, not installed by
+        default) must verify its signature, with a trusted comment naming this
+        file and version.
+      </span>
+      <CopyableWell
+        value={manual.check.join('\n')}
+        testId="update-manual-check"
+        label="check commands"
+      />
+      <span>Then install it there, and restart Delta:</span>
+      <CopyableWell
+        value={manual.install}
+        testId="update-manual-command"
+        label="install command"
+      />
+      <ReleasePageLink newer={newer} />
+    </div>
+  );
+}
+
+/** `value` in a {@link WELL}, with a button copying it. */
+function CopyableWell({
+  value,
+  testId,
+  label,
+}: {
+  value: string;
+  testId: string;
+  label: string;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <code
+        className={cn(WELL, 'min-w-0 flex-1 whitespace-pre-wrap')}
+        data-testid={testId}
+      >
         {value}
       </code>
-      <div className="flex items-center justify-between gap-2">
-        <ReleasePageLink newer={newer} />
-        <CopyButton value={value} label={label} />
-      </div>
+      <CopyButton value={value} label={label} />
     </div>
   );
 }

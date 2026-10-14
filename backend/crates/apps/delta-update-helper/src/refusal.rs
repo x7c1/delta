@@ -137,6 +137,10 @@ pub enum Refusal {
     /// `apt-get install` failed.
     #[error("apt-get could not install the update: {0}")]
     InstallFailed(String),
+    /// The directory the helper works in is not one only root may change
+    /// (or its parent is not), so the copy staged there could be swapped.
+    #[error("refused the working directory {}: {reason}", dir.display())]
+    WorkDir { dir: PathBuf, reason: String },
     /// The helper's own working files could not be set up.
     #[error("{what}")]
     Io {
@@ -184,6 +188,7 @@ impl Refusal {
             Self::PackageUnreadable { .. } => 26,
             Self::SignatureUnavailable { .. } => 27,
             Self::SignatureRefused { .. } => 28,
+            Self::WorkDir { .. } => 29,
             Self::NotNewer { .. } => ALREADY_INSTALLED,
         }
     }
@@ -221,6 +226,7 @@ impl Refusal {
             | Self::Unrunnable { .. }
             | Self::InstallFailed(_)
             | Self::Io { .. }
+            | Self::WorkDir { .. }
             | Self::NotNewer { .. } => false,
         }
     }
@@ -328,6 +334,10 @@ mod tests {
             Refusal::Io {
                 what: String::new(),
                 source: io(),
+            },
+            Refusal::WorkDir {
+                dir: PathBuf::new(),
+                reason: String::new(),
             },
         ];
         for refusal in &all {

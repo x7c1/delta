@@ -6,6 +6,7 @@ use release_signature::testing::{
 };
 
 use super::*;
+use crate::https_client::tests::{is_refused_redirect, redirect_to};
 use crate::test_server::serve_routes;
 
 const NAME: &str = BUNDLE_NAME;
@@ -104,9 +105,10 @@ fn files_in(dir: &Path) -> Vec<String> {
     names
 }
 
-/// A downloader checking signatures with the test key.
+/// A downloader checking signatures with the test key, over the tests'
+/// plain HTTP.
 fn downloader() -> GithubAssetDownloader {
-    GithubAssetDownloader::checking_with(test_key()).unwrap()
+    GithubAssetDownloader::with(test_key(), Schemes::PlainFirstHop).unwrap()
 }
 
 async fn download_with(
@@ -262,7 +264,7 @@ async fn the_apps_downloader_checks_with_the_release_key() {
     let release = Release::signed_with(SIGNED).await;
 
     let (result, _) = download_with(
-        &GithubAssetDownloader::new().unwrap(),
+        &GithubAssetDownloader::with(ReleaseKey::production(), Schemes::PlainFirstHop).unwrap(),
         &release.signed(digest_of(BODY)),
         data.path(),
     )
@@ -593,4 +595,53 @@ async fn a_name_that_is_not_a_plain_file_name_is_refused() {
             "{name}: {result:?}"
         );
     }
+}
+
+/// The downloader the app uses asks for nothing over plain HTTP: the
+/// signature, the first request, is refused before any request is sent.
+#[tokio::test]
+async fn the_apps_downloader_refuses_a_plain_http_url() {
+    let data = tempfile::tempdir().unwrap();
+    let dir = data.path().join("updates");
+    let release = Release::signed_with(SIGNED).await;
+
+    let (result, _) = download_with(
+        &GithubAssetDownloader::new().unwrap(),
+        &release.signed(digest_of(BODY)),
+        &dir,
+    )
+    .await;
+
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, AssetDownloadError::SignatureRequest(_)),
+        "{err:?}"
+    );
+    assert!(release.requested().is_empty());
+    assert_eq!(files_in(&dir), Vec::<String>::new());
+}
+
+/// Neither the signature nor the asset follows a redirect to plain HTTP.
+#[tokio::test]
+async fn a_redirect_to_plain_http_is_refused_for_the_signature_and_the_asset() {
+    let data = tempfile::tempdir().unwrap();
+    let dir = data.path().join("updates");
+    let elsewhere = "http://127.0.0.1:9/elsewhere";
+
+    let release = Release::serving(ok_response(BODY), redirect_to(elsewhere)).await;
+    let (result, _) = download(&release.signed(digest_of(BODY)), &dir).await;
+    let err = result.unwrap_err();
+    assert!(
+        matches!(&err, AssetDownloadError::SignatureRequest(cause) if is_refused_redirect(cause.as_ref())),
+        "{err:?}"
+    );
+
+    let release = Release::serving(redirect_to(elsewhere), ok_response(SIGNED.as_bytes())).await;
+    let (result, _) = download(&release.signed(digest_of(BODY)), &dir).await;
+    let err = result.unwrap_err();
+    assert!(
+        matches!(&err, AssetDownloadError::Request(cause) if is_refused_redirect(cause.as_ref())),
+        "{err:?}"
+    );
+    assert_eq!(files_in(&dir), Vec::<String>::new());
 }

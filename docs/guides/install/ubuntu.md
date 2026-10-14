@@ -102,14 +102,26 @@ never runs `sudo` in its own terminal.
 If the app cannot install the update — no password dialog can be shown (for
 example in a session without a polkit agent), you are not allowed to
 authenticate as an administrator, or the install failed — the footer shows
-the command to run in your own terminal, with a copy button and a link to the
-release page, beside a retry:
+what to run in a terminal **outside Delta** (a terminal app of its own, not
+one of Delta's sessions, whose panes the agents can type into), with copy
+buttons and a link to the release page, beside a retry. First check the file:
 
 ```bash
-sudo apt install /home/<you>/.local/share/io.github.x7c1.delta/updates/delta-desktop_<version>_amd64.deb
+sha256sum /home/<you>/.local/share/io.github.x7c1.delta/updates/delta-desktop_<version>_amd64.deb
+minisign -Vm /home/<you>/.local/share/io.github.x7c1.delta/updates/delta-desktop_<version>_amd64.deb -P <Delta's public key>
 ```
 
-Then quit the app and start it again.
+The sha256 must match the digest the release page shows for the `.deb`, and
+minisign must verify the signature Delta kept beside the file, as
+[Checking a download](README.md#checking-a-download) describes (the app
+shows the command with Delta's public key filled in). Then install it:
+
+```bash
+sudo -k apt install /home/<you>/.local/share/io.github.x7c1.delta/updates/delta-desktop_<version>_amd64.deb
+```
+
+`-k` makes `sudo` ask for your password and remember no authentication
+afterwards. Then quit the app and start it again.
 
 If the release's signature is missing or does not verify the download, the app
 keeps nothing and the footer says **Update it by hand**, with the reason and a
