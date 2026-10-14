@@ -718,7 +718,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 2.0.117",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -902,6 +902,7 @@ dependencies = [
  "include_dir",
  "log",
  "portable-pty",
+ "release-signature",
  "serde",
  "serde_json",
  "tempfile",
@@ -952,6 +953,7 @@ name = "delta-update-helper"
 version = "0.6.0"
 dependencies = [
  "libc",
+ "release-signature",
  "reqwest",
  "rustls",
  "rustls-platform-verifier",
@@ -971,6 +973,7 @@ dependencies = [
  "async-trait",
  "delta-attribution",
  "delta-model",
+ "release-signature",
  "semver",
  "serde_json",
  "tempfile",
@@ -2578,6 +2581,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
+name = "minisign-verify"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "871285dc19d8d0ebe0eef3d0e99a205f2a71363b122632cbbfa4a6c370a960ce"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3423,6 +3432,7 @@ dependencies = [
  "async-trait",
  "delta-usecase",
  "libc",
+ "release-signature",
  "reqwest",
  "rustls",
  "rustls-platform-verifier",
@@ -3434,6 +3444,15 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "release-signature"
+version = "0.6.0"
+dependencies = [
+ "minisign-verify",
+ "semver",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

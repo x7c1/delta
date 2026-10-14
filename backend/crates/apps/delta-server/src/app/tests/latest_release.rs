@@ -12,7 +12,7 @@ use delta_bootstrap::{BuildOrigin, Launcher};
 use delta_usecase::{
     AssetDownloadError, AssetDownloader, DownloadProgress, InstallError, InstalledApp, Platform,
     PublishedRelease, ReleaseAsset, ReleaseCheck, ReleaseFeed, ReleaseFeedError, ReleaseUpdate,
-    UpdateInstaller, UpdateRestart,
+    SignedAsset, UpdateInstaller, UpdateRestart,
 };
 
 use crate::serve::ServerStopped;
@@ -59,7 +59,9 @@ fn release(tag: &str) -> PublishedRelease {
         html_url: format!("https://github.com/x7c1/delta/releases/tag/{tag}"),
         assets: vec![
             asset(format!("Delta_{bare}_aarch64.dmg")),
+            asset(format!("Delta_{bare}_aarch64.dmg.minisig")),
             asset(format!("delta-desktop_{bare}_amd64.deb")),
+            asset(format!("delta-desktop_{bare}_amd64.deb.minisig")),
         ],
     }
 }
@@ -110,7 +112,7 @@ impl GatedDownloader {
 impl AssetDownloader for GatedDownloader {
     async fn download(
         &self,
-        asset: &ReleaseAsset,
+        signed: &SignedAsset,
         dir: &Path,
         progress: &(dyn Fn(DownloadProgress) + Send + Sync),
     ) -> Result<PathBuf, AssetDownloadError> {
@@ -120,13 +122,13 @@ impl AssetDownloader for GatedDownloader {
             total: Some(1024),
         });
         let outcome = self.outcome_rx.lock().await.recv().await.unwrap();
-        outcome.map(|()| dir.join(&asset.name))
+        outcome.map(|()| dir.join(&signed.asset.name))
     }
 
     /// Nothing is ever left behind by an earlier run here.
     async fn reverify(
         &self,
-        _asset: &ReleaseAsset,
+        _signed: &SignedAsset,
         _dir: &Path,
     ) -> Result<Option<PathBuf>, AssetDownloadError> {
         Ok(None)
@@ -510,6 +512,32 @@ async fn a_request_after_a_failed_download_starts_over() {
     downloader.finish(Ok(()));
     assert_eq!(settled_download(&state).await["state"], "ready");
     assert_eq!(downloader.calls(), 2);
+}
+
+#[tokio::test]
+async fn a_file_failing_its_signature_check_is_unavailable_and_not_downloaded_again() {
+    let downloader = GatedDownloader::new();
+    let state = desktop_release_state(&downloader).await;
+
+    post_download(&state).await;
+    downloader.finish(Err(AssetDownloadError::SignatureRejected(
+        release_signature::SignatureError::Invalid,
+    )));
+    let unavailable = serde_json::json!({
+        "state": "unavailable",
+        "version": NEWER_TAG,
+        "error": "the release's signature does not verify the downloaded file: \
+                  the file does not match its signature",
+    });
+    assert_eq!(settled_download(&state).await, unavailable);
+
+    let (status, body) = post_download(&state).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, unavailable);
+    let (status, body) = post(&state, "/api/latest-release/install").await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "update_not_ready");
+    assert_eq!(downloader.calls(), 1);
 }
 
 async fn post(state: &AppState, path: &str) -> (StatusCode, serde_json::Value) {

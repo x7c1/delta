@@ -3,9 +3,10 @@
 use std::sync::Arc;
 
 use super::{
-    downloadable_asset, lock, ReleaseUpdate, UpdateDownload, UpdateInstall, UpdateRefusal,
+    downloadable_asset, lock, signed_asset, ReleaseUpdate, UpdateDownload, UpdateInstall,
+    UpdateRefusal,
 };
-use crate::ports::DownloadProgress;
+use crate::ports::{AssetDownloadError, DownloadProgress};
 use crate::with_causes;
 use crate::NewerRelease;
 
@@ -17,12 +18,15 @@ impl ReleaseUpdate {
     /// is no newer release, or when it has no asset this platform may download
     /// ([`downloadable_asset`]). Otherwise answers the download's
     /// state: the one running (whichever release it is of), `Ready` when this
-    /// release is already downloaded, or a fresh `Downloading` whose transfer
-    /// now runs in the background (a failed download starts over). A request
-    /// that joins [`Self::restore`]'s check of a file left behind is
-    /// remembered, and continues as a download if the check finds none. A fresh
-    /// download clears an install whose file was rejected
-    /// ([`UpdateInstall::Rejected`]), so the new file is offered for install.
+    /// release is already downloaded, `Unavailable` when it was found not to
+    /// verify, or a fresh `Downloading` whose transfer now runs in the
+    /// background (a failed download starts over). A release that carries
+    /// no signature of the asset ([`signed_asset`]) is `Unavailable` at once,
+    /// with nothing fetched. A request that joins [`Self::restore`]'s check
+    /// of a file left behind is remembered, and continues as a download if
+    /// the check finds none. A fresh download clears an install whose file
+    /// was rejected ([`UpdateInstall::Rejected`]), so the new file is offered
+    /// for install.
     pub fn start(&self, newer: Option<NewerRelease>) -> Result<UpdateDownload, UpdateRefusal> {
         let offered = self.may_update()?;
         let newer = newer.ok_or(UpdateRefusal::NoNewerRelease)?;
@@ -36,17 +40,32 @@ impl ReleaseUpdate {
                 }
                 return Ok(running.clone());
             }
-            Some(ready @ UpdateDownload::Ready { version: done, .. }) if *done == version => {
-                return Ok(ready.clone())
-            }
+            Some(
+                done @ (UpdateDownload::Ready { version: of, .. }
+                | UpdateDownload::Unavailable { version: of, .. }),
+            ) if *of == version => return Ok(done.clone()),
             _ => {}
         }
-        let asset = downloadable_asset(&offered.platform, &newer)?.clone();
+        let asset = downloadable_asset(&offered.platform, &newer)?;
         // `downloadable_asset` accepts only an asset stating a sha256.
         let sha256 = asset.sha256().ok_or_else(|| UpdateRefusal::NoDigest {
             version: version.clone(),
             asset: asset.name.clone(),
         })?;
+        let signed = match signed_asset(&newer, asset) {
+            Ok(signed) => signed,
+            Err(refusal) => {
+                let cause = refusal.to_string();
+                tracing::warn!(
+                    version = %version,
+                    error = %cause,
+                    "the newer release of Delta cannot be verified: not downloading it"
+                );
+                let unavailable = UpdateDownload::Unavailable { version, cause };
+                *current = Some(unavailable.clone());
+                return Ok(unavailable);
+            }
+        };
 
         let started = UpdateDownload::Downloading {
             version: version.clone(),
@@ -65,8 +84,9 @@ impl ReleaseUpdate {
 
         tracing::info!(
             version = %version,
-            asset = %asset.name,
-            url = %asset.download_url,
+            asset = %signed.asset.name,
+            url = %signed.asset.download_url,
+            signature = %signed.signature_url,
             "downloading the newer release of Delta"
         );
         let slot = Arc::clone(&self.download);
@@ -80,12 +100,12 @@ impl ReleaseUpdate {
                     *held = progress;
                 }
             };
-            let done = match downloader.download(&asset, &dir, &report).await {
+            let done = match downloader.download(&signed, &dir, &report).await {
                 Ok(path) => {
                     tracing::info!(
                         version = %version,
                         path = %path.display(),
-                        "downloaded and verified the newer release of Delta"
+                        "downloaded the newer release of Delta and verified its digest and signature"
                     );
                     UpdateDownload::Ready {
                         version,
@@ -93,11 +113,22 @@ impl ReleaseUpdate {
                         sha256,
                     }
                 }
+                Err(err @ AssetDownloadError::SignatureRejected(_)) => {
+                    let cause = with_causes(&err);
+                    tracing::warn!(
+                        version = %version,
+                        url = %signed.asset.download_url,
+                        signature = %signed.signature_url,
+                        error = %cause,
+                        "the newer release of Delta failed its signature check: removed it"
+                    );
+                    UpdateDownload::Unavailable { version, cause }
+                }
                 Err(err) => {
                     let cause = with_causes(&err);
                     tracing::warn!(
                         version = %version,
-                        url = %asset.download_url,
+                        url = %signed.asset.download_url,
                         error = %cause,
                         "could not download the newer release of Delta"
                     );
@@ -115,11 +146,12 @@ mod tests {
     use std::path::Path;
 
     use super::super::testing::{
-        asset, linux_update, newer_release, settled, v060, GatedDownloader, LINUX_DEB,
+        asset, linux_update, newer_release, settled, signature_of, signature_rejected, update_on,
+        v060, GatedDownloader, GatedInstaller, LINUX_DEB, MAC_DMG,
     };
     use super::*;
     use crate::ports::AssetDownloadError;
-    use crate::release_update::UpdateOffer;
+    use crate::release_update::{Platform, UpdateOffer};
 
     #[tokio::test]
     async fn no_newer_release_is_refused() {
@@ -221,5 +253,110 @@ mod tests {
         );
         downloader.finish(Ok(()));
         settled(&update).await;
+    }
+
+    #[tokio::test]
+    async fn the_download_is_handed_the_releases_signature_and_version() {
+        let downloader = GatedDownloader::new();
+        let update = linux_update(&downloader);
+        update.start(Some(v060())).unwrap();
+        downloader.finish(Ok(()));
+        settled(&update).await;
+
+        let signed = downloader.signed();
+        assert_eq!(signed.len(), 1);
+        assert_eq!(signed[0].asset, asset(LINUX_DEB));
+        assert_eq!(
+            signed[0].signature_url,
+            signature_of(LINUX_DEB).download_url
+        );
+        assert_eq!(signed[0].version, semver::Version::new(0, 6, 0));
+    }
+
+    /// A release published without signatures is never downloaded: there is
+    /// no fallback to its digest alone.
+    #[tokio::test]
+    async fn a_release_without_a_signature_is_unavailable_with_nothing_fetched() {
+        for platform in [
+            Platform::new("linux", "x86_64"),
+            Platform::new("macos", "aarch64"),
+        ] {
+            let downloader = GatedDownloader::new();
+            let installer = GatedInstaller::new();
+            let update = update_on(platform.clone(), &downloader, &installer);
+            let unsigned = newer_release("0.6.0", vec![asset(LINUX_DEB), asset(MAC_DMG)]);
+
+            let answered = update.start(Some(unsigned.clone())).unwrap();
+            let UpdateDownload::Unavailable { version, cause } = &answered else {
+                panic!("{platform}: {answered:?}");
+            };
+            assert_eq!(version, "v0.6.0");
+            assert!(cause.contains("carries no signature"), "{cause}");
+            // Asked again, the same answer, still with nothing fetched.
+            assert_eq!(update.start(Some(unsigned.clone())).unwrap(), answered);
+            tokio::task::yield_now().await;
+            assert_eq!(downloader.calls(), 0);
+            assert_eq!(update.download_of(Some(&unsigned)), Some(answered));
+            assert!(matches!(
+                update.install(Some(unsigned)),
+                Err(UpdateRefusal::NotReady)
+            ));
+            assert!(installer.asked().is_empty());
+        }
+    }
+
+    /// The Linux and the macOS install alike: a file whose signature does
+    /// not verify never becomes ready, so it is never handed to the
+    /// installer (and on macOS never mounted or copied).
+    #[tokio::test]
+    async fn a_file_failing_its_signature_check_is_unavailable_and_never_installed() {
+        for platform in [
+            Platform::new("linux", "x86_64"),
+            Platform::new("macos", "aarch64"),
+        ] {
+            let downloader = GatedDownloader::new();
+            let installer = GatedInstaller::new();
+            let update = update_on(platform.clone(), &downloader, &installer);
+            assert!(update.installs());
+
+            update.start(Some(v060())).unwrap();
+            downloader.finish(Err(signature_rejected()));
+            let done = settled(&update).await;
+            assert_eq!(
+                done,
+                UpdateDownload::Unavailable {
+                    version: "v0.6.0".into(),
+                    cause: "the release's signature does not verify the downloaded file: \
+                            the signature was made with another key than Delta's release key"
+                        .into(),
+                },
+                "{platform}"
+            );
+            assert!(matches!(
+                update.install(Some(v060())),
+                Err(UpdateRefusal::NotReady)
+            ));
+            // Not downloaded again: the same release fails the same way.
+            assert_eq!(update.start(Some(v060())).unwrap(), done);
+            tokio::task::yield_now().await;
+            assert_eq!(downloader.calls(), 1);
+            assert!(installer.asked().is_empty());
+            // A newer release than that is downloaded afresh.
+            let v070 = newer_release(
+                "0.7.0",
+                vec![
+                    asset("delta-desktop_0.7.0_amd64.deb"),
+                    signature_of("delta-desktop_0.7.0_amd64.deb"),
+                    asset("Delta_0.7.0_aarch64.dmg"),
+                    signature_of("Delta_0.7.0_aarch64.dmg"),
+                ],
+            );
+            assert!(matches!(
+                update.start(Some(v070)).unwrap(),
+                UpdateDownload::Downloading { .. }
+            ));
+            downloader.finish(Ok(()));
+            settled(&update).await;
+        }
     }
 }

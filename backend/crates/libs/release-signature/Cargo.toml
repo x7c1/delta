@@ -1,0 +1,21 @@
+[package]
+name = "release-signature"
+description = "The public key Delta's release bundles are signed with, and the check of a bundle against its minisign signature"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Shared by the desktop app's downloader (`release-feed`) and the Linux root
+# helper (`delta-update-helper`), so both check against one compiled-in key.
+# Kept to pure computation: no network, no files beyond the reader handed in.
+[dependencies]
+minisign-verify = { workspace = true }
+semver = { workspace = true }
+thiserror = { workspace = true }
+
+[features]
+# The test key pair's public half and the bundle and signatures made with it
+# (`src/testing/`), for the tests of the crates that check signatures.
+testing = []

@@ -9,10 +9,14 @@
 //!
 //! [`GithubAssetDownloader`] downloads one asset into a directory, computing
 //! its sha256 while it streams in and comparing it with the asset's
-//! `sha256:<hex>` digest; which asset, and whether its URL is trusted, is the
-//! release update's decision in `delta-usecase`. After a restart it verifies
-//! again the file an earlier download left there, without following a
-//! symlink, rather than trusting it.
+//! `sha256:<hex>` digest, and checking it against the release's signature of
+//! it (`<asset>.minisig`, fetched first) with the release key compiled in
+//! from `release-signature`; which asset, and whether its URL and its
+//! signature's are trusted, is the release update's decision in
+//! `delta-usecase`. The signature is kept beside the verified file. After a
+//! restart it verifies again the file an earlier download left there, and
+//! the signature beside it, without following a symlink, rather than
+//! trusting them.
 //!
 //! [`remove_stale_updates`] clears the downloads the running app has caught
 //! up with out of that directory, at startup.

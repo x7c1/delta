@@ -39,7 +39,8 @@ pub(crate) async fn get_latest_release(
 
 /// `POST /api/latest-release/download` — start downloading the newer
 /// release's asset for this platform, or report the download already running
-/// (`202`) or done (`200`).
+/// (`202`) or done (`200`: ready, or unavailable because the release's
+/// signature is missing or does not verify the file).
 ///
 /// Every refusal is the server's own: a `409` with a stable code when the CLI
 /// launched the server, the build is local, its HTTPS client could not be set
@@ -53,7 +54,7 @@ pub(crate) async fn download_latest_release(
         .start(state.newer_release())
         .map_err(ApiError::UpdateRefused)?;
     let status = match download {
-        UpdateDownload::Ready { .. } => StatusCode::OK,
+        UpdateDownload::Ready { .. } | UpdateDownload::Unavailable { .. } => StatusCode::OK,
         UpdateDownload::Downloading { .. } | UpdateDownload::Failed { .. } => StatusCode::ACCEPTED,
     };
     Ok((status, Json(download.into())))

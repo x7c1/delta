@@ -8,7 +8,13 @@ use ts_rs::TS;
 ///
 /// - `downloading`: the transfer is running; `received_bytes` so far, of
 ///   `total_bytes` when the answer stated it.
-/// - `ready`: downloaded and its sha256 verified, waiting to be applied.
+/// - `ready`: downloaded and verified against its sha256 and the release's
+///   signature, waiting to be applied.
+/// - `unavailable`: the release cannot be updated to in the app: it carries
+///   no signature of this platform's asset, or the signature does not verify
+///   the downloaded file. Nothing was kept; `error` says why. A new request
+///   for the same release answers this again; the user updates by hand from
+///   the release page.
 /// - `failed`: nothing was kept; `error` says why. A new request starts over.
 ///
 /// `version` is the release the download is of (`v0.6.0`).
@@ -23,6 +29,10 @@ pub enum WireUpdateDownload {
     },
     Ready {
         version: String,
+    },
+    Unavailable {
+        version: String,
+        error: String,
     },
     Failed {
         version: String,
@@ -39,6 +49,10 @@ impl From<UpdateDownload> for WireUpdateDownload {
                 total_bytes: progress.total,
             },
             UpdateDownload::Ready { version, .. } => Self::Ready { version },
+            UpdateDownload::Unavailable { version, cause } => Self::Unavailable {
+                version,
+                error: cause,
+            },
             UpdateDownload::Failed { version, cause } => Self::Failed {
                 version,
                 error: cause,
@@ -59,6 +73,18 @@ mod tests {
             })
             .unwrap(),
             serde_json::json!({ "state": "ready", "version": "v0.6.0" })
+        );
+        assert_eq!(
+            serde_json::to_value(WireUpdateDownload::Unavailable {
+                version: "v0.6.0".to_owned(),
+                error: "release v0.6.0 carries no signature".to_owned(),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "state": "unavailable",
+                "version": "v0.6.0",
+                "error": "release v0.6.0 carries no signature",
+            })
         );
         assert_eq!(
             serde_json::to_value(WireUpdateDownload::Failed {

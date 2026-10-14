@@ -1,7 +1,7 @@
 //! Which file of a release this platform downloads, and from where it may.
 
 use super::{Platform, UpdateRefusal};
-use crate::ports::ReleaseAsset;
+use crate::ports::{ReleaseAsset, SignedAsset};
 use crate::NewerRelease;
 
 /// The only place a release asset may be downloaded from: Delta's own GitHub
@@ -53,6 +53,34 @@ pub fn downloadable_asset<'a>(
     Ok(asset)
 }
 
+/// `asset` of `release` (the one [`downloadable_asset`] picked) with the
+/// release's signature of it: the release's asset named
+/// `<asset name>.minisig`, from a URL [`check_download_url`] accepts.
+///
+/// Refused when the release carries no such asset
+/// ([`UpdateRefusal::NoSignature`]) or its URL is outside the pinned prefix:
+/// the asset cannot be verified, and is never downloaded.
+pub fn signed_asset(
+    release: &NewerRelease,
+    asset: &ReleaseAsset,
+) -> Result<SignedAsset, UpdateRefusal> {
+    let name = release_signature::signature_name(&asset.name);
+    let signature = release
+        .assets()
+        .iter()
+        .find(|candidate| candidate.name == name)
+        .ok_or_else(|| UpdateRefusal::NoSignature {
+            version: release.display_version(),
+            asset: asset.name.clone(),
+        })?;
+    check_download_url(&signature.download_url)?;
+    Ok(SignedAsset {
+        asset: asset.clone(),
+        signature_url: signature.download_url.clone(),
+        version: release.version().clone(),
+    })
+}
+
 /// Accept `url` only under [`RELEASE_DOWNLOAD_PREFIX`].
 ///
 /// Each path segment after the prefix must be a plain name (letters, digits,
@@ -82,7 +110,7 @@ pub fn check_download_url(url: &str) -> Result<(), UpdateRefusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::release_update::testing::{asset, newer_release};
+    use crate::release_update::testing::{asset, newer_release, signature_of, LINUX_DEB};
 
     #[test]
     fn linux_x86_64_downloads_the_deb() {
@@ -182,6 +210,53 @@ mod tests {
                 "{digest:?}: {err:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_signed_asset_carries_the_releases_signature_of_it_and_its_version() {
+        let release = newer_release(
+            "0.6.0",
+            vec![
+                asset(LINUX_DEB),
+                signature_of("Delta_0.6.0_aarch64.dmg"),
+                signature_of(LINUX_DEB),
+            ],
+        );
+        let chosen = downloadable_asset(&Platform::new("linux", "x86_64"), &release).unwrap();
+        let signed = signed_asset(&release, chosen).unwrap();
+        assert_eq!(signed.asset, asset(LINUX_DEB));
+        assert_eq!(
+            signed.signature_url,
+            format!("{RELEASE_DOWNLOAD_PREFIX}v0.6.0/{LINUX_DEB}.minisig")
+        );
+        assert_eq!(signed.version, semver::Version::new(0, 6, 0));
+    }
+
+    #[test]
+    fn an_asset_without_a_signature_is_refused() {
+        // Another asset's signature does not stand in for this one's.
+        let release = newer_release(
+            "0.6.0",
+            vec![asset(LINUX_DEB), signature_of("Delta_0.6.0_aarch64.dmg")],
+        );
+        let err = signed_asset(&release, &asset(LINUX_DEB)).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                UpdateRefusal::NoSignature { version, asset }
+                    if version == "v0.6.0" && asset == LINUX_DEB
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn a_signature_outside_the_pinned_prefix_is_refused() {
+        let mut signature = signature_of(LINUX_DEB);
+        signature.download_url = format!("https://example.com/{LINUX_DEB}.minisig");
+        let release = newer_release("0.6.0", vec![asset(LINUX_DEB), signature]);
+        let err = signed_asset(&release, &asset(LINUX_DEB)).unwrap_err();
+        assert!(matches!(err, UpdateRefusal::UntrustedUrl(_)), "{err:?}");
     }
 
     #[test]

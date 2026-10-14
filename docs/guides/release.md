@@ -9,11 +9,13 @@ merging that PR.
 Delta uses a "merge the PR" release model. A bot opens and updates one
 rolling release PR against `main`; merging it triggers the `Release`
 workflow, which creates a draft GitHub Release for the commit CI tested,
-builds the desktop bundles, attaches them, and only then publishes the
+builds the desktop bundles, signs them with a key only a dedicated job can
+read, attaches them with their signatures, and only then publishes the
 Release, which creates the matching `vX.Y.Z` tag. The Release body is a
 summary written by hand in the release PR; the generated per-commit changelog
-stays on the PR. The jobs that build hold no write access; see
-[Desktop bundles](#desktop-bundles).
+stays on the PR. The jobs that build hold no write access and never see the
+signing key; see [Desktop bundles](#desktop-bundles) and
+[Signing](#signing).
 
 ## Normal flow (patch bump)
 
@@ -117,8 +119,10 @@ stays in sync with every force-push.
 
 ## Desktop bundles
 
-Every Release carries unsigned bundles of the desktop shell
-(`backend/crates/apps/delta-desktop`), built by `.github/workflows/bundle.yml`:
+Every Release carries bundles of the desktop shell
+(`backend/crates/apps/delta-desktop`), built by `.github/workflows/bundle.yml`,
+each with its minisign signature, `<file>.minisig`, beside it
+([Signing](#signing)):
 
 | File | Platform |
 |---|---|
@@ -126,9 +130,9 @@ Every Release carries unsigned bundles of the desktop shell
 | `delta-desktop_<version>_amd64.deb` | Linux (Debian/Ubuntu), x86_64 |
 
 The version in each file name is the workspace version Tauri reads from the
-shell crate, so it matches the tag by construction. The bundles are neither
-signed nor notarized; what that means for someone installing them is in
-[the install guide](install/README.md).
+shell crate, so it matches the tag by construction. The bundles are not
+code-signed by Apple's or a distribution's scheme, nor notarized; what that
+means for someone installing them is in [the install guide](install/README.md).
 
 The `Release` workflow (`.github/workflows/release.yml`) runs as a chain of
 jobs, each holding only the access its step needs:
@@ -146,17 +150,24 @@ jobs, each holding only the access its step needs:
    an action, a build script, a dependency's install-time code — can change a
    Release or push. A release build restores no compiled `backend/target`
    cache, only the downloaded crate sources.
-4. **`publish`** (`contents: write`) downloads the artifacts, attaches them
-   to the draft, checks that every file in the table above is attached, and
-   publishes the draft, which creates the tag. It runs no project code and no
-   third-party action besides `actions/download-artifact`.
-5. **`rewrite-links`** (`pull-requests: write`) points the release PR's
+4. **`sign`** (no token; the `release-signing` environment) signs each file
+   in the table above with the release key and uploads the signatures as a
+   workflow artifact ([Signing](#signing)).
+5. **`publish`** (`contents: write`, plus `id-token: write` and
+   `attestations: write` for the attestations) downloads the bundles and the
+   signatures, checks that every bundle has its signature, attaches them all
+   to the draft, checks that every file in the table above and its
+   `.minisig` is attached, records a GitHub artifact attestation of each
+   bundle's build provenance, and publishes the draft, which creates the tag.
+   It runs no project code and no third-party action besides
+   `actions/download-artifact` and `actions/attest-build-provenance`.
+6. **`rewrite-links`** (`pull-requests: write`) points the release PR's
    compare link at the tag, which now exists.
 
 - **A failed build** leaves the draft unpublished: no tag exists and the desktop
   app sees no new Release. Open the failed `Release` run in the Actions tab
-  and use "Re-run failed jobs": the failed platforms build again, and
-  `publish` then attaches their bundles and publishes the same draft. Re-running
+  and use "Re-run failed jobs": the failed platforms build again, `sign`
+  signs them, and `publish` then attaches them and publishes the same draft. Re-running
   the whole run is safe too: `draft` updates the draft it created rather than
   making a second one, and `publish` replaces any bundle already attached.
   To rebuild a ref without any Release, run the `Bundle` workflow by hand
@@ -166,13 +177,89 @@ jobs, each holding only the access its step needs:
   chain from the dispatched ref without releasing anything. It builds that
   ref, creates a draft under the tag name `v0.0.0-dryrun.<run id>` — a name no
   release uses, never created as a tag because the draft is never published —
-  attaches and checks the bundles, and stops before publishing and before the
-  link rewrite. Inspect the draft on the Releases page, then delete it.
+  signs the bundles with the release key (so `sign` is exercised end to end;
+  dispatch it from a protected branch such as `main`, since only those may
+  use the `release-signing` environment), attaches and checks the bundles and
+  their signatures, and stops before the attestation, before publishing and
+  before the link rewrite. Inspect the draft on the Releases page, then delete
+  it.
 - **Pull requests.** A pull request that touches the shell or its build
   inputs (the `paths` filter in `bundle.yml`) runs the same builds and uploads
   each platform's bundles as a workflow artifact (`delta-macos-aarch64`,
   `delta-linux-x86_64`), so a broken bundle is caught
   before a release depends on it and reviewers can download and try it.
+
+## Signing
+
+Every bundle is signed with [minisign](https://jedisct1.github.io/minisign/)
+(Ed25519), and the desktop app and its Linux update helper refuse an update
+whose signature does not verify ([security guide](security.md#signed-release-bundles)).
+GitHub's sha256 digest of an asset only proves the download is what was
+uploaded; the signature proves the release pipeline produced it, so the key
+must be out of reach of everything that builds.
+
+- **Where the key lives.** The secret key is the secret
+  **`MINISIGN_SECRET_KEY`** of the GitHub Environment **`release-signing`**,
+  which a maintainer created and restricted to protected branches; the
+  workflow only references it. It holds the key file `minisign -G -W` writes
+  (the bare key line is accepted too). The key has no password, since CI
+  signs unattended; the environment is what guards it.
+- **The `sign` job.** Only `sign` names the environment. It has
+  `permissions: {}`, checks nothing out and runs no project code; it
+  downloads the bundle artifacts, installs minisign from a pinned release
+  archive whose sha256 is written in the workflow, and signs exactly the
+  bundle names `plan` lists, with the trusted comment
+  `file:<bundle> version:<version>` (the app refuses a signature naming
+  another file or version). It then verifies each signature against the
+  public key written in the workflow — the one the app compiles in — so a
+  secret that does not match the app's key fails the run instead of every
+  user's update, and uploads the signatures as the `bundle-signatures`
+  artifact. `publish` refuses to attach a bundle without its signature.
+- **The public key** is `PUBLIC_KEY` in `backend/crates/libs/release-signature`
+  (key id `C2B89994B1AA8DAF`), the only place the code holds it; the app and
+  the helper both read it from there, and a test fails if it is written
+  anywhere else under `backend/crates/`. The workflow and the install guide
+  print it too.
+- **Attestations.** `publish` also records a GitHub artifact attestation of
+  each bundle (`actions/attest-build-provenance`), which ties it to the
+  workflow run and commit that built it; users can check it with
+  `gh attestation verify <file> -R x7c1/delta`
+  ([install guide](install/README.md#checking-a-download)). Only `publish`
+  holds `id-token: write` and `attestations: write`. A dry run skips it.
+- **The first signed release.** Releases published before signing began
+  carry no `.minisig`. An app that checks signatures updates only to releases
+  published after the change, all of which carry them; the release it would
+  refuse — an older, unsigned one — is never newer than itself, so it is
+  never offered. Apps built before the change keep checking only the digest
+  until they update.
+
+### Rotating the key
+
+The app accepts only the key it was built with, so a new public key reaches
+users inside an app release signed with the old key:
+
+1. Generate the new key pair (`minisign -G -W`) and keep the new secret key
+   out of the repository.
+2. Change `PUBLIC_KEY` in `release-signature` to the new public key, and cut
+   that release as usual. `sign` still signs it with the old key (and checks
+   it against the old `MINISIGN_PUBLIC_KEY` in `release.yml`), so installed
+   apps accept it; once they run it, they expect the new key. The guides
+   keep printing the old key, which is still the one that verifies the
+   bundles by hand.
+3. Before the next release, in one change, replace `MINISIGN_SECRET_KEY` in
+   the `release-signing` environment with the new secret key,
+   `MINISIGN_PUBLIC_KEY` in `release.yml` with the new public key, and the
+   key printed in the install and security guides with the new one, naming
+   the old key as the one for releases up to the release of step 2.
+
+An app still older than the release of step 2 refuses releases signed with
+the new key and shows the reason with the release page; its user updates by
+hand once. If the secret key is lost, or leaked and must not sign anything
+more, there is no trusted old key to sign the hand-over release: do steps 2
+and 3 together, so the release carrying the new key is signed with it, and
+every user updates by hand once
+([install guide](install/README.md#checking-a-download)); after a leak, say
+so in the release notes.
 
 ## Workflows involved
 
@@ -187,9 +274,10 @@ jobs, each holding only the access its step needs:
 - `.github/workflows/release.yml` — when CI completes successfully on
   `main`, checks whether the workspace version changed; if it did, reads the
   summary from the merged release PR, creates a draft Release, has
-  `bundle.yml` build the desktop bundles, attaches them and publishes the
-  Release (which creates the tag). Run by hand, it performs a dry run. See
-  [Desktop bundles](#desktop-bundles).
+  `bundle.yml` build the desktop bundles, signs them, attaches them with
+  their signatures, attests them and publishes the Release (which creates the
+  tag). Run by hand, it performs a dry run. See
+  [Desktop bundles](#desktop-bundles) and [Signing](#signing).
 - `.github/workflows/bundle.yml` — builds the desktop bundles on macOS
   (Apple silicon only) and Linux with read-only access and uploads them as
   workflow artifacts, on pull requests, manual runs and for `release.yml`.
@@ -259,5 +347,6 @@ after the release PR is merged keeps using the default `GITHUB_TOKEN` — it run
 under a human-triggered merge event, so recursion is not a concern, and no
 workflow in this repo listens to tag pushes. Only its `draft` and `publish`
 jobs get write access to the repository's contents (see
-[Desktop bundles](#desktop-bundles)). The `Create Release PR` job's own token
+[Desktop bundles](#desktop-bundles)), and only its `sign` job may read the
+`release-signing` environment's `MINISIGN_SECRET_KEY` ([Signing](#signing)). The `Create Release PR` job's own token
 is read-only: everything it writes goes through `RELEASE_PAT`.

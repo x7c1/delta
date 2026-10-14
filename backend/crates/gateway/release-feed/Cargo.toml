@@ -10,6 +10,9 @@ delta-usecase = { workspace = true }
 async-trait = { workspace = true }
 # `O_NOFOLLOW` when reading a download an earlier run left behind.
 libc = { workspace = true }
+# Checks every downloaded asset against the release's signature of it, with
+# the release key compiled in.
+release-signature = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
 # Verifies GitHub's certificate against the operating system's trust store
@@ -26,4 +29,5 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+release-signature = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }

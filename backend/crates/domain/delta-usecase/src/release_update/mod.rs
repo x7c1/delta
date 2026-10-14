@@ -23,8 +23,18 @@
 //! check recorded, assets included), and of it the asset
 //! [`downloadable_asset`] picks: the one named for this platform
 //! ([`choose_asset`]), from a URL under [`RELEASE_DOWNLOAD_PREFIX`]
-//! ([`check_download_url`]), stating a sha256 digest. The [`AssetDownloader`]
-//! verifies the file against that digest.
+//! ([`check_download_url`]), stating a sha256 digest, together with the
+//! release's signature of it, `<asset>.minisig` from under the same prefix
+//! ([`signed_asset`]). The [`AssetDownloader`] verifies the file against that
+//! digest and against the signature, which must be made with the release
+//! key and name the asset's file name and the release's version. A release
+//! without the signature, or whose signature does not verify the file, ends
+//! the download [`UpdateDownload::Unavailable`]: nothing is kept, there is no
+//! fallback to the digest alone, and the user updates by hand from the
+//! release page. Since the file is verified before it is `Ready`, nothing is
+//! installed, mounted or copied that the signature has not verified; the
+//! installer is handed the sha256 of the verified file and checks the file
+//! against it again.
 //!
 //! # What is installed
 //!
@@ -63,7 +73,7 @@
 
 mod asset_choice;
 pub use asset_choice::{
-    check_download_url, choose_asset, downloadable_asset, RELEASE_DOWNLOAD_PREFIX,
+    check_download_url, choose_asset, downloadable_asset, signed_asset, RELEASE_DOWNLOAD_PREFIX,
 };
 mod build_origin;
 pub use build_origin::BuildOrigin;
@@ -223,7 +233,9 @@ impl ReleaseUpdate {
                 cause: cause.clone(),
                 manual: offered.platform.manual_install(&path),
             }),
-            UpdateDownload::Downloading { .. } | UpdateDownload::Failed { .. } => None,
+            UpdateDownload::Downloading { .. }
+            | UpdateDownload::Unavailable { .. }
+            | UpdateDownload::Failed { .. } => None,
         }
     }
 

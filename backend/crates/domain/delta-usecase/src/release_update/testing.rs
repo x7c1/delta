@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 use super::{lock, Platform, ReleaseUpdate, UpdateDownload, RELEASE_DOWNLOAD_PREFIX};
 use crate::ports::{
     AssetDownloadError, AssetDownloader, DownloadProgress, InstallError, InstalledApp,
-    ReleaseAsset, UpdateInstaller,
+    ReleaseAsset, SignedAsset, UpdateInstaller,
 };
 use crate::release_check::RELEASE_PAGE_PREFIX;
 use crate::NewerRelease;
@@ -41,6 +41,13 @@ pub(super) fn asset(name: &str) -> ReleaseAsset {
     }
 }
 
+/// The release's signature of the asset named `name`: `<name>.minisig`
+/// under the pinned download prefix. A signature asset states a digest too,
+/// as GitHub does for every asset; nothing reads it.
+pub(super) fn signature_of(name: &str) -> ReleaseAsset {
+    asset(&format!("{name}.minisig"))
+}
+
 /// A newer release of `version` carrying `assets`.
 pub(super) fn newer_release(version: &str, assets: Vec<ReleaseAsset>) -> NewerRelease {
     NewerRelease {
@@ -54,9 +61,11 @@ pub(super) fn newer_release(version: &str, assets: Vec<ReleaseAsset>) -> NewerRe
 /// until the test hands it an outcome with [`Self::finish`].
 ///
 /// What it finds left behind for [`AssetDownloader::reverify`] is set with
-/// [`Self::leave_behind`]: nothing unless set.
+/// [`Self::leave_behind`]: nothing unless set. Every [`SignedAsset`] it is
+/// handed is recorded ([`Self::signed`]).
 pub(super) struct GatedDownloader {
     calls: AtomicUsize,
+    signed: std::sync::Mutex<Vec<SignedAsset>>,
     left_behind: std::sync::Mutex<Option<Result<bool, AssetDownloadError>>>,
     reverified: std::sync::Mutex<Vec<String>>,
     reverify_gate: std::sync::Mutex<Option<oneshot::Receiver<()>>>,
@@ -76,6 +85,7 @@ impl GatedDownloader {
         let (outcome_tx, outcome_rx) = mpsc::unbounded_channel();
         Arc::new(Self {
             calls: AtomicUsize::new(0),
+            signed: std::sync::Mutex::new(Vec::new()),
             left_behind: std::sync::Mutex::new(None),
             reverified: std::sync::Mutex::new(Vec::new()),
             reverify_gate: std::sync::Mutex::new(None),
@@ -88,6 +98,12 @@ impl GatedDownloader {
     /// How many transfers have started.
     pub(super) fn calls(&self) -> usize {
         self.calls.load(Ordering::SeqCst)
+    }
+
+    /// Every asset a download or a reverify was asked for, with its
+    /// signature, in order.
+    pub(super) fn signed(&self) -> Vec<SignedAsset> {
+        self.signed.lock().unwrap().clone()
     }
 
     /// End the running (or next) transfer with `outcome`.
@@ -125,22 +141,25 @@ impl GatedDownloader {
 impl AssetDownloader for GatedDownloader {
     async fn download(
         &self,
-        asset: &ReleaseAsset,
+        signed: &SignedAsset,
         dir: &Path,
         progress: &(dyn Fn(DownloadProgress) + Send + Sync),
     ) -> Result<PathBuf, AssetDownloadError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.signed.lock().unwrap().push(signed.clone());
         progress(Self::PROGRESS);
         self.started.notify_one();
         let outcome = self.outcome_rx.lock().await.recv().await.unwrap();
-        outcome.map(|()| dir.join(&asset.name))
+        outcome.map(|()| dir.join(&signed.asset.name))
     }
 
     async fn reverify(
         &self,
-        asset: &ReleaseAsset,
+        signed: &SignedAsset,
         dir: &Path,
     ) -> Result<Option<PathBuf>, AssetDownloadError> {
+        let asset = &signed.asset;
+        self.signed.lock().unwrap().push(signed.clone());
         self.reverified.lock().unwrap().push(asset.name.clone());
         let gate = self.reverify_gate.lock().unwrap().take();
         if let Some(gate) = gate {
@@ -250,9 +269,24 @@ pub(super) fn linux_update(downloader: &Arc<GatedDownloader>) -> ReleaseUpdate {
     )
 }
 
-/// The newer release v0.6.0, carrying [`LINUX_DEB`].
+/// The newer release v0.6.0, carrying [`LINUX_DEB`] and [`MAC_DMG`], each
+/// with its signature.
 pub(super) fn v060() -> NewerRelease {
-    newer_release("0.6.0", vec![asset(LINUX_DEB)])
+    newer_release(
+        "0.6.0",
+        vec![
+            asset(LINUX_DEB),
+            signature_of(LINUX_DEB),
+            asset(MAC_DMG),
+            signature_of(MAC_DMG),
+        ],
+    )
+}
+
+/// A signature the downloader found not to verify the file: made with
+/// another key.
+pub(super) fn signature_rejected() -> AssetDownloadError {
+    AssetDownloadError::SignatureRejected(release_signature::SignatureError::OtherKey)
 }
 
 /// Wait until the background transfer has recorded its outcome.

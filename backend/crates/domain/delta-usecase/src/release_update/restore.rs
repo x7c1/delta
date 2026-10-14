@@ -1,7 +1,7 @@
 //! [`ReleaseUpdate::restore`]: picking up a download an earlier run of the
 //! app left behind.
 
-use super::{downloadable_asset, lock, ReleaseUpdate, UpdateDownload};
+use super::{downloadable_asset, lock, signed_asset, ReleaseUpdate, UpdateDownload};
 use crate::ports::DownloadProgress;
 use crate::with_causes;
 use crate::NewerRelease;
@@ -12,7 +12,8 @@ impl ReleaseUpdate {
     /// restart does not offer Update for a release already downloaded.
     ///
     /// Run once the first check after startup has answered. The file is
-    /// verified again against the release's digest
+    /// verified again against the release's digest and the signature kept
+    /// beside it
     /// ([`AssetDownloader::reverify`](crate::AssetDownloader::reverify))
     /// rather than trusted: the user owns the directory. A file that passes
     /// makes the download `Ready`, exactly as if this run had downloaded it.
@@ -20,7 +21,8 @@ impl ReleaseUpdate {
     /// the download stays as if none had been asked for.
     ///
     /// Does nothing when updates are not offered, when there is no newer
-    /// release or none this app would download, or when a download has
+    /// release or none this app would download, when the release carries no
+    /// signature of the asset, or when a download has
     /// already been asked for in this run. While the file is checked, the
     /// download reads as `Downloading`, so a request in the meantime joins
     /// the check instead of fetching the release beside it; when the check
@@ -39,6 +41,9 @@ impl ReleaseUpdate {
         let Some(sha256) = asset.sha256() else {
             return;
         };
+        let Ok(signed) = signed_asset(newer, asset) else {
+            return;
+        };
         let version = newer.display_version();
         {
             let mut current = lock(&self.download);
@@ -55,7 +60,7 @@ impl ReleaseUpdate {
             });
         }
 
-        let restored = match offered.downloader.reverify(asset, &offered.dir).await {
+        let restored = match offered.downloader.reverify(&signed, &offered.dir).await {
             Ok(Some(path)) => {
                 tracing::info!(
                     version = %version,
@@ -105,7 +110,8 @@ mod tests {
     use std::path::Path;
 
     use super::super::testing::{
-        asset, linux_update, newer_release, settled, test_sha256, v060, GatedDownloader, LINUX_DEB,
+        asset, linux_update, newer_release, settled, signature_of, test_sha256, v060,
+        GatedDownloader, LINUX_DEB,
     };
     use super::*;
     use crate::ports::AssetDownloadError;
@@ -233,7 +239,13 @@ mod tests {
         // (and removes v0.6.0's).
         downloader.leave_behind(Ok(false));
         let update = linux_update(&downloader);
-        let v070 = newer_release("0.7.0", vec![asset("delta-desktop_0.7.0_amd64.deb")]);
+        let v070 = newer_release(
+            "0.7.0",
+            vec![
+                asset("delta-desktop_0.7.0_amd64.deb"),
+                signature_of("delta-desktop_0.7.0_amd64.deb"),
+            ],
+        );
 
         update.restore(Some(&v070)).await;
 
@@ -262,6 +274,10 @@ mod tests {
         let mut undigested = v060();
         undigested.assets[0].digest = None;
         update.restore(Some(&undigested)).await;
+
+        let unsigned = newer_release("0.6.0", vec![asset(LINUX_DEB)]);
+        update.restore(Some(&unsigned)).await;
+        assert_eq!(update.download_of(Some(&unsigned)), None);
 
         update.start(Some(v060())).unwrap();
         update.restore(Some(&v060())).await;

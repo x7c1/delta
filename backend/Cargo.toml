@@ -41,6 +41,7 @@ codex-agent = { path = "crates/gateway/codex-agent" }
 claude-agent = { path = "crates/gateway/claude-agent" }
 agent-contract = { path = "crates/libs/agent-contract" }
 delta-bootstrap = { path = "crates/libs/delta-bootstrap" }
+release-signature = { path = "crates/libs/release-signature" }
 delta-server = { path = "crates/apps/delta-server" }
 
 # Shared third-party dependencies
@@ -92,6 +93,9 @@ rustls-platform-verifier = "0.7"
 # Verifies a downloaded release asset against the sha256 digest GitHub states
 # for it, computed while the file streams in.
 sha2 = "0.10"
+# Verifies a release bundle against its minisign (Ed25519) signature: pure
+# Rust, no network, no dependencies of its own (`crates/libs/release-signature`).
+minisign-verify = "=0.3.0"
 # Reads the Info.plist of the Delta.app inside a downloaded macOS disk image
 # (its bundle identifier and version) before it replaces the running app; the
 # version Tauri itself builds on.

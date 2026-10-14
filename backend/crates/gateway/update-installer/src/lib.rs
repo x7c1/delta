@@ -15,7 +15,8 @@
 //! `io.github.x7c1.delta.update` allows, at the path the `.deb` installs it
 //! to ([`UPDATE_HELPER_PATH`]), and polkit asks for an administrator's
 //! password every time. The helper checks the file again itself before
-//! installing it. This crate only starts it and reads how it ended:
+//! installing it, against the release's digest and the release's signature,
+//! which it fetches itself. This crate only starts it and reads how it ended:
 //!
 //! | `pkexec` exit status | Meaning | [`InstallError`] |
 //! |---|---|---|
@@ -23,8 +24,8 @@
 //! | `30` | the installed app is already the requested version or newer, so the helper installed nothing | — (installed) |
 //! | `126` | the user dismissed the password dialog | [`InstallError::Dismissed`] |
 //! | `127` | not authorized, or no polkit authentication agent | [`InstallError::Unavailable`] |
-//! | `10`–`19` | the helper rejected the file itself (not a regular file, the digest, the package name or version); its last stderr line says why | [`InstallError::Rejected`] |
-//! | any other | the helper could not check or install the file (GitHub out of reach, `dpkg` or `apt-get` failing); its last stderr line says why | [`InstallError::Failed`] |
+//! | `10`–`19` | the helper rejected the file itself (not a regular file, the digest, the signature, the package name or version); its last stderr line says why | [`InstallError::Rejected`] |
+//! | any other | the helper could not check or install the file (GitHub out of reach, the signature not downloaded, `dpkg` or `apt-get` failing); its last stderr line says why | [`InstallError::Failed`] |
 //!
 //! A missing `pkexec` or helper is [`InstallError::Unavailable`] too, found
 //! before anything is run; a `pkexec` that is there but cannot be started is
@@ -52,7 +53,7 @@
 //! |---|---|
 //! | 1. the app runs from a bundle, not from a copy macOS translocated (`…/AppTranslocation/…`, an app opened from its disk image or the Downloads folder without being moved) | [`InstallError::Unavailable`] |
 //! | 2. this user may write to the bundle's directory (`access(2)`) | [`InstallError::Unavailable`] |
-//! | 3. the download, a regular file and not a symlink, is copied into a private working directory and the copy's sha256 checked against the digest it was downloaded with | [`InstallError::Rejected`]; the copy not written (the working directory full or out of reach): [`InstallError::Failed`] |
+//! | 3. the download, a regular file and not a symlink, is copied into a private working directory and the copy's sha256 checked against the digest it was downloaded with (the digest of the file the download checked against the release's signature, so the copy is the signed file) | [`InstallError::Rejected`]; the copy not written (the working directory full or out of reach): [`InstallError::Failed`] |
 //! | 4. the copy is mounted read-only and privately: `hdiutil attach -nobrowse -readonly -noautoopen -mountpoint <dir> <copy>` | missing `hdiutil`: [`InstallError::Unavailable`]; failing: [`InstallError::Failed`] |
 //! | 5. the image holds exactly one app at its root, a `Delta.app` whose `Info.plist` states `CFBundleIdentifier` `io.github.x7c1.delta` and `CFBundleShortVersionString` the requested version | [`InstallError::Rejected`]; the image's root not listed: [`InstallError::Failed`] |
 //! | 6. that `Delta.app` is copied next to the running one, as `.delta-update-new`, with `ditto` (keeping symlinks, permissions and extended attributes, so the code signature holds) | [`InstallError::Failed`] |

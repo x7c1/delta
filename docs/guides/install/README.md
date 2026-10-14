@@ -12,6 +12,9 @@ needs a one-time Gatekeeper workaround.
 - **[macOS](macos.md)** — the `.dmg`, and getting past Gatekeeper
 - **[Ubuntu](ubuntu.md)** — the `.deb`, and the WebKitGTK notes
 
+Every bundle on a Release is signed by the release workflow; how to check a
+download by hand is in [Checking a download](#checking-a-download).
+
 To run Delta from source instead, see
 [the development guide](../development/README.md).
 
@@ -54,8 +57,8 @@ It holds:
 - `settings/<port>.json`, the settings a session is launched with. There is one
   file for every port the app has used.
 - `tmux.conf`, the configuration of Delta's tmux server.
-- `updates/`, a newer release the desktop app downloaded and verified, kept
-  until it is installed; a download of another version replaces it, and the
+- `updates/`, a newer release the desktop app downloaded and verified, with
+  its signature (`<file>.minisig`) beside it, kept until it is installed; a download of another version replaces it, and the
   app removes it at startup once it runs that version or a newer one.
   Settings → Storage shows its size.
 
@@ -226,6 +229,40 @@ never touches, and these may also exist: `~/Library/WebKit/delta-app/` and
 directory, and the tmux socket `delta` in `/tmp/tmux-<uid>/`.
 End that version's tmux server with `tmux -L delta kill-server` before
 deleting them.
+
+## Checking a download
+
+Every bundle on a Release has its signature beside it, `<bundle>.minisig`,
+made by the release workflow with a key no build step can read. The in-app
+update checks it before installing anything; to check a bundle you downloaded
+yourself, download its `.minisig` from the same Release and run
+[minisign](https://jedisct1.github.io/minisign/) (`brew install minisign`,
+`sudo apt install minisign`) with Delta's public key:
+
+```bash
+minisign -Vm Delta_<version>_aarch64.dmg -P RWSvjaqxlJm4wr9SiKBHDAlbhBASzeSf0dbg9loPJdgbTFQOEOX5J1Pl
+```
+
+(with `delta-desktop_<version>_amd64.deb` on Ubuntu). It reads the signature
+from the `.minisig` next to the file. A good bundle prints `Signature and
+comment signature verified` and the trusted comment
+`file:<the file's name> version:<version>`; check that both name the file and
+version you meant to install. Anything else means the file is not the one the
+release workflow published: do not install it.
+
+The Release also records where each bundle was built: a GitHub artifact
+attestation linking it to the workflow run and commit that produced it. With
+the [GitHub CLI](https://cli.github.com/):
+
+```bash
+gh attestation verify Delta_<version>_aarch64.dmg -R x7c1/delta
+```
+
+What the signature does and does not protect against is in the
+[security guide](../security.md#signed-release-bundles).
+
+Releases published before signing began carry no `.minisig` and no
+attestation.
 
 ## Updating
 

@@ -1,9 +1,6 @@
-//! The sha256 the release itself states for its `.deb`, asked of GitHub.
+//! What the release itself states for its `.deb`, read from GitHub's answer
+//! for it: the sha256 digest, and where its signature is.
 
-use std::sync::Arc;
-use std::time::Duration;
-
-use rustls_platform_verifier::BuilderVerifierExt;
 use semver::Version;
 use serde::Deserialize;
 
@@ -12,11 +9,10 @@ use crate::Refusal;
 /// Where GitHub answers the release a tag names.
 const RELEASE_BY_TAG_PREFIX: &str = "https://api.github.com/repos/x7c1/delta/releases/tags/";
 
-/// How long the request may take, connecting included.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// The `User-Agent` the request sends (GitHub rejects requests without one).
-const USER_AGENT: &str = concat!("delta-update-helper/", env!("CARGO_PKG_VERSION"));
+/// The only place a release's files are downloaded from: Delta's own GitHub
+/// Releases, as the desktop app pins it (`RELEASE_DOWNLOAD_PREFIX` in
+/// `delta-usecase`).
+const RELEASE_DOWNLOAD_PREFIX: &str = "https://github.com/x7c1/delta/releases/download/";
 
 /// GitHub's API URL for the release `tag` names.
 ///
@@ -53,6 +49,9 @@ struct Release {
 #[derive(Deserialize)]
 struct Asset {
     name: String,
+    /// Where GitHub serves the file; absent or `null` is read as nowhere.
+    #[serde(default)]
+    browser_download_url: Option<String>,
     /// `sha256:<hex>`; absent or `null` where GitHub has none.
     #[serde(default)]
     digest: Option<String>,
@@ -65,12 +64,7 @@ struct Asset {
 /// it or states no digest, and when the digest is not `sha256:` followed by
 /// 64 hex digits.
 pub fn digest_in_release(body: &[u8], tag: &str, asset: &str) -> Result<String, Refusal> {
-    let release: Release =
-        serde_json::from_slice(body).map_err(|err| Refusal::ReleaseUnavailable {
-            tag: tag.to_owned(),
-            what: "GitHub's answer is not a release",
-            source: Box::new(err),
-        })?;
+    let release = parse_release(body, tag)?;
     let missing = || Refusal::DigestMissing {
         tag: tag.to_owned(),
         asset: asset.to_owned(),
@@ -89,69 +83,49 @@ pub fn digest_in_release(body: &[u8], tag: &str, asset: &str) -> Result<String, 
     })
 }
 
+/// Where release `tag`'s answer `body` says the signature of its asset
+/// `asset`, `<asset>.minisig`, is downloaded from.
+///
+/// Refused when the body is not a release object, when the release carries
+/// no such signature, and when its URL is not exactly the release's own
+/// download URL for it, under [`RELEASE_DOWNLOAD_PREFIX`]: the helper fetches
+/// nothing from anywhere else.
+pub fn signature_url_in_release(body: &[u8], tag: &str, asset: &str) -> Result<String, Refusal> {
+    let release = parse_release(body, tag)?;
+    let name = release_signature::signature_name(asset);
+    let url = release
+        .assets
+        .into_iter()
+        .find(|candidate| candidate.name == name)
+        .ok_or_else(|| Refusal::SignatureMissing {
+            tag: tag.to_owned(),
+            asset: asset.to_owned(),
+        })?
+        .browser_download_url
+        .unwrap_or_default();
+    if url != format!("{RELEASE_DOWNLOAD_PREFIX}{tag}/{name}") {
+        return Err(Refusal::SignatureUntrusted {
+            tag: tag.to_owned(),
+            url,
+        });
+    }
+    Ok(url)
+}
+
+fn parse_release(body: &[u8], tag: &str) -> Result<Release, Refusal> {
+    serde_json::from_slice(body).map_err(|err| Refusal::ReleaseUnavailable {
+        tag: tag.to_owned(),
+        what: "GitHub's answer is not a release",
+        source: Box::new(err),
+    })
+}
+
 /// The hex of a `sha256:<64 hex digits>` digest, lowercased, or `None` for
 /// anything else.
 pub fn parse_sha256(digest: &str) -> Option<String> {
     let hex = digest.strip_prefix("sha256:")?;
     (hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()))
         .then(|| hex.to_ascii_lowercase())
-}
-
-/// Ask GitHub for release `tag` and return the sha256 it states for `asset`.
-pub fn fetch_digest(tag: &str, asset: &str) -> Result<String, Refusal> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|err| Refusal::ReleaseUnavailable {
-            tag: tag.to_owned(),
-            what: "could not start the async runtime",
-            source: Box::new(err),
-        })?;
-    let body = runtime.block_on(fetch_release(tag))?;
-    digest_in_release(&body, tag, asset)
-}
-
-/// Release `tag`'s object from GitHub's API, asked the way the release feed
-/// asks: rustls with the `ring` provider, verifying against the operating
-/// system's trust store, with no token.
-async fn fetch_release(tag: &str) -> Result<Vec<u8>, Refusal> {
-    let unavailable = |what: &'static str, source: Box<dyn std::error::Error + Send + Sync>| {
-        Refusal::ReleaseUnavailable {
-            tag: tag.to_owned(),
-            what,
-            source,
-        }
-    };
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let tls = rustls::ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .and_then(|builder| builder.with_platform_verifier())
-        .map_err(|err| unavailable("could not set up TLS", err.into()))?
-        .with_no_client_auth();
-    let client = reqwest::Client::builder()
-        .tls_backend_preconfigured(tls)
-        .timeout(REQUEST_TIMEOUT)
-        .build()
-        .map_err(|err| unavailable("could not build the HTTPS client", err.into()))?;
-    let response = client
-        .get(release_url(tag))
-        .header(reqwest::header::USER_AGENT, USER_AGENT)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|err| unavailable("the request failed", err.into()))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(Refusal::ReleaseRefused {
-            tag: tag.to_owned(),
-            status,
-        });
-    }
-    let body = response
-        .bytes()
-        .await
-        .map_err(|err| unavailable("the answer could not be read", err.into()))?;
-    Ok(body.to_vec())
 }
 
 #[cfg(test)]
@@ -254,5 +228,67 @@ mod tests {
                 "{body}: {err:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_signature_is_the_releases_own_asset_for_the_deb() {
+        let body = format!(
+            r#"{{"assets": [
+                {{"name": "Delta_0.6.0_aarch64.dmg.minisig", "browser_download_url": "{p}v0.6.0/Delta_0.6.0_aarch64.dmg.minisig"}},
+                {{"name": "{DEB}.minisig", "browser_download_url": "{p}v0.6.0/{DEB}.minisig"}}
+            ]}}"#,
+            p = RELEASE_DOWNLOAD_PREFIX,
+        );
+        assert_eq!(
+            signature_url_in_release(body.as_bytes(), TAG, DEB).unwrap(),
+            format!("https://github.com/x7c1/delta/releases/download/v0.6.0/{DEB}.minisig")
+        );
+    }
+
+    #[test]
+    fn a_release_without_the_debs_signature_is_refused() {
+        for assets in [
+            "[]".to_owned(),
+            format!(
+                r#"[{{"name": "Delta_0.6.0_aarch64.dmg.minisig", "browser_download_url": "{RELEASE_DOWNLOAD_PREFIX}v0.6.0/Delta_0.6.0_aarch64.dmg.minisig"}}]"#
+            ),
+            format!(
+                r#"[{{"name": "{DEB}", "digest": "sha256:{}"}}]"#,
+                hex_of('a')
+            ),
+        ] {
+            let body = format!(r#"{{"assets": {assets}}}"#);
+            let err = signature_url_in_release(body.as_bytes(), TAG, DEB).unwrap_err();
+            assert!(
+                matches!(&err, Refusal::SignatureMissing { asset, .. } if asset == DEB),
+                "{assets}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_signature_anywhere_but_the_releases_own_url_is_refused() {
+        for url in [
+            format!("https://example.com/{DEB}.minisig"),
+            format!("https://objects.githubusercontent.com/x7c1/delta/releases/download/v0.6.0/{DEB}.minisig"),
+            format!("http://github.com/x7c1/delta/releases/download/v0.6.0/{DEB}.minisig"),
+            // Another release's signature of the same name.
+            format!("{RELEASE_DOWNLOAD_PREFIX}v0.5.0/{DEB}.minisig"),
+            format!("{RELEASE_DOWNLOAD_PREFIX}v0.6.0/../v0.5.0/{DEB}.minisig"),
+            format!("{RELEASE_DOWNLOAD_PREFIX}v0.6.0/{DEB}.minisig?x=1"),
+            String::new(),
+        ] {
+            let body = format!(
+                r#"{{"assets": [{{"name": "{DEB}.minisig", "browser_download_url": "{url}"}}]}}"#
+            );
+            let err = signature_url_in_release(body.as_bytes(), TAG, DEB).unwrap_err();
+            assert!(
+                matches!(&err, Refusal::SignatureUntrusted { url: refused, .. } if *refused == url),
+                "{url}: {err:?}"
+            );
+        }
+        let body = format!(r#"{{"assets": [{{"name": "{DEB}.minisig"}}]}}"#);
+        let err = signature_url_in_release(body.as_bytes(), TAG, DEB).unwrap_err();
+        assert!(matches!(err, Refusal::SignatureUntrusted { .. }), "{err:?}");
     }
 }

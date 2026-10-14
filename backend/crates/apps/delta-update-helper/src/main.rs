@@ -21,12 +21,19 @@
 //!    (`https://api.github.com/repos/x7c1/delta/releases/tags/<tag>`) and
 //!    compares the copy's sha256 with the digest it states for the `.deb`
 //!    ([`release_digest`]); a release without one is refused;
-//! 3. checks with `dpkg-deb` and `dpkg-query` that the package is
+//! 3. downloads the release's signature of the `.deb`, `<deb>.minisig`, from
+//!    the release's own download URL for it (nowhere else), and checks the
+//!    copy against it with the release key compiled in from
+//!    `release-signature` ([`signature_check`]): the signature must be made
+//!    with that key and name exactly the `.deb`'s file name and the
+//!    requested version. A release without a signature, or one that does
+//!    not verify the copy, is refused, whatever the caller checked before;
+//! 4. checks with `dpkg-deb` and `dpkg-query` that the package is
 //!    `delta-desktop`, at the requested version, and newer than the installed
 //!    one ([`package_check`]); when the installed one is that version or
 //!    newer already, it installs nothing and exits with
 //!    [`refusal::ALREADY_INSTALLED`], which the server reads as installed;
-//! 4. installs the copy with `apt-get install -y <path>`, so its dependencies
+//! 5. installs the copy with `apt-get install -y <path>`, so its dependencies
 //!    resolve, then removes the directory.
 //!
 //! Every refusal and failure exits with a status of its own and prints one
@@ -37,17 +44,21 @@
 //! decisions live in functions the unit tests cover without root; this file
 //! is only the thin shell that runs `dpkg-deb`, `dpkg-query` and `apt-get`.
 
+mod github;
 mod install_request;
 mod package_check;
 mod refusal;
 mod release_digest;
+mod signature_check;
 mod staged_copy;
 
 use std::path::Path;
 use std::process::{Command, ExitCode, Output};
 
+use github::Github;
 use install_request::InstallRequest;
 use refusal::Refusal;
+use release_signature::ReleaseKey;
 use staged_copy::StagedCopy;
 
 /// The programs the helper runs, by absolute path: `pkexec` hands it a
@@ -84,7 +95,9 @@ fn run() -> Result<(), Refusal> {
         &request.version,
         release_digest::deb_arch(std::env::consts::ARCH),
     );
-    let expected = release_digest::fetch_digest(&request.tag, &asset)?;
+    let github = Github::new(&request.tag)?;
+    let release = github.release(&request.tag)?;
+    let expected = release_digest::digest_in_release(&release, &request.tag, &asset)?;
     if staged.sha256() != expected {
         return Err(Refusal::DigestMismatch {
             tag: request.tag,
@@ -92,6 +105,15 @@ fn run() -> Result<(), Refusal> {
             actual: staged.sha256().to_owned(),
         });
     }
+    let signature_url = release_digest::signature_url_in_release(&release, &request.tag, &asset)?;
+    let signature = github.signature(&request.tag, &signature_url)?;
+    signature_check::check_signature(
+        &ReleaseKey::production(),
+        &staged.path(),
+        &signature,
+        &asset,
+        &request.version,
+    )?;
 
     let fields = run_reading(
         DPKG_DEB,

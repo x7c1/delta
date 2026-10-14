@@ -8,7 +8,9 @@ the host and where it keeps its data are in the [install guide](README.md).
 1. Install `tmux` if you do not have it: `brew install tmux`.
 2. Open the [latest Release](https://github.com/x7c1/delta/releases/latest)
    and download `Delta_<version>_aarch64.dmg`.
-3. Open the `.dmg` and drag `Delta.app` into `Applications`.
+3. Optionally, check the download's signature
+   ([how](README.md#checking-a-download)).
+4. Open the `.dmg` and drag `Delta.app` into `Applications`.
 
 ## First launch: getting past Gatekeeper
 
@@ -44,8 +46,9 @@ the version:
 
 1. **Update** downloads the new `.dmg` into the data directory's `updates/`
    (`~/Library/Application Support/io.github.x7c1.delta/updates/`) and checks
-   its sha256 against the one the release states. The footer then says
-   **Update ready** and offers **Install**.
+   its sha256 against the one the release states and its contents against the
+   release's signature. The footer then says **Update ready** and offers
+   **Install**.
 2. **Install** replaces `Delta.app` with the one in the new `.dmg`. No
    password is asked for: the app replaces itself as you. While it runs the
    footer says **Installing…**.
@@ -86,6 +89,12 @@ to the release page; a failed install also offers a retry. Open that `.dmg`
 (for example with **Go → Go to Folder…** in Finder and the copied path), quit
 Delta (Finder does not replace an app that is open), drag `Delta.app` into
 `Applications` over the old one, then start Delta again.
+
+If the release's signature is missing or does not verify the download, the app
+keeps nothing and the footer says **Update it by hand**, with the reason and a
+link to the release page; there is no Install and no retry. Download the
+`.dmg` from the release page, [check its signature](README.md#checking-a-download),
+and install it as below only if it verifies.
 
 If the downloaded file fails the app's check (it does not match the release's
 digest, or the `.dmg` does not hold Delta at that version), the app removes it

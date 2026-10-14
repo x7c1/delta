@@ -5,9 +5,15 @@
  *
  * - `downloading`: the transfer is running; `received_bytes` so far, of
  *   `total_bytes` when the answer stated it.
- * - `ready`: downloaded and its sha256 verified, waiting to be applied.
+ * - `ready`: downloaded and verified against its sha256 and the release's
+ *   signature, waiting to be applied.
+ * - `unavailable`: the release cannot be updated to in the app: it carries
+ *   no signature of this platform's asset, or the signature does not verify
+ *   the downloaded file. Nothing was kept; `error` says why. A new request
+ *   for the same release answers this again; the user updates by hand from
+ *   the release page.
  * - `failed`: nothing was kept; `error` says why. A new request starts over.
  *
  * `version` is the release the download is of (`v0.6.0`).
  */
-export type UpdateDownload = { "state": "downloading", version: string, received_bytes: number, total_bytes: number | null, } | { "state": "ready", version: string, } | { "state": "failed", version: string, error: string, };
+export type UpdateDownload = { "state": "downloading", version: string, received_bytes: number, total_bytes: number | null, } | { "state": "ready", version: string, } | { "state": "unavailable", version: string, error: string, } | { "state": "failed", version: string, error: string, };

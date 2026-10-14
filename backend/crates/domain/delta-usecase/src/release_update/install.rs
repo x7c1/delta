@@ -489,12 +489,11 @@ mod tests {
         let installer = GatedInstaller::new();
         let mac = update_on(Platform::new("macos", "aarch64"), &downloader, &installer);
         assert!(mac.installs());
-        let v060_mac = || newer_release("0.6.0", vec![asset(MAC_DMG)]);
-        mac.start(Some(v060_mac())).unwrap();
+        mac.start(Some(v060())).unwrap();
         downloader.finish(Ok(()));
         settled(&mac).await;
 
-        mac.install(Some(v060_mac())).unwrap();
+        mac.install(Some(v060())).unwrap();
         // The installer's reason and the I/O error behind it, each named
         // once.
         installer.finish(Err(unlocated()));
@@ -508,7 +507,7 @@ mod tests {
             })
         );
 
-        mac.install(Some(v060_mac())).unwrap();
+        mac.install(Some(v060())).unwrap();
         installer.finish(Err(InstallError::failed("hdiutil could not attach")));
         assert_eq!(
             install_settled(&mac).await,
@@ -522,7 +521,7 @@ mod tests {
             installer.asked()[0],
             ("v0.6.0".to_owned(), image, test_sha256())
         );
-        assert_eq!(mac.install_unavailable_of(Some(&v060_mac())), None);
+        assert_eq!(mac.install_unavailable_of(Some(&v060())), None);
     }
 
     /// An installer that says at startup it cannot install here (on macOS,
@@ -534,18 +533,17 @@ mod tests {
         let downloader = GatedDownloader::new();
         let installer = GatedInstaller::unavailable_because(unlocated);
         let mac = update_on(Platform::new("macos", "aarch64"), &downloader, &installer);
-        let v060_mac = || newer_release("0.6.0", vec![asset(MAC_DMG)]);
         assert!(!mac.installs());
-        assert_eq!(mac.offer(Some(&v060_mac())), crate::UpdateOffer::Update);
+        assert_eq!(mac.offer(Some(&v060())), crate::UpdateOffer::Update);
         // Nothing to install by hand before the download is ready.
-        assert_eq!(mac.install_unavailable_of(Some(&v060_mac())), None);
-        mac.start(Some(v060_mac())).unwrap();
-        assert_eq!(mac.install_unavailable_of(Some(&v060_mac())), None);
+        assert_eq!(mac.install_unavailable_of(Some(&v060())), None);
+        mac.start(Some(v060())).unwrap();
+        assert_eq!(mac.install_unavailable_of(Some(&v060())), None);
         downloader.finish(Ok(()));
         settled(&mac).await;
 
         assert_eq!(
-            mac.install_unavailable_of(Some(&v060_mac())),
+            mac.install_unavailable_of(Some(&v060())),
             Some(InstallUnavailable {
                 cause: UNLOCATED_CAUSE.into(),
                 manual: ManualInstall::DiskImage(Path::new("/data/updates").join(MAC_DMG)),

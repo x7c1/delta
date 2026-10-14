@@ -17,8 +17,8 @@ const PKEXEC_DISMISSED: i32 = 126;
 const PKEXEC_NOT_AUTHORIZED: i32 = 127;
 
 /// The update helper's exit statuses that reject the file itself: not a
-/// regular file, not matching the release's digest, or not `delta-desktop` at
-/// the version asked for. The helper holds the same range
+/// regular file, not matching the release's digest or not verified by its
+/// signature, or not `delta-desktop` at the version asked for. The helper holds the same range
 /// (`FILE_REJECTED` in its `refusal` module) and tests that each of its
 /// refusals falls in it exactly when it rejects the file.
 const HELPER_REJECTED_FILE: std::ops::RangeInclusive<i32> = 10..=19;
@@ -60,8 +60,8 @@ impl Default for PkexecInstaller {
 
 #[async_trait]
 impl UpdateInstaller for PkexecInstaller {
-    /// The helper checks the file against the release's digest itself, as
-    /// root, so `sha256` is not handed to it.
+    /// The helper checks the file against the release's digest and
+    /// signature itself, as root, so `sha256` is not handed to it.
     async fn install(
         &self,
         version: &str,
