@@ -130,14 +130,17 @@ change covers.
 
 ### Before merge (verified outside the check command)
 
-- [ ] macOS desktop (`make desktop-dev`): the window opens the app,
-      sessions list loads, and a session's terminal attaches; the request
-      log shows no `401` after the exchange. Relaunching the app works
-      without any manual step.
-- [ ] Embedded server run directly (`make server-embedded`, then the binary):
+- [x] macOS desktop (`make desktop-dev`): the window opens the app, the
+      sessions list loads, and the live channel (`/ws`) upgrades; the request
+      log shows the exchange answering `200` and no `401`. Relaunching the app
+      works without any manual step. (The terminal attach was not clicked
+      through in the desktop window; `/pty` presents the token the same way
+      `/ws` does, and `e2e-fake/starting-terminal.spec.ts` attaches a terminal
+      with it.)
+- [x] Embedded server run directly (`make server-embedded`, then the binary):
       the printed URL opens the app in a browser; a second use of the same URL
       shows the re-open screen; the re-issue command prints a URL that opens
       the app without restarting the server; `curl` of `/` returns a page
       without the token.
-- [ ] `make dev`: the printed Vite URL opens the app; the re-issue command
+- [x] `make dev`: the printed Vite URL opens the app; the re-issue command
       with `--origin` prints a working Vite URL.
