@@ -6,7 +6,60 @@ on:
   push:
     branches: [main]
 
+# Read-only: no CI job writes to the repository.
+permissions:
+  contents: read
+
 jobs:
+  # Every action is pinned to a commit SHA (scripts/check-workflow-pins.sh);
+  # `make check` runs both steps too.
+  workflow-pins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Check every action is pinned to a commit SHA
+        run: make check-workflow-pins
+
+      - name: Test the pin check
+        run: make check-workflow-pins-test
+
+  # Known advisories in the dependencies that ship: the backend's lockfile
+  # (backend/deny.toml says how unmaintained and yanked crates count) and the
+  # frontend's production dependencies. Both fetch advisory data over the
+  # network, so this runs here and as `make audit`, not in `make check`.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable branch
+        with:
+          toolchain: stable
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny@0.20.2 --locked
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          package_json_file: frontend/package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Audit dependencies
+        run: make audit
+
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -14,15 +67,18 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable branch
         with:
+          toolchain: stable
           components: clippy
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
@@ -91,7 +147,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # A source file past 1000 lines mixes responsibilities. The check only
       # counts lines, so it runs before the install to fail fast.
@@ -100,7 +158,7 @@ jobs:
         run: make check-frontend-file-length
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           # Single source of truth: the pnpm version comes from the
           # "packageManager" field in frontend/package.json. Do not also set
@@ -108,7 +166,7 @@ jobs:
           package_json_file: frontend/package.json
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: pnpm
@@ -145,7 +203,7 @@ jobs:
           echo "key=${prefix}${ImageVersion}" >> "$GITHUB_OUTPUT"
 
       - name: Cache apt archives
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /var/cache/apt/archives/*.deb
           key: ${{ steps.apt-cache-key.outputs.key }}
@@ -173,7 +231,7 @@ jobs:
       # the job's working-directory.
       - name: Upload e2e (mock mode) diagnostics
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2e-mock-diagnostics
           path: |
@@ -199,7 +257,9 @@ jobs:
         libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
         librsvg2-dev libxdo-dev libssl-dev patchelf
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # The .deb archives are cached so a run normally installs from the cache
       # instead of the Ubuntu mirror, which has stalled these installs for over
@@ -227,7 +287,7 @@ jobs:
           echo "key=${prefix}${ImageVersion}" >> "$GITHUB_OUTPUT"
 
       - name: Cache apt archives
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /var/cache/apt/archives/*.deb
           key: ${{ steps.apt-cache-key.outputs.key }}
@@ -245,12 +305,13 @@ jobs:
           sudo find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec chmod a+r {} +
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable branch
         with:
+          toolchain: stable
           components: clippy
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
@@ -261,12 +322,12 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           package_json_file: frontend/package.json
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: pnpm
@@ -332,7 +393,7 @@ jobs:
       # keeps a green run from erroring when nothing was produced.
       - name: Upload e2e-fake diagnostics
         if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2e-fake-diagnostics
           path: |

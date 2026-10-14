@@ -1,0 +1,28 @@
+# cargo-deny configuration. CI's `audit` job runs `cargo deny check advisories`
+# against the RustSec advisory database; `make audit` runs the same check
+# locally (it needs network access to fetch the database, so `make check` does
+# not run it). See docs/guides/development/README.md ("Workflows and
+# dependency audit").
+#
+# Every target counts: the desktop shell's Linux-only dependencies (the gtk-rs
+# stack under tauri) ship in the .deb even when the check runs on macOS.
+
+[graph]
+all-features = true
+
+[advisories]
+# Vulnerabilities always fail the check; there is no setting for them.
+# Unsoundness and unmaintained crates fail it too, wherever they sit in the
+# graph, so each one is either fixed or listed below with its reason.
+unsound = "all"
+unmaintained = "all"
+# A yanked crate in the lockfile fails the check: its author withdrew it.
+yanked = "deny"
+
+# Each entry names why the advisory cannot be fixed by a compatible update
+# today. Drop an entry once an update removes the crate or fixes it.
+ignore = [
+  { id = "RUSTSEC-2024-0429", reason = "glib 0.18 VariantStrIter unsoundness: the fix is glib 0.20, but tauri 2's Linux runtime (gtk/webkit2gtk 0.18) requires glib 0.18, and delta-desktop must use the same glib. Delta never iterates a VariantStrIter." },
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained: a build-time dependency of glib-macros 0.18, pinned by tauri 2's gtk 0.18 stack like RUSTSEC-2024-0429." },
+  { id = "RUSTSEC-2017-0008", reason = "serial is unmaintained: pulled in by portable-pty 0.8 for its serial-port support, which Delta does not use. portable-pty 0.9 replaces it with serial2, an upgrade across a breaking version that no compatible update reaches." },
+]

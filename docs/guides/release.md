@@ -8,10 +8,12 @@ merging that PR.
 
 Delta uses a "merge the PR" release model. A bot opens and updates one
 rolling release PR against `main`; merging it triggers the `Release`
-workflow, which creates the matching `vX.Y.Z` tag and a GitHub Release. The
-Release body is a summary written by hand in the release PR; the generated
-per-commit changelog stays on the PR. Once the Release exists, the desktop
-bundles are built and attached to it (see [Desktop bundles](#desktop-bundles)).
+workflow, which creates a draft GitHub Release for the commit CI tested,
+builds the desktop bundles, attaches them, and only then publishes the
+Release, which creates the matching `vX.Y.Z` tag. The Release body is a
+summary written by hand in the release PR; the generated per-commit changelog
+stays on the PR. The jobs that build hold no write access; see
+[Desktop bundles](#desktop-bundles).
 
 ## Normal flow (patch bump)
 
@@ -23,9 +25,10 @@ bundles are built and attached to it (see [Desktop bundles](#desktop-bundles)).
    via `generate-changelog.sh`). See [Release summary](#release-summary).
 3. Write the summary. The PR cannot be merged while it is unwritten.
 4. Merge the PR when you want to cut the release. The `Release` workflow
-   then runs after CI completes on `main`, creates the `vX.Y.Z` tag, and
-   publishes a GitHub Release carrying that summary plus links back to the
-   release PR and the compare view.
+   then runs after CI completes on `main` and publishes a GitHub Release
+   carrying that summary plus links back to the release PR and the compare
+   view, with the desktop bundles attached; publishing creates the `vX.Y.Z`
+   tag.
 
 ## Release summary
 
@@ -56,8 +59,8 @@ it: `Validate Release PR` fails while the summary is empty or still carries the
 `<!-- release-summary:todo -->` sentinel. That workflow also runs on body
 edits, so saving the summary re-runs the check and turns it green without any
 further push. If a release nonetheless reaches the `Release` workflow without
-a summary, that workflow fails before creating the tag rather than publishing
-a Release without one.
+a summary, that workflow fails before creating the draft rather than
+publishing a Release without one.
 
 ## Promoting to minor or major
 
@@ -127,15 +130,44 @@ shell crate, so it matches the tag by construction. The bundles are neither
 signed nor notarized; what that means for someone installing them is in
 [the install guide](install/README.md).
 
-- **Order.** The `bundles` job of the `Release` workflow runs only after the
-  `release` job has created the tag and the Release, and uploads to that
-  Release. A bundle failure therefore never blocks the tag or the Release; it
-  shows up as a failed `bundles` job.
-- **Rerunning.** Open the failed `Release` run in the Actions tab and use
-  "Re-run failed jobs": only the failed matrix entries of `bundles` run again,
-  against the same tag and Release. To rebuild a tag from scratch without a
-  Release upload, run the `Bundle` workflow by hand (`workflow_dispatch`) with
-  the tag as `ref`; it uploads workflow artifacts instead.
+The `Release` workflow (`.github/workflows/release.yml`) runs as a chain of
+jobs, each holding only the access its step needs:
+
+1. **`plan`** (read-only) checks out the commit CI tested
+   (`workflow_run.head_sha`, not whatever `main` points at by then), decides
+   whether the version changed and reads the summary.
+2. **`draft`** (`contents: write`) creates the Release as a **draft** whose
+   tag will point at that commit (`target_commitish`). It runs only the `gh`
+   CLI: no checkout, no project code. A draft is not visible to the desktop
+   app's update check, and its tag does not exist yet.
+3. **`bundles`** (read-only) calls `bundle.yml`, which builds each platform
+   from that commit and uploads the bundle as a workflow artifact. The build
+   jobs get no write token and keep no git credentials, so nothing they run —
+   an action, a build script, a dependency's install-time code — can change a
+   Release or push. A release build restores no compiled `backend/target`
+   cache, only the downloaded crate sources.
+4. **`publish`** (`contents: write`) downloads the artifacts, attaches them
+   to the draft, checks that every file in the table above is attached, and
+   publishes the draft, which creates the tag. It runs no project code and no
+   third-party action besides `actions/download-artifact`.
+5. **`rewrite-links`** (`pull-requests: write`) points the release PR's
+   compare link at the tag, which now exists.
+
+- **A failed build** leaves the draft unpublished: no tag exists and the desktop
+  app sees no new Release. Open the failed `Release` run in the Actions tab
+  and use "Re-run failed jobs": the failed platforms build again, and
+  `publish` then attaches their bundles and publishes the same draft. Re-running
+  the whole run is safe too: `draft` updates the draft it created rather than
+  making a second one, and `publish` replaces any bundle already attached.
+  To rebuild a ref without any Release, run the `Bundle` workflow by hand
+  (`workflow_dispatch`) with that ref; it uploads workflow artifacts only.
+- **Dry run.** Run the `Release` workflow by hand (`workflow_dispatch`, with
+  `dry_run` checked, which is the only accepted value) to exercise the whole
+  chain from the dispatched ref without releasing anything. It builds that
+  ref, creates a draft under the tag name `v0.0.0-dryrun.<run id>` — a name no
+  release uses, never created as a tag because the draft is never published —
+  attaches and checks the bundles, and stops before publishing and before the
+  link rewrite. Inspect the draft on the Releases page, then delete it.
 - **Pull requests.** A pull request that touches the shell or its build
   inputs (the `paths` filter in `bundle.yml`) runs the same builds and uploads
   each platform's bundles as a workflow artifact (`delta-macos-aarch64`,
@@ -154,13 +186,13 @@ signed nor notarized; what that means for someone installing them is in
   summary is unwritten.
 - `.github/workflows/release.yml` — when CI completes successfully on
   `main`, checks whether the workspace version changed; if it did, reads the
-  summary from the merged release PR and then creates the matching tag and
-  GitHub Release; its `bundles` job then calls `bundle.yml` to attach the
-  desktop bundles.
+  summary from the merged release PR, creates a draft Release, has
+  `bundle.yml` build the desktop bundles, attaches them and publishes the
+  Release (which creates the tag). Run by hand, it performs a dry run. See
+  [Desktop bundles](#desktop-bundles).
 - `.github/workflows/bundle.yml` — builds the desktop bundles on macOS
-  (Apple silicon only) and Linux; attaches them to a Release when called
-  from `release.yml`, and uploads them as workflow artifacts on pull requests
-  and manual runs. See [Desktop bundles](#desktop-bundles).
+  (Apple silicon only) and Linux with read-only access and uploads them as
+  workflow artifacts, on pull requests, manual runs and for `release.yml`.
 
 For the underlying setup (the `RELEASE_PAT` secret, why a user PAT is
 required instead of `GITHUB_TOKEN`), see "Release automation setup" below.
@@ -176,13 +208,15 @@ required instead of `GITHUB_TOKEN`), see "Release automation setup" below.
 - The `Release` workflow gates on a green CI: a red `main` will never tag
   a release. Fix CI first and the next successful CI run cuts the
   release automatically.
-- If `Release` failed because the summary was missing, no tag was created.
+- If `Release` failed because the summary was missing, no draft and no tag
+  were created.
   Write the summary into the merged release PR's body (a merged PR's
   description is still editable) and re-run the failed run from the Actions
-  tab — before another commit lands on `main`. The version-change check
-  compares the workspace version against the previous commit, so once the
-  bump is no longer the newest change the automation stops seeing a version
-  change and will not cut that release on its own.
+  tab. The re-run checks out the same commit CI tested
+  (`workflow_run.head_sha`), so it still sees the version change after other
+  commits have landed on `main`. Nothing else will cut that release: the
+  version-change check compares each commit against its parent, so the `Release`
+  runs for later commits see no version change.
 
 ## Release automation setup
 
@@ -223,4 +257,7 @@ the misconfiguration the PAT is solving.
 The `Release` workflow (`.github/workflows/release.yml`) that tags and publishes
 after the release PR is merged keeps using the default `GITHUB_TOKEN` — it runs
 under a human-triggered merge event, so recursion is not a concern, and no
-workflow in this repo listens to tag pushes.
+workflow in this repo listens to tag pushes. Only its `draft` and `publish`
+jobs get write access to the repository's contents (see
+[Desktop bundles](#desktop-bundles)). The `Create Release PR` job's own token
+is read-only: everything it writes goes through `RELEASE_PAT`.

@@ -148,8 +148,8 @@ ensure_release_label() {
 }
 
 # Bump the workspace version via cargo set-version (cargo-edit). This
-# expects `cargo install cargo-edit --locked` to have run earlier in the
-# workflow.
+# expects the workflow to have installed cargo-edit earlier (at the version
+# create-release-pr.yml fixes).
 bump_version_in_workspace() {
     local version="$1"
     (cd "${REPO_ROOT}/backend" && \
