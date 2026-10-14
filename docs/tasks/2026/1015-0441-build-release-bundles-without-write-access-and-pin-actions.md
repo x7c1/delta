@@ -103,8 +103,8 @@ run, and that the build jobs hold no write access.
 
 ### Before merge (verified outside the check command)
 
-- [ ] Reading the workflows: no job that runs a build step, `pnpm install`,
+- [x] Reading the workflows: no job that runs a build step, `pnpm install`,
       or `cargo` holds `contents: write`; every `actions/checkout` sets
       `persist-credentials: false` except where a later step pushes with the
       checkout's credentials, which is named in a comment.
-- [ ] The CI `audit` job passes on the PR.
+- [x] The CI `audit` job passes on the PR.
