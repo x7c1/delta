@@ -1,5 +1,18 @@
 name: Release
 
+# Cuts a Release when CI passes on a main commit that changed the workspace
+# version. The jobs split by what they may write:
+#
+#   plan (read) → draft (contents: write, gh only) → bundles (read, builds)
+#     → publish (contents: write, gh and download-artifact only)
+#     → rewrite-links (pull-requests: write)
+#
+# Only `draft` and `publish` can change a Release, and neither checks out or
+# runs project code or installs anything; the jobs that build hold read access
+# only. The Release stays a draft — invisible to the desktop app's update
+# check, and with no tag yet — until every bundle is attached. See
+# docs/guides/release.md ("Desktop bundles").
+
 on:
   workflow_run:
     workflows: ["CI"]
@@ -7,44 +20,76 @@ on:
       - completed
     branches:
       - main
+  # A dry run of the whole pipeline from the dispatched ref: a draft under a
+  # tag name no release uses, with the bundles attached, never published.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: >-
+          Must stay checked: a dispatched run is always a dry run. Real
+          releases come only from a green CI run on main.
+        type: boolean
+        default: true
+
+# Every job states what it needs.
+permissions: {}
 
 jobs:
-  release:
+  plan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Only consider main runs that finished green: a red CI must never
     # tag a release.
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+      pull-requests: read
 
-    # Read by the bundles job.
     outputs:
-      changed: ${{ steps.version-check.outputs.changed }}
-      version: ${{ steps.version-check.outputs.version }}
-      release_id: ${{ steps.gh-release.outputs.id }}
+      release: ${{ steps.target.outputs.release }}
+      dry_run: ${{ steps.target.outputs.dry_run }}
+      version: ${{ steps.target.outputs.version }}
+      tag: ${{ steps.target.outputs.tag }}
+      title: ${{ steps.target.outputs.title }}
+      sha: ${{ steps.target.outputs.sha }}
+      body: ${{ steps.summary.outputs.body || steps.dry-run.outputs.body }}
+
+    env:
+      # The commit CI tested, not the branch tip: another merge may have
+      # landed on main since that CI run started.
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
     steps:
+      - name: Refuse a dispatched release that is not a dry run
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run }}
+        run: |
+          echo "::error::A dispatched Release run is always a dry run; real releases come from a green CI run on main. See docs/guides/release.md."
+          exit 1
+
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ env.RELEASE_SHA }}
           fetch-depth: 0
+          persist-credentials: false
 
       # cargo metadata reads the manifest, so the toolchain has to be
       # available even when the version turns out to be unchanged.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable branch
+        with:
+          toolchain: stable
 
       - name: Check if version changed
+        if: github.event_name == 'workflow_run'
         id: version-check
         run: ./scripts/check-version-change.sh
 
       # The Release body is the summary a developer wrote in the release PR,
       # not the per-commit changelog — that stays on the PR itself (layout:
-      # docs/guides/release.md). This step runs before the tag is cut, so a
-      # missing summary aborts the run instead of publishing a Release
+      # docs/guides/release.md). This step runs before the draft is created,
+      # so a missing summary aborts the run instead of producing a Release
       # nobody can read.
       - name: Resolve release summary
         if: steps.version-check.outputs.changed == 'true'
@@ -90,31 +135,172 @@ jobs:
             echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub release
-        if: steps.version-check.outputs.changed == 'true'
-        id: gh-release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version-check.outputs.version }}
-          name: Release v${{ steps.version-check.outputs.version }}
-          body: ${{ steps.summary.outputs.body }}
+      # A dry run builds whatever version the dispatched ref carries; the
+      # bundle file names, which the publish job checks, use it.
+      - name: Read the dry run's version
+        if: github.event_name == 'workflow_dispatch'
+        id: dry-run
+        working-directory: backend
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "delta-server") | .version')
+          test -n "$version"
+          {
+            echo "version=${version}"
+            echo "body=Dry run of the Release workflow (run ${GITHUB_RUN_ID}, ${RELEASE_SHA}). Not a release: delete this draft once inspected."
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Rewrite release PR links to point at the tag
-        if: steps.version-check.outputs.changed == 'true'
+      # The dry run's tag cannot collide with a release tag: no release
+      # version is 0.0.0, and the run id makes it unique per run.
+      - name: Resolve the release target
+        id: target
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW_VERSION: ${{ steps.version-check.outputs.version }}
-        run: .github/scripts/update-release-pr-links.sh "$NEW_VERSION"
+          CHANGED: ${{ steps.version-check.outputs.changed }}
+          RELEASE_VERSION: ${{ steps.version-check.outputs.version }}
+          DRY_RUN_VERSION: ${{ steps.dry-run.outputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            {
+              echo "release=true"
+              echo "dry_run=true"
+              echo "version=${DRY_RUN_VERSION}"
+              echo "tag=v0.0.0-dryrun.${GITHUB_RUN_ID}"
+              echo "title=Dry run ${GITHUB_RUN_ID} (not a release)"
+            } >> "$GITHUB_OUTPUT"
+          elif [ "$CHANGED" = true ]; then
+            {
+              echo "release=true"
+              echo "dry_run=false"
+              echo "version=${RELEASE_VERSION}"
+              echo "tag=v${RELEASE_VERSION}"
+              echo "title=Release v${RELEASE_VERSION}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "sha=${RELEASE_SHA}" >> "$GITHUB_OUTPUT"
 
-  # Runs after the Release exists, so a bundle failure never blocks the tag:
-  # it shows up as a failed run of this job to re-run (docs/guides/release.md,
-  # "Desktop bundles").
-  bundles:
-    needs: release
-    if: ${{ needs.release.outputs.changed == 'true' }}
+  # A draft has no tag yet: GitHub creates it at target_commitish when the
+  # draft is published. A whole-workflow re-run finds the draft it created
+  # before and updates it instead of creating a second one.
+  draft:
+    needs: plan
+    if: ${{ needs.plan.outputs.release == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
+    steps:
+      - name: Create or update the draft Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          TITLE: ${{ needs.plan.outputs.title }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          BODY: ${{ needs.plan.outputs.body }}
+        run: |
+          notes="${RUNNER_TEMP}/release-notes.md"
+          printf '%s\n' "$BODY" > "$notes"
+
+          # Empty when no Release (draft or not) carries the tag name.
+          is_draft=$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null || true)
+          case "$is_draft" in
+            true)
+              echo "Updating the existing draft ${TAG}."
+              gh release edit "$TAG" --title "$TITLE" --notes-file "$notes" --target "$SHA"
+              ;;
+            false)
+              echo "::error::${TAG} is already published; nothing to draft."
+              exit 1
+              ;;
+            *)
+              gh release create "$TAG" --draft --title "$TITLE" --notes-file "$notes" --target "$SHA"
+              ;;
+          esac
+
+  bundles:
+    needs: [plan, draft]
+    if: ${{ needs.plan.outputs.release == 'true' }}
+    permissions:
+      contents: read
     uses: ./.github/workflows/bundle.yml
     with:
-      ref: v${{ needs.release.outputs.version }}
-      release_id: ${{ needs.release.outputs.release_id }}
+      ref: ${{ needs.plan.outputs.sha }}
+      release: true
+
+  # Runs no project code and no third-party action besides download-artifact:
+  # it only moves the files the bundles job built onto the draft, checks them
+  # and publishes. A failed bundle leaves the draft unpublished; "Re-run
+  # failed jobs" rebuilds the failed platforms and runs this job again.
+  publish:
+    needs: [plan, bundles]
+    if: ${{ needs.plan.outputs.release == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      # bundle.yml uploads one artifact per platform, delta-<matrix name>,
+      # each holding that platform's single bundle file.
+      - name: Download the bundles
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: delta-*
+          path: bundles
+          merge-multiple: true
+
+      # --clobber: a re-run replaces what an earlier attempt attached.
+      - name: Attach the bundles to the draft
+        run: gh release upload "$TAG" bundles/* --clobber
+
+      # The file names bundle.yml's matrix produces (docs/guides/release.md,
+      # "Desktop bundles"). A platform missing here means a bundle the
+      # Release would otherwise ship without.
+      - name: Check every bundle is attached
+        run: |
+          expected=(
+            "Delta_${VERSION}_aarch64.dmg"
+            "delta-desktop_${VERSION}_amd64.deb"
+          )
+          attached=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          printf 'Attached:\n%s\n' "$attached"
+          missing=0
+          for name in "${expected[@]}"; do
+            if ! grep -qxF -- "$name" <<< "$attached"; then
+              echo "::error::${TAG} lacks ${name}."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Publish the Release
+        if: ${{ needs.plan.outputs.dry_run != 'true' }}
+        run: gh release edit "$TAG" --draft=false
+
+  # Needs the tag, which exists only once the draft is published.
+  rewrite-links:
+    needs: [plan, publish]
+    if: ${{ needs.plan.outputs.release == 'true' && needs.plan.outputs.dry_run != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      - name: Rewrite release PR links to point at the tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ needs.plan.outputs.version }}
+        run: .github/scripts/update-release-pr-links.sh "$NEW_VERSION"

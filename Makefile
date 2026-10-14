@@ -146,6 +146,24 @@ vendor-codex-schema-check:
 vendor-codex-schema-test:
 	bash scripts/tests/vendor-codex-schema.test.sh
 
+# --- Workflow and dependency checks -------------------------------------------
+
+## check-workflow-pins: fail, naming each offender, when a `uses:` in .github/workflows/ is not pinned to a full commit SHA with a `# <version>` comment (local `./` workflows exempt; part of `make check` and of CI)
+.PHONY: check-workflow-pins
+check-workflow-pins:
+	scripts/check-workflow-pins.sh
+
+## check-workflow-pins-test: exercise the pin check against throwaway workflow directories (part of `make check` and of CI)
+.PHONY: check-workflow-pins-test
+check-workflow-pins-test:
+	bash scripts/tests/check-workflow-pins.test.sh
+
+## audit: check the dependencies for known advisories — `cargo deny check advisories` (backend/deny.toml) and `pnpm audit --prod` (needs network access and cargo-deny: `cargo install cargo-deny --locked`; CI's audit job, not part of `make check`)
+.PHONY: audit
+audit:
+	cd backend && cargo deny check advisories
+	cd frontend && pnpm audit --prod
+
 # --- Quality gate -------------------------------------------------------------
 
 ## build: build backend and frontend
@@ -166,9 +184,12 @@ lint:
 	cd backend && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy/rustdoc/file length + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint/file length + the embedded-server build (`embed-web`) + the desktop-shell build/test/clippy + both Playwright suites (needs tmux) + the release version check's scratch-repo test — plus the canary gate's, the re-vendor script's, gen-check's and the test-residue sweep's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
+## check: full pre-PR gate — everything CI runs except the network-bound dependency audit (`make audit`): backend fmt/build/test/clippy/rustdoc/file length + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint/file length + the embedded-server build (`embed-web`) + the desktop-shell build/test/clippy + both Playwright suites (needs tmux) + the release version check's scratch-repo test + the workflow pin check and its test — plus the canary gate's, the re-vendor script's, gen-check's and the test-residue sweep's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
 # The point of this target is that passing it means CI will pass, so it has to
 # stay a superset of what the workflow runs — including BOTH Playwright suites.
+# The one exception is CI's `audit` job (`make audit`): it fetches advisory
+# data over the network, and its verdict changes when a new advisory is
+# published rather than when the code does.
 # `e2e` is the mock-backed one and `e2e-fake` drives the real backend through
 # tmux with the scripted fake agent binaries; they run different specs, so
 # leaving either out lets a suite fail in CI that a green local gate claimed to
@@ -184,7 +205,7 @@ lint:
 #   { check-backend-build, check-frontend-build } → { check-backend-doc, check-e2e-fake, check-embedded, check-desktop-build }
 #   check-backend-file-length, check-frontend-file-length, vendor-codex-schema-check,
 #   vendor-codex-schema-test, e2e-real-gate-test, sweep-test-residue-test, gen-check-test,
-#   check-version-change-test (no prerequisites)
+#   check-version-change-test, check-workflow-pins, check-workflow-pins-test (no prerequisites)
 #
 # Without -j, make walks the same graph left to right, which is the serial
 # order the gate always had. The cargo steps share backend/target and take
@@ -198,7 +219,7 @@ lint:
 CHECK_STEPS := \
 	check-backend-test check-backend-clippy check-backend-doc check-backend-file-length check-gen \
 	vendor-codex-schema-check vendor-codex-schema-test e2e-real-gate-test sweep-test-residue-test \
-	gen-check-test check-version-change-test \
+	gen-check-test check-version-change-test check-workflow-pins check-workflow-pins-test \
 	check-frontend-typecheck check-frontend-test check-frontend-lint check-frontend-file-length \
 	check-e2e check-e2e-fake check-embedded check-desktop-build
 

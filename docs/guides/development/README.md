@@ -81,8 +81,11 @@ runs the whole thing for both parts at once (build, test, lint, the frontend
 typecheck, the backend's rustdoc, the backend and frontend source-file
 lengths, the generated-bindings freshness check, the vendored Codex schema's
 stored form, the canary gate's, the re-vendor script's and the freshness
-check's own stubbed tests) **plus both Playwright suites**, so passing it means
-CI will pass. It needs tmux, because `make e2e-fake` drives the real backend
+check's own stubbed tests, the workflow pin check and its test) **plus both
+Playwright suites**, so passing it means CI will pass — except CI's dependency
+audit, which needs the network (see
+[Workflows and dependency audit](#workflows-and-dependency-audit)).
+`make check` needs tmux, because `make e2e-fake` drives the real backend
 through one, and `jq`, which is what the vendored schema's stored form is
 defined in terms of.
 
@@ -514,3 +517,32 @@ and the proxy follows it.
   hot-reloads directly.
 - `esbuild` and `msw` build scripts are allow-listed in `pnpm-workspace.yaml`
   (`allowBuilds`); pnpm does not run dependency build scripts by default.
+
+## Workflows and dependency audit
+
+Every `uses:` in `.github/workflows/` references an action by a full
+40-character commit SHA, with the release it was taken from in a trailing
+comment:
+
+```yaml
+- uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+```
+
+A tag can be moved to different code after review; a commit SHA cannot.
+`make check-workflow-pins` (`scripts/check-workflow-pins.sh`) fails, naming
+each offender, on a reference that is not a SHA or lacks the comment; local
+reusable workflows (`./...`) are exempt. It and its test
+(`make check-workflow-pins-test`) are part of `make check` and of CI's
+`workflow-pins` job. Dependabot (`.github/dependabot.yml`) proposes the new
+SHA and comment when an action releases, and weekly updates for the cargo and
+npm dependencies.
+
+CI's `audit` job checks the shipped dependencies for known advisories:
+`cargo deny check advisories` against the RustSec database, configured by
+`backend/deny.toml` (vulnerable, unsound, unmaintained and yanked crates all
+fail; each ignored advisory carries the reason no compatible update fixes it),
+and `pnpm audit --prod` for the frontend. `make audit` runs the same two
+commands locally (one-time: `cargo install cargo-deny --locked`). Both fetch
+advisory data over the network, and their verdict changes when an advisory is
+published rather than when the code does, so the audit runs in CI and on
+demand, and is not part of `make check`.
