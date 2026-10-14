@@ -495,7 +495,6 @@ export async function bootServer(): Promise<ServerHandle> {
             env: {
               ...process.env,
               DELTA_PORT: String(BACKEND_PORT),
-              DELTA_AUTH_TOKEN: AUTH_TOKEN,
             },
           },
         );

@@ -11,6 +11,7 @@ use crate::hooks::{
     UserPromptSubmitPayload, UserPromptSubmitResponse,
 };
 use crate::rest::{
+    WireAuthCodeResponse, WireAuthExchangeRequest, WireAuthExchangeResponse,
     WireCloneRepositoryRequest, WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
     WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
     WireDeleteSnapshotRequest, WireEraseResponse, WireGitBranchesResponse, WireGitRepoResponse,
@@ -77,6 +78,21 @@ declare_endpoints! {
     HookStatusLine: POST "/hooks/status-line", request = StatusLinePayload;
 
     // Browser REST surface: queries and commands.
+
+    /// Trades a one-time code for the per-run bearer token. The page is opened
+    /// at a URL carrying a code in its fragment and posts it here on boot; a
+    /// code is good for one exchange within ten minutes of being minted, and
+    /// a used, expired or unknown one answers `401` with no token. The one
+    /// `/api/*` route the bearer guard lets through, since the caller has no
+    /// token yet; the Origin/Host guard still applies.
+    ExchangeAuthCode: POST "/api/auth/exchange",
+        request = WireAuthExchangeRequest,
+        response = WireAuthExchangeResponse;
+
+    /// Mints a one-time code for a URL that opens the app, for `delta-server
+    /// open-url`. Takes no body; requires the bearer token like the rest of
+    /// `/api/*`.
+    MintAuthCode: POST "/api/auth/codes", response = WireAuthCodeResponse;
 
     /// The session list, open-first then newest first, paged by an opaque
     /// cursor.

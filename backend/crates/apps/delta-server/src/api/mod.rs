@@ -20,6 +20,8 @@
 
 mod api_error;
 pub(crate) use api_error::ApiError;
+mod auth;
+pub(crate) use auth::{exchange_auth_code, mint_auth_code};
 pub(crate) mod clone_root_path;
 mod clone_roots;
 pub(crate) use clone_roots::{create_clone_root, delete_clone_root, list_clone_roots};

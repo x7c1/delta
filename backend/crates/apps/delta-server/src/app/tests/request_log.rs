@@ -199,11 +199,7 @@ async fn a_static_web_request_is_logged_without_a_route() {
     use include_dir::{include_dir, Dir};
     static FIXTURE: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/tests/fixtures/web-dist");
 
-    let app = with_request_log(static_web::mount(
-        api_router(test_state().await),
-        &FIXTURE,
-        TEST_AUTH_TOKEN,
-    ));
+    let app = with_request_log(static_web::mount(api_router(test_state().await), &FIXTURE));
     let (logs, _guard) = capture(REQUEST_LOG_ON);
 
     let response = app

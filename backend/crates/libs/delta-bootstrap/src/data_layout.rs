@@ -5,6 +5,8 @@
 //!
 //! ```text
 //! <data_dir>/
+//!   auth-token                the running CLI server's bearer token (0600,
+//!                             removed on a clean stop)
 //!   delta.db                  the SQLite overlay (SQLite adds `-wal`/`-shm`
 //!                             beside it, the migration runner `.bak-v<N>`)
 //!   delta-hook-state.json     the hook secret and the desktop app's port
@@ -30,6 +32,9 @@ use std::path::{Path, PathBuf};
 
 use crate::DataDirError;
 
+/// The bearer token file's name.
+const AUTH_TOKEN_FILE: &str = "auth-token";
+
 /// The SQLite overlay's file name.
 const DATABASE_FILE: &str = "delta.db";
 
@@ -49,7 +54,7 @@ const TMUX_CONF_FILE: &str = "tmux.conf";
 const UPDATES_DIR: &str = "updates";
 
 /// Owner-only: the data directory holds the hook secret (in the hook state
-/// file and in every session settings file).
+/// file and in every session settings file) and the bearer token file.
 const DATA_DIR_MODE: u32 = 0o700;
 
 /// The paths Delta writes, all under one data directory.
@@ -69,6 +74,13 @@ impl DataLayout {
     /// The data directory itself.
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// The file the running `delta-server` keeps its per-run bearer token in,
+    /// for `delta-server open-url` and other local clients of the same user.
+    /// Written owner-only on start and removed on a clean stop.
+    pub fn auth_token(&self) -> PathBuf {
+        self.dir.join(AUTH_TOKEN_FILE)
     }
 
     /// The SQLite overlay. Its `-wal`/`-shm` and `.bak-v<N>` siblings land

@@ -8,6 +8,12 @@
 //! TypeScript by the `export-ts` binary, so the browser types can never drift
 //! from the Rust contract.
 
+mod auth_code_response;
+pub use auth_code_response::WireAuthCodeResponse;
+mod auth_exchange_request;
+pub use auth_exchange_request::WireAuthExchangeRequest;
+mod auth_exchange_response;
+pub use auth_exchange_response::WireAuthExchangeResponse;
 mod clone_repository_request;
 pub use clone_repository_request::WireCloneRepositoryRequest;
 mod clone_root_create_request;

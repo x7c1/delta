@@ -20,11 +20,14 @@
 #      settings file in the data directory so the hooks point back at the
 #      server). No session is spawned on startup or on page load.
 #   2. Starts the frontend dev server against the real backend.
+#   3. Prints the link that opens the app: the frontend's URL with a one-time
+#      code, which the page trades for the server's bearer token.
 #
-# Opening the browser is the only manual step. On load the UI shows the session
-# list (empty on a fresh database) — it does not auto-start anything. The first
-# Send from the composer (or a New action) spawns a fresh `claude` session;
-# Sending to a closed session resumes it. tmux is a hidden implementation detail.
+# Opening the browser at that link is the only manual step. On load the UI
+# shows the session list (empty on a fresh database) — it does not auto-start
+# anything. The first Send from the composer (or a New action) spawns a fresh
+# `claude` session; Sending to a closed session resumes it. tmux is a hidden
+# implementation detail.
 #
 # Authentication is assumed: the server relies on a cached Claude Code token (or
 # CLAUDE_CODE_OAUTH_TOKEN) and does not run interactive OAuth. If `claude` is not
@@ -49,6 +52,9 @@
 #                              # run the binary --desktop-build built, on the dev
 #                              # environment (does not build; `make desktop-dev`
 #                              # runs preflight, build, then this)
+#   scripts/dev.sh --open-url  # print a new link that opens the app on the
+#                              # frontend dev server (a one-time code from the
+#                              # running server; no restart)
 #   scripts/dev.sh --down      # tear the loop down (same as scripts/stop.sh)
 #   scripts/dev.sh --reset     # tear down, then delete the SQLite database in the
 #                              # dev data directory — and the pre-migration
@@ -133,6 +139,9 @@ DESKTOP_DEV_ICONS='"icons-dev/icon.png","icons-dev/32x32.png","icons-dev/128x128
 DESKTOP_DEV_TAURI_CONFIG="{\"identifier\":\"$DEV_NAME\",\"bundle\":{\"icon\":[$DESKTOP_DEV_ICONS]}}"
 DESKTOP_DEV_BIN="${CARGO_TARGET_DIR:-$BACKEND_DIR/target}/debug/delta-desktop"
 
+# The delta-server binary `cargo run` builds for the loop; `--open-url` runs it.
+SERVER_BIN="${CARGO_TARGET_DIR:-$BACKEND_DIR/target}/debug/delta-server"
+
 # delta-server and the frontend dev server each log to a per-run timestamped file
 # so a new run never clobbers a previous run's log. A stable `*.log` symlink
 # always points at the most recent run for convenience.
@@ -216,16 +225,16 @@ require() {
   command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH. $2"
 }
 
-# Mint a random per-run bearer token (64 hex chars). `openssl` is preferred; the
-# `/dev/urandom` fallback keeps this portable across macOS and Linux where
-# openssl is not guaranteed. `dd`+`od` consume their whole input, so no SIGPIPE
-# trips `set -o pipefail` the way a `head -c` on a pipe would.
-mint_auth_token() {
-  if command -v openssl >/dev/null 2>&1; then
-    openssl rand -hex 32
-  else
-    dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'
-  fi
+# Print a URL that opens the app on the frontend dev server with a fresh
+# one-time code, minted by the running delta-server (`delta-server open-url`,
+# which reads the server's bearer token from the token file in the dev data
+# directory). The page trades the code for the token once; this prints a new
+# one whenever it is needed, without restarting anything.
+print_open_url() {
+  [ -x "$SERVER_BIN" ] ||
+    die "$SERVER_BIN not found. Start the loop with 'make dev' first."
+  DELTA_IDENTIFIER="$DELTA_IDENTIFIER" DELTA_PORT="$DELTA_PORT" \
+    "$SERVER_BIN" open-url --origin "http://localhost:$FRONTEND_PORT"
 }
 
 # Whether something is already listening on 127.0.0.1:$1. Best-effort: tries the
@@ -402,17 +411,6 @@ up() {
 
   mkdir -p "$LOG_DIR"
 
-  # Mint ONE per-run bearer token here, outside both processes, and export the
-  # SAME value into the backend and the frontend dev server below. Minting it
-  # here (rather than letting the server mint its own) avoids a startup race: the
-  # page Vite serves must carry the exact token the server enforces. The server
-  # reads DELTA_AUTH_TOKEN; Vite reads it too and injects it into the page as the
-  # `delta-auth-token` meta tag (see vite.config.ts), which the frontend then
-  # presents on every request. Honor a value the caller already exported.
-  local auth_token
-  auth_token="${DELTA_AUTH_TOKEN:-$(mint_auth_token)}"
-  log "Minted a per-run auth token (the frontend presents it on every request)."
-
   # --- 1. delta-server. It owns the claude session lifecycle. ---
   ln -sf "$(basename "$SERVER_LOG")" "$SERVER_LOG_LATEST"
   log "Starting delta-server (DELTA_PORT=$DELTA_PORT) ..."
@@ -423,7 +421,6 @@ up() {
       DELTA_IDENTIFIER="$DELTA_IDENTIFIER" \
       DELTA_WORKTREE_BASE="$DELTA_WORKTREE_BASE" \
       DELTA_TMUX_SOCKET="$DELTA_TMUX_SOCKET" \
-      DELTA_AUTH_TOKEN="$auth_token" \
       cargo run -p delta-server >"$SERVER_LOG" 2>&1
   ) &
   local server_pid=$!
@@ -434,7 +431,6 @@ up() {
   log "Frontend log: $FRONTEND_LOG (latest -> $FRONTEND_LOG_LATEST)"
   (
     cd "$FRONTEND_DIR"
-    export DELTA_AUTH_TOKEN="$auth_token"
     pnpm install >"$FRONTEND_LOG" 2>&1
     pnpm -r build >>"$FRONTEND_LOG" 2>&1
     # `--force` re-optimizes deps so the dev server always serves the libraries
@@ -460,6 +456,12 @@ up() {
     die "frontend dev server did not come up. See $FRONTEND_LOG (latest -> $FRONTEND_LOG_LATEST)."
   fi
 
+  local open_url
+  if ! open_url="$(print_open_url)"; then
+    down
+    die "Could not get a link that opens the app from delta-server. See $SERVER_LOG (latest -> $SERVER_LOG_LATEST)."
+  fi
+
   cat <<EOF
 
 ────────────────────────────────────────────────────────────────────────────
@@ -468,9 +470,15 @@ Delta is up.
   • delta-server  → http://127.0.0.1:$DELTA_PORT  (owns the claude session)
   • frontend      → http://localhost:$FRONTEND_PORT  (ready)
 
-The only manual step: open the browser.
+The only manual step: open the browser at this link. It carries a one-time
+code: it opens the app once, within 10 minutes, and the page keeps working
+after that (reloads included) until the server restarts.
 
-  Open:  http://localhost:$FRONTEND_PORT
+  Open:  $open_url
+
+For a new link later (another browser, or after the server restarted):
+
+       make open-url              # or: scripts/dev.sh --open-url
 
 On load the UI shows the session list (empty on a fresh database); nothing
 auto-starts. The first Send from the composer (or a New action) spawns a fresh
@@ -496,6 +504,7 @@ main() {
     --desktop-build) desktop_build ;;
     --desktop-preflight) refuse_if_dev_port_taken ;;
     --desktop) desktop ;;
+    --open-url|open-url) print_open_url ;;
     -h|--help|help) usage ;;
     "")            up ;;
     *)             usage >&2; die "Unknown argument: $1 (the session workdir is no longer an argument: sessions run under the data directory)" ;;

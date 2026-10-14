@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { storageStateWithToken } from './e2e-fake/support/endpoints';
 
 /**
  * Playwright config for the real-claude canary smoke: the real frontend
@@ -18,6 +19,8 @@ import { defineConfig, devices } from '@playwright/test';
 // the mock e2e suite (5199), or the fake suite (5198/7899).
 const PORT = Number(process.env.E2E_REAL_PORT ?? 5197);
 const BACKEND_PORT = Number(process.env.E2E_REAL_BACKEND_PORT ?? 7897);
+// The bearer token the script fixed for its backend (`DELTA_AUTH_TOKEN` there).
+const AUTH_TOKEN = process.env.E2E_REAL_AUTH_TOKEN ?? 'delta-e2e-real-auth-token';
 
 export default defineConfig({
   testDir: './e2e-real',
@@ -43,6 +46,9 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   use: {
     baseURL: `http://localhost:${PORT}`,
+    // The page starts out holding the backend's token, where the app keeps
+    // the token it trades a one-time code for, so the smoke opens `/` as is.
+    storageState: storageStateWithToken(`http://localhost:${PORT}`, AUTH_TOKEN),
     trace: 'on-first-retry',
   },
   projects: [
