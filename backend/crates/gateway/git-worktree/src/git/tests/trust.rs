@@ -21,3 +21,16 @@ async fn forget_dir_trusted_removes_only_that_project_entry() {
         "exactly one projects key is gone"
     );
 }
+
+#[tokio::test]
+async fn record_dir_trust_is_read_back_by_is_dir_trusted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = tmp.path().join(".claude.json");
+    let git = Git::with_config_path(config, Vec::new());
+    assert!(!git.is_dir_trusted("/repos/app").await.unwrap());
+
+    git.record_dir_trust("/repos/app").await.unwrap();
+
+    assert!(git.is_dir_trusted("/repos/app").await.unwrap());
+    assert!(!git.is_dir_trusted("/repos/other").await.unwrap());
+}

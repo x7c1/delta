@@ -39,9 +39,7 @@ async fn the_bind_deadline_starts_at_the_launch_not_at_acceptance() {
                 provider: crate::AgentProvider::Claude,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),
-                worktree: Some(WorktreeSpec {
-                    start_point: WorktreeStartPoint::Head,
-                }),
+                worktree: Some(WorktreeSpec::new(WorktreeStartPoint::Head)),
             },
             "hello",
             None,

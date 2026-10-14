@@ -16,6 +16,7 @@ import type { Send, Session, SessionListItem } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useLiveStore, type SpawnItem } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
+import { useLaunchTrustStore } from '../launch-trust/launchTrustStore';
 import { FailedSessionPane } from './FailedSessionPane';
 
 const FAILED_ID = 'sess-failed';
@@ -293,5 +294,57 @@ describe('FailedSessionPane', () => {
           .spawns.some((spawn) => spawn.sessionId === FAILED_ID),
       ).toBe(false),
     );
+  });
+
+  it('Retry cancelled at the launch-trust confirmation keeps this row in focus', async () => {
+    // A worktree retry asks again about what the branch holds now. Cancelling
+    // starts nothing, so the failed row must stay — and the user stays on it
+    // rather than being left on an empty new-session screen.
+    const sent: unknown[] = [];
+    const deleted: string[] = [];
+    server.use(
+      http.post('*/api/launch-trust', () =>
+        HttpResponse.json({
+          needs_confirmation: true,
+          repository_untrusted: true,
+          commit: 'abc123',
+          agent_config_changes: [],
+        }),
+      ),
+      http.post('*/api/sends', async ({ request }) => {
+        sent.push(await request.json());
+        return new HttpResponse(null, { status: 500 });
+      }),
+      http.delete('*/api/sessions/:id', ({ params }) => {
+        deleted.push(String(params.id));
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    useLaunchTrustStore.setState({ pending: null });
+    useLiveStore.setState({
+      spawns: [
+        trackedFailure({
+          worktree: { start_point: { kind: 'remote_branch', name: 'feature' } },
+        }),
+      ],
+    });
+    renderPane();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() =>
+      expect(useLaunchTrustStore.getState().pending).not.toBeNull(),
+    );
+    useLaunchTrustStore.getState().answer(false);
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(FAILED_ID),
+    );
+    expect(sent).toEqual([]);
+    expect(deleted).toEqual([]);
+    expect(
+      useLiveStore
+        .getState()
+        .spawns.some((spawn) => spawn.sessionId === FAILED_ID),
+    ).toBe(true);
   });
 });

@@ -45,9 +45,7 @@ async fn send_to_a_still_spawning_session_is_queued() {
                 provider: crate::AgentProvider::Claude,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),
-                worktree: Some(WorktreeSpec {
-                    start_point: WorktreeStartPoint::Head,
-                }),
+                worktree: Some(WorktreeSpec::new(WorktreeStartPoint::Head)),
             },
             "first message",
             None,

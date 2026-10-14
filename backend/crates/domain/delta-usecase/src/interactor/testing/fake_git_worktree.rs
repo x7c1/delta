@@ -59,6 +59,20 @@ impl WorktreeGate {
     }
 }
 
+/// The commit the fake reports for a repository's `HEAD`, and for every
+/// branch no test scripted otherwise — so an unscripted branch has the same
+/// tree as the trusted `HEAD` and differs from it in nothing.
+pub(crate) const FAKE_HEAD_COMMIT: &str = "head0000";
+
+/// One scripted branch: the commit it resolves to, and the paths (with their
+/// diffs) whose content differs from [`FAKE_HEAD_COMMIT`]'s tree there.
+#[derive(Debug, Clone)]
+pub(crate) struct ScriptedBranch {
+    pub(crate) name: String,
+    pub(crate) commit: String,
+    pub(crate) changes: Vec<(String, String)>,
+}
+
 /// A single recorded `create_worktree` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CreatedWorktree {
@@ -171,6 +185,22 @@ pub(crate) struct FakeGitWorktree {
     /// The dirs passed to `ensure_dir_trusted`, in order, so tests can assert
     /// whether (and with what path) trust-seeding was invoked.
     pub(crate) trusted: Mutex<Vec<String>>,
+    /// The dirs passed to `record_dir_trust`, in order.
+    pub(crate) recorded_trust: Mutex<Vec<String>>,
+    /// Directories Claude Code's config already trusts, besides the
+    /// repository roots (see [`Self::untrusted_repos`]).
+    pub(crate) pre_trusted: Mutex<Vec<String>>,
+    /// Repository roots the config does *not* trust. Every other repository
+    /// root registered with [`Self::with_repo`] reads as trusted, so the many
+    /// tests about something other than trust launch as a user who already
+    /// trusts their repository would.
+    pub(crate) untrusted_repos: Mutex<Vec<String>>,
+    /// Branches with a scripted commit and changes; see
+    /// [`Self::with_branch_commit`]. A test may move a branch (rewrite its
+    /// `commit`) after the check, as a push between check and build would.
+    pub(crate) branches: Mutex<Vec<ScriptedBranch>>,
+    /// The start points `launch_commit` was asked to resolve, in order.
+    pub(crate) launch_commit_calls: Mutex<Vec<WorktreeStartPoint>>,
     /// When set, every worktree build waits on this gate before recording (or
     /// failing) anything — the seam the accept-before-launch tests hold open.
     /// `None` (the default) means no wait at all, so every other test is
@@ -282,6 +312,71 @@ impl FakeGitWorktree {
             .unwrap()
             .push((branch.to_owned(), answers));
         self
+    }
+
+    /// Make the repository root `root` untrusted in Claude Code's config.
+    pub(crate) fn with_untrusted_repo(self, root: &str) -> Self {
+        self.untrusted_repos.lock().unwrap().push(root.to_owned());
+        self
+    }
+
+    /// Mark `dir` as already trusted in Claude Code's config.
+    pub(crate) fn with_trusted_dir(self, dir: &str) -> Self {
+        self.pre_trusted.lock().unwrap().push(dir.to_owned());
+        self
+    }
+
+    /// Script branch `name` to resolve to `commit`, whose tree differs from
+    /// the trusted `HEAD` at each `(path, diff)` of `changes`.
+    pub(crate) fn with_branch_commit(
+        self,
+        name: &str,
+        commit: &str,
+        changes: &[(&str, &str)],
+    ) -> Self {
+        self.branches.lock().unwrap().push(ScriptedBranch {
+            name: name.to_owned(),
+            commit: commit.to_owned(),
+            changes: changes
+                .iter()
+                .map(|(path, diff)| ((*path).to_owned(), (*diff).to_owned()))
+                .collect(),
+        });
+        self
+    }
+
+    /// The commit branch `name` resolves to.
+    fn branch_commit(&self, name: &str) -> String {
+        self.branches
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|branch| branch.name == name)
+            .map_or_else(
+                || FAKE_HEAD_COMMIT.to_owned(),
+                |branch| branch.commit.clone(),
+            )
+    }
+
+    /// The commit a build from `start_point` checks out.
+    fn start_point_commit(&self, start_point: &WorktreeStartPoint) -> String {
+        match start_point {
+            WorktreeStartPoint::Head => FAKE_HEAD_COMMIT.to_owned(),
+            WorktreeStartPoint::RemoteBranch(name) | WorktreeStartPoint::UseRemoteBranch(name) => {
+                self.branch_commit(name)
+            }
+        }
+    }
+
+    /// The scripted changes between `FAKE_HEAD_COMMIT` and `commit`.
+    fn changes_at(&self, commit: &str) -> Vec<(String, String)> {
+        self.branches
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|branch| branch.commit == commit)
+            .map(|branch| branch.changes.clone())
+            .unwrap_or_default()
     }
 
     /// Script `remove_worktree(_, path)` to answer `answer`.
@@ -459,6 +554,106 @@ impl GitWorktree for FakeGitWorktree {
     async fn ensure_dir_trusted(&self, dir: &str) -> Result<()> {
         self.trusted.lock().unwrap().push(dir.to_owned());
         Ok(())
+    }
+
+    async fn is_dir_trusted(&self, dir: &str) -> Result<bool> {
+        let is_trusted_repo = self
+            .repo_roots
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, root)| root == dir)
+            && !self
+                .untrusted_repos
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|root| root == dir);
+        let has = |list: &Mutex<Vec<String>>| list.lock().unwrap().iter().any(|d| d == dir);
+        Ok(is_trusted_repo
+            || has(&self.pre_trusted)
+            || has(&self.trusted)
+            || has(&self.recorded_trust))
+    }
+
+    async fn record_dir_trust(&self, dir: &str) -> Result<()> {
+        self.recorded_trust.lock().unwrap().push(dir.to_owned());
+        Ok(())
+    }
+
+    async fn launch_commit(
+        &self,
+        _repo_root: &str,
+        start_point: &WorktreeStartPoint,
+    ) -> Result<String> {
+        self.launch_commit_calls
+            .lock()
+            .unwrap()
+            .push(start_point.clone());
+        Ok(self.start_point_commit(start_point))
+    }
+
+    async fn head_commit(&self, dir: &str) -> Result<String> {
+        let created = self
+            .created
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|c| c.worktree_path == dir)
+            .map(|c| c.start_point.clone());
+        if let Some(start_point) = created {
+            return Ok(self.start_point_commit(&start_point));
+        }
+        let checked_out = self
+            .checked_out
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|c| c.worktree_path == dir)
+            .map(|c| c.branch.clone());
+        if let Some(branch) = checked_out {
+            return Ok(self.branch_commit(&branch));
+        }
+        // A worktree the fake did not build (one a branch lookup reports) is
+        // on that branch.
+        let held = self
+            .checked_out_branches
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(_, path)| path == dir)
+            .map(|(branch, _)| branch.clone());
+        Ok(held.map_or_else(
+            || FAKE_HEAD_COMMIT.to_owned(),
+            |branch| self.branch_commit(&branch),
+        ))
+    }
+
+    async fn changed_paths(&self, _repo_root: &str, from: &str, to: &str) -> Result<Vec<String>> {
+        assert_eq!(
+            from, FAKE_HEAD_COMMIT,
+            "changes are compared against the trusted HEAD"
+        );
+        Ok(self
+            .changes_at(to)
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect())
+    }
+
+    async fn file_diff(
+        &self,
+        _repo_root: &str,
+        _from: &str,
+        to: &str,
+        path: &str,
+    ) -> Result<String> {
+        Ok(self
+            .changes_at(to)
+            .into_iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, diff)| diff)
+            .unwrap_or_default())
     }
 
     async fn remove_worktree(&self, repo_root: &str, path: &str) -> Result<WorktreeRemoval> {

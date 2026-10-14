@@ -1,4 +1,5 @@
-//! Pre-accepting Claude Code's blocking startup dialogs for a directory.
+//! Pre-accepting Claude Code's blocking startup dialogs for a directory, and
+//! reading back whether a directory is already trusted.
 //!
 //! Claude Code shows blocking interactive prompts at startup whose state lives
 //! per absolute path in the user's global config (`~/.claude.json`) under
@@ -19,9 +20,15 @@
 //!   `hasClaudeMdExternalIncludesWarningShown = true` — Claude Code re-shows
 //!   the prompt unless both flags are present.
 //!
-//! Both prompts are blocking and non-interactive launches (Delta's spawn flow)
-//! cannot answer them, so the reaper would eventually kill the spawn as
-//! `SpawnFailed`. Pre-seeding both is what keeps fresh-workdir spawns alive.
+//! This module only reads and writes the keys; *whether* a directory may be
+//! pre-accepted is the use case's decision (see the launch-trust rule in
+//! `delta-usecase`'s lifecycle module and `docs/guides/security.md`). In short,
+//! a worktree Delta built is pre-accepted only when the user already trusts the
+//! repository it came from and the worktree's agent configuration matches what
+//! the user trusted — or when the user confirmed the difference in Delta's UI.
+//! [`is_dir_trusted`] is the read half of that rule, and [`record_dir_trust`]
+//! records a repository the user confirmed exactly as Claude Code's own trust
+//! dialog would (the trust key alone).
 //!
 //! When Delta removes a worktree it created, [`forget_dir_trusted`] drops the
 //! whole `projects.<abs-path>` entry again, so `~/.claude.json` does not
@@ -55,8 +62,8 @@ const EXTERNAL_INCLUDES_APPROVED_KEY: &str = "hasClaudeMdExternalIncludesApprove
 /// is what fully suppresses the prompt on the next launch.
 const EXTERNAL_INCLUDES_WARNING_SHOWN_KEY: &str = "hasClaudeMdExternalIncludesWarningShown";
 
-/// All boolean keys this module pre-seeds to `true` on a project entry. Kept
-/// in one place so the seeding loop and the idempotency check stay in sync.
+/// All boolean keys [`ensure_dir_trusted`] pre-seeds to `true` on a project
+/// entry.
 const SEEDED_KEYS: &[&str] = &[
     TRUST_KEY,
     EXTERNAL_INCLUDES_APPROVED_KEY,
@@ -75,6 +82,44 @@ const PROJECTS_KEY: &str = "projects";
 /// a config file that does not parse as JSON yields an error and is left
 /// untouched, so a corrupt or hand-edited file is never clobbered.
 pub(crate) async fn ensure_dir_trusted(config_path: &Path, dir: &str) -> Result<(), Error> {
+    seed_keys(config_path, dir, SEEDED_KEYS).await
+}
+
+/// Record that the user trusts `dir` (a repository root), writing only
+/// `hasTrustDialogAccepted` — the key Claude Code itself writes when the user
+/// accepts its workspace-trust dialog there. The external-imports approval is
+/// deliberately not written: the user confirmed trusting the repository, not
+/// anything about the imports its `CLAUDE.md` files make.
+///
+/// Idempotent and as careful with the file as [`ensure_dir_trusted`].
+pub(crate) async fn record_dir_trust(config_path: &Path, dir: &str) -> Result<(), Error> {
+    seed_keys(config_path, dir, &[TRUST_KEY]).await
+}
+
+/// Whether `projects.<dir>.hasTrustDialogAccepted` is `true` in the config
+/// file at `config_path` — the workspace-trust decision Claude Code (or an
+/// earlier Delta pre-acceptance) recorded for exactly that path.
+///
+/// A missing config file, a missing entry, or a value other than `true` is
+/// "not trusted". A config file that does not parse as JSON is an error: the
+/// caller cannot tell what the user decided, and must not guess either way.
+pub(crate) async fn is_dir_trusted(config_path: &Path, dir: &str) -> Result<bool, Error> {
+    let root = match tokio::fs::read(config_path).await {
+        Ok(bytes) => parse_config(config_path, &bytes)?,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(source) => return Err(io_error(config_path, source)),
+    };
+    Ok(root
+        .get(PROJECTS_KEY)
+        .and_then(|projects| projects.get(dir))
+        .and_then(|project| project.get(TRUST_KEY))
+        == Some(&Value::Bool(true)))
+}
+
+/// Set every key in `keys` to `true` on `projects.<dir>` in the config file at
+/// `config_path`, rewriting the file only when one of them was not already
+/// `true`.
+async fn seed_keys(config_path: &Path, dir: &str, keys: &[&str]) -> Result<(), Error> {
     // Read the existing config, if any. A missing file is the normal first-run
     // case and starts from an empty object; any other read error propagates.
     let mut root = match tokio::fs::read(config_path).await {
@@ -112,7 +157,7 @@ pub(crate) async fn ensure_dir_trusted(config_path: &Path, dir: &str) -> Result<
     // spawn/resume. A partial seed (e.g. only `hasTrustDialogAccepted` from an
     // older Delta) still triggers a rewrite to fill in the missing keys.
     let mut changed = false;
-    for &key in SEEDED_KEYS {
+    for &key in keys {
         if project.get(key) != Some(&Value::Bool(true)) {
             project.insert(key.to_owned(), Value::Bool(true));
             changed = true;
@@ -446,6 +491,62 @@ mod tests {
             bytes,
             "the file is not rewritten"
         );
+    }
+
+    #[tokio::test]
+    async fn is_dir_trusted_reads_only_the_exact_entry_trust_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(".claude.json");
+        assert!(
+            !is_dir_trusted(&config, "/repo").await.unwrap(),
+            "a missing config file trusts nothing"
+        );
+
+        let initial = serde_json::json!({
+            PROJECTS_KEY: {
+                "/repo": { TRUST_KEY: true },
+                "/declined": { TRUST_KEY: false },
+                "/other": { EXTERNAL_INCLUDES_APPROVED_KEY: true },
+            }
+        });
+        tokio::fs::write(&config, serde_json::to_vec_pretty(&initial).unwrap())
+            .await
+            .unwrap();
+
+        assert!(is_dir_trusted(&config, "/repo").await.unwrap());
+        assert!(!is_dir_trusted(&config, "/declined").await.unwrap());
+        assert!(!is_dir_trusted(&config, "/other").await.unwrap());
+        assert!(
+            !is_dir_trusted(&config, "/repo/sub").await.unwrap(),
+            "trust is per directory: a child of a trusted path is not itself trusted"
+        );
+    }
+
+    #[tokio::test]
+    async fn is_dir_trusted_errors_on_a_corrupt_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(".claude.json");
+        tokio::fs::write(&config, b"{ nope").await.unwrap();
+        assert!(matches!(
+            is_dir_trusted(&config, "/repo").await,
+            Err(Error::TrustParse { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn record_dir_trust_writes_only_the_trust_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(".claude.json");
+
+        record_dir_trust(&config, "/repo").await.unwrap();
+
+        let value = read_json(&config).await;
+        assert_eq!(
+            value,
+            serde_json::json!({ PROJECTS_KEY: { "/repo": { TRUST_KEY: true } } }),
+            "only the workspace-trust key is recorded for a repository"
+        );
+        assert!(is_dir_trusted(&config, "/repo").await.unwrap());
     }
 
     #[tokio::test]

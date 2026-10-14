@@ -202,7 +202,7 @@ where
 /// `-` is the point; whitespace / ASCII control chars (NUL included) are refused
 /// too as neither can be a legitimate ref short name. This is deliberately not a
 /// full `git check-ref-format`.
-fn check_ref_name(name: &str) -> Result<()> {
+pub(super) fn check_ref_name(name: &str) -> Result<()> {
     let invalid = name.is_empty()
         || name.starts_with('-')
         || name

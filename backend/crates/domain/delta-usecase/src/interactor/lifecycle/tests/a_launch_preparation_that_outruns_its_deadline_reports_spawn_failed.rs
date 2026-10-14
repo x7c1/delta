@@ -41,9 +41,7 @@ async fn a_launch_preparation_that_outruns_its_deadline_reports_spawn_failed() {
                 provider: crate::AgentProvider::Claude,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),
-                worktree: Some(WorktreeSpec {
-                    start_point: WorktreeStartPoint::Head,
-                }),
+                worktree: Some(WorktreeSpec::new(WorktreeStartPoint::Head)),
             },
             "hello",
             None,

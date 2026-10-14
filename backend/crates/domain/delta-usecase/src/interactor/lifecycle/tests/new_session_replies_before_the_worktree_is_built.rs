@@ -39,9 +39,7 @@ async fn new_session_replies_before_the_worktree_is_built() {
                 provider: crate::AgentProvider::Claude,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),
-                worktree: Some(WorktreeSpec {
-                    start_point: WorktreeStartPoint::Head,
-                }),
+                worktree: Some(WorktreeSpec::new(WorktreeStartPoint::Head)),
             },
             "hello",
             None,

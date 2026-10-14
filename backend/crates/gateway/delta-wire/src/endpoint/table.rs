@@ -15,15 +15,16 @@ use crate::rest::{
     WireCloneRepositoryRequest, WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
     WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
     WireDeleteSnapshotRequest, WireEraseResponse, WireGitBranchesResponse, WireGitRepoResponse,
-    WireLatestReleaseResponse, WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse,
-    WireNewSessionResponse, WireOpenCwdRequest, WirePermissionDecisionRequest, WirePromptTemplate,
-    WirePromptTemplatesResponse, WireProvidersResponse, WirePrunePreviewResponse,
-    WirePruneSessionsRequest, WirePruneSessionsResponse, WirePullRequestsResponse,
-    WireQuestionAnswerRequest, WireQuestionCancelRequest, WireRemoveWorktreeRequest,
-    WireRepositoriesResponse, WireSendResponse, WireSendsResponse, WireSessionsResponse,
-    WireStorageResponse, WireStorageWorktreesResponse, WireThreadsResponse, WireUpdateDownload,
-    WireUpdateInstall, WireUpdateLaunchOptionRequest, WireUpdatePromptTemplateRequest,
-    WireVersionResponse, WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireLatestReleaseResponse, WireLaunchOption, WireLaunchOptionsResponse, WireLaunchTrustRequest,
+    WireLaunchTrustResponse, WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
+    WirePermissionDecisionRequest, WirePromptTemplate, WirePromptTemplatesResponse,
+    WireProvidersResponse, WirePrunePreviewResponse, WirePruneSessionsRequest,
+    WirePruneSessionsResponse, WirePullRequestsResponse, WireQuestionAnswerRequest,
+    WireQuestionCancelRequest, WireRemoveWorktreeRequest, WireRepositoriesResponse,
+    WireSendResponse, WireSendsResponse, WireSessionsResponse, WireStorageResponse,
+    WireStorageWorktreesResponse, WireThreadsResponse, WireUpdateDownload, WireUpdateInstall,
+    WireUpdateLaunchOptionRequest, WireUpdatePromptTemplateRequest, WireVersionResponse,
+    WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 use crate::{WireCommsFrame, WireSessionEvent};
 
@@ -145,6 +146,15 @@ declare_endpoints! {
     CreateSend: POST "/api/sends",
         request = WireCreateSendRequest,
         response = WireSendResponse;
+
+    /// Whether a new worktree session needs the user's confirmation before
+    /// Claude Code's trust is pre-accepted for its worktree: its repository is
+    /// not trusted yet, or (for a remote start point) the branch changes agent
+    /// configuration relative to the trusted `HEAD`, with the diff. Creates
+    /// nothing; a remote start point is fetched first, as the launch would.
+    CheckLaunchTrust: POST "/api/launch-trust",
+        request = WireLaunchTrustRequest,
+        response = WireLaunchTrustResponse;
 
     /// Cancels a still-queued send before it is dispatched into the pane.
     CancelSend: POST "/api/sends/{id}/cancel";

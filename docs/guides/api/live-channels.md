@@ -155,7 +155,8 @@ which frames arrive, and a client must handle each event whenever it lands.
 - `spawn_failed` — a freshly-spawned session never came up, for **any**
   provider. Four producers emit it: the background launch when it fails (the
   worktree build, including one that landed on a path other than the one planned
-  at accept time; for Claude the trust seed and the tmux launch; for an
+  at accept time; for Claude the launch-trust refusal of a worktree whose
+  commit was not confirmed, the trust seed and the tmux launch; for an
   adapter-backed provider the connect and the `thread/start`; or the whole
   sequence outrunning its deadline — all of which run *after* the send was
   accepted, see [sends.md](sends.md)), the

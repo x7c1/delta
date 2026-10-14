@@ -32,9 +32,7 @@ async fn ensure_session_is_idempotent_while_a_launch_is_in_flight() {
             provider: crate::AgentProvider::Claude,
             workdir: Some("/projects/app".to_owned()),
             launch_option_ids: Vec::new(),
-            worktree: Some(WorktreeSpec {
-                start_point: WorktreeStartPoint::Head,
-            }),
+            worktree: Some(WorktreeSpec::new(WorktreeStartPoint::Head)),
         },
         "hello",
         None,

@@ -16,9 +16,7 @@ async fn new_session_with_worktree_but_no_workdir_is_rejected() {
                 provider: crate::AgentProvider::Claude,
                 workdir: None,
                 launch_option_ids: Vec::new(),
-                worktree: Some(WorktreeSpec {
-                    start_point: WorktreeStartPoint::Head,
-                }),
+                worktree: Some(WorktreeSpec::new(WorktreeStartPoint::Head)),
             },
             "hello",
             None,

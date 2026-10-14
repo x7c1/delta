@@ -324,6 +324,30 @@ pub enum Error {
         built: String,
     },
 
+    /// A freshly-built worktree needs the user's launch confirmation before
+    /// Claude Code's trust may be pre-accepted for it — its repository is not
+    /// trusted, or its agent configuration differs from the trusted `HEAD` —
+    /// and the launch carried no confirmation for the commit the worktree is
+    /// actually on (none at all, or one for a commit the branch has since
+    /// moved from). Trust is not pre-accepted and the launch stops before the
+    /// agent starts; starting the session again shows the confirmation for
+    /// what is there now.
+    ///
+    /// Never returned to a REST caller: it is found after the build, long
+    /// after the send was accepted, so it reaches the browser as the `reason`
+    /// of a [`SessionEvent::SpawnFailed`](crate::ports::SessionEvent::SpawnFailed).
+    #[error(
+        "the worktree {workdir} is at commit {commit}, which this launch did not confirm \
+         (its repository is not trusted, or its agent configuration differs from the \
+         trusted HEAD); start the session again to review it"
+    )]
+    LaunchNeedsConfirmation {
+        /// The worktree the launch built.
+        workdir: String,
+        /// The commit the worktree is on.
+        commit: String,
+    },
+
     /// A `gh` CLI invocation failed despite the gateway reporting gh as
     /// authenticated. Surfaced as `500`. Missing/unauthenticated gh is
     /// NOT routed here — it is reported via the use case's

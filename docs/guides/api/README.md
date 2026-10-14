@@ -15,7 +15,8 @@ kinds of traffic, and this directory has one page per area:
   - **[sessions.md](sessions.md)** — listing, creating, opening, closing,
     removing (one at a time or old ones in bulk) and interrupting sessions,
     plus reading threads and messages.
-  - **[sends.md](sends.md)** — enqueueing and managing sends, and answering the
+  - **[sends.md](sends.md)** — enqueueing and managing sends (with the
+    launch-trust check a new worktree session runs first), and answering the
     permission requests and questions the agent raises mid-turn.
   - **[workdirs.md](workdirs.md)** — the new-session dialog's sources: working
     directories, git detection, repositories and clone roots, pull requests, and

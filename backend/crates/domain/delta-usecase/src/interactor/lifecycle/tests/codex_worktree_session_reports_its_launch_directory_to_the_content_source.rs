@@ -48,9 +48,9 @@ async fn codex_worktree_session_reports_its_launch_directory_to_the_content_sour
                 provider: AgentProvider::Codex,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),
-                worktree: Some(WorktreeSpec {
-                    start_point: WorktreeStartPoint::UseRemoteBranch("pr-head".to_owned()),
-                }),
+                worktree: Some(WorktreeSpec::new(WorktreeStartPoint::UseRemoteBranch(
+                    "pr-head".to_owned(),
+                ))),
             },
             "work on this branch",
             None,

@@ -40,9 +40,9 @@ async fn new_session_from_a_pr_with_codex_provider_uses_a_worktree() {
                 provider: AgentProvider::Codex,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),
-                worktree: Some(WorktreeSpec {
-                    start_point: WorktreeStartPoint::UseRemoteBranch("pr-head".to_owned()),
-                }),
+                worktree: Some(WorktreeSpec::new(WorktreeStartPoint::UseRemoteBranch(
+                    "pr-head".to_owned(),
+                ))),
             },
             "resume this PR on codex",
             None,

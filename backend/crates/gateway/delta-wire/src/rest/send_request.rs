@@ -557,6 +557,7 @@ mod tests {
             launch_option_ids: None,
             worktree: Some(WireWorktreeSpec {
                 start_point: super::super::worktree_start_point::WireWorktreeStartPoint::Head,
+                confirmed_commit: None,
             }),
             provider: None,
             pull_request_number: None,

@@ -455,8 +455,8 @@ impl IntoResponse for ApiError {
                     Error::WorktreeNotRegistered(_) => {
                         (StatusCode::CONFLICT, Some(WORKTREE_NOT_REGISTERED_CODE))
                     }
-                    // Everything else is an internal failure. The two launch
-                    // preparation failures only land here defensively: both
+                    // Everything else is an internal failure. The launch
+                    // preparation failures only land here defensively: they
                     // happen long after the send was accepted, so they reach
                     // the browser as a `spawn_failed` event, never as a
                     // response body.
@@ -465,6 +465,7 @@ impl IntoResponse for ApiError {
                     | Error::Git(_)
                     | Error::LaunchPreparationTimedOut(_)
                     | Error::WorktreeLandedElsewhere { .. }
+                    | Error::LaunchNeedsConfirmation { .. }
                     | Error::Gh(_)
                     | Error::Transcript(_)
                     | Error::Store(_)

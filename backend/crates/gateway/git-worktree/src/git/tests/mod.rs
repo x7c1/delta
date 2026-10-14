@@ -3,6 +3,7 @@
 
 mod checkout;
 mod command;
+mod commits;
 mod create_worktree;
 mod fetch_remote_branches;
 mod repository;

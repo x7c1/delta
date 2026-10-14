@@ -13,6 +13,8 @@ import type {
   GitRepoResponse,
   LaunchOption,
   LaunchOptionsResponse,
+  LaunchTrustRequest,
+  LaunchTrustResponse,
   MessagesResponse,
   NewSessionResponse,
   OpenCwdRequest,
@@ -278,6 +280,21 @@ export class ApiClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(wireBody),
+    });
+  }
+
+  /**
+   * `POST /api/launch-trust` — whether a new worktree session needs the user's
+   * confirmation before Claude Code's trust is pre-accepted for its worktree
+   * (the repository is not trusted yet, or the branch changes agent
+   * configuration), with the diff to show. Creates nothing; a remote start
+   * point is fetched first, so this can take as long as a `git fetch`.
+   */
+  checkLaunchTrust(body: LaunchTrustRequest): Promise<LaunchTrustResponse> {
+    return this.request<LaunchTrustResponse>('/api/launch-trust', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
   }
 

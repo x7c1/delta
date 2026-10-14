@@ -38,7 +38,7 @@ pub(crate) use fake_agent::{ConnectGate, FakeAgentFactory, FAKE_AGENT_CAPABILITI
 pub(crate) use fake_binary_detector::FakeBinaryDetector;
 pub(crate) use fake_external_opener::FakeExternalOpener;
 pub(crate) use fake_gh_cli::{FakeGhCli, CLONE_MARKER};
-pub(crate) use fake_git_worktree::{FakeGitWorktree, Scripted, WorktreeGate};
+pub(crate) use fake_git_worktree::{FakeGitWorktree, Scripted, WorktreeGate, FAKE_HEAD_COMMIT};
 pub(crate) use fake_launch_option_vocabulary::{FakeLaunchOptionVocabulary, DANGEROUS_NAME};
 pub(crate) use fake_store::FakeStore;
 pub(crate) use fake_tmux::{FakeTmux, PaneInput, TmuxGate};

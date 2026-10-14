@@ -168,9 +168,14 @@ where
     /// The Claude tail of a launch, once the worktree is in place.
     ///
     /// 1. Pre-accept Claude Code's workspace-trust dialog for the launch
-    ///    directory when it is a git working tree. Without it `claude` opens a
-    ///    blocking dialog at startup, no `UserPromptSubmit` ever fires, and the
-    ///    spawn is reaped at the bind deadline.
+    ///    directory where the launch-trust rule allows it (see the
+    ///    `launch_trust` module): a worktree Delta built under its worktree
+    ///    base whose repository the user trusts and whose agent configuration
+    ///    matches the trusted `HEAD`, or whose exact commit the user
+    ///    confirmed. A built worktree that needs a confirmation the launch did
+    ///    not carry fails here, before any pane exists — `claude` would
+    ///    otherwise open a blocking dialog at startup, no `UserPromptSubmit`
+    ///    would ever fire, and the spawn would be reaped at the bind deadline.
     /// 2. Write Delta's session settings (hooks + theme) to the Delta-owned
     ///    path the launch argv points `--settings` at.
     /// 3. Check in with the session's actor ([`SessionInput::LaunchPrepared`]),
@@ -192,17 +197,11 @@ where
         pane: &PaneLaunch,
         self_sender: &mpsc::WeakUnboundedSender<SessionInput>,
     ) -> Result<()> {
-        // Pre-accept the trust dialog only for a git working tree (`seed_trust`)
-        // that also lives under Delta's own worktree base — i.e. a worktree
-        // Delta created. A user-selected repo is trust-eligible too, but seeding
-        // it would silently trust its checked-in automation in the user's plain
-        // `claude` sessions, so it gets Claude Code's normal dialog instead. See
-        // [`super::is_under_worktree_base`] for the trade-off.
-        if pane.seed_trust && super::is_under_worktree_base(&self.worktree_base, &launching.workdir)
-        {
-            self.git_worktree
-                .ensure_dir_trusted(&launching.workdir)
-                .await?;
+        // Only a git working tree (`seed_trust`) is a candidate; the
+        // launch-trust rule decides the rest, starting with "under Delta's own
+        // worktree base" (see [`super::is_under_worktree_base`]).
+        if pane.seed_trust {
+            self.pre_accept_launch_trust(launching).await?;
         }
         self.workspace
             .write_session_settings(&self.session_settings_path, &self.session_settings_json)
