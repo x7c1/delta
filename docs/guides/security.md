@@ -48,7 +48,8 @@ the local machine, four guards defend the surface:
   owner-only (`0600`) — because a Claude Code session outlives Delta in tmux and
   keeps calling the URLs it was launched with. Deleting the file rotates it.
 - **Scoped trust seeding** — the subject of the next section: Delta pre-accepts
-  Claude Code's workspace-trust dialog only for directories it created itself.
+  Claude Code's workspace-trust dialog only for worktrees it created itself,
+  and only when you already trust what is in them or confirm it.
 
 ## Handing the token to the page
 
@@ -108,22 +109,78 @@ the dialog in your own plain `claude` sessions in that directory — which means
 any automation checked into that directory (a `.claude/settings.json` with
 hooks) would then run without ever asking you.
 
-Delta therefore scopes trust seeding narrowly:
+Trust is also what lets a project's checked-in agent configuration — hooks, a
+status line, `apiKeyHelper`, MCP servers, `CLAUDE.md` imports — take effect
+without a prompt. And the content of a worktree made from a remote branch or a
+pull request is decided by that branch's author, not by you.
 
-- **Delta's own worktrees are auto-trusted.** When Delta creates a git worktree
-  under its own worktree base, it pre-accepts the dialog for that worktree path.
-  Delta made the directory, so nothing checked into it is a surprise.
-- **A directory you point Delta at is not.** If you launch a session in an
-  existing repository you selected yourself (or reuse a working tree outside the
-  worktree base), Delta does **not** pre-accept the dialog. Claude Code shows its
-  normal one-time trust dialog instead; once you accept, it is remembered. Delta
-  stays out of that decision, because pre-accepting it would also silently trust
-  that repository's checked-in automation in your plain `claude` sessions.
+Delta therefore pre-accepts the dialog only where you have, in effect, already
+made the decision, and asks in its own UI otherwise:
 
-The gate is a strict "is this path under Delta's worktree base?" check:
+- **A directory you point Delta at is never pre-accepted.** If you launch a
+  session in an existing repository you selected yourself (or reuse a working
+  tree outside the worktree base), Claude Code shows its normal one-time trust
+  dialog; once you accept, it is remembered. Delta stays out of that decision,
+  because pre-accepting it would also silently trust that repository's
+  checked-in configuration in your plain `claude` sessions.
+- **Rule A — a worktree inherits its repository's trust.** A worktree Delta
+  creates under its worktree base is pre-accepted only when the repository you
+  picked (its root) is itself trusted in `~/.claude.json`
+  (`projects.<repo root>.hasTrustDialogAccepted` is `true`). A repository that
+  has never been trusted gets Delta's confirmation instead. Confirming it also
+  records trust for the repository root — only `hasTrustDialogAccepted`, the
+  key Claude Code itself writes when you accept its dialog there — so the
+  question is asked once per repository.
+- **Rule B — a branch from outside is compared with what you trust.** For a
+  worktree started from a remote branch (`remote_branch` or
+  `use_remote_branch`, which covers every pull-request start), Delta compares
+  the branch's tree with the tree of the repository root's `HEAD` — the content
+  you trusted — on these paths:
+  - everything under `.claude/` at the repository top, compared as a whole
+    directory rather than as a list of known files, so a configuration file
+    Claude Code starts reading later is still covered;
+  - `.mcp.json` at the top;
+  - every `CLAUDE.md` and `CLAUDE.local.md` anywhere in the tree.
+
+  Names are compared case-insensitively, since a case-insensitive filesystem
+  (the macOS default) treats differently cased names as the same file. When
+  nothing differs — most branches touch none of these — the worktree is
+  pre-accepted as under rule A, without asking. When anything differs, Delta
+  asks first and shows the diff. A worktree off your own `HEAD` (`head`) needs
+  only rule A.
+
+**The confirmation.** Before a worktree session launches, the new-session flow
+asks the server (`POST /api/launch-trust`, see
+[sends.md](api/sends.md#post-apilaunch-trust)) whether the launch needs
+confirmation. When it does, a dialog states why — the repository is not trusted
+yet, and/or the branch changes agent configuration — and lists each changed
+path with its unified diff. *Launch and trust* sends the session; *Cancel*
+sends nothing, so no worktree and no session are created. The diff is computed
+from git objects (`git diff` between the two commits, after the fetch the start
+point runs anyway), never by reading files from a worktree, and external diff
+drivers and textconv filters are off, so what is shown is git's own rendering
+of the files. A very large diff is cut short and marked as such.
+
+**The confirmation is bound to a commit.** The check reports the commit the
+worktree will be on, and the launch request carries it back as
+`worktree.confirmed_commit`. After building the worktree, the server applies
+rules A and B again to the commit the worktree is actually checked out at. If
+they still require a confirmation and that commit is not the confirmed one —
+the branch moved after you looked, say — the server does not pre-accept and
+the launch fails with a reason saying so; starting the session again (Retry
+included) asks about what is there now.
+
+**Resume.** Trust is per directory. Resuming a session in a worktree that is
+already trusted does not ask again; a worktree that is not trusted is not
+pre-accepted on resume either.
+
+The first gate is a strict "is this path under Delta's worktree base?" check:
 directories are canonicalized (so a `/tmp` vs `/private/tmp` symlink or a `..`
 cannot disguise a path) and compared by path components (so a sibling like
 `<base>-evil` is not mistaken for a child of `<base>`).
+
+Only Claude sessions are affected: a Codex session never has Claude Code's
+trust pre-accepted, so it is never asked about.
 
 ## Data-file hardening
 

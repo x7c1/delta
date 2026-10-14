@@ -112,7 +112,11 @@ only with `new_session: true` and are ignored on a thread send:
   `workdir`. `start_point.kind` is `head` (branch off the repository's current
   `HEAD`), `remote_branch` (branch off `origin/<name>`, fetched first), or
   `use_remote_branch` (work on `<name>` itself in the worktree); the latter two
-  carry `name`, the branch short name with no `origin/` prefix.
+  carry `name`, the branch short name with no `origin/` prefix. An optional
+  `confirmed_commit` carries the commit the user confirmed in the launch
+  confirmation (see [`POST /api/launch-trust`](#post-apilaunch-trust)); a
+  worktree that needs a confirmation is only pre-accepted when it is built on
+  exactly that commit.
 - `pull_request_number` (optional) — the GitHub pull request the session is
   being opened from. Stored as a spawn-time snapshot on the session row (see
   [shapes.md — `Session`](shapes.md#session)) and never updated afterwards.
@@ -184,6 +188,15 @@ Response:
   paths. Retrying the send re-decides against the worktree that now exists and
   starts there.
 
+  A Claude worktree launch can also stop here before the agent starts: when
+  the built worktree needs the user's confirmation (its repository is not yet
+  trusted, or its branch changes agent configuration — see
+  [security.md](../security.md#the-claude-code-trust-seeding-trade-off)) and the
+  send carried no `confirmed_commit` for the commit it is actually on, Claude
+  Code's trust is not pre-accepted and the launch fails with a `spawn_failed`
+  whose `reason` says the commit was not confirmed. Starting the session again
+  runs the check and shows the confirmation for what is there now.
+
   For `provider: "codex"` the first prompt sits in the session's send list as
   `queued` until the provider thread exists, then dispatches: unlike a Claude
   spawn — where the prompt rides on the launch command line, so launching *is*
@@ -240,6 +253,68 @@ Response:
   turn the first prompt opens, for either provider, or immediately at the bind
   when no such turn starts (the spawn carried no first prompt, or that prompt
   was cancelled before the launch bound).
+
+### `POST /api/launch-trust`
+
+Ask whether a new Claude worktree session needs the user's confirmation before
+Claude Code's workspace trust is pre-accepted for its worktree. The
+new-session flow calls it just before `POST /api/sends` whenever the send will
+carry a `worktree`. The rule it applies is in
+[security.md](../security.md#the-claude-code-trust-seeding-trade-off).
+
+Request:
+
+```json
+{
+  "workdir": "/work/delta",
+  "start_point": { "kind": "use_remote_branch", "name": "feature" },
+  "provider": "claude"
+}
+```
+
+- `workdir` (required) — the directory the user selected; it must exist and be
+  inside a git repository.
+- `start_point` (required) — exactly as the send's `worktree.start_point`.
+- `provider` (optional, default `"claude"`) — a provider that does not run
+  Claude Code in a pane never needs a confirmation.
+
+Nothing is created: no worktree, no session, no change to `~/.claude.json`. For
+a `remote_branch` or `use_remote_branch` start point the branch is fetched
+first, as the launch would.
+
+Response:
+
+- **200 OK**:
+
+  ```json
+  {
+    "needs_confirmation": true,
+    "repository_untrusted": false,
+    "commit": "4f1c2e…",
+    "agent_config_changes": [
+      {
+        "path": ".claude/settings.json",
+        "diff": "diff --git a/.claude/settings.json b/.claude/settings.json\n…",
+        "diff_truncated": false
+      }
+    ]
+  }
+  ```
+
+  - `needs_confirmation` — `true` when the repository is untrusted or any agent
+    configuration changes.
+  - `repository_untrusted` — the repository root is not trusted in Claude Code.
+  - `commit` — the commit the worktree will be on; send it back as
+    `worktree.confirmed_commit` once the user accepts. `null` when the launch
+    pre-accepts nothing (a reused worktree outside the worktree base or one
+    already trusted, or a non-Claude provider).
+  - `agent_config_changes` — every changed agent-configuration path, with
+    git's unified diff against the repository's `HEAD`. A diff longer than
+    64 KiB is cut, and paths past the first 50 are listed without one; both
+    are flagged `diff_truncated`.
+- **400** — `workdir` does not exist, is not a git repository, or the branch
+  name is malformed.
+- **500** — a git failure (the fetch, say).
 
 ### `GET /api/sessions/{id}/sends`
 

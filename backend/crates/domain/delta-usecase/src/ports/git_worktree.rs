@@ -139,6 +139,48 @@ pub trait GitWorktree: Send + Sync {
     /// git working directories", so they share one port.
     async fn ensure_dir_trusted(&self, dir: &str) -> Result<()>;
 
+    /// Whether Claude Code's user config records the workspace-trust dialog as
+    /// accepted for exactly `dir` (`projects.<dir>.hasTrustDialogAccepted`).
+    ///
+    /// The read half of the launch-trust rule: a worktree Delta builds is
+    /// pre-accepted only when the repository it came from is trusted. A
+    /// missing config file or entry is `false`; a config file that does not
+    /// parse is an error, since the user's decision cannot be read.
+    async fn is_dir_trusted(&self, dir: &str) -> Result<bool>;
+
+    /// Record that the user trusts `dir` — a repository root they confirmed in
+    /// Delta's launch confirmation — by writing only
+    /// `projects.<dir>.hasTrustDialogAccepted = true`, the key Claude Code's
+    /// own trust dialog writes when accepted there. Idempotent.
+    async fn record_dir_trust(&self, dir: &str) -> Result<()>;
+
+    /// The commit a worktree built from `start_point` in the repository at
+    /// `repo_root` would check out, running the same fetch the build runs
+    /// first for a remote start point.
+    ///
+    /// `Head` is the current `HEAD`; `RemoteBranch(name)` is the fetched
+    /// `origin/<name>`; `UseRemoteBranch(name)` is the local branch `<name>`
+    /// when one exists (the build checks it out, or reuses the worktree
+    /// holding it), otherwise the fetched `origin/<name>`.
+    async fn launch_commit(
+        &self,
+        repo_root: &str,
+        start_point: &WorktreeStartPoint,
+    ) -> Result<String>;
+
+    /// The commit `HEAD` is on in the working tree at `dir`.
+    async fn head_commit(&self, dir: &str) -> Result<String>;
+
+    /// Every path whose content differs between the trees of commits `from`
+    /// and `to` in the repository at `repo_root` (`git diff --name-only`, with
+    /// renames reported as their two sides). Read from git objects only.
+    async fn changed_paths(&self, repo_root: &str, from: &str, to: &str) -> Result<Vec<String>>;
+
+    /// The unified diff of `path` between the trees of commits `from` and `to`
+    /// in the repository at `repo_root`, rendered by git itself (no external
+    /// diff driver or textconv filter). Read from git objects only.
+    async fn file_diff(&self, repo_root: &str, from: &str, to: &str, path: &str) -> Result<String>;
+
     /// Remove the linked worktree at `path` from the repository at
     /// `repo_root`, **only if it holds no work**.
     ///
@@ -270,6 +312,34 @@ impl GitWorktree for Box<dyn GitWorktree> {
 
     async fn ensure_dir_trusted(&self, dir: &str) -> Result<()> {
         (**self).ensure_dir_trusted(dir).await
+    }
+
+    async fn is_dir_trusted(&self, dir: &str) -> Result<bool> {
+        (**self).is_dir_trusted(dir).await
+    }
+
+    async fn record_dir_trust(&self, dir: &str) -> Result<()> {
+        (**self).record_dir_trust(dir).await
+    }
+
+    async fn launch_commit(
+        &self,
+        repo_root: &str,
+        start_point: &WorktreeStartPoint,
+    ) -> Result<String> {
+        (**self).launch_commit(repo_root, start_point).await
+    }
+
+    async fn head_commit(&self, dir: &str) -> Result<String> {
+        (**self).head_commit(dir).await
+    }
+
+    async fn changed_paths(&self, repo_root: &str, from: &str, to: &str) -> Result<Vec<String>> {
+        (**self).changed_paths(repo_root, from, to).await
+    }
+
+    async fn file_diff(&self, repo_root: &str, from: &str, to: &str, path: &str) -> Result<String> {
+        (**self).file_diff(repo_root, from, to, path).await
     }
 
     async fn remove_worktree(&self, repo_root: &str, path: &str) -> Result<WorktreeRemoval> {

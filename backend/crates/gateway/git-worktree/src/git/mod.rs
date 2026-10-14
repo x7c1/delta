@@ -2,9 +2,11 @@
 //!
 //! Split by responsibility: this module holds the struct, the shared `git`
 //! invocation helpers and the [`GitWorktree`] trait wiring, `removal` the
-//! worktree removal and branch deletion, and `inspection` what git says about
-//! a directory as a worktree.
+//! worktree removal and branch deletion, `inspection` what git says about
+//! a directory as a worktree, and `commits` the commit lookups and tree
+//! comparisons the launch-trust rule reads.
 
+mod commits;
 mod inspection;
 mod removal;
 #[cfg(test)]
@@ -431,6 +433,61 @@ impl GitWorktree for Git {
         // accepted rather than guarded with file locking.
         let _guard = self.trust_lock.lock().await;
         crate::trust::ensure_dir_trusted(&self.config_path, dir)
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
+    async fn is_dir_trusted(&self, dir: &str) -> std::result::Result<bool, delta_usecase::Error> {
+        // Read under the same lock as the writes, so a read never lands
+        // between Delta's own temp-file write and its rename.
+        let _guard = self.trust_lock.lock().await;
+        crate::trust::is_dir_trusted(&self.config_path, dir)
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
+    async fn record_dir_trust(&self, dir: &str) -> std::result::Result<(), delta_usecase::Error> {
+        let _guard = self.trust_lock.lock().await;
+        crate::trust::record_dir_trust(&self.config_path, dir)
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
+    async fn launch_commit(
+        &self,
+        repo_root: &str,
+        start_point: &WorktreeStartPoint,
+    ) -> std::result::Result<String, delta_usecase::Error> {
+        self.launch_commit_of(repo_root, start_point)
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
+    async fn head_commit(&self, dir: &str) -> std::result::Result<String, delta_usecase::Error> {
+        self.head_commit_of(dir)
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
+    async fn changed_paths(
+        &self,
+        repo_root: &str,
+        from: &str,
+        to: &str,
+    ) -> std::result::Result<Vec<String>, delta_usecase::Error> {
+        self.changed_paths_between(repo_root, from, to)
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
+    async fn file_diff(
+        &self,
+        repo_root: &str,
+        from: &str,
+        to: &str,
+        path: &str,
+    ) -> std::result::Result<String, delta_usecase::Error> {
+        self.file_diff_between(repo_root, from, to, path)
             .await
             .map_err(delta_usecase::Error::from)
     }

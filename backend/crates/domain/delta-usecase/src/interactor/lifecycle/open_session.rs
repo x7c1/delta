@@ -130,17 +130,17 @@ where
             RESUME_FLAG.to_owned(),
             id.as_str().to_owned(),
         ];
-        // Pre-accept Claude Code's workspace-trust dialog when resuming a Delta
-        // worktree — a git repository (so a fresh pane would otherwise stall on
-        // the interactive trust dialog) that also lives under Delta's own
-        // worktree base. Seed before launching so a failure aborts the resume
-        // cleanly with no pane created. A cwd that is not a git repo (the default
-        // `<base>/<token>` scratch dir) or a user-selected repo outside the base
-        // is left to Claude Code's normal dialog — Delta does not pre-accept it,
-        // because that would also trust its checked-in automation in the user's
-        // plain `claude` sessions. See [`super::is_under_worktree_base`].
+        // Refresh Claude Code's pre-accepted keys when resuming in a Delta
+        // worktree that is already trusted — trust is per directory, so a
+        // worktree trusted at its launch is not asked about again. Seed before
+        // launching so a failure aborts the resume cleanly with no pane
+        // created. Nothing is pre-accepted for a directory that is not trusted
+        // yet, nor for one outside Delta's worktree base: those keep Claude
+        // Code's own dialog (see [`super::is_under_worktree_base`] and the
+        // `launch_trust` module for why).
         if self.git_worktree.repo_root(&workdir).await?.is_some()
             && super::is_under_worktree_base(&self.worktree_base, &workdir)
+            && self.git_worktree.is_dir_trusted(&workdir).await?
         {
             self.git_worktree.ensure_dir_trusted(&workdir).await?;
         }

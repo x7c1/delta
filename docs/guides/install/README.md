@@ -187,7 +187,11 @@ What it does not remove is left to you:
    the file belongs to Claude Code and holds your other settings too, so remove
    only the keys you no longer want.
 3. Claude Code's and Codex's own files — the conversations under `~/.claude`
-   and `~/.codex` — belong to those tools, not to Delta, and stay.
+   and `~/.codex` — belong to those tools, not to Delta, and stay. So does the
+   trust you gave a repository in Delta's launch confirmation: its
+   `hasTrustDialogAccepted` key under `projects` in `~/.claude.json` is the one
+   Claude Code's own dialog writes, and stays as if you had accepted that
+   dialog.
 
 If the app does not start any more, take the same steps by hand: end the tmux
 server and delete its socket, then the data directory, the

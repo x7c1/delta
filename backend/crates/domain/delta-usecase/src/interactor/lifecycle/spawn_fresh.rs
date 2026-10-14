@@ -67,7 +67,8 @@ where
     ///
     /// Everything expensive is deliberately *not* here: the worktree build (a
     /// `git fetch` plus a full checkout — seconds to tens of seconds on a large
-    /// repository), the trust seed (a rewrite of `~/.claude.json`), the
+    /// repository), the launch-trust decision and trust seed (a rewrite of
+    /// `~/.claude.json`), the
     /// settings write and the tmux launch all run on the task
     /// [`spawn_launch_preparation`] spawns, which reports back on this actor's
     /// own mailbox ([`SessionInput::LaunchFinished`]). Because the row and the
@@ -188,12 +189,13 @@ where
         let pane = pane_for(token.as_str());
 
         // `seed_trust` records whether the effective launch directory is a git
-        // repository whose workspace-trust dialog must be pre-accepted before
-        // launching `claude` there (the launch task does the seeding). A
+        // working tree, and so a candidate for pre-accepting Claude Code's
+        // workspace-trust dialog; the launch task applies the launch-trust rule
+        // (see the `launch_trust` module) once the worktree is built. A
         // worktree is always a git working tree; a user-selected workdir is
         // checked once here; the default `<base>/<token>` scratch dir is empty
-        // and never triggers the dialog, so it is never seeded (avoids bloating
-        // `~/.claude.json` for ordinary sessions).
+        // and never triggers the dialog, so it is never a candidate (avoids
+        // bloating `~/.claude.json` for ordinary sessions).
         //
         // `launch_repo_root` is the repository root containing the effective
         // launch directory at spawn time — the worktree's repo for a worktree
@@ -213,10 +215,9 @@ where
                 let root = worktree_repo_root
                     .clone()
                     .expect("worktree_repo_root is Some whenever a worktree was requested");
-                // A worktree is by definition a git working tree, so its
-                // trust dialog must be pre-accepted; no extra git call
-                // needed. Trust seeding is idempotent, so reusing an
-                // already-trusted path (e.g. the main tree) is fine.
+                // A worktree is by definition a git working tree, so it is a
+                // trust candidate; no extra git call needed. Whether it is
+                // pre-accepted is decided after the build.
                 (Some(root), true)
             }
             None => match requested_workdir.as_deref() {

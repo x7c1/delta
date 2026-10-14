@@ -11,18 +11,24 @@ use crate::rest::worktree_start_point::WireWorktreeStartPoint;
 ///
 /// Wire twin of the domain [`WorktreeSpec`]: when present on a `new_session`
 /// send whose selected directory is a git repository, Delta creates a
-/// per-session worktree and launches there. The only knob is the branch start
-/// point.
+/// per-session worktree and launches there. `start_point` is where the branch
+/// starts; `confirmed_commit` is the commit the user confirmed in the launch
+/// confirmation (`POST /api/launch-trust` reported it), omitted when none was
+/// asked.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
 #[ts(rename = "WorktreeSpec")]
 pub struct WireWorktreeSpec {
     pub start_point: WireWorktreeStartPoint,
+    #[serde(default)]
+    #[ts(optional)]
+    pub confirmed_commit: Option<String>,
 }
 
 impl From<WireWorktreeSpec> for WorktreeSpec {
     fn from(spec: WireWorktreeSpec) -> Self {
         WorktreeSpec {
             start_point: spec.start_point.into(),
+            confirmed_commit: spec.confirmed_commit,
         }
     }
 }
@@ -41,6 +47,22 @@ mod tests {
         assert_eq!(
             WorktreeSpec::from(spec).start_point,
             WorktreeStartPoint::Head
+        );
+    }
+
+    #[test]
+    fn confirmed_commit_is_optional_and_carried_through() {
+        let bare: WireWorktreeSpec =
+            serde_json::from_str(r#"{ "start_point": { "kind": "head" } }"#).unwrap();
+        assert_eq!(WorktreeSpec::from(bare).confirmed_commit, None);
+
+        let confirmed: WireWorktreeSpec = serde_json::from_str(
+            r#"{ "start_point": { "kind": "head" }, "confirmed_commit": "abc123" }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            WorktreeSpec::from(confirmed).confirmed_commit.as_deref(),
+            Some("abc123")
         );
     }
 

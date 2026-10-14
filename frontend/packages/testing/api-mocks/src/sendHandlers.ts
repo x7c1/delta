@@ -1,5 +1,6 @@
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
+  LaunchTrustResponse,
   Send,
   SendRequest,
   SendResponse,
@@ -11,6 +12,9 @@ import { mockSpawnSessionId } from './fixtures';
 import { MOCK_WORKDIR_HOME } from './workdirFixtures';
 import type { HandlerContext } from './handlerContext';
 import { resumeUnavailableResponse } from './sessionHandlers';
+
+/** The commit the mock's launch-trust check reports for every launch. */
+const MOCK_LAUNCH_COMMIT = 'mock0000launch';
 
 /** Discriminate a `POST /api/sends` body: new-session spawn vs thread target. */
 function isNewSessionSend(body: SendRequest): body is SendToNewSession {
@@ -63,6 +67,20 @@ export function sendHandlers({
       send.held_at = null;
       return new HttpResponse(null, { status: 204 });
     }),
+
+    // The launch-trust check a new worktree session runs before its send. The
+    // mock models a user whose repository is trusted and whose branches leave
+    // agent configuration alone — the common case, which asks nothing — so the
+    // new-session flow goes straight through. A test that needs the
+    // confirmation overrides this route with its own answer.
+    http.post('*/api/launch-trust', () =>
+      HttpResponse.json<LaunchTrustResponse>({
+        needs_confirmation: false,
+        repository_untrusted: false,
+        commit: MOCK_LAUNCH_COMMIT,
+        agent_config_changes: [],
+      }),
+    ),
 
     http.post('*/api/sends', async ({ request }) => {
       const payload = (await request.json()) as SendRequest;

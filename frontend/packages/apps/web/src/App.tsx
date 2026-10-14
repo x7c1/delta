@@ -3,6 +3,7 @@ import { Button, ErrorBoundary } from '@delta/ui-kit';
 import { ApiProvider } from './data/apiContext';
 import { AuthGate } from './features/auth/AuthGate';
 import type { AuthState } from './features/auth/establishAuth';
+import { LaunchTrustDialog } from './features/launch-trust/LaunchTrustDialog';
 import { NotificationSnackbar } from './features/notifications/NotificationSnackbar';
 import { ErasedGate } from './features/settings/storage/ErasedGate';
 import { WorkspaceScreen } from './features/workspace/WorkspaceScreen';
@@ -98,6 +99,10 @@ export function App({ auth }: { auth: AuthState }) {
                       outside the workspace layout so a bottom-anchored
                       notification never affects transcript scrolling. */}
                       <NotificationSnackbar />
+                      {/* The launch-trust confirmation a new worktree session
+                      may ask before it launches; mounted once so the
+                      composer's Send and a failed session's Retry share it. */}
+                      <LaunchTrustDialog />
                     </ErasedGate>
                   </div>
                 </ErrorBoundary>

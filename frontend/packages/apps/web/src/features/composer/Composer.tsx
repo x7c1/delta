@@ -1,4 +1,4 @@
-import { useCallback, useRef, type FormEvent } from 'react';
+import { useCallback, useRef, useState, type FormEvent } from 'react';
 import type { ThreadId } from '@delta/model';
 import type { SendRequest, Thread } from '@delta/wire-gen';
 import { Button } from '@delta/ui-kit';
@@ -10,6 +10,8 @@ import { COMPOSER_MAX_HEIGHT } from './autoGrow';
 import { useAutoGrow } from './useAutoGrow';
 import { useLiveStore, type NewSessionLaunch } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
+import { useApiClient } from '../../data/apiContext';
+import { confirmLaunchTrust } from '../launch-trust/confirmLaunchTrust';
 import { useOptionalComposerDraftTarget } from './composerDraftTarget';
 import { newSessionSendBody } from './newSessionRequest';
 import { useSubmitSend } from './useSubmitSend';
@@ -100,6 +102,11 @@ function SendIcon({ className }: { className?: string }) {
  */
 export function Composer({ mode }: ComposerProps) {
   const submitSend = useSubmitSend();
+  const client = useApiClient();
+  // True while a new-session Send waits on the launch-trust check or the
+  // user's answer to its confirmation; Send stays disabled so a second click
+  // cannot start a second launch meanwhile.
+  const [confirmingLaunch, setConfirmingLaunch] = useState(false);
   // The textarea is shared upward when the composer is mounted inside a
   // {@link ComposerDraftTargetProvider}, so the rail's prompt-template button
   // can read the caret and hand focus back after an insert. Standing alone (no
@@ -174,7 +181,6 @@ export function Composer({ mode }: ComposerProps) {
       if (activeThread) {
         clearResumeUnavailable(activeThread.session_id);
       }
-      clearDraft(draftKey);
 
       // A new session's full configuration, assembled once and used twice: for
       // the request body and for the submit target that retains it, so a failed
@@ -208,6 +214,22 @@ export function Composer({ mode }: ComposerProps) {
             : null,
       };
 
+      // A new worktree session may need the user's confirmation before
+      // Claude Code's trust is pre-accepted for it (see confirmLaunchTrust).
+      // Cancelling sends nothing and keeps the draft.
+      let confirmedCommit: string | null = null;
+      if (isNew) {
+        setConfirmingLaunch(true);
+        const decision = await confirmLaunchTrust(client, launch).finally(() =>
+          setConfirmingLaunch(false),
+        );
+        if (!decision.proceed) {
+          return;
+        }
+        confirmedCommit = decision.confirmedCommit;
+      }
+      clearDraft(draftKey);
+
       // Build the send target. A branch carries the semantic parent; otherwise
       // it is a plain send to the active thread. Both target the active thread
       // regardless of open/closed — for a closed session the backend
@@ -215,7 +237,7 @@ export function Composer({ mode }: ComposerProps) {
       // stays on that sub-thread instead of jumping to the session's main thread.
       let body: SendRequest;
       if (isNew) {
-        body = newSessionSendBody(text, launch);
+        body = newSessionSendBody(text, launch, confirmedCommit);
       } else if (branching) {
         body = {
           thread_id: activeThread!.id,
@@ -268,6 +290,7 @@ export function Composer({ mode }: ComposerProps) {
       newSessionProvider,
       newSessionWorkdirSource,
       clearDraft,
+      client,
       submitSend,
       setBranchOrigin,
       setActiveThread,
@@ -307,7 +330,8 @@ export function Composer({ mode }: ComposerProps) {
   // button's `disabled` and as the Cmd/Ctrl+Enter shortcut guard, so the
   // keyboard path cannot bypass gates the button enforces:
   //   - empty draft
-  //   - a send is already in-flight
+  //   - a send is already in-flight, or a new session's launch-trust
+  //     confirmation is still being checked or answered
   //   - a new session must start in a chosen directory (selection mandatory)
   //   - if the worktree toggle is on, the start-point must be a concrete
   //     value: `pending_remote_branch` means the Other-remote-branch picker
@@ -323,6 +347,7 @@ export function Composer({ mode }: ComposerProps) {
   const submitDisabled =
     draft.trim().length === 0 ||
     sendInFlight ||
+    confirmingLaunch ||
     hooksUnreachable ||
     (isNew && !newSessionWorkdir) ||
     (isNew &&

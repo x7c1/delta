@@ -28,9 +28,7 @@ async fn new_session_with_worktree_uses_repo_identity_in_dir_name() {
             provider: crate::AgentProvider::Claude,
             workdir: Some("/projects/app".to_owned()),
             launch_option_ids: Vec::new(),
-            worktree: Some(WorktreeSpec {
-                start_point: WorktreeStartPoint::Head,
-            }),
+            worktree: Some(WorktreeSpec::new(WorktreeStartPoint::Head)),
         },
         "hello",
         None,

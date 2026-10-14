@@ -14,6 +14,7 @@ mod erase_report;
 mod error;
 mod interactor;
 mod launch_config;
+mod launch_trust;
 mod pane_token;
 mod pane_token_minter;
 mod ports;
@@ -59,6 +60,7 @@ pub use launch_config::{
     PENDING_SPAWN_DEADLINE, PERMISSION_DECISION_DEADLINE, RESUME_READY_DEADLINE,
     SLASH_COMMAND_ECHO_DEADLINE,
 };
+pub use launch_trust::{AgentConfigChange, LaunchTrustCheck, MAX_DIFFED_PATHS, MAX_DIFF_BYTES};
 pub use pane_token::PaneToken;
 pub use pane_token_minter::PaneTokenMinter;
 pub use ports::{

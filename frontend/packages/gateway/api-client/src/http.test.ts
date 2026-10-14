@@ -535,6 +535,31 @@ describe('ApiClient', () => {
     );
   });
 
+  it('posts the launch-trust check and returns its answer', async () => {
+    const answer = {
+      needs_confirmation: true,
+      repository_untrusted: false,
+      commit: 'abc123',
+      agent_config_changes: [
+        { path: '.mcp.json', diff: '@@\n+{}', diff_truncated: false },
+      ],
+    };
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(answer));
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+    const body = {
+      workdir: '/home/dev/app',
+      start_point: { kind: 'remote_branch' as const, name: 'feature' },
+      provider: 'claude' as const,
+    };
+
+    await expect(client.checkLaunchTrust(body)).resolves.toEqual(answer);
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('http://localhost/api/launch-trust');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+
   it('answers a pending question with the per-question selection indices', async () => {
     const fetchFn = vi.fn().mockResolvedValue(noContent());
     const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });

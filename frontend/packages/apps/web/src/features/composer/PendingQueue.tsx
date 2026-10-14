@@ -462,16 +462,21 @@ export function PendingQueue({
                             // the whole configuration the target retained (chosen
                             // directory, selected launch options, provider,
                             // worktree, PR origin). Then drop the failed chip so
-                            // only the fresh attempt shows.
-                            retrySpawn({
+                            // only the fresh attempt shows — unless the user
+                            // cancelled the retry's launch-trust confirmation,
+                            // which started nothing.
+                            void retrySpawn({
                               text: entry.item.text,
                               workdir: target.workdir,
                               launchOptionIds: target.launchOptionIds,
                               provider: target.provider,
                               worktree: target.worktree,
                               pullRequestNumber: target.pullRequestNumber,
+                            }).then((started) => {
+                              if (started) {
+                                removeSending(entry.item.id);
+                              }
                             });
-                            removeSending(entry.item.id);
                           }}
                         >
                           Retry

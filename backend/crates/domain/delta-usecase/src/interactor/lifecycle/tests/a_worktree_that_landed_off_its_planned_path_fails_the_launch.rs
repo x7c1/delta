@@ -44,9 +44,9 @@ async fn a_worktree_that_landed_off_its_planned_path_fails_the_launch() {
                 provider: crate::AgentProvider::Claude,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),
-                worktree: Some(WorktreeSpec {
-                    start_point: WorktreeStartPoint::UseRemoteBranch("feature/x".to_owned()),
-                }),
+                worktree: Some(WorktreeSpec::new(WorktreeStartPoint::UseRemoteBranch(
+                    "feature/x".to_owned(),
+                ))),
             },
             "hello",
             None,

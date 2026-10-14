@@ -6,7 +6,9 @@ import type { WorktreeStartPoint } from "./WorktreeStartPoint";
  *
  * Wire twin of the domain [`WorktreeSpec`]: when present on a `new_session`
  * send whose selected directory is a git repository, Delta creates a
- * per-session worktree and launches there. The only knob is the branch start
- * point.
+ * per-session worktree and launches there. `start_point` is where the branch
+ * starts; `confirmed_commit` is the commit the user confirmed in the launch
+ * confirmation (`POST /api/launch-trust` reported it), omitted when none was
+ * asked.
  */
-export type WorktreeSpec = { start_point: WorktreeStartPoint, };
+export type WorktreeSpec = { start_point: WorktreeStartPoint, confirmed_commit?: string, };

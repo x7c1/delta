@@ -53,9 +53,9 @@ async fn codex_worktree_session_grants_its_repo_root_to_the_adapter() {
                 provider: AgentProvider::Codex,
                 workdir: Some("/projects/app".to_owned()),
                 launch_option_ids: Vec::new(),
-                worktree: Some(WorktreeSpec {
-                    start_point: WorktreeStartPoint::UseRemoteBranch("pr-head".to_owned()),
-                }),
+                worktree: Some(WorktreeSpec::new(WorktreeStartPoint::UseRemoteBranch(
+                    "pr-head".to_owned(),
+                ))),
             },
             "work on this branch",
             None,

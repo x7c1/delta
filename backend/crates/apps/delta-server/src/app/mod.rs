@@ -75,6 +75,7 @@ fn api_router(state: AppState) -> Router {
         .bind(endpoint::ListSends, api::list_sends)
         .bind(endpoint::ListThreadMessages, api::thread_messages)
         .bind(endpoint::CreateSend, api::create_send)
+        .bind(endpoint::CheckLaunchTrust, api::check_launch_trust)
         .bind(endpoint::CancelSend, api::cancel_send)
         .bind(endpoint::ReleaseSend, api::release_send)
         .bind(endpoint::DecidePermission, api::decide_permission)

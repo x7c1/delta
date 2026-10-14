@@ -2,11 +2,11 @@ use crate::interactor::testing::*;
 use crate::ports::WorktreeStartPoint;
 use crate::{SendTarget, WorktreeSpec};
 
-/// A fresh session whose worktree Delta creates under its own worktree base
-/// pre-accepts Claude Code's workspace-trust dialog for that worktree path — a
-/// directory Delta itself made, so seeding it never silently trusts a repo the
-/// user pointed Delta at. The interactive launch there is not blocked on the
-/// trust dialog.
+/// A fresh session whose worktree Delta creates under its own worktree base,
+/// from a repository Claude Code already trusts (the fake's default for a
+/// registered repository), pre-accepts Claude Code's workspace-trust dialog
+/// for that worktree path — never for the repository the user pointed Delta
+/// at. The interactive launch there is not blocked on the trust dialog.
 #[tokio::test]
 async fn auto_trusts_a_delta_worktree() {
     let canonical = FakeWorkspace::canonical("/projects/app");
@@ -27,9 +27,7 @@ async fn auto_trusts_a_delta_worktree() {
             provider: crate::AgentProvider::Claude,
             workdir: Some("/projects/app".to_owned()),
             launch_option_ids: Vec::new(),
-            worktree: Some(WorktreeSpec {
-                start_point: WorktreeStartPoint::Head,
-            }),
+            worktree: Some(WorktreeSpec::new(WorktreeStartPoint::Head)),
         },
         "hello",
         None,

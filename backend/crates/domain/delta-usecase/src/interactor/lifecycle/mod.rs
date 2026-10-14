@@ -18,6 +18,7 @@ mod delete_session;
 mod dispatch_ready_resumes;
 mod finish_launch;
 mod launch_prep;
+mod launch_trust;
 mod open_session;
 mod reap_stale_spawns;
 mod reap_tick;
@@ -53,17 +54,21 @@ const SESSION_ID_FLAG: &str = "--session-id";
 /// `.claude/settings.json`.
 const SETTINGS_FLAG: &str = "--settings";
 
-/// True iff `candidate` resolves to a path at or below `base` — the sole gate on
-/// pre-accepting Claude Code's workspace-trust dialog.
+/// True iff `candidate` resolves to a path at or below `base` — the first gate
+/// on pre-accepting Claude Code's workspace-trust dialog.
 ///
 /// The trade-off this defends: [`ensure_dir_trusted`] writes
 /// `hasTrustDialogAccepted` into the user's GLOBAL `~/.claude.json`, which also
 /// silences the dialog in the user's own plain `claude` sessions in that
-/// directory — so any checked-in `.claude/settings.json` hooks there would then
-/// run unprompted. Delta therefore auto-accepts ONLY directories it itself
-/// created under its own worktree base; any other directory (a repo the user
-/// pointed Delta at, a clone, a worktree made elsewhere) gets Claude Code's
-/// normal one-time trust dialog instead.
+/// directory — so any checked-in agent configuration there would then take
+/// effect unprompted. Delta therefore never pre-accepts a directory outside its
+/// own worktree base (a repo the user pointed Delta at, a clone, a worktree
+/// made elsewhere); those get Claude Code's normal one-time trust dialog.
+///
+/// Being under the base is necessary, not sufficient: a worktree Delta builds
+/// there is pre-accepted only under the launch-trust rule (its repository is
+/// trusted and its agent configuration matches the trusted `HEAD`, or the user
+/// confirmed that exact commit) — see the `launch_trust` module.
 ///
 /// Robustness: both paths are canonicalized (their longest existing ancestor is
 /// resolved, so `/tmp` vs `/private/tmp` on macOS and any `..` collapse) and then

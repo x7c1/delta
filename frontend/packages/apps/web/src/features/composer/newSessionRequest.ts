@@ -14,6 +14,11 @@ import type { NewSessionLaunch } from '../../store/liveStore';
  * `PROVIDER_WIRE_DEFAULT` — the backend resolves an omitted `provider` to
  * exactly that, so omitting it keeps a send on the default provider
  * byte-for-byte identical to a pre-provider send.
+ *
+ * `confirmedCommit` is the commit the user confirmed in the launch-trust
+ * dialog for this very attempt (see `confirmLaunchTrust`). It rides on the
+ * worktree request only; the {@link NewSessionLaunch} a failed spawn retains
+ * never carries it, so a Retry asks again about what is there by then.
  */
 export function newSessionSendBody(
   text: string,
@@ -24,6 +29,7 @@ export function newSessionSendBody(
     worktree,
     pullRequestNumber,
   }: NewSessionLaunch,
+  confirmedCommit: string | null = null,
 ): SendRequest {
   return {
     new_session: true,
@@ -32,7 +38,14 @@ export function newSessionSendBody(
     ...(launchOptionIds.length > 0
       ? { launch_option_ids: launchOptionIds }
       : {}),
-    ...(worktree ? { worktree } : {}),
+    ...(worktree
+      ? {
+          worktree:
+            confirmedCommit !== null
+              ? { ...worktree, confirmed_commit: confirmedCommit }
+              : worktree,
+        }
+      : {}),
     ...(provider !== PROVIDER_WIRE_DEFAULT ? { provider } : {}),
     ...(pullRequestNumber !== null
       ? { pull_request_number: pullRequestNumber }

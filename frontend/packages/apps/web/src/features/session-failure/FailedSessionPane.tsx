@@ -210,17 +210,26 @@ export function FailedSessionPane({ item }: FailedSessionPaneProps) {
                   // means the removal below is no longer removing the focused
                   // session, so nothing races to reconcile focus a second time.
                   setFocusedSession(NEW_SESSION_FOCUS);
-                  retrySpawn({
+                  void retrySpawn({
                     text: spawn.text,
                     workdir: spawn.workdir,
                     launchOptionIds: spawn.launchOptionIds,
                     provider: spawn.provider,
                     worktree: spawn.worktree,
                     pullRequestNumber: spawn.pullRequestNumber,
+                  }).then((started) => {
+                    // The retry supersedes this row; leaving it would show the
+                    // new session beside a dead duplicate of itself. A retry
+                    // the user cancelled at its launch-trust confirmation
+                    // started nothing, so the row stays — and focus returns
+                    // to it rather than leaving the user on an empty
+                    // new-session screen.
+                    if (started) {
+                      remove();
+                    } else {
+                      setFocusedSession(sessionId);
+                    }
                   });
-                  // The retry supersedes this row; leaving it would show the new
-                  // session beside a dead duplicate of itself.
-                  remove();
                 }}
               >
                 Retry

@@ -30,9 +30,11 @@ pub(crate) use latest_release::{
     download_latest_release, get_latest_release, install_latest_release, restart_latest_release,
 };
 mod launch_options;
+mod launch_trust;
 pub(crate) use launch_options::{
     create_launch_option, delete_launch_option, list_launch_options, update_launch_option,
 };
+pub(crate) use launch_trust::check_launch_trust;
 mod open_cwd;
 pub(crate) use open_cwd::open_cwd;
 mod permissions;

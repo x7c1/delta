@@ -26,15 +26,15 @@ use delta_wire::rest::{
     WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
     WireDeleteSnapshotRequest, WireEraseResponse, WireErrorBody, WireGitBranchesResponse,
     WireGitRepoResponse, WireLatestReleaseResponse, WireLaunchOptionsResponse,
-    WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
-    WirePermissionDecisionRequest, WirePromptTemplatesResponse, WireProvidersResponse,
-    WirePrunePreviewResponse, WirePruneSessionsRequest, WirePruneSessionsResponse,
-    WirePullRequestsResponse, WireQuestionAnswerRequest, WireQuestionCancelRequest,
-    WireRemoveWorktreeRequest, WireRepositoriesResponse, WireSendResponse, WireSendsResponse,
-    WireSessionsResponse, WireStorageResponse, WireStorageWorktreesResponse, WireThreadsResponse,
-    WireUpdateDownload, WireUpdateInstall, WireUpdateLaunchOptionRequest,
-    WireUpdatePromptTemplateRequest, WireVersionResponse, WireWorkdirListResponse,
-    WireWorkdirRecentResponse,
+    WireLaunchTrustRequest, WireLaunchTrustResponse, WireMessagesResponse, WireNewSessionResponse,
+    WireOpenCwdRequest, WirePermissionDecisionRequest, WirePromptTemplatesResponse,
+    WireProvidersResponse, WirePrunePreviewResponse, WirePruneSessionsRequest,
+    WirePruneSessionsResponse, WirePullRequestsResponse, WireQuestionAnswerRequest,
+    WireQuestionCancelRequest, WireRemoveWorktreeRequest, WireRepositoriesResponse,
+    WireSendResponse, WireSendsResponse, WireSessionsResponse, WireStorageResponse,
+    WireStorageWorktreesResponse, WireThreadsResponse, WireUpdateDownload, WireUpdateInstall,
+    WireUpdateLaunchOptionRequest, WireUpdatePromptTemplateRequest, WireVersionResponse,
+    WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 use delta_wire::{event_kinds, export_config, WireCommsFrame, WireSessionEvent};
 use ts_rs::TS;
@@ -67,6 +67,8 @@ fn main() {
     WireMessagesResponse::export_all(&config).expect("export MessagesResponse.ts");
     WireCreateSendRequest::export_all(&config).expect("export CreateSendRequest.ts");
     WireSendResponse::export_all(&config).expect("export SendResponse.ts");
+    WireLaunchTrustRequest::export_all(&config).expect("export LaunchTrustRequest.ts");
+    WireLaunchTrustResponse::export_all(&config).expect("export LaunchTrustResponse.ts");
     WireSendsResponse::export_all(&config).expect("export SendsResponse.ts");
     WireOpenCwdRequest::export_all(&config).expect("export OpenCwdRequest.ts");
     WirePermissionDecisionRequest::export_all(&config)

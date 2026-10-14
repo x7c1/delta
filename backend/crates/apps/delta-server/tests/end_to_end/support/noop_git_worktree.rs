@@ -71,6 +71,48 @@ impl GitWorktree for NoopGitWorktree {
         Ok(())
     }
 
+    async fn is_dir_trusted(&self, _dir: &str) -> delta_usecase::Result<bool> {
+        Ok(false)
+    }
+
+    async fn record_dir_trust(&self, _dir: &str) -> delta_usecase::Result<()> {
+        Ok(())
+    }
+
+    // The end-to-end flow never requests a worktree, so the launch-trust
+    // check's commit and diff lookups are never reached.
+
+    async fn launch_commit(
+        &self,
+        _repo_root: &str,
+        _start_point: &WorktreeStartPoint,
+    ) -> delta_usecase::Result<String> {
+        Ok(String::new())
+    }
+
+    async fn head_commit(&self, _dir: &str) -> delta_usecase::Result<String> {
+        Ok(String::new())
+    }
+
+    async fn changed_paths(
+        &self,
+        _repo_root: &str,
+        _from: &str,
+        _to: &str,
+    ) -> delta_usecase::Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
+    async fn file_diff(
+        &self,
+        _repo_root: &str,
+        _from: &str,
+        _to: &str,
+        _path: &str,
+    ) -> delta_usecase::Result<String> {
+        Ok(String::new())
+    }
+
     // The end-to-end flow never runs in a Delta worktree, so removing a
     // session never reaches the worktree cleanup; these are never called.
 
