@@ -52,6 +52,8 @@ mod release_feed;
 pub use release_feed::{FeedCause, ReleaseFeed};
 mod release_feed_error;
 pub use release_feed_error::ReleaseFeedError;
+mod signed_asset;
+pub use signed_asset::SignedAsset;
 mod rate_limit_window;
 pub use rate_limit_window::RateLimitWindow;
 mod remembered_pane;

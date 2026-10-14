@@ -43,6 +43,8 @@ delta-transcript = { workspace = true }
 # The static-web route tests embed a fixture directory through the same code
 # path the `embed-web` feature uses, so they run without the feature.
 include_dir = { workspace = true }
+# A refused signature, for the update tests' downloader.
+release-signature = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tmux-driver = { workspace = true }

@@ -15,8 +15,11 @@ path = "src/main.rs"
 # with Delta's server and trusts nothing its caller says beyond the version and
 # the file. The HTTPS client is the release feed's (rustls with `ring`,
 # verifying against the operating system's trust store), set up on its own.
+# The one crate it shares with the desktop app is `release-signature`, so both
+# check against the same compiled-in release key.
 [dependencies]
 libc = { workspace = true }
+release-signature = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
 rustls-platform-verifier = { workspace = true }
@@ -27,3 +30,6 @@ sha2 = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+release-signature = { workspace = true, features = ["testing"] }

@@ -73,18 +73,19 @@ pub use ports::{
     ReleaseFeed, ReleaseFeedError, RememberedPane, RememberedPaneStore, RemoteBranches,
     RepositoryCloneRow, SendStore, SessionEndHook, SessionEvent, SessionHistoryStore,
     SessionLifecycle, SessionPageRow, SessionRecordStore, SessionStartHook, SessionStore,
-    SpawningSession, StatusSnapshot, StopHook, SubagentLaunchStore, ThreadStore, TmuxDriver,
-    Transcript, TranscriptMessage, TranscriptRead, UpdateInstaller, UserPromptSubmitHook,
-    Workspace, WorktreeInspection, WorktreeRemoval, WorktreeStartPoint,
+    SignedAsset, SpawningSession, StatusSnapshot, StopHook, SubagentLaunchStore, ThreadStore,
+    TmuxDriver, Transcript, TranscriptMessage, TranscriptRead, UpdateInstaller,
+    UserPromptSubmitHook, Workspace, WorktreeInspection, WorktreeRemoval, WorktreeStartPoint,
 };
 pub use pull_request::PullRequest;
 pub use pull_request_lens::PullRequestLens;
 pub use pull_request_list::PullRequestList;
 pub use release_check::{NewerRelease, ReleaseCheck, ReleaseCheckError, RELEASE_PAGE_PREFIX};
 pub use release_update::{
-    check_download_url, choose_asset, downloadable_asset, BuildOrigin, InstallUnavailable,
-    Launcher, ManualInstall, NotOffered, Platform, ReleaseUpdate, UpdateDownload, UpdateInstall,
-    UpdateOffer, UpdateRefusal, UpdateRestart, RELEASE_DOWNLOAD_PREFIX,
+    check_download_url, choose_asset, downloadable_asset, signed_asset, BuildOrigin,
+    InstallUnavailable, Launcher, ManualInstall, NotOffered, Platform, ReleaseUpdate,
+    UpdateDownload, UpdateInstall, UpdateOffer, UpdateRefusal, UpdateRestart,
+    RELEASE_DOWNLOAD_PREFIX,
 };
 pub use repository::{display_name, identity_key, worktree_dir_slug, Repository};
 pub use send_target::SendTarget;

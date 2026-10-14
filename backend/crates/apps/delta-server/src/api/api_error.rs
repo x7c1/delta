@@ -256,6 +256,7 @@ impl IntoResponse for ApiError {
                     UpdateRefusal::UnsupportedPlatform { .. }
                     | UpdateRefusal::MissingAsset { .. }
                     | UpdateRefusal::NoDigest { .. }
+                    | UpdateRefusal::NoSignature { .. }
                     | UpdateRefusal::UntrustedUrl(_) => UPDATE_UNSUPPORTED_CODE,
                     UpdateRefusal::InstallUnsupported { .. } => UPDATE_INSTALL_UNSUPPORTED_CODE,
                     UpdateRefusal::NotReady => UPDATE_NOT_READY_CODE,

@@ -66,7 +66,11 @@ const problem = (node: ReactNode): UpdateControlView => ({
  *   ({@link InstallUnavailableBox}). Where the app found at startup that it
  *   cannot install (`install_unavailable`: on macOS, it does not run from a
  *   `Delta.app` this user may replace), ready offers no Install: it shows
- *   that reason and the way by hand at once. A file the installer rejected
+ *   that reason and the way by hand at once. A release Delta cannot verify
+ *   (its signature missing, or not verifying the downloaded file) shows
+ *   `unavailable`: the reason, and updating by hand from the release page
+ *   ({@link UpdateUnavailableBox}); nothing was kept and there is no retry.
+ *   A file the installer rejected
  *   (it failed the digest or package check) was removed by the server: that
  *   offers downloading it again and the release page, never a way to install
  *   it. A dismissed password dialog leaves the update ready.
@@ -247,6 +251,10 @@ export function useUpdateControl(
     );
   }
 
+  if (state?.state === 'unavailable') {
+    return problem(<UpdateUnavailableBox error={state.error} newer={newer} />);
+  }
+
   const cause =
     download.error?.message ?? (state?.state === 'failed' ? state.error : null);
   if (cause === null && installState?.state === 'rejected') {
@@ -381,6 +389,42 @@ function InstallUnavailableBox({
         </span>
       )}
       <ManualInstallSteps manual={manual} newer={newer} />
+    </ProblemBox>
+  );
+}
+
+/**
+ * A release Delta will not update to in the app: its signature is missing or
+ * does not verify the downloaded file, so it was not kept. The reason, and
+ * the way by hand: download the release from its page, check its signature
+ * as the install guide shows, and install it. No retry: the same release
+ * fails the same way.
+ */
+function UpdateUnavailableBox({
+  error,
+  newer,
+}: {
+  error: string;
+  newer: NewerRelease;
+}) {
+  return (
+    <ProblemBox tone="warning">
+      <div className={PROBLEM_HEADING}>
+        <span
+          className="font-medium text-warning"
+          data-testid="update-unavailable"
+          title={error}
+        >
+          Update it by hand
+        </span>
+        <ReleasePageLink newer={newer} />
+      </div>
+      <span className="select-text" data-testid="update-unavailable-reason">
+        {error}
+      </span>
+      <span data-testid="update-unavailable-steps">
+        {`Delta could not verify ${newer.version}'s signature, so it did not keep the download. Download it from the release page, check its signature as the install guide shows, and install it by hand.`}
+      </span>
     </ProblemBox>
   );
 }

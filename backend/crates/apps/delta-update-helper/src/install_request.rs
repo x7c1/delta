@@ -117,6 +117,16 @@ mod tests {
             &["install", "-v", "v0.6.0", "--file", "/a.deb"],
             // A trailing argument, which apt would otherwise never see.
             &["install", "--version", "v0.6.0", "--file", "/a.deb", "--x"],
+            // Nothing the caller says it checked counts: the helper checks
+            // the digest and the signature itself.
+            &[
+                "install",
+                "--version",
+                "v0.6.0",
+                "--file",
+                "/a.deb",
+                "--signature-verified",
+            ],
             // A relative path.
             &["install", "--version", "v0.6.0", "--file", "a.deb"],
             &["install", "--version", "v0.6.0", "--file", "./a.deb"],

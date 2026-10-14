@@ -10,9 +10,9 @@ Delta therefore treats **reaching the loopback port as the trust boundary**
 document states what each guard covers, how a browser page comes to hold the
 bearer token without any page carrying it, the one deliberate trade-off in how
 Delta pre-accepts Claude Code's workspace-trust dialog, how the files Delta
-writes into its data directory are protected, how the desktop app installs an
-update (on Linux without the server ever holding root, on macOS without root
-at all), what its logs
+writes into its data directory are protected, how the desktop app checks an
+update's signature and installs it (on Linux without the server ever holding
+root, on macOS without root at all), what its logs
 deliberately leave out, and how Delta handles the launch options that switch
 an agent's own safety mechanisms off.
 
@@ -223,7 +223,9 @@ the hook URLs carry the current run's secret.
 
 One more directory holds something that ends up mattering to root:
 **`updates/`**, where the desktop app downloads a newer release and verifies
-it against the sha256 digest GitHub states for it. Whatever the user (or a
+it against the sha256 digest GitHub states for it and against the release's
+signature ([below](#signed-release-bundles)), keeping the signature beside
+it. Whatever the user (or a
 process running as the user) can write there could be swapped after that
 check, so nothing that runs as root trusts it: the update helper below copies
 the file out and checks the copy again. The macOS install, which runs as the
@@ -232,14 +234,75 @@ running app is not older than are removed at startup. A download of the newer
 release that an earlier run left there is not taken as verified either: once
 the first release check names that release, its file is opened without
 following a symlink, refused unless it is a regular file, and its sha256
-compared with the release's digest again before it is offered for install; a
-file that fails is removed, as is every file of another release.
+compared with the release's digest and its contents checked against the
+signature kept beside it again before it is offered for install; a file that
+fails, or has no signature beside it, is removed, as is every file of another
+release.
 
 ## Updates
 
 The desktop app built by the release workflow can install a newer release on
 Linux and on macOS (`POST /api/latest-release/install`, in
 [the API reference](api/settings.md#post-apilatest-releaseinstall)).
+
+### Signed release bundles
+
+GitHub's sha256 digest of a Release asset is computed by GitHub from whatever
+was uploaded. It proves the download arrived intact, not that the release
+pipeline produced it: anything able to upload or replace an asset on the
+Release would get a matching digest for its own file. So every bundle also
+carries a signature, made with a key that no build step can read.
+
+- **The key lives outside the build.** The release workflow signs each bundle
+  with [minisign](https://jedisct1.github.io/minisign/) (Ed25519) in a job of
+  its own, `sign`, the only job that may read the secret key: it is a secret
+  of the GitHub Environment `release-signing`, which only protected branches
+  may use. The job has no token permissions, checks nothing out and runs no
+  project code; it only installs minisign from a pinned, checksummed release
+  archive and signs the files the build jobs produced. The build jobs, which
+  run the project's code and its dependencies' build scripts, never see the
+  key. How the job is laid out is in [the release guide](release.md#signing).
+- **What is signed.** Each bundle's signature, `<bundle>.minisig`, is
+  attached to the Release next to it. Its trusted comment, which the
+  signature covers, names the bundle's file name and the version:
+  `file:<bundle> version:<version>`.
+- **The public key is compiled in.** The desktop app and the Linux update
+  helper both check against one public key, defined once in the
+  `release-signature` crate and never read from a file or the environment:
+
+  ```text
+  RWSvjaqxlJm4wr9SiKBHDAlbhBASzeSf0dbg9loPJdgbTFQOEOX5J1Pl
+  ```
+
+  (minisign key id `C2B89994B1AA8DAF`).
+- **The app checks before anything is offered for install.** It fetches
+  `<asset>.minisig` from the same Release, under the same pinned URL prefix
+  as the asset, before the asset itself, and checks the asset against it as
+  it streams in. The signature must be made with the release key, must be a
+  pre-hashed minisign signature, and its trusted comment must name exactly
+  the asset's file name and the version being installed, so a valid
+  signature of another file, or of an older release, is refused. A release
+  without the signature, or one that does not verify, is never offered for
+  install: the download ends `unavailable` with the reason, nothing is kept,
+  and the user updates by hand from the release page. There is no fallback to
+  the digest alone. On macOS this check comes before the disk image is copied
+  or mounted; on Linux the root helper checks again by itself (below).
+- **What it protects.** A bundle replaced on the Release after the release
+  workflow built it, or uploaded by anything other than the release
+  pipeline (a leaked or over-scoped token, a compromised account without
+  access to the environment), is refused. So is a bundle served from
+  anywhere but the Release, and an older signed bundle offered as a newer
+  version.
+- **What it does not protect.** The signature vouches for whatever the
+  pipeline built. Code injected into the build itself — a compromised
+  dependency, a malicious change merged to `main`, a tampered runner — is
+  built and then signed like everything else. The GitHub artifact
+  attestation the workflow also records (`gh attestation verify`) ties a
+  bundle to the workflow run and commit that built it, which helps trace
+  such a build but does not prevent it.
+
+Checking a downloaded bundle by hand is described in the
+[install guide](install/README.md#checking-a-download).
 
 ### Linux
 
@@ -269,15 +332,22 @@ dedicated helper, `/usr/lib/delta-desktop/delta-update-helper`, which the
      compares the copy's sha256 with the `sha256:<hex>` digest the release
      states for its `.deb` — the same digest the server checked the download
      against; a release that states none is refused;
-  3. it checks with `dpkg-deb` and `dpkg-query` that the package is
+  3. it downloads the release's signature of the `.deb` itself, only from
+     the release's own download URL for it, and checks the copy against it
+     with the release key compiled into the helper, as the app does
+     ([above](#signed-release-bundles)); a release without one, or one that
+     does not verify the copy, is refused. The helper takes no word from its
+     caller that the file was checked: its command line has no place for
+     one;
+  4. it checks with `dpkg-deb` and `dpkg-query` that the package is
      `delta-desktop`, at exactly the requested version, and newer than the
      installed `delta-desktop`;
-  4. it installs the copy with `apt-get install -y <path of the copy>`, so new
+  5. it installs the copy with `apt-get install -y <path of the copy>`, so new
      dependencies resolve, and removes its directory.
 
   Each refusal and failure exits with a status of its own and prints one
   line saying why, which the app shows. The statuses `10`–`19` say the file
-  itself failed a check (step 1, 2, or 3's package name and version): the
+  itself failed a check (step 1, 2, 3, or 4's package name and version): the
   server then removes it and the app offers only to download the release
   again, never a command that would install that file. When the installed
   `delta-desktop` is already the requested version or newer (installed from
@@ -295,7 +365,7 @@ dedicated helper, `/usr/lib/delta-desktop/delta-update-helper`, which the
   arguments, not only this install.
 
 When Delta cannot install the update itself — no `pkexec`, no polkit agent,
-the helper missing, GitHub out of reach for the helper's check, or `apt-get`
+the helper missing, GitHub out of reach for the helper's checks, or `apt-get`
 failing — the app shows the command for the user's own terminal,
 `sudo apt install <absolute path of the verified .deb>`. It depends on
 nothing but the file, so it stays the way out even if the in-app update turns

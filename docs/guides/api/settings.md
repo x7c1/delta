@@ -493,8 +493,13 @@ both instead of Install.
 - `{ "state": "downloading", "version", "received_bytes", "total_bytes" }` —
   the transfer is running; `total_bytes` is `null` when the answer did not
   state a size.
-- `{ "state": "ready", "version" }` — downloaded and its sha256 verified,
-  waiting to be installed.
+- `{ "state": "ready", "version" }` — downloaded and verified against its
+  sha256 and the release's signature, waiting to be installed.
+- `{ "state": "unavailable", "version", "error" }` — the release cannot be
+  updated to in the app: it carries no signature of this platform's asset, or
+  the signature does not verify the downloaded file. Nothing was kept; `error`
+  names the cause with its whole chain. The footer shows it with the release
+  page, for updating by hand; there is no retry.
 - `{ "state": "failed", "version", "error" }` — nothing was kept; `error`
   names the cause with its whole chain.
 
@@ -590,17 +595,31 @@ installing is [`POST /api/latest-release/install`](#post-apilatest-releaseinstal
 - **Verification.** The sha256 is computed while the file streams in and
   compared with the asset's `digest` (`sha256:<hex>`) from GitHub's release
   answer. An asset without one is never downloaded (`update_unsupported`).
+  The file is also checked, as it streams in, against the release's
+  signature of it: the asset `<asset name>.minisig` of the same release,
+  fetched first from under the same prefix. The signature must be made with
+  the release key compiled into the app, and its trusted comment must name
+  exactly the asset's file name and the release's version. A release without
+  that asset is `unavailable` with nothing fetched; a signature that is
+  malformed, made with another key or naming another file or version is
+  `unavailable` before the asset is fetched; a file it does not verify is
+  `unavailable` once fetched. There is no fallback to the digest alone. Why,
+  and what the signature does and does not prove, is in the
+  [security guide](../security.md#updates).
 - **Where it goes.** `updates/` in the data directory. The file is written
   under `<asset name>.part` and renamed to the asset's name only once its
-  digest matches, so a file under that name is always a verified one. When a
-  download completes, every other file in `updates/` (other versions, partial
-  downloads) is removed. A mismatch, a non-2xx answer, an interrupted or
-  stalled transfer (no data for 30 s; connecting may take 15 s) or a write
-  failure deletes the partial file and is reported as `failed`.
+  digest and its signature both match, with the signature kept beside it as
+  `<asset name>.minisig`, so a file under that name is always a verified one.
+  When a download completes, every other file in `updates/` (other versions,
+  partial downloads) is removed. A digest mismatch, a non-2xx answer (for the
+  asset or its signature), an interrupted or stalled transfer (no data for
+  30 s; connecting may take 15 s) or a write failure deletes the partial file
+  and is reported as `failed`.
 - **One at a time.** A request while a download runs joins it (no second
   transfer); a request after a failure starts over; a request after the same
-  release is ready answers `ready` without downloading again. A partial
-  download is never resumed.
+  release is ready answers `ready`, and one after it was found `unavailable`
+  answers `unavailable`, without downloading again. A partial download is
+  never resumed.
 
 - **202 Accepted**: a download is running (just started, or already running),
   with the state `GET /api/latest-release` reports as `download`:
@@ -614,6 +633,8 @@ installing is [`POST /api/latest-release/install`](#post-apilatest-releaseinstal
   ```json
   { "state": "ready", "version": "v0.6.0" }
   ```
+
+  or it cannot be updated to in the app (`unavailable`, with `error`).
 
 - **409** — refused by the server whatever the browser shows, with nothing
   fetched, `code` naming the case:
@@ -637,10 +658,10 @@ newer than its own version (read from the asset name), so an update that was
 installed and restarted into does not linger; a download of a newer release
 is kept. Once the first release check after startup names the newer release,
 the server verifies that release's file in `updates/` again against its
-`sha256` digest, if an earlier run left one: a file that matches makes the
-download `ready` without fetching it again, and a file that does not (or is a
-symlink, or not a regular file) is removed, as is every file of another
-release. While it checks, the download reports `downloading`, and a request
+`sha256` digest and the signature kept beside it, if an earlier run left one:
+a file that passes makes the download `ready` without fetching it again, and
+a file that does not (or has no signature beside it, or either is a symlink
+or not a regular file) is removed, as is every file of another release. While it checks, the download reports `downloading`, and a request
 joins the check; if the check finds no file that passes, that request
 continues as a download of the release.
 
@@ -662,7 +683,8 @@ Desktop apps built by the release workflow, on Linux and on macOS, only.
   `io.github.x7c1.delta.update`, which allows only that helper and asks for
   an administrator's password every time. The helper copies the file
   somewhere only root can change it, checks it against the release's digest
-  on GitHub, checks it is `delta-desktop` at the requested, newer version, and
+  on GitHub and against the release's signature, which it downloads itself,
+  checks it is `delta-desktop` at the requested, newer version, and
   installs it with `apt-get`. The server itself never runs as root. Why it is
   built this way, and what the helper checks, is in the
   [security guide](../security.md#updates).

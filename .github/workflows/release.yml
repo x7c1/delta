@@ -1,17 +1,20 @@
 name: Release
 
 # Cuts a Release when CI passes on a main commit that changed the workspace
-# version. The jobs split by what they may write:
+# version. The jobs split by what they may write or read:
 #
 #   plan (read) → draft (contents: write, gh only) → bundles (read, builds)
-#     → publish (contents: write, gh and download-artifact only)
+#     → sign (no token; the signing key, minisign only)
+#     → publish (contents: write, attestations; gh and pinned actions only)
 #     → rewrite-links (pull-requests: write)
 #
 # Only `draft` and `publish` can change a Release, and neither checks out or
-# runs project code or installs anything; the jobs that build hold read access
-# only. The Release stays a draft — invisible to the desktop app's update
-# check, and with no tag yet — until every bundle is attached. See
-# docs/guides/release.md ("Desktop bundles").
+# runs project code; the jobs that build hold read access only. Only `sign`
+# can read the release signing key (the `release-signing` environment), and
+# it holds no token and runs no project code either. The Release stays a
+# draft — invisible to the desktop app's update check, and with no tag yet —
+# until every bundle and its signature is attached. See
+# docs/guides/release.md ("Desktop bundles", "Signing").
 
 on:
   workflow_run:
@@ -50,6 +53,7 @@ jobs:
       release: ${{ steps.target.outputs.release }}
       dry_run: ${{ steps.target.outputs.dry_run }}
       version: ${{ steps.target.outputs.version }}
+      bundles: ${{ steps.names.outputs.bundles }}
       tag: ${{ steps.target.outputs.tag }}
       title: ${{ steps.target.outputs.title }}
       sha: ${{ steps.target.outputs.sha }}
@@ -136,7 +140,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # A dry run builds whatever version the dispatched ref carries; the
-      # bundle file names, which the publish job checks, use it.
+      # bundle file names, which the sign and publish jobs check, use it.
       - name: Read the dry run's version
         if: github.event_name == 'workflow_dispatch'
         id: dry-run
@@ -179,6 +183,18 @@ jobs:
             echo "release=false" >> "$GITHUB_OUTPUT"
           fi
           echo "sha=${RELEASE_SHA}" >> "$GITHUB_OUTPUT"
+
+      # The file names bundle.yml's matrix produces (docs/guides/release.md,
+      # "Desktop bundles"), space-separated: exactly what `sign` signs and
+      # `publish` requires. A platform missing here would be a bundle the
+      # Release ships without.
+      - name: Name the bundles
+        id: names
+        if: steps.target.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.target.outputs.version }}
+        run: |
+          echo "bundles=Delta_${VERSION}_aarch64.dmg delta-desktop_${VERSION}_amd64.deb" >> "$GITHUB_OUTPUT"
 
   # A draft has no tag yet: GitHub creates it at target_commitish when the
   # draft is published. A whole-workflow re-run finds the draft it created
@@ -229,22 +245,33 @@ jobs:
       ref: ${{ needs.plan.outputs.sha }}
       release: true
 
-  # Runs no project code and no third-party action besides download-artifact:
-  # it only moves the files the bundles job built onto the draft, checks them
-  # and publishes. A failed bundle leaves the draft unpublished; "Re-run
-  # failed jobs" rebuilds the failed platforms and runs this job again.
-  publish:
+  # The only job that can read the release signing key: the secret of the
+  # `release-signing` environment, which only protected branches may use. It
+  # holds no token, checks nothing out and runs no project code; it installs
+  # minisign from a pinned release archive checked against the sha256 below,
+  # signs exactly the bundle names `plan` lists, verifies each signature
+  # against the public key the desktop app compiles in, and hands the
+  # signatures on as an artifact. The build jobs, which run project code,
+  # never see the key. A dry run signs too, so the whole job is exercised.
+  sign:
     needs: [plan, bundles]
     if: ${{ needs.plan.outputs.release == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: write
+    environment: release-signing
+    permissions: {}
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GH_REPO: ${{ github.repository }}
-      TAG: ${{ needs.plan.outputs.tag }}
       VERSION: ${{ needs.plan.outputs.version }}
+      BUNDLES: ${{ needs.plan.outputs.bundles }}
+      # minisign 0.12's Linux release archive (jedisct1/minisign), and its
+      # sha256, taken when it was pinned (it also verified against the
+      # author's minisign key then).
+      MINISIGN_URL: https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+      MINISIGN_SHA256: 9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
+      # The public half of the signing key, as the desktop app and the update
+      # helper compile it in (backend/crates/libs/release-signature). A
+      # secret key that does not match it fails here, not in every app.
+      MINISIGN_PUBLIC_KEY: RWSvjaqxlJm4wr9SiKBHDAlbhBASzeSf0dbg9loPJdgbTFQOEOX5J1Pl
     steps:
       # bundle.yml uploads one artifact per platform, delta-<matrix name>,
       # each holding that platform's single bundle file.
@@ -255,29 +282,148 @@ jobs:
           path: bundles
           merge-multiple: true
 
+      - name: Install minisign
+        run: |
+          archive="${RUNNER_TEMP}/minisign.tar.gz"
+          curl --fail --silent --show-error --location --proto '=https' \
+            --output "$archive" "$MINISIGN_URL"
+          echo "${MINISIGN_SHA256}  ${archive}" | sha256sum --check --strict -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" minisign-linux/x86_64/minisign
+          echo "${RUNNER_TEMP}/minisign-linux/x86_64" >> "$GITHUB_PATH"
+
+      # The trusted comment, which the signature covers, names the file and
+      # the version; the app refuses a signature naming anything else.
+      - name: Sign the bundles
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            echo "::error::The release-signing environment provides no MINISIGN_SECRET_KEY. See docs/guides/release.md (\"Signing\")."
+            exit 1
+          fi
+          key="${RUNNER_TEMP}/release.key"
+          trap 'rm -f "$key"' EXIT
+          (
+            umask 077
+            # The secret holds the key file; a bare key line gets the
+            # comment line minisign expects above it.
+            case "$MINISIGN_SECRET_KEY" in
+              "untrusted comment:"*) printf '%s\n' "$MINISIGN_SECRET_KEY" ;;
+              *) printf 'untrusted comment: minisign secret key\n%s\n' "$MINISIGN_SECRET_KEY" ;;
+            esac > "$key"
+          )
+          mkdir signatures
+          read -ra expected <<< "$BUNDLES"
+          for name in "${expected[@]}"; do
+            if [ ! -f "bundles/${name}" ]; then
+              echo "::error::The bundles job produced no ${name}."
+              exit 1
+            fi
+            comment="file:${name} version:${VERSION}"
+            minisign -S -s "$key" -m "bundles/${name}" \
+              -x "signatures/${name}.minisig" -t "$comment" < /dev/null
+            verified=$(minisign -V -Q -P "$MINISIGN_PUBLIC_KEY" \
+              -m "bundles/${name}" -x "signatures/${name}.minisig")
+            if [ "$verified" != "$comment" ]; then
+              echo "::error::The signature of ${name} does not verify with the app's public key as \"${comment}\"."
+              exit 1
+            fi
+            echo "Signed ${name}: ${comment}"
+          done
+
+      - name: Upload the signatures
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bundle-signatures
+          path: signatures/*.minisig
+          if-no-files-found: error
+          # A re-run of the whole run signs again.
+          overwrite: true
+
+  # Runs no project code and no third-party action besides download-artifact
+  # and attest-build-provenance: it only moves the files the bundles and sign
+  # jobs produced onto the draft, checks them, records their build
+  # provenance and publishes. A failed bundle leaves the draft unpublished;
+  # "Re-run failed jobs" rebuilds the failed platforms, signs them and runs
+  # this job again.
+  publish:
+    needs: [plan, sign]
+    if: ${{ needs.plan.outputs.release == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      # GitHub artifact attestations of the bundles, and nothing else.
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      BUNDLES: ${{ needs.plan.outputs.bundles }}
+    steps:
+      # bundle.yml uploads one artifact per platform, delta-<matrix name>,
+      # each holding that platform's single bundle file.
+      - name: Download the bundles
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: delta-*
+          path: bundles
+          merge-multiple: true
+
+      - name: Download the signatures
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: bundle-signatures
+          path: bundles
+
+      # The app refuses an update without its signature, so a bundle must
+      # not reach the Release without one.
+      - name: Check every bundle has its signature
+        run: |
+          read -ra expected <<< "$BUNDLES"
+          missing=0
+          for name in "${expected[@]}"; do
+            for file in "$name" "${name}.minisig"; do
+              if [ ! -f "bundles/${file}" ]; then
+                echo "::error::Nothing to attach as ${file}."
+                missing=1
+              fi
+            done
+          done
+          exit "$missing"
+
       # --clobber: a re-run replaces what an earlier attempt attached.
-      - name: Attach the bundles to the draft
+      - name: Attach the bundles and their signatures to the draft
         run: gh release upload "$TAG" bundles/* --clobber
 
-      # The file names bundle.yml's matrix produces (docs/guides/release.md,
-      # "Desktop bundles"). A platform missing here means a bundle the
-      # Release would otherwise ship without.
-      - name: Check every bundle is attached
+      - name: Check every bundle and signature is attached
         run: |
-          expected=(
-            "Delta_${VERSION}_aarch64.dmg"
-            "delta-desktop_${VERSION}_amd64.deb"
-          )
+          read -ra expected <<< "$BUNDLES"
           attached=$(gh release view "$TAG" --json assets --jq '.assets[].name')
           printf 'Attached:\n%s\n' "$attached"
           missing=0
           for name in "${expected[@]}"; do
-            if ! grep -qxF -- "$name" <<< "$attached"; then
-              echo "::error::${TAG} lacks ${name}."
-              missing=1
-            fi
+            for file in "$name" "${name}.minisig"; do
+              if ! grep -qxF -- "$file" <<< "$attached"; then
+                echo "::error::${TAG} lacks ${file}."
+                missing=1
+              fi
+            done
           done
           exit "$missing"
+
+      # Records, in GitHub's attestation store, which workflow run and
+      # commit built each bundle (`gh attestation verify`). Not for a dry
+      # run: an attestation is a lasting public statement, and a dry run may
+      # build any protected ref.
+      - name: Attest the bundles' build provenance
+        if: ${{ needs.plan.outputs.dry_run != 'true' }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            bundles/*.dmg
+            bundles/*.deb
 
       - name: Publish the Release
         if: ${{ needs.plan.outputs.dry_run != 'true' }}

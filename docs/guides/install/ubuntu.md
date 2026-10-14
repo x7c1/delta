@@ -14,7 +14,8 @@ distributions, build from source with `make desktop-build` (see
 
 1. Install `tmux` if you do not have it: `sudo apt install tmux`.
 2. Open the [latest Release](https://github.com/x7c1/delta/releases/latest)
-   and download `delta-desktop_<version>_amd64.deb`.
+   and download `delta-desktop_<version>_amd64.deb`. Optionally, check its
+   signature ([how](README.md#checking-a-download)).
 3. Install it:
 
    ```bash
@@ -80,8 +81,9 @@ The app updates itself from the footer, where a newer release is shown next to
 the version:
 
 1. **Update** downloads the new `.deb` into the data directory's `updates/`
-   and checks its sha256 against the one the release states. The footer then
-   says **Update ready** and offers **Install**.
+   and checks its sha256 against the one the release states and its contents
+   against the release's signature. The footer then says **Update ready** and
+   offers **Install**.
 2. **Install** opens the system's password dialog, which says that Delta
    wants to install its downloaded update. Enter an administrator's password.
    It asks every time; dismissing it leaves the update ready to install
@@ -93,7 +95,7 @@ the version:
 
 Only a small helper the package installs
 (`/usr/lib/delta-desktop/delta-update-helper`) runs as root, and it checks
-the file again before installing it; the
+the file's digest and signature again itself before installing it; the
 [security guide](../security.md#updates) says what it checks and why Delta
 never runs `sudo` in its own terminal.
 
@@ -109,8 +111,14 @@ sudo apt install /home/<you>/.local/share/io.github.x7c1.delta/updates/delta-des
 
 Then quit the app and start it again.
 
+If the release's signature is missing or does not verify the download, the app
+keeps nothing and the footer says **Update it by hand**, with the reason and a
+link to the release page; there is no Install and no retry. Download the
+`.deb` from the release page, [check its signature](README.md#checking-a-download),
+and install it with `apt install` only if it verifies.
+
 If the downloaded file fails the helper's check (it does not match the
-release's digest, or is not `delta-desktop` at that version), the app removes
+release's digest or signature, or is not `delta-desktop` at that version), the app removes
 it and the footer says **Verification failed · Download again**, with a link
 to the release page; no command is offered for that file. Download it again from
 the footer, or get the `.deb` from the release page.

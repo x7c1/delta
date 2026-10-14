@@ -105,6 +105,7 @@ describe('NavigatorPane update control', () => {
     'update-install-reason',
     'update-manual',
     'update-download-again',
+    'update-unavailable',
   ];
 
   function shownControls() {
@@ -600,6 +601,38 @@ describe('NavigatorPane update control', () => {
     fireEvent.click(again);
     expect(await screen.findByTestId('update-downloading')).toBeInTheDocument();
     expect(posts).toBe(1);
+  });
+
+  it('shows an unverifiable release as unavailable, with the way by hand and no retry', async () => {
+    const reason =
+      "the release's signature does not verify the downloaded file: the file does not match its signature";
+    answerLatest(
+      'update',
+      () => ({
+        state: 'unavailable',
+        version: MOCK_NEWER_RELEASE.version,
+        error: reason,
+      }),
+      { installs: true },
+    );
+    renderPane();
+
+    const heading = await screen.findByTestId('update-unavailable');
+    expect(heading).toHaveTextContent('Update it by hand');
+    expect(heading).toHaveAttribute('title', reason);
+    expect(screen.getByTestId('update-unavailable-reason')).toHaveTextContent(
+      reason,
+    );
+    expect(screen.getByTestId('update-unavailable-steps')).toHaveTextContent(
+      'check its signature',
+    );
+    expect(screen.getByTestId('update-release-page')).toHaveAttribute(
+      'href',
+      MOCK_NEWER_RELEASE.url,
+    );
+    // Nothing to install, retry or download again.
+    expect(shownControls()).toEqual(['update-unavailable']);
+    expect(screen.queryByTestId('update-manual-command')).toBeNull();
   });
 
   it('shows an install refusal as a failure with the server message', async () => {

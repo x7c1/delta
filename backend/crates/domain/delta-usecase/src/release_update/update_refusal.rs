@@ -28,7 +28,13 @@ pub enum UpdateRefusal {
     /// verified and is never downloaded.
     #[error("release {version}'s asset {asset} states no sha256 digest to verify it against")]
     NoDigest { version: String, asset: String },
-    /// The asset's download URL is outside [`RELEASE_DOWNLOAD_PREFIX`].
+    /// The newer release carries no signature of this platform's asset
+    /// (`<asset>.minisig`), so the asset could not be verified and is never
+    /// downloaded.
+    #[error("release {version} carries no signature of {asset} to verify it against")]
+    NoSignature { version: String, asset: String },
+    /// The download URL of the asset, or of its signature, is outside
+    /// [`RELEASE_DOWNLOAD_PREFIX`].
     #[error("the asset's download URL {0:?} is outside {RELEASE_DOWNLOAD_PREFIX}")]
     UntrustedUrl(String),
     /// The app cannot install an update itself on this platform.

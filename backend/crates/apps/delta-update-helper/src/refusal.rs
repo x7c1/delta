@@ -69,6 +69,38 @@ pub enum Refusal {
         expected: String,
         actual: String,
     },
+    /// The release carries no signature of the package's asset
+    /// (`<asset>.minisig`).
+    #[error("release {tag} carries no signature of {asset}")]
+    SignatureMissing { tag: String, asset: String },
+    /// The release's signature of the asset is not at the release's own
+    /// download URL for it, so the helper does not fetch it.
+    #[error("release {tag} names its signature at {url:?}, not under its own downloads")]
+    SignatureUntrusted { tag: String, url: String },
+    /// The release's signature could not be fetched: `what` step failed,
+    /// for `source`.
+    #[error("could not download release {tag}'s signature: {what}")]
+    SignatureUnavailable {
+        tag: String,
+        what: &'static str,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    /// GitHub answered the request for the signature with an error status.
+    #[error("could not download release {tag}'s signature: it answered with HTTP status {status}")]
+    SignatureRefused {
+        tag: String,
+        status: reqwest::StatusCode,
+    },
+    /// The release's signature does not verify the file: not made with the
+    /// release key, naming another file or version, or not matching the
+    /// file's contents.
+    #[error("the release's signature of {asset} does not verify the update file")]
+    SignatureRejected {
+        asset: String,
+        #[source]
+        source: release_signature::SignatureError,
+    },
     /// `dpkg-deb` or `dpkg-query` could not tell the package's or the
     /// installed app's name and version.
     #[error("could not read {what}: {cause}")]
@@ -134,11 +166,14 @@ impl Refusal {
             Self::Usage(_) => 2,
             Self::NotRoot => 3,
             Self::File { .. } => 10,
+            Self::SignatureMissing { .. } => 11,
             Self::DigestMissing { .. } => 12,
             Self::DigestMalformed { .. } => 13,
             Self::DigestMismatch { .. } => 14,
+            Self::SignatureUntrusted { .. } => 15,
             Self::NotDelta(_) => 16,
             Self::VersionMismatch { .. } => 17,
+            Self::SignatureRejected { .. } => 18,
             Self::FileUnreadable { .. } => 19,
             Self::InstallFailed(_) => 20,
             Self::Io { .. } => 21,
@@ -147,16 +182,20 @@ impl Refusal {
             Self::Unrunnable { .. } => 24,
             Self::ReleaseUnavailable { .. } => 25,
             Self::PackageUnreadable { .. } => 26,
+            Self::SignatureUnavailable { .. } => 27,
+            Self::SignatureRefused { .. } => 28,
             Self::NotNewer { .. } => ALREADY_INSTALLED,
         }
     }
 
     /// Whether the refusal is of the file itself: not a regular file the
     /// helper may read, not matching the digest the release states (or the
-    /// release stating none it can use), or not `delta-desktop` at the
-    /// version asked for. Such a file is not to be installed by any means,
+    /// release stating none it can use), not verified by the release's
+    /// signature (or the release carrying none it may fetch), or not
+    /// `delta-desktop` at the version asked for. Such a file is not to be installed by any means,
     /// from a terminal included. Every other refusal is about this machine or
-    /// the network (GitHub out of reach, `dpkg` or `apt-get` failing), and
+    /// the network (GitHub out of reach, the signature not downloaded,
+    /// `dpkg` or `apt-get` failing), and
     /// leaves installing the file from a terminal open, except
     /// [`Self::NotNewer`], which says the update is installed already.
     pub fn rejects_file(&self) -> bool {
@@ -166,12 +205,17 @@ impl Refusal {
             | Self::DigestMissing { .. }
             | Self::DigestMalformed { .. }
             | Self::DigestMismatch { .. }
+            | Self::SignatureMissing { .. }
+            | Self::SignatureUntrusted { .. }
+            | Self::SignatureRejected { .. }
             | Self::NotDelta(_)
             | Self::VersionMismatch { .. } => true,
             Self::Usage(_)
             | Self::NotRoot
             | Self::ReleaseUnavailable { .. }
             | Self::ReleaseRefused { .. }
+            | Self::SignatureUnavailable { .. }
+            | Self::SignatureRefused { .. }
             | Self::PackageUnreadable { .. }
             | Self::InstalledVersionMalformed { .. }
             | Self::Unrunnable { .. }
@@ -237,6 +281,27 @@ mod tests {
                 tag: String::new(),
                 expected: String::new(),
                 actual: String::new(),
+            },
+            Refusal::SignatureMissing {
+                tag: String::new(),
+                asset: String::new(),
+            },
+            Refusal::SignatureUntrusted {
+                tag: String::new(),
+                url: String::new(),
+            },
+            Refusal::SignatureUnavailable {
+                tag: String::new(),
+                what: "",
+                source: Box::new(io()),
+            },
+            Refusal::SignatureRefused {
+                tag: String::new(),
+                status: reqwest::StatusCode::NOT_FOUND,
+            },
+            Refusal::SignatureRejected {
+                asset: String::new(),
+                source: release_signature::SignatureError::Invalid,
             },
             Refusal::PackageUnreadable {
                 what: "",
