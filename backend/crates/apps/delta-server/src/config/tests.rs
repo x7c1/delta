@@ -184,13 +184,48 @@ fn the_release_feed_defaults_to_github_and_an_empty_value_turns_it_off() {
         Some("https://api.github.com/repos/x7c1/delta/releases/latest")
     );
     assert_eq!(
-        config(&[("DELTA_RELEASE_FEED_URL", "http://127.0.0.1:9/latest")])
+        config(&[("DELTA_RELEASE_FEED_URL", "https://feed.example/latest")])
             .release_feed_url
             .as_deref(),
-        Some("http://127.0.0.1:9/latest")
+        Some("https://feed.example/latest")
     );
     assert_eq!(
         config(&[("DELTA_RELEASE_FEED_URL", "")]).release_feed_url,
+        None
+    );
+}
+
+#[test]
+fn a_feed_url_that_is_not_https_is_refused_for_the_default() {
+    for url in [
+        "http://127.0.0.1:9/latest",
+        "HTTP://feed.example/latest",
+        "ftp://feed.example/latest",
+        "feed.example/latest",
+    ] {
+        assert_eq!(
+            release_feed_url(Some(url.to_owned()), BuildOrigin::Local).as_deref(),
+            Some(DEFAULT_RELEASE_FEED_URL),
+            "{url}"
+        );
+    }
+}
+
+#[test]
+fn a_release_build_ignores_another_feed_url_but_may_turn_the_check_off() {
+    for url in ["https://feed.example/latest", "http://127.0.0.1:9/latest"] {
+        assert_eq!(
+            release_feed_url(Some(url.to_owned()), BuildOrigin::Release).as_deref(),
+            Some(DEFAULT_RELEASE_FEED_URL),
+            "{url}"
+        );
+    }
+    assert_eq!(
+        release_feed_url(None, BuildOrigin::Release).as_deref(),
+        Some(DEFAULT_RELEASE_FEED_URL)
+    );
+    assert_eq!(
+        release_feed_url(Some(String::new()), BuildOrigin::Release),
         None
     );
 }

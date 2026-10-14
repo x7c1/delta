@@ -20,6 +20,7 @@ import { MOCK_NEWER_RELEASE } from '@delta/api-mocks';
 import type {
   InstallUnavailable,
   LatestReleaseResponse,
+  ManualInstall,
   UpdateDownload,
   UpdateInstall,
   UpdateOffer,
@@ -271,8 +272,18 @@ describe('NavigatorPane update control', () => {
     state: 'ready',
     version: MOCK_NEWER_RELEASE.version,
   };
-  const MANUAL_COMMAND =
-    'sudo apt install /home/dev/.local/share/io.github.x7c1.delta/updates/delta-desktop_0.6.0_amd64.deb';
+  const DEB =
+    '/home/dev/.local/share/io.github.x7c1.delta/updates/delta-desktop_0.6.0_amd64.deb';
+  const MANUAL_CHECK = [
+    `sha256sum ${DEB}`,
+    `minisign -Vm ${DEB} -P <the release key>`,
+  ];
+  const MANUAL_COMMAND = `sudo -k apt install ${DEB}`;
+  const MANUAL: ManualInstall = {
+    kind: 'command',
+    check: MANUAL_CHECK,
+    install: MANUAL_COMMAND,
+  };
   const DISK_IMAGE =
     '/Users/dev/Library/Application Support/io.github.x7c1.delta/updates/Delta_0.6.0_aarch64.dmg';
   const TRANSLOCATED =
@@ -382,7 +393,7 @@ describe('NavigatorPane update control', () => {
       state: 'failed',
       version: MOCK_NEWER_RELEASE.version,
       error: 'apt-get could not install the update: E: Unmet dependencies',
-      manual: { kind: 'command', command: MANUAL_COMMAND },
+      manual: MANUAL,
     };
     let posts = 0;
     answerLatest('update', () => READY, {
@@ -430,7 +441,7 @@ describe('NavigatorPane update control', () => {
         version: MOCK_NEWER_RELEASE.version,
         error:
           'Delta cannot install the update itself: not authorized, or no polkit authentication agent is running',
-        manual: { kind: 'command', command: MANUAL_COMMAND },
+        manual: MANUAL,
       }),
     });
     renderPane();
@@ -439,10 +450,13 @@ describe('NavigatorPane update control', () => {
       await screen.findByTestId('update-install-unavailable'),
     ).toHaveAttribute('title', expect.stringContaining('no polkit'));
     expect(screen.getByTestId('update-install-unavailable')).toHaveTextContent(
-      'Install it from a terminal',
+      'Install it from a terminal outside Delta',
     );
     expect(screen.getByTestId('update-manual')).toHaveTextContent(
-      'Run in a terminal, then restart Delta:',
+      "In a terminal outside Delta (not one of Delta's sessions), check the file",
+    );
+    expect(screen.getByTestId('update-manual')).toHaveTextContent(
+      'Then install it there, and restart Delta:',
     );
     expect(shownControls()).toEqual([
       'update-install-retry',
@@ -453,10 +467,21 @@ describe('NavigatorPane update control', () => {
       MANUAL_COMMAND,
     );
 
+    expect(screen.getByTestId('update-manual-check').textContent).toBe(
+      MANUAL_CHECK.join('\n'),
+    );
+
     const copy = screen.getByRole('button', { name: 'Copy install command' });
     fireEvent.click(copy);
     expect(await within(copy).findByText('Copied')).toBeInTheDocument();
     expect(writeText).toHaveBeenCalledWith(MANUAL_COMMAND);
+
+    const copyCheck = screen.getByRole('button', {
+      name: 'Copy check commands',
+    });
+    fireEvent.click(copyCheck);
+    expect(await within(copyCheck).findByText('Copied')).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledWith(MANUAL_CHECK.join('\n'));
   });
 
   it('shows the disk image to open and the reason, not a command or a retry, when Delta cannot install on macOS', async () => {
@@ -531,7 +556,7 @@ describe('NavigatorPane update control', () => {
       version: MOCK_NEWER_RELEASE.version,
       error:
         'Delta cannot install the update itself: not authorized, or no polkit authentication agent is running',
-      manual: { kind: 'command', command: MANUAL_COMMAND },
+      manual: MANUAL,
     };
     let posts = 0;
     answerLatest('update', () => READY, {

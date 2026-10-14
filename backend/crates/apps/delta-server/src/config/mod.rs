@@ -171,18 +171,46 @@ fn config_from_vars_for(
         hook_endpoint_changed: false,
         launch: launch_from_vars(&text),
         child_env: Vec::new(),
-        release_feed_url: release_feed_url(text("DELTA_RELEASE_FEED_URL")),
+        release_feed_url: release_feed_url(text(RELEASE_FEED_URL_VAR), build_origin()),
         launcher,
         build_origin: build_origin(),
     }
 }
 
-/// Where the release check asks: `DELTA_RELEASE_FEED_URL` when set, with the
-/// empty string turning the check off; [`DEFAULT_RELEASE_FEED_URL`] when unset.
-fn release_feed_url(value: Option<String>) -> Option<String> {
+/// The variable that points the release check elsewhere, or turns it off.
+const RELEASE_FEED_URL_VAR: &str = "DELTA_RELEASE_FEED_URL";
+
+/// Where the release check asks: [`DEFAULT_RELEASE_FEED_URL`] unless
+/// `DELTA_RELEASE_FEED_URL` (`value`) says otherwise. The empty string turns
+/// the check off in every build.
+///
+/// Another URL is honoured only by a `local` build, and only when it is
+/// `https://`. A `release` build ignores it: the feed decides which update
+/// the app offers to download and install, so the installed app asks
+/// GitHub, whatever its environment says. A plain-HTTP URL is refused in any
+/// build, since anyone on the path could answer it. Either way the check
+/// asks the default feed, with a `warn` saying why.
+fn release_feed_url(value: Option<String>, origin: BuildOrigin) -> Option<String> {
+    let default = || Some(DEFAULT_RELEASE_FEED_URL.to_owned());
     match value {
-        None => Some(DEFAULT_RELEASE_FEED_URL.to_owned()),
+        None => default(),
         Some(url) if url.is_empty() => None,
+        Some(url) if origin == BuildOrigin::Release => {
+            tracing::warn!(
+                url,
+                "{RELEASE_FEED_URL_VAR} is ignored in a release build; \
+                 the release check asks {DEFAULT_RELEASE_FEED_URL}"
+            );
+            default()
+        }
+        Some(url) if !url.starts_with("https://") => {
+            tracing::warn!(
+                url,
+                "{RELEASE_FEED_URL_VAR} is not an https:// URL, so it is ignored; \
+                 the release check asks {DEFAULT_RELEASE_FEED_URL}"
+            );
+            default()
+        }
         Some(url) => Some(url),
     }
 }

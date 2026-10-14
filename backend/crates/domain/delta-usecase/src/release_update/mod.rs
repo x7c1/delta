@@ -47,8 +47,9 @@
 //! is never offered for install, from a terminal included. When Delta cannot
 //! install it ([`UpdateInstall::Unavailable`]) or the install fails for
 //! another reason ([`UpdateInstall::Failed`]), the state carries how the user
-//! installs the file by hand ([`ManualInstall`]: a command for their own
-//! terminal on Linux, the disk image to open on macOS). Where the installer
+//! installs the file by hand ([`ManualInstall`]: commands that check and
+//! install it from a terminal outside Delta on Linux, the disk image to open
+//! on macOS). Where the installer
 //! can tell at startup that it cannot install any update here (on macOS, the
 //! app does not run from a `Delta.app` this user may replace), Install is not
 //! offered at all, and a ready download comes with the way by hand instead

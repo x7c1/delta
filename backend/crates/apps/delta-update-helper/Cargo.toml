@@ -13,8 +13,9 @@ path = "src/main.rs"
 
 # Kept to what the checks need: the helper runs as root, so it shares no code
 # with Delta's server and trusts nothing its caller says beyond the version and
-# the file. The HTTPS client is the release feed's (rustls with `ring`,
-# verifying against the operating system's trust store), set up on its own.
+# the file. The HTTPS client is rustls with `ring`, set up on its own: it
+# trusts only the system's CA bundle at its fixed path, read with rustls's own
+# PEM parser, so no variable such as `SSL_CERT_FILE` can add a certificate.
 # The one crate it shares with the desktop app is `release-signature`, so both
 # check against the same compiled-in release key.
 [dependencies]
@@ -22,7 +23,6 @@ libc = { workspace = true }
 release-signature = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
-rustls-platform-verifier = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

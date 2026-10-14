@@ -245,6 +245,15 @@ The desktop app built by the release workflow can install a newer release on
 Linux and on macOS (`POST /api/latest-release/install`, in
 [the API reference](api/settings.md#post-apilatest-releaseinstall)).
 
+Everything the update path fetches — the release feed, each signature, each
+bundle, and the Linux helper's own requests — goes over HTTPS only: the
+clients refuse an `http://` URL and a redirect to one, so nothing on the
+network path can answer in GitHub's place. The feed the release check asks is
+GitHub's, fixed in a `release` build: `DELTA_RELEASE_FEED_URL` may point a
+`local` build at another `https://` feed (or turn the check off), but a
+`release` build ignores any other URL with a warning, since the feed decides
+which update the app offers to install.
+
 ### Signed release bundles
 
 GitHub's sha256 digest of a Release asset is computed by GitHub from whatever
@@ -324,9 +333,12 @@ dedicated helper, `/usr/lib/delta-desktop/delta-update-helper`, which the
   line, `install --version v<version> --file <absolute path>`, and checks
   everything else itself, as root:
   1. it opens the file without following a symlink and refuses anything but a
-     regular file, then copies it into a new root-owned directory (mode 0700);
-     every later step reads the copy, so the original cannot be swapped
-     between the checks and the install;
+     regular file, then copies it into a new directory (mode 0700) under its
+     fixed working directory, `/var/cache/delta-update-helper`; every later
+     step reads the copy, so the original cannot be swapped between the
+     checks and the install. The working directory is created mode 0700, and
+     the helper refuses to go on unless it and its parent are directories
+     owned by root that no group or other user may write to;
   2. it asks GitHub for the release the tag names
      (`https://api.github.com/repos/x7c1/delta/releases/tags/<tag>`) and
      compares the copy's sha256 with the `sha256:<hex>` digest the release
@@ -353,6 +365,16 @@ dedicated helper, `/usr/lib/delta-desktop/delta-update-helper`, which the
   `delta-desktop` is already the requested version or newer (installed from
   a terminal, say), the helper installs nothing and exits with status `30`,
   which the app reads as installed and offers to restart into.
+- **The helper takes nothing from its environment.** `pkexec` clears most
+  of the environment, but the helper does not rely on that: it never reads
+  `TMPDIR` (its working directory is fixed, above); its HTTPS client uses no
+  proxy, whatever `HTTPS_PROXY`, `ALL_PROXY` and the like say, and trusts
+  only the system's CA bundle at its fixed path
+  (`/etc/ssl/certs/ca-certificates.crt`), never a file or directory
+  `SSL_CERT_FILE` or `SSL_CERT_DIR` names; and it runs `dpkg-deb`,
+  `dpkg-query` and `apt-get` by absolute path with an environment of its own
+  (a fixed `PATH` and the C locale), so no variable left by its caller
+  reaches them.
 - **Why not `sudo` in a terminal.** Delta's tmux server hosts autonomous
   agents, and anything on that tmux socket can `send-keys` into any pane.
   `sudo` remembers an authentication per terminal for a while, so a Delta
@@ -366,11 +388,18 @@ dedicated helper, `/usr/lib/delta-desktop/delta-update-helper`, which the
 
 When Delta cannot install the update itself — no `pkexec`, no polkit agent,
 the helper missing, GitHub out of reach for the helper's checks, or `apt-get`
-failing — the app shows the command for the user's own terminal,
-`sudo apt install <absolute path of the verified .deb>`. It depends on
-nothing but the file, so it stays the way out even if the in-app update turns
-out to be broken. It is not shown when the helper rejected the file itself:
-a file that failed the check is not to be installed as root by any route.
+failing — the app shows how to install it from a terminal **outside Delta**
+(not a Delta session's pane, which agents on the tmux socket can type into,
+[above](#linux)): first the commands that check the file, `sha256sum <path>`
+to compare with the digest on the release page and
+`minisign -Vm <path> -P <release public key>` to check the signature Delta
+kept beside it, then `sudo -k apt install <absolute path of the verified
+.deb>`. `-k` makes `sudo` ask for the password and leaves no cached
+authentication behind for anything else in that terminal to use. This way by
+hand depends on nothing but the file, so it stays the way out even if the
+in-app update turns out to be broken. It is not shown when the helper
+rejected the file itself: a file that failed the check is not to be
+installed as root by any route.
 
 Restarting into the installed update starts the installed app,
 `/usr/bin/delta-desktop`, after the running one has exited; nothing about it
@@ -396,6 +425,14 @@ reports that it cannot install the update and shows the manual way below.
   `/private/var/folders/…/AppTranslocation/`); replacing that copy would
   change nothing, so Delta refuses and tells the user to move Delta to
   `/Applications` first.
+- **No one else may change where the bundle is.** Delta installs only into
+  a directory owned by the user or root that neither everyone nor a group
+  may write to — except an administrators' group (`wheel`, `admin`), whose
+  members can become root anyway, which is how macOS ships `/Applications`
+  (`root:admin`, mode 0775) — unless its sticky bit keeps others from
+  renaming what they do not own. Anywhere else another user could swap the
+  installed `Delta.app` for an app of their own before it next starts, so
+  Delta reports that it cannot install the update there, and why.
 - **The file is checked again.** The user owns `updates/`, so the download is
   not trusted on the strength of its earlier check: it is opened without
   following a symlink, refused unless it is a regular file, and copied into a

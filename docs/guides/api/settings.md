@@ -476,8 +476,10 @@ as it is. On macOS the app finds out once, when it starts, without writing
 anything, whether it runs from a `Delta.app` the user may write next to: not
 when it is not in an app bundle, runs from a read-only copy macOS made of it
 (App Translocation: opened from its disk image or the Downloads folder
-without being moved), or the user may not write to the directory its
-`Delta.app` is in. There `installs` is `false`, and once the download is
+without being moved), the user may not write to the directory its
+`Delta.app` is in, or someone else may (it is owned by neither the user nor
+root, or, without the sticky bit, everyone or a group other than `wheel` /
+`admin` may write to it). There `installs` is `false`, and once the download is
 ready the response carries `install_unavailable`.
 
 `install_unavailable` is present only then — `installs` `false` on macOS for
@@ -539,10 +541,11 @@ which leaves the download `ready`:
   from a read-only copy macOS made of it (App Translocation: opened from its
   disk image or the Downloads folder without being moved; `error` says to
   move Delta to `/Applications` first), the user may not write to the
-  directory its `Delta.app` is in, or `hdiutil` is missing. The first three
-  are found at startup too (`install_unavailable` above), where the footer
-  offers no Install, so an install from the footer ends this way only when
-  they changed since the app started. The footer offers a
+  directory its `Delta.app` is in or someone else may, or `hdiutil` is
+  missing. All but the last are found at startup too
+  (`install_unavailable` above), where the footer offers no Install, so an
+  install from the footer ends this way only when they changed since the
+  app started. The footer offers a
   retry beside `manual` on Linux only: on macOS the reason does not change
   by trying again.
 
@@ -550,9 +553,16 @@ which leaves the download `ready`:
 `kind`. It depends on nothing but the file, so it works even when the in-app
 install does not:
 
-- `{ "kind": "command", "command" }` (Linux) — the command that installs the
-  file from the user's own terminal, `sudo apt install <absolute path of the
-  .deb>` (the path single-quoted when a shell would split or expand it).
+- `{ "kind": "command", "check", "install" }` (Linux) — commands to run in a
+  terminal outside Delta (not a Delta session's pane, which agents can type
+  into; see the [security guide](../security.md#linux)). `check` lists the
+  commands that check the file first: `sha256sum <path>`, whose output must
+  match the digest on the release page, and
+  `minisign -Vm <path> -P <release public key>`, which checks it against
+  the signature Delta kept beside it. `install` installs it:
+  `sudo -k apt install <absolute path of the .deb>`, so `sudo` asks for the
+  password and leaves no cached authentication behind. Each path is
+  single-quoted when a shell would split or expand it.
 - `{ "kind": "disk_image", "path" }` (macOS) — the absolute path of the
   verified `.dmg`: open it, quit Delta (Finder does not replace an app that
   is open), drag Delta to Applications, then start Delta again.
@@ -697,9 +707,9 @@ Desktop apps built by the release workflow, on Linux and on macOS, only.
   the requested version, copies that app next to the running one with
   `ditto`, detaches the image, and renames the running bundle aside and the
   copy into its place. Where that is not possible (no bundle, a translocated
-  copy, a directory the user may not write to, no `hdiutil`) it reports
-  `unavailable` without trying (the first three are checked at startup too,
-  so `installs` is `false` there already); see the
+  copy, a directory the user may not write to or someone else may, no
+  `hdiutil`) it reports `unavailable` without trying (all but the last are
+  checked at startup too, so `installs` is `false` there already); see the
   [security guide](../security.md#macos) for why.
 - **Outcome on Linux.** `pkexec`'s exit status decides the state
   `GET /api/latest-release` then reports as `install`: `0` → `installed`;

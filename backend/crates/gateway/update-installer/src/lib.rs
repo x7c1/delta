@@ -52,7 +52,7 @@
 //! | Step | Fails as |
 //! |---|---|
 //! | 1. the app runs from a bundle, not from a copy macOS translocated (`…/AppTranslocation/…`, an app opened from its disk image or the Downloads folder without being moved) | [`InstallError::Unavailable`] |
-//! | 2. this user may write to the bundle's directory (`access(2)`) | [`InstallError::Unavailable`] |
+//! | 2. this user may write to the bundle's directory (`access(2)`), and no one else may: it is owned by this user or root, and neither its group (unless an administrators' group, `wheel` or `admin`, as for `/Applications`) nor everyone may write to it, unless its sticky bit is set | [`InstallError::Unavailable`] |
 //! | 3. the download, a regular file and not a symlink, is copied into a private working directory and the copy's sha256 checked against the digest it was downloaded with (the digest of the file the download checked against the release's signature, so the copy is the signed file) | [`InstallError::Rejected`]; the copy not written (the working directory full or out of reach): [`InstallError::Failed`] |
 //! | 4. the copy is mounted read-only and privately: `hdiutil attach -nobrowse -readonly -noautoopen -mountpoint <dir> <copy>` | missing `hdiutil`: [`InstallError::Unavailable`]; failing: [`InstallError::Failed`] |
 //! | 5. the image holds exactly one app at its root, a `Delta.app` whose `Info.plist` states `CFBundleIdentifier` `io.github.x7c1.delta` and `CFBundleShortVersionString` the requested version | [`InstallError::Rejected`]; the image's root not listed: [`InstallError::Failed`] |
@@ -83,6 +83,7 @@
 //! [`InstallError::Failed`]: delta_usecase::InstallError::Failed
 //! [`InstalledApp::Bundle`]: delta_usecase::InstalledApp::Bundle
 
+mod bundle_dir;
 mod bundle_installer;
 pub use bundle_installer::BundleInstaller;
 mod bundle_location;

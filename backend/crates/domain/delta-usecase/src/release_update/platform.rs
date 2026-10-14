@@ -48,8 +48,9 @@ impl Platform {
     }
 
     /// How the user installs the verified download at `path` by hand here:
-    /// open the disk image on macOS, `sudo apt install` it elsewhere (Linux,
-    /// the only other platform that installs in the app).
+    /// open the disk image on macOS, check it and `sudo -k apt install` it
+    /// from a terminal outside Delta elsewhere (Linux, the only other
+    /// platform that installs in the app).
     pub(super) fn manual_install(&self, path: &Path) -> ManualInstall {
         match self.os.as_str() {
             "macos" => ManualInstall::DiskImage(path.to_path_buf()),

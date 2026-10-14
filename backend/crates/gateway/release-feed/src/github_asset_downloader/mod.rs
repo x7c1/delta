@@ -10,7 +10,7 @@ use release_signature::{
     signature_name, BundleCheck, BundleSignature, ReleaseKey, SignatureError, MAX_SIGNATURE_BYTES,
 };
 
-use crate::https_client::{https_client_builder, USER_AGENT_VALUE};
+use crate::https_client::{https_client_builder, Schemes, USER_AGENT_VALUE};
 use crate::{ClientBuildError, DOWNLOAD_CONNECT_TIMEOUT, DOWNLOAD_STALL_TIMEOUT};
 
 mod local_file;
@@ -25,7 +25,8 @@ const TEMP_SUFFIX: &str = ".part";
 /// The [`AssetDownloader`] for GitHub release assets.
 ///
 /// Follows the redirect GitHub answers a `browser_download_url` with (to its
-/// asset host); whether the URL it is handed may be fetched at all is the
+/// asset host), only to an `https://` URL, and refuses an `http://` URL
+/// outright; whether the URL it is handed may be fetched at all is the
 /// caller's decision. Checks every asset against its signature with the
 /// release key ([`ReleaseKey::production`]) besides its digest.
 #[derive(Debug, Clone)]
@@ -39,13 +40,14 @@ impl GithubAssetDownloader {
     /// [`DOWNLOAD_CONNECT_TIMEOUT`] or no data arrives for
     /// [`DOWNLOAD_STALL_TIMEOUT`], with no cap on the whole transfer.
     pub fn new() -> Result<Self, ClientBuildError> {
-        Self::checking_with(ReleaseKey::production())
+        Self::with(ReleaseKey::production(), Schemes::HttpsOnly)
     }
 
-    /// As [`Self::new`], checking signatures against `key` instead of the
-    /// release key: for tests, which sign with a key of their own.
-    fn checking_with(key: ReleaseKey) -> Result<Self, ClientBuildError> {
-        let client = https_client_builder()?
+    /// As [`Self::new`], checking signatures against `key` and fetching the
+    /// URLs `schemes` allows: the tests sign with a key of their own and
+    /// serve plain HTTP.
+    fn with(key: ReleaseKey, schemes: Schemes) -> Result<Self, ClientBuildError> {
+        let client = https_client_builder(schemes)?
             .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
             .read_timeout(DOWNLOAD_STALL_TIMEOUT)
             .build()?;

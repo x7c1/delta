@@ -183,9 +183,7 @@ mod tests {
     }
 
     fn manual() -> ManualInstall {
-        ManualInstall::Command(
-            "sudo apt install /data/updates/delta-desktop_0.6.0_amd64.deb".into(),
-        )
+        ManualInstall::apt_install(Path::new("/data/updates/delta-desktop_0.6.0_amd64.deb"))
     }
 
     #[tokio::test]

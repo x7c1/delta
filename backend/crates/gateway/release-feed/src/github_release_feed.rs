@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use delta_usecase::{PublishedRelease, ReleaseAsset, ReleaseFeed, ReleaseFeedError};
 
-use crate::https_client::{https_client_builder, USER_AGENT_VALUE};
+use crate::https_client::{https_client_builder, Schemes, USER_AGENT_VALUE};
 use crate::{ClientBuildError, REQUEST_TIMEOUT};
 
 /// The media type GitHub's REST API documents for its JSON answers.
@@ -18,9 +18,19 @@ pub struct GithubReleaseFeed {
 }
 
 impl GithubReleaseFeed {
-    /// A feed asking `url` (normally [`LATEST_RELEASE_URL`](crate::LATEST_RELEASE_URL)).
+    /// A feed asking `url` (normally [`LATEST_RELEASE_URL`](crate::LATEST_RELEASE_URL))
+    /// over HTTPS only: an `http://` URL, or a redirect to one, fails the
+    /// request.
     pub fn new(url: impl Into<String>) -> Result<Self, ClientBuildError> {
-        let client = https_client_builder()?.timeout(REQUEST_TIMEOUT).build()?;
+        Self::with(url, Schemes::HttpsOnly)
+    }
+
+    /// As [`Self::new`], asking the URLs `schemes` allows: the tests serve
+    /// plain HTTP.
+    fn with(url: impl Into<String>, schemes: Schemes) -> Result<Self, ClientBuildError> {
+        let client = https_client_builder(schemes)?
+            .timeout(REQUEST_TIMEOUT)
+            .build()?;
         Ok(Self {
             client,
             url: url.into(),
@@ -99,7 +109,13 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
-    use crate::test_server::serve_once;
+    use crate::https_client::tests::{is_refused_redirect, redirect_to};
+    use crate::test_server::{serve_once, serve_raw};
+
+    /// A feed asking `url` over the tests' plain HTTP.
+    fn feed(url: impl Into<String>) -> GithubReleaseFeed {
+        GithubReleaseFeed::with(url, Schemes::PlainFirstHop).unwrap()
+    }
 
     #[tokio::test]
     async fn a_release_is_read_with_the_headers_github_requires() {
@@ -108,11 +124,7 @@ mod tests {
             r#"{"tag_name":"v0.6.0","html_url":"https://github.com/x7c1/delta/releases/tag/v0.6.0","draft":false}"#,
         )
         .await;
-        let release = GithubReleaseFeed::new(url)
-            .unwrap()
-            .latest_release()
-            .await
-            .unwrap();
+        let release = feed(url).latest_release().await.unwrap();
         assert_eq!(
             release,
             PublishedRelease {
@@ -214,11 +226,7 @@ mod tests {
     async fn a_non_2xx_status_is_reported_with_its_code() {
         let (url, server) =
             serve_once("403 Forbidden", r#"{"message":"API rate limit exceeded"}"#).await;
-        let err = GithubReleaseFeed::new(url)
-            .unwrap()
-            .latest_release()
-            .await
-            .unwrap_err();
+        let err = feed(url).latest_release().await.unwrap_err();
         assert!(matches!(err, ReleaseFeedError::Status(403)), "{err:?}");
         server.await.unwrap();
     }
@@ -227,11 +235,7 @@ mod tests {
     async fn a_body_that_is_not_a_release_is_malformed() {
         for body in ["not json", r#"{"tag_name":"v0.6.0"}"#, "[]"] {
             let (url, server) = serve_once("200 OK", body).await;
-            let err = GithubReleaseFeed::new(url)
-                .unwrap()
-                .latest_release()
-                .await
-                .unwrap_err();
+            let err = feed(url).latest_release().await.unwrap_err();
             assert!(
                 matches!(&err, ReleaseFeedError::Malformed(cause) if cause.is::<serde_json::Error>()),
                 "{body}: {err:?}"
@@ -249,8 +253,7 @@ mod tests {
             .local_addr()
             .unwrap()
             .port();
-        let err = GithubReleaseFeed::new(format!("http://127.0.0.1:{port}/latest"))
-            .unwrap()
+        let err = feed(format!("http://127.0.0.1:{port}/latest"))
             .latest_release()
             .await
             .unwrap_err();
@@ -258,5 +261,35 @@ mod tests {
             matches!(&err, ReleaseFeedError::Request(cause) if cause.is::<reqwest::Error>()),
             "{err:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_redirect_to_plain_http_is_refused() {
+        let (url, server) = serve_raw(
+            "/repos/x7c1/delta/releases/latest",
+            redirect_to("http://127.0.0.1:9/latest"),
+        )
+        .await;
+        let err = feed(url).latest_release().await.unwrap_err();
+        assert!(
+            matches!(&err, ReleaseFeedError::Request(cause) if is_refused_redirect(cause.as_ref())),
+            "{err:?}"
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_apps_feed_refuses_a_plain_http_url() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/latest", listener.local_addr().unwrap());
+        let err = GithubReleaseFeed::new(url)
+            .unwrap()
+            .latest_release()
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ReleaseFeedError::Request(_)), "{err:?}");
+        let accepted =
+            tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept()).await;
+        assert!(accepted.is_err(), "the feed connected over plain HTTP");
     }
 }

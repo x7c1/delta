@@ -120,7 +120,8 @@ mod tests {
                 version: "v0.6.0".to_owned(),
                 error: "no agent".to_owned(),
                 manual: WireManualInstall::Command {
-                    command: "sudo apt install /u/d.deb".to_owned(),
+                    check: vec!["sha256sum /u/d.deb".to_owned()],
+                    install: "sudo -k apt install /u/d.deb".to_owned(),
                 },
             })
             .unwrap(),
@@ -128,7 +129,11 @@ mod tests {
                 "state": "unavailable",
                 "version": "v0.6.0",
                 "error": "no agent",
-                "manual": { "kind": "command", "command": "sudo apt install /u/d.deb" },
+                "manual": {
+                    "kind": "command",
+                    "check": ["sha256sum /u/d.deb"],
+                    "install": "sudo -k apt install /u/d.deb",
+                },
             })
         );
     }

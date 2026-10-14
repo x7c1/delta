@@ -31,8 +31,10 @@
 //!
 //! # Requests
 //!
-//! Every request carries a `User-Agent` (GitHub rejects requests without
-//! one) and no token. The feed's request also sends
+//! Every request goes over HTTPS: both clients refuse an `http://` URL and
+//! a redirect to one, so the feed's answer, a signature or a bundle is never
+//! read off plain HTTP. Every request carries a `User-Agent` (GitHub rejects
+//! requests without one) and no token. The feed's request also sends
 //! `Accept: application/vnd.github+json` and gives up after
 //! [`REQUEST_TIMEOUT`]. A download of several MB has no cap on the whole
 //! transfer: it gives up when connecting takes longer than

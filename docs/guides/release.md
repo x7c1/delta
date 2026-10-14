@@ -210,7 +210,10 @@ must be out of reach of everything that builds.
   archive whose sha256 is written in the workflow, and signs exactly the
   bundle names `plan` lists, with the trusted comment
   `file:<bundle> version:<version>` (the app refuses a signature naming
-  another file or version). It then verifies each signature against the
+  another file or version). On a dry run `<version>` is the dry run's own,
+  `0.0.0-dryrun.<run id>`, not the version the bundles are built as: a
+  dry-run bundle signed with the release key must not carry a signature the
+  app accepts when it installs that version. It then verifies each signature against the
   public key written in the workflow — the one the app compiles in — so a
   secret that does not match the app's key fails the run instead of every
   user's update, and uploads the signatures as the `bundle-signatures`

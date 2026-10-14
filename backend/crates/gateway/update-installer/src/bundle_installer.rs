@@ -7,6 +7,7 @@ use async_trait::async_trait;
 
 use delta_usecase::{with_causes, InstallError, InstalledApp, UpdateInstaller};
 
+use crate::bundle_dir::shared_by_others;
 use crate::image_check::{check_image, APP_NAME};
 use crate::image_check_error::ImageCheckError;
 use crate::swap_paths::{remove_any, SwapPaths};
@@ -101,8 +102,8 @@ impl UpdateInstaller for BundleInstaller {
 
     /// Why no update can replace the running bundle: where it runs from is
     /// unknown, it is not in a bundle, macOS runs a translocated copy of it,
-    /// or this user may not write to its directory. Checked without writing
-    /// anything.
+    /// or this user may not write to its directory, or someone else may.
+    /// Checked without writing anything.
     fn unavailable(&self) -> Option<InstallError> {
         replaceable_bundle(&self.location)
             .err()
@@ -112,8 +113,9 @@ impl UpdateInstaller for BundleInstaller {
 
 /// Where the bundle at `location` would be updated, or why Delta cannot
 /// update it ([`InstallError::Unavailable`]'s source): where it runs from is
-/// unknown, it is not in a bundle, macOS runs a translocated copy of it, or
-/// this user may not write to the bundle's directory. Writes nothing.
+/// unknown, it is not in a bundle, macOS runs a translocated copy of it,
+/// this user may not write to the bundle's directory, or someone else may
+/// (see [`shared_by_others`]). Writes nothing.
 fn replaceable_bundle(
     location: &Result<BundleLocation, Arc<std::io::Error>>,
 ) -> Result<SwapPaths, UnreplaceableBundle> {
@@ -134,7 +136,21 @@ fn replaceable_bundle(
             bundle: bundle.clone(),
         });
     }
-    Ok(paths)
+    // SAFETY: `geteuid` has no preconditions and cannot fail.
+    let user = unsafe { libc::geteuid() };
+    match shared_by_others(&paths.dir, user) {
+        Ok(None) => Ok(paths),
+        Ok(Some(reason)) => Err(UnreplaceableBundle::SharedDir {
+            dir: paths.dir,
+            bundle: bundle.clone(),
+            reason,
+        }),
+        Err(source) => Err(UnreplaceableBundle::Unchecked {
+            dir: paths.dir,
+            bundle: bundle.clone(),
+            source,
+        }),
+    }
 }
 
 /// Whether this process may create and rename entries in the directory
@@ -378,6 +394,12 @@ mod tests {
                 crate::image_check::BUNDLE_IDENTIFIER,
                 "0.5.0",
             );
+            // Whatever the umask: only this user may change where the app is.
+            std::fs::set_permissions(
+                dir.path().join("apps"),
+                std::os::unix::fs::PermissionsExt::from_mode(0o755),
+            )
+            .unwrap();
             std::fs::create_dir(dir.path().join("updates")).unwrap();
             std::fs::write(dir.path().join("updates/Delta_0.6.0_aarch64.dmg"), DMG).unwrap();
             std::fs::create_dir(dir.path().join("tmp")).unwrap();
@@ -657,6 +679,55 @@ mod tests {
                 "{read_only:?}"
             );
         }
+
+        assert!(tools.calls().is_empty());
+        assert_eq!(Machine::version_of(&machine.bundle()), "0.5.0");
+    }
+
+    /// A bundle in a directory someone else may change is one Delta does
+    /// not update: another user could swap the update before it starts.
+    #[tokio::test]
+    async fn a_bundle_in_a_group_or_world_writable_directory_is_unavailable() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let machine = Machine::new();
+        let tools = Arc::new(FakeTools::of_version("0.6.0"));
+        let apps = machine.dir.path().join("apps");
+        let chmod =
+            |mode| std::fs::set_permissions(&apps, PermissionsExt::from_mode(mode)).unwrap();
+        let group = std::fs::metadata(&apps).unwrap().gid();
+        let mut shared = vec![0o777, 0o757];
+        if !crate::bundle_dir::ADMIN_GROUPS.contains(&group) {
+            shared.push(0o775);
+        }
+
+        for mode in shared {
+            chmod(mode);
+            let result = machine.install(&tools).await;
+            let at_startup = machine.installer(&tools).unavailable();
+            chmod(0o755);
+            for err in [result.as_ref().err(), at_startup.as_ref()] {
+                assert!(
+                    matches!(
+                        unreplaceable(err),
+                        Some(UnreplaceableBundle::SharedDir { dir, bundle, .. })
+                            if *dir == apps && *bundle == machine.bundle()
+                    ),
+                    "{mode:o}: {err:?}"
+                );
+            }
+            let text = with_causes(&result.unwrap_err());
+            assert!(text.contains("may be written to by"), "{text}");
+            assert!(
+                text.contains("someone else could replace the update"),
+                "{text}"
+            );
+        }
+
+        chmod(0o1777);
+        let sticky = machine.installer(&tools).unavailable();
+        chmod(0o755);
+        assert!(sticky.is_none(), "{sticky:?}");
 
         assert!(tools.calls().is_empty());
         assert_eq!(Machine::version_of(&machine.bundle()), "0.5.0");

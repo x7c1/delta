@@ -4,11 +4,16 @@
  * How the user installs the verified download by hand when Delta cannot,
  * internally tagged by `kind`, one per platform:
  *
- * - `command` (Linux): `command` installs the file from the user's own
- *   terminal, `sudo apt install <absolute path of the .deb>`, the path
- *   quoted for a POSIX shell when it needs to be.
+ * - `command` (Linux): commands to run in a terminal outside Delta (not a
+ *   Delta session's pane, which agents can type into). `check` checks the
+ *   file first, one command per line: `sha256sum <path>`, to compare with
+ *   the digest on the release page, and `minisign -Vm <path> -P <release
+ *   public key>`, against the signature Delta kept beside it. `install`
+ *   installs it: `sudo -k apt install <absolute path of the .deb>`, so
+ *   `sudo` asks for the password and keeps no cached authentication. Each
+ *   path is quoted for a POSIX shell when it needs to be.
  * - `disk_image` (macOS): open the disk image at `path`, an absolute path,
  *   quit Delta (Finder does not replace an app that is open), drag Delta to
  *   Applications, and start Delta again.
  */
-export type ManualInstall = { "kind": "command", command: string, } | { "kind": "disk_image", path: string, };
+export type ManualInstall = { "kind": "command", check: Array<string>, install: string, } | { "kind": "disk_image", path: string, };
