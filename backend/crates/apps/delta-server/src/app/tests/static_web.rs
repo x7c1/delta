@@ -22,7 +22,7 @@ static FIXTURE: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/tests/fixtures/
 const NAVIGATION_ACCEPT: &str = "text/html,application/xhtml+xml,*/*;q=0.8";
 
 async fn mounted() -> Router {
-    static_web::mount(api_router(test_state().await), &FIXTURE, TEST_AUTH_TOKEN)
+    static_web::mount(api_router(test_state().await), &FIXTURE)
 }
 
 /// A loopback GET to `uri` with no token, as a browser's first page load is.
@@ -51,7 +51,7 @@ fn header_of(response: &Response, name: header::HeaderName) -> &str {
         .unwrap()
 }
 
-/// Asserts `response` is the fixture page with the token tag injected.
+/// Asserts `response` is the fixture page as built, carrying no credential.
 async fn assert_is_index(response: Response) {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -66,17 +66,33 @@ async fn assert_is_index(response: Response) {
     let body = body_text(response).await;
     assert!(body.contains("<title>Delta fixture</title>"), "{body}");
     assert!(
-        body.contains(&format!(
-            r#"<meta name="delta-auth-token" content="{TEST_AUTH_TOKEN}" /></head>"#
-        )),
-        "the token tag is injected at the end of <head>: {body}",
+        !body.contains(TEST_AUTH_TOKEN),
+        "a page served without credentials must not carry the token: {body}",
+    );
+    assert_eq!(
+        body,
+        FIXTURE
+            .get_file("index.html")
+            .and_then(|file| file.contents_utf8())
+            .unwrap(),
+        "the page is served exactly as built",
     );
 }
 
 #[tokio::test]
-async fn serves_the_page_at_the_root_and_at_index_html_without_a_token() {
-    for uri in ["/", "/index.html"] {
-        let response = send(mounted().await, get(uri).body(Body::empty()).unwrap()).await;
+async fn serves_the_page_without_the_token_to_a_request_without_credentials() {
+    // The root, `/index.html`, and the SPA fallback for a deep link are the
+    // three ways to get the page; none of them may hand out the token.
+    for (uri, accept) in [
+        ("/", None),
+        ("/index.html", None),
+        ("/sessions/xyz", Some(NAVIGATION_ACCEPT)),
+    ] {
+        let mut request = get(uri);
+        if let Some(accept) = accept {
+            request = request.header("accept", accept);
+        }
+        let response = send(mounted().await, request.body(Body::empty()).unwrap()).await;
         assert_is_index(response).await;
     }
 }
@@ -114,19 +130,6 @@ async fn serves_a_nested_file_with_its_content_type_and_no_cache() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(header_of(&response, header::CONTENT_TYPE), "image/svg+xml");
     assert_eq!(header_of(&response, header::CACHE_CONTROL), "no-cache");
-}
-
-#[tokio::test]
-async fn falls_back_to_the_page_for_a_deep_link_navigation() {
-    let response = send(
-        mounted().await,
-        get("/sessions/xyz")
-            .header("accept", NAVIGATION_ACCEPT)
-            .body(Body::empty())
-            .unwrap(),
-    )
-    .await;
-    assert_is_index(response).await;
 }
 
 #[tokio::test]
@@ -241,8 +244,8 @@ async fn keeps_the_api_behind_its_bearer_guard() {
 
 #[tokio::test]
 async fn refuses_the_page_to_a_non_loopback_host_or_a_foreign_origin() {
-    // The page carries the token, so a DNS-rebinding host or a foreign page
-    // must not be handed it.
+    // The static surface sits behind the Origin/Host guard like the API: a
+    // DNS-rebinding host or a foreign page is refused it.
     let foreign_host = Request::builder()
         .method("GET")
         .uri("/")

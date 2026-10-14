@@ -15,9 +15,29 @@ export const DEV_SERVER_PORT = Number(process.env.E2E_FAKE_PORT ?? 5198);
 export const BACKEND_PORT = Number(process.env.E2E_FAKE_BACKEND_PORT ?? 7899);
 
 /**
- * A fixed per-run bearer token. The dev server injects it into the page as the
- * `delta-auth-token` meta tag, every backend generation is started with it, and
- * the config sends it on the specs' direct REST calls — so the page's token
- * always matches the one the backend enforces.
+ * A fixed per-run bearer token. Every backend generation is started with it
+ * (`DELTA_AUTH_TOKEN`), the config seeds it into the page's `localStorage`
+ * where the app keeps the token it would otherwise trade a one-time code for,
+ * and the config sends it on the specs' direct REST calls — so the page's
+ * token always matches the one the backend enforces, across restarts too.
  */
 export const AUTH_TOKEN = 'delta-e2e-fake-auth-token';
+
+/** The `localStorage` key the app keeps its token under (`tokenStore.ts`). */
+export const AUTH_TOKEN_STORAGE_KEY = 'delta.auth.token';
+
+/**
+ * A Playwright `storageState` that starts every page of the suite holding
+ * `token` on `origin`, as if it had already traded a one-time code for it.
+ */
+export function storageStateWithToken(origin: string, token: string) {
+  return {
+    cookies: [],
+    origins: [
+      {
+        origin,
+        localStorage: [{ name: AUTH_TOKEN_STORAGE_KEY, value: token }],
+      },
+    ],
+  };
+}

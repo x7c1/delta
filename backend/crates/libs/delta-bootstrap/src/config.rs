@@ -53,9 +53,10 @@ pub struct Config {
     pub tmux_socket: String,
     /// The per-run bearer token the API and live sockets require, enforced by
     /// the server's auth guard. Minted (or handed in) once for the server's
-    /// lifetime by `delta_server::config::config_from_env`; the frontend
-    /// presents it on every request. Not a wire field and never rotated — see
-    /// the auth guard.
+    /// lifetime by `delta_server::config::config_from_env`. The page trades a
+    /// one-time code for it and presents it on every request; the CLI server
+    /// also keeps it in [`DataLayout::auth_token`] for local clients. Never
+    /// rotated, and never in a page the server serves — see the auth guard.
     pub auth_token: String,
     /// The hook secret carried back on every hook URL as `?hs=<secret>`,
     /// enforced by the server's hook auth guard, and rendered into the session

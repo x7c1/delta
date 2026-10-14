@@ -1,5 +1,7 @@
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
+  AuthExchangeRequest,
+  AuthExchangeResponse,
   CloneRepositoryRequest,
   CreateLaunchOptionRequest,
   CreateCloneRootRequest,
@@ -68,18 +70,27 @@ export interface ApiClientOptions {
    * means "attach nothing".
    */
   token?: string;
+  /**
+   * Called when the server answers `401`: the token is missing, or belongs to
+   * an earlier run of the server (it mints a new one each start). The request
+   * still fails with an {@link ApiError}; this only lets the app swap its UI
+   * for the screen that asks for a new link.
+   */
+  onUnauthorized?: () => void;
 }
 
 export class ApiClient {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
   private readonly token: string;
+  private readonly onUnauthorized: () => void;
 
   constructor(options: ApiClientOptions = {}) {
     // Normalise away any trailing slash so we can concatenate paths directly.
     this.baseUrl = (options.baseUrl ?? '').replace(/\/$/, '');
     this.fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
     this.token = options.token ?? '';
+    this.onUnauthorized = options.onUnauthorized ?? (() => {});
   }
 
   /**
@@ -98,14 +109,7 @@ export class ApiClient {
   }
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await this.fetchFn(
-      `${this.baseUrl}${path}`,
-      this.authorized(init),
-    );
-    if (!response.ok) {
-      const { message, code } = await readError(response);
-      throw new ApiError(response.status, message, code);
-    }
+    const response = await this.send(path, init);
     return (await response.json()) as T;
   }
 
@@ -114,14 +118,48 @@ export class ApiClient {
     path: string,
     init?: RequestInit,
   ): Promise<void> {
+    await this.send(path, init);
+  }
+
+  /**
+   * Send one authorized request, throwing an {@link ApiError} for a non-2xx
+   * answer — after telling `onUnauthorized` about a `401`.
+   */
+  private async send(path: string, init?: RequestInit): Promise<Response> {
     const response = await this.fetchFn(
       `${this.baseUrl}${path}`,
       this.authorized(init),
     );
     if (!response.ok) {
+      if (response.status === 401) {
+        this.onUnauthorized();
+      }
       const { message, code } = await readError(response);
       throw new ApiError(response.status, message, code);
     }
+    return response;
+  }
+
+  /**
+   * `POST /api/auth/exchange` — trade the one-time code the page was opened
+   * with for the server's per-run bearer token. Sent without a token (the page
+   * has none yet) and without reporting a `401` to `onUnauthorized`: a used,
+   * expired or unknown code answers `401`, which the caller handles itself
+   * through the thrown {@link ApiError}.
+   */
+  async exchangeAuthCode(code: string): Promise<string> {
+    const body: AuthExchangeRequest = { code };
+    const response = await this.fetchFn(`${this.baseUrl}/api/auth/exchange`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const { message, code: errorCode } = await readError(response);
+      throw new ApiError(response.status, message, errorCode);
+    }
+    const { token } = (await response.json()) as AuthExchangeResponse;
+    return token;
   }
 
   /**

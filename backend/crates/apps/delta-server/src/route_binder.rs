@@ -82,11 +82,12 @@ impl RouteBinder {
         // the origin tests present a valid token, so a foreign origin still fails
         // at the origin check with 403, not 401. The two auth guards partition
         // the surface by path: the bearer guard covers everything except
-        // `/hooks/*` and `/health`, while the hook guard covers `/hooks/*` (and
-        // passes everything else through), so a hook needs the `hs` secret but no
-        // bearer token, and an `/api/*` request the reverse. The origin/host
-        // guard covers every path. See [`crate::auth_guard`],
-        // [`crate::hook_auth_guard`], and [`crate::origin_guard`].
+        // `/hooks/*`, `/health` and the one-time code exchange, while the hook
+        // guard covers `/hooks/*` (and passes everything else through), so a
+        // hook needs the `hs` secret but no bearer token, and an `/api/*`
+        // request the reverse. The origin/host guard covers every path. See
+        // [`crate::auth_guard`], [`crate::hook_auth_guard`], and
+        // [`crate::origin_guard`].
         let auth = axum::middleware::from_fn_with_state(state.clone(), crate::auth_guard::guard);
         let hook_auth =
             axum::middleware::from_fn_with_state(state.clone(), crate::hook_auth_guard::guard);

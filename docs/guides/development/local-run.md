@@ -6,8 +6,8 @@ This brings up the full loop end to end: type in the browser, a real `claude`
 TUI (running in tmux) receives it via `send-keys`, and its response flows back
 through the JSONL transcript and Claude Code's HTTP hooks to the browser.
 
-Opening the browser is the only manual step. `make dev` starts both the
-server and the frontend dev server. The server owns the `claude` session
+Opening the browser at the link `make dev` prints is the only manual step.
+`make dev` starts both the server and the frontend dev server. The server owns the `claude` session
 lifecycle but does not spawn anything on startup or on page load: on load the UI
 shows the session list (empty on a fresh database), and the first Send from the
 composer (or a New action) spawns a session, so there is nothing else to launch.
@@ -73,7 +73,22 @@ process dies or is not listening within its budget, `make dev` tears the loop
 back down and exits non-zero after printing the tail of the relevant log (the
 budgets are overridable via `DELTA_DEV_SERVER_TIMEOUT` / `DELTA_DEV_FRONTEND_TIMEOUT`).
 
-Then open <http://localhost:5173>. On load the UI fetches the session list and
+Then open the link `make dev` prints last — <http://localhost:5173> with a
+one-time code in its fragment (`/#code=…`). The page trades the code for the
+server's bearer token and keeps the token, so reloads and new tabs on the same
+origin keep working; the link itself works once, within 10 minutes. A page
+without a token, or whose token the server no longer accepts (after the server
+restarted), shows a screen asking for a new link. Print one at any time without
+restarting anything:
+
+```bash
+make open-url    # = scripts/dev.sh --open-url: delta-server open-url --origin http://localhost:5173
+```
+
+[security.md](../security.md#handing-the-token-to-the-page) explains why the
+page does not just carry the token.
+
+On load the UI fetches the session list and
 shows it (empty on a fresh database); opening the browser does not spawn
 anything. From the composer, the first Send (or a New action) spawns a fresh
 `claude` session. Existing sessions show as open or closed: a closed session is
@@ -115,16 +130,30 @@ DELTA_PORT=7878 DELTA_IDENTIFIER=io.github.x7c1.delta.dev \
   backend/target/release/delta-server
 ```
 
-Then open <http://127.0.0.1:7878/>. The server hands out the page with the
-per-run token injected, so `DELTA_AUTH_TOKEN` is optional (a bare run mints
-one). Unlike `make dev`, nothing sets the other `DELTA_*` variables for you.
+On start the server prints, on one line of stderr, the URL to open:
+`http://127.0.0.1:7878/#code=…`. The link works once, within 10 minutes; the
+page then keeps the token itself. For a new link — another browser, or a link
+that was already used — run the re-issue command against the running server,
+with the same `DELTA_*` variables it was started with:
+
+```bash
+DELTA_PORT=7878 DELTA_IDENTIFIER=io.github.x7c1.delta.dev \
+  backend/target/release/delta-server open-url
+```
+
+It reads the server's bearer token from `auth-token` in the data directory
+(owner-only; the server removes it when it stops cleanly) and asks the server
+for a fresh one-time code. `--origin <url>` prints the link for another origin,
+such as a Vite dev server proxied to this server. Unlike `make dev`, nothing
+sets the other `DELTA_*` variables for you.
 `DELTA_IDENTIFIER` points it at `make dev`'s data directory, so it shows the
 same sessions, and at `make dev`'s tmux server; without it the server runs
 under the installed app's identifier — its data directory and the tmux socket
 it runs its sessions on — and `make down` would not end the sessions it
 spawns.
-What is served, and how the page gets the token, is in
-[the API guide](../api/README.md#the-built-frontend-embed-web). A plain
+What is served is in
+[the API guide](../api/README.md#the-built-frontend-embed-web), and how the page
+gets the token in [its Authentication section](../api/README.md#authentication). A plain
 `cargo build` never needs `dist/`: only the `embed-web` feature compiles it in.
 
 ## Two environments: the installed app and the dev environment
@@ -177,7 +206,8 @@ which names the dev environment's data directory and tmux socket, and sets
 to it instead.
 
 - **Startup.** The window opens at once on a page that says "Starting
-  Delta…", and switches to Delta when the server is up: once your login shell
+  Delta…", and switches to Delta — opened with a fresh one-time code the app
+  mints in process, so no link is needed — when the server is up: once your login shell
   has answered (below), the database is open and the sessions that survived
   the last quit are re-adopted. The app logs both moments at `info` (`window
   shown on the placeholder page`, then `window navigating to the server` with

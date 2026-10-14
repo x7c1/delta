@@ -6,6 +6,7 @@
 //! `test_state_with_unavailable_gh` wrapper.
 
 mod auth;
+mod auth_codes;
 mod clone_roots;
 mod hooks;
 mod latest_release;

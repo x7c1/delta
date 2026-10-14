@@ -7,7 +7,8 @@ keeps it off the network, but loopback binding is *not* an authentication
 boundary: any process or web page on the same host can still reach the port.
 Delta therefore treats **reaching the loopback port as the trust boundary**
 ("unauthenticated-by-port") and layers explicit guards on top of it. This
-document states what each guard covers, the one deliberate trade-off in how
+document states what each guard covers, how a browser page comes to hold the
+bearer token without any page carrying it, the one deliberate trade-off in how
 Delta pre-accepts Claude Code's workspace-trust dialog, how the files Delta
 writes into its data directory are protected, how the desktop app installs an
 update (on Linux without the server ever holding root, on macOS without root
@@ -30,15 +31,15 @@ the local machine, four guards defend the surface:
   loopback `Host`, so it passes this guard — which is why the next one exists.
 - **Per-run bearer token** — a secret minted once per server run and required on
   every REST call (`Authorization: Bearer <token>`) and live socket
-  (`token=<token>` query parameter). The browser page receives it in a
-  `<meta name="delta-auth-token">` tag (injected by Vite in development, by the
-  server itself for the built frontend — see
-  [api/README.md](api/README.md#the-built-frontend-embed-web)). Anything without
-  the valid token gets `401`. This closes the gap the Origin/Host guard leaves
-  open for a local non-browser process. Two paths are exempt from *this* guard:
-  `/health` (an unauthenticated liveness probe) and `/hooks/*`, which carries
-  the hook secret instead of a bearer token (next guard) rather than
-  being left open.
+  (`token=<token>` query parameter). No response served without credentials
+  carries it; the page obtains it through a one-time code
+  ([next section](#handing-the-token-to-the-page)). Anything without the valid
+  token gets `401`. This closes the gap the Origin/Host guard leaves open for a
+  local non-browser process. Three paths are exempt from *this* guard:
+  `/health` (an unauthenticated liveness probe), `/hooks/*`, which carries the
+  hook secret instead of a bearer token (next guard) rather than being left
+  open, and `POST /api/auth/exchange`, which a page without a token calls to
+  obtain one and which is authenticated by the one-time code instead.
 - **Hook secret** — the `/hooks/*` control plane is called by Claude Code (not
   the browser), so it cannot carry a bearer token. Instead Delta renders a
   secret into the hook URLs (`?hs=<secret>`) and requires it on every hook
@@ -48,6 +49,51 @@ the local machine, four guards defend the surface:
   keeps calling the URLs it was launched with. Deleting the file rotates it.
 - **Scoped trust seeding** — the subject of the next section: Delta pre-accepts
   Claude Code's workspace-trust dialog only for directories it created itself.
+
+## Handing the token to the page
+
+The page and its assets are served to any request (the browser cannot present
+a token before it has one), so none of them carries the token. Instead the page
+is opened at a URL with a **one-time code** in its fragment —
+`http://127.0.0.1:<port>/#code=<code>` — and trades the code for the token:
+
+- **The code.** Minted by the running server from the operating system's
+  CSPRNG (well over 128 bits), compared in constant time, and valid for one
+  exchange within 10 minutes of being minted, whichever ends first. A used,
+  expired or unknown code answers `401` and returns no token. The fragment never
+  reaches a server's request log or a `Referer`, and the page removes it from
+  the address bar (`history.replaceState`) before it does anything else.
+- **The exchange.** On boot the page posts the code to `POST /api/auth/exchange`
+  and receives the token in the response body (`Cache-Control: no-store`). The
+  endpoint stays behind the Origin/Host guard, so a foreign page cannot redeem a
+  code either. In development it is under `/api/`, so the Vite dev server
+  proxies it like the rest of the API.
+- **Where the code comes from.** The desktop app runs the server in its own
+  process, mints a code directly, and opens its window at the URL with it, on
+  every launch. `delta-server` run directly prints the URL on one line of stderr
+  when it starts. `delta-server open-url` prints a fresh one for the running
+  server without restarting it (`--origin <url>` for another origin, such as
+  the Vite dev server's); it authenticates to the server with the bearer token
+  from the token file below, through `POST /api/auth/codes`. `make dev` prints
+  the Vite URL with a code once both servers are up.
+- **Where the page keeps the token.** In `localStorage`, which is scoped to the
+  page's origin *including its port*, so two Delta servers on different ports
+  never share it and a reload or a second tab of the same server keeps working.
+  A cookie is deliberately not used: cookies are not scoped by port, so a cookie
+  set on `127.0.0.1` would be sent to every other listener on `127.0.0.1`. The
+  page presents the token exactly as before (`Authorization` header, `token=`
+  on the socket upgrades). When it holds none, its link was already used, or
+  the server answers `401` (it was restarted and minted a new token), the page
+  shows a short screen asking for a new link instead of the app.
+- **The token file.** For `open-url` and other local clients of the same user,
+  `delta-server` writes its token to `<data dir>/auth-token` on start, created
+  with mode **0600** inside the **0700** data directory, replacing any file an
+  earlier run left. It removes the file on a clean stop (an erase, `SIGINT` or
+  `SIGTERM`).
+- **Not in child environments.** `DELTA_AUTH_TOKEN` fixes the token in advance
+  for tests and scripts. The server removes it from its own environment as soon
+  as it has read it, so the agents, tmux and every other command it starts do
+  not inherit it.
 
 ## The Claude Code trust-seeding trade-off
 

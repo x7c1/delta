@@ -151,6 +151,7 @@ path it writes from it, in one place
 
 ```text
 <data dir>/
+  auth-token               the running delta-server's bearer token, owner-only, removed on a clean stop (not written by the desktop app)
   delta.db                 SQLite overlay (with its -wal/-shm and .bak-v<N> siblings)
   delta-hook-state.json    the hook secret and the desktop app's port, kept across restarts
   sessions/<token>/        per-spawn working directory of a session started without a repository

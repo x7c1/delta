@@ -9,6 +9,16 @@
 //! `AppState::token`. Every browser request carries it; anything without the
 //! valid token gets `401`.
 //!
+//! ## How a client comes to hold the token
+//!
+//! No response served without credentials carries the token: not the page, not
+//! any asset. A page is opened at a URL carrying a one-time code in its
+//! fragment and trades the code for the token through the exchange endpoint
+//! (`crate::one_time_codes`, `crate::api::auth`). A non-browser client of the
+//! same user reads it from the token file the `delta-server` binary keeps in
+//! its data directory (`crate::token_file`), or fixes it in advance with
+//! `DELTA_AUTH_TOKEN`.
+//!
 //! The token arrives in one of two ways, because a browser cannot set request
 //! headers on a WebSocket upgrade:
 //!
@@ -21,8 +31,7 @@
 //!
 //! ## Exemptions
 //!
-//! `/hooks/*` and `/health` are exempt from *this* (bearer) guard by path
-//! prefix:
+//! Three kinds of path are exempt from *this* (bearer) guard:
 //!
 //! - `/hooks/*` is the Claude Code control plane — `curl` POSTs from Claude
 //!   Code, not the browser, so there is no place to carry a bearer token. It is
@@ -31,6 +40,10 @@
 //!   into the hook URLs. This guard defers hooks to that one rather than
 //!   demanding a bearer token they cannot carry.
 //! - `/health` is an unauthenticated liveness probe (exempt from both guards).
+//! - The exchange endpoint (`POST /api/auth/exchange`) is how a page that has
+//!   no token yet obtains one, so it cannot require one. It authenticates the
+//!   caller by the one-time code instead, and stays behind the Origin/Host
+//!   guard, so a foreign page cannot redeem a code either.
 //!
 //! ## Middleware order
 //!
@@ -39,25 +52,30 @@
 //! before its origin is inspected. The pre-existing Origin/Host tests still
 //! assert `403` for a foreign origin, so they send a valid token to pass this
 //! guard and reach the origin check; a request that reaches the origin check is
-//! therefore always one that already presented a valid token.
+//! therefore one that already presented a valid token, or one on an exempt
+//! path.
 
 use axum::extract::{Request, State};
 use axum::http::{header, StatusCode, Uri};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
+use delta_wire::endpoint::{Endpoint, ExchangeAuthCode};
+
 use crate::state::AppState;
 
 /// Rejects a request that does not present the per-run token, except on the
-/// exempt `/hooks/*` and `/health` paths. Everything else is passed to `next`.
+/// exempt `/hooks/*`, `/health` and exchange paths. Everything else is passed
+/// to `next`.
 pub(crate) async fn guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let path = request.uri().path();
     // Defer the Claude Code control plane and the health probe (see module
     // docs): hooks are `curl`ed by Claude Code with no place to carry a bearer
     // token, so they authenticate through their own `hs` secret in
     // `crate::hook_auth_guard` instead; `/health` is an unauthenticated liveness
-    // probe.
-    if path == "/health" || path.starts_with("/hooks/") {
+    // probe. The exchange is how a page without a token gets one; it is
+    // authenticated by its one-time code.
+    if path == "/health" || path.starts_with("/hooks/") || path == ExchangeAuthCode::PATH {
         return next.run(request).await;
     }
 

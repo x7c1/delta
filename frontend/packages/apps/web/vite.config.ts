@@ -1,5 +1,5 @@
 /// <reference types="vitest/config" />
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { bundleBudget } from './bundle-budget';
 
@@ -8,39 +8,12 @@ import { bundleBudget } from './bundle-budget';
 // backend on a dedicated port so it never collides with `make dev`.
 const backendPort = process.env.DELTA_PORT ?? '7878';
 
-// Inject the per-run bearer token into the served HTML as a static
-// `<meta name="delta-auth-token">` tag, read from DELTA_AUTH_TOKEN. `dev.sh`
-// mints one token and exports it into both the backend and this dev server, so
-// the tag the page carries matches the token the server enforces. The frontend
-// reads the tag in `src/config.ts` (`authToken()`). When the env var is unset —
-// notably mock mode (`make mock` / `make e2e`), which never reaches a real
-// backend — nothing is injected, and the frontend treats the absent token as
-// "attach nothing". A static meta tag is permitted by the existing CSP.
-//
-// Dev server only (`apply: 'serve'`): a production build must never bake a
-// token into `dist/`, even when DELTA_AUTH_TOKEN happens to be exported. The
-// built page served by delta-server (`embed-web`) gets the same tag injected by
-// the server at serve time instead
-// (backend/crates/apps/delta-server/src/app/static_web/index_page.rs).
-function injectAuthToken(): Plugin {
-  return {
-    name: 'delta-inject-auth-token',
-    apply: 'serve',
-    transformIndexHtml() {
-      const token = process.env.DELTA_AUTH_TOKEN;
-      if (!token) {
-        return [];
-      }
-      return [
-        {
-          tag: 'meta',
-          attrs: { name: 'delta-auth-token', content: token },
-          injectTo: 'head' as const,
-        },
-      ];
-    },
-  };
-}
+// No credential is put in the page this dev server serves: anything that can
+// reach the port can request it. The page is opened at a URL carrying a
+// one-time code in its fragment (`scripts/dev.sh` prints one, and `delta-server
+// open-url --origin <this server's origin>` prints another), and trades it for
+// the backend's bearer token through `POST /api/auth/exchange`, which the
+// `/api` proxy below forwards (see `src/features/auth/`).
 
 // Content-Security-Policy, mirrored from the <meta http-equiv> in index.html
 // (keep the two in sync). The <meta> tag is the primary control that protects
@@ -69,7 +42,7 @@ const contentSecurityPolicy =
 const BUNDLE_BUDGET_KB = 1200;
 
 export default defineConfig({
-  plugins: [react(), injectAuthToken(), bundleBudget(BUNDLE_BUDGET_KB)],
+  plugins: [react(), bundleBudget(BUNDLE_BUDGET_KB)],
   build: {
     chunkSizeWarningLimit: BUNDLE_BUDGET_KB,
   },

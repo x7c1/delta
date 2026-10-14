@@ -36,19 +36,17 @@
 //! [`mount`] installs the static surface as the API router's fallback, so it
 //! only ever sees a request no endpoint matched: it cannot shadow a route. The
 //! fallback is attached after the router's guard layers, so it is not wrapped
-//! by them. It must not sit behind the bearer guard, because the page is what
-//! delivers the token: a browser loading `/` has no token to present yet. It
-//! carries the Origin/Host guard itself, which keeps a DNS-rebinding page from
-//! reading the token out of the served HTML.
+//! by them. It must not sit behind the bearer guard, because a browser loading
+//! `/` has no token to present yet. It carries the Origin/Host guard itself,
+//! so a DNS-rebinding or foreign page is refused it like any other route.
 //!
-//! ## How the page learns the token and the API base
+//! ## No credential in what is served
 //!
-//! The frontend reads the per-run token from a `<meta name="delta-auth-token">`
-//! tag (`frontend/packages/apps/web/src/config.ts`). In development Vite
-//! injects it; here [`mount`] injects the same tag into `index.html` once, at
-//! router construction, from [`AppState::token`](crate::AppState::token). The
-//! token therefore never appears in a URL or in the built assets. The API base
-//! needs nothing: the build leaves `VITE_API_BASE_URL` unset, so the frontend
+//! Because anything that can reach the port can request these files, none of
+//! them carries the per-run token: the page is the build's `index.html` as is.
+//! The page obtains the token by trading the one-time code in its URL's
+//! fragment (`crate::one_time_codes`), and keeps it itself. The API base needs
+//! nothing either: the build leaves `VITE_API_BASE_URL` unset, so the frontend
 //! uses same-origin relative paths, which is this server.
 
 mod content_type;
@@ -85,17 +83,17 @@ const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 /// `Cache-Control` for everything whose name does not change with its content.
 const NO_CACHE: &str = "no-cache";
 
-/// Installs the SPA in `site` as `api`'s fallback, with `token` injected into
-/// its page. See the module docs for what is served and why.
+/// Installs the SPA in `site` as `api`'s fallback. See the module docs for
+/// what is served and why.
 ///
 /// # Panics
 ///
-/// If `site` has no `index.html`, or that page has no `</head>` to inject the
-/// token before — a broken build, refused at boot rather than served.
-pub(crate) fn mount(api: Router, site: &'static Dir<'static>, token: &str) -> Router {
+/// If `site` has no `index.html` — a broken build, refused at boot rather than
+/// served.
+pub(crate) fn mount(api: Router, site: &'static Dir<'static>) -> Router {
     let web = Arc::new(StaticWeb {
         site,
-        index: index_page::render(site, token),
+        index: index_page::page(site),
     });
     // A clone taken before the fallback is installed: its fallback is still
     // the default one, behind the guard layers, so delegating to it answers a
@@ -113,7 +111,7 @@ pub(crate) fn mount(api: Router, site: &'static Dir<'static>, token: &str) -> Ro
 
 struct StaticWeb {
     site: &'static Dir<'static>,
-    /// `index.html` with the token tag injected, rendered once.
+    /// `index.html`, served for `/`, `/index.html` and the SPA fallback.
     index: Bytes,
 }
 

@@ -28,6 +28,11 @@ dev:
 mock:
 	cd frontend && pnpm -r build && VITE_API_MOCK=1 pnpm --filter @delta/web dev --force
 
+## open-url: print a new link (one-time code) that opens the `make dev` app in a browser, from the running server — no restart
+.PHONY: open-url
+open-url:
+	@scripts/dev.sh --open-url
+
 ## down: stop the dev environment (the server or a running `make desktop-dev` on port 7878, the web dev server, spawned tmux sessions)
 .PHONY: down
 down:

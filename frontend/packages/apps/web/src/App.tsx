@@ -1,6 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Button, ErrorBoundary } from '@delta/ui-kit';
 import { ApiProvider } from './data/apiContext';
+import { AuthGate } from './features/auth/AuthGate';
+import type { AuthState } from './features/auth/establishAuth';
 import { NotificationSnackbar } from './features/notifications/NotificationSnackbar';
 import { ErasedGate } from './features/settings/storage/ErasedGate';
 import { WorkspaceScreen } from './features/workspace/WorkspaceScreen';
@@ -58,43 +60,52 @@ function ShellTitleBarStrip() {
   );
 }
 
-export function App() {
+/**
+ * The app. `auth` is how the page stood with the server's bearer token at
+ * boot (`establishAuth`, run by `main.tsx`); without a token the server
+ * accepts, only the screen asking for a new link is shown.
+ */
+export function App({ auth }: { auth: AuthState }) {
   return (
     <QueryClientProvider client={queryClient}>
-      <ApiProvider>
-        {/* ThemeProvider owns the singleton subscription to the active theme:
+      <AuthGate initial={auth}>
+        {(onUnauthorized) => (
+          <ApiProvider onUnauthorized={onUnauthorized}>
+            {/* ThemeProvider owns the singleton subscription to the active theme:
             it drives <html data-theme="...">, the matchMedia listener for the
             'system' preference, and the localStorage write — so any consumer
             (settings picker, xterm bridge) reads the same shared state. */}
-        <ThemeProvider>
-          {/* Mirrors ThemeProvider: derives the effective rich/flat look from
+            <ThemeProvider>
+              {/* Mirrors ThemeProvider: derives the effective rich/flat look from
               the persisted visual-effects setting plus the environment and
               stamps <html data-effects="…"> so the decorative CSS gates. */}
-          <VisualEffectsProvider>
-            {/* App-wide catch-all: a crash anywhere in the tree degrades to a
+              <VisualEffectsProvider>
+                {/* App-wide catch-all: a crash anywhere in the tree degrades to a
                 recoverable notice instead of a blank page. Region-level boundaries
                 (e.g. the terminal) handle their own failures before reaching here. */}
-            <ErrorBoundary label="app" fallback={() => <AppCrash />}>
-              <div className="flex h-full flex-col bg-surface-elevated text-fg">
-                {isMacosShell() && <ShellTitleBarStrip />}
-                {/* Once Settings → Storage erases everything, the server has
+                <ErrorBoundary label="app" fallback={() => <AppCrash />}>
+                  <div className="flex h-full flex-col bg-surface-elevated text-fg">
+                    {isMacosShell() && <ShellTitleBarStrip />}
+                    {/* Once Settings → Storage erases everything, the server has
                     stopped: the gate swaps the workspace (and its live
                     channels' reconnection UI) for the static report. */}
-                <ErasedGate>
-                  <div className="min-h-0 flex-1">
-                    <WorkspaceScreen />
-                  </div>
-                  {/* App-wide snackbar, for failures and for outcomes the user
+                    <ErasedGate>
+                      <div className="min-h-0 flex-1">
+                        <WorkspaceScreen />
+                      </div>
+                      {/* App-wide snackbar, for failures and for outcomes the user
                       asked for alike. Rendered as a fixed overlay
                       outside the workspace layout so a bottom-anchored
                       notification never affects transcript scrolling. */}
-                  <NotificationSnackbar />
-                </ErasedGate>
-              </div>
-            </ErrorBoundary>
-          </VisualEffectsProvider>
-        </ThemeProvider>
-      </ApiProvider>
+                      <NotificationSnackbar />
+                    </ErasedGate>
+                  </div>
+                </ErrorBoundary>
+              </VisualEffectsProvider>
+            </ThemeProvider>
+          </ApiProvider>
+        )}
+      </AuthGate>
     </QueryClientProvider>
   );
 }

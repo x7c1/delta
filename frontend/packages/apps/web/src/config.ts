@@ -1,3 +1,5 @@
+import { storedAuthToken } from './features/auth/tokenStore';
+
 /** Whether the app should run against MSW + the WS fake (no backend). */
 export function isMockMode(): boolean {
   return import.meta.env.VITE_API_MOCK === '1';
@@ -10,21 +12,16 @@ export function apiBaseUrl(): string {
 
 /**
  * The per-run bearer token the server requires on every API call and live
- * socket, read from the `<meta name="delta-auth-token">` tag injected by Vite
- * from `DELTA_AUTH_TOKEN` in development (see `vite.config.ts`), and by
- * delta-server itself for the built page (`embed-web`, see
- * backend/crates/apps/delta-server/src/app/static_web/index_page.rs). Empty in
- * mock mode — where the tag is injected empty or absent and no real backend is
- * reached — so callers treat an empty token as "attach nothing".
+ * socket: the one this page traded a one-time code for and keeps in
+ * `localStorage` (see `features/auth/`). No page the server serves carries
+ * it. Empty in mock mode, where no real backend is reached, and before the
+ * page holds one — callers treat an empty token as "attach nothing".
  */
 export function authToken(): string {
-  if (typeof document === 'undefined') {
+  if (isMockMode() || typeof window === 'undefined') {
     return '';
   }
-  const meta = document.querySelector<HTMLMetaElement>(
-    'meta[name="delta-auth-token"]',
-  );
-  return meta?.content ?? '';
+  return storedAuthToken();
 }
 
 /**

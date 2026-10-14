@@ -1,5 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
-import { AUTH_TOKEN, DEV_SERVER_PORT } from './e2e-fake/support/endpoints';
+import {
+  AUTH_TOKEN,
+  DEV_SERVER_PORT,
+  storageStateWithToken,
+} from './e2e-fake/support/endpoints';
 import { ARTIFACT_DIR } from './e2e-fake/support/paths';
 
 /**
@@ -52,6 +56,14 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   use: {
     baseURL: `http://localhost:${DEV_SERVER_PORT}`,
+    // The page starts out holding the backend's fixed token, where the app
+    // keeps the token it trades a one-time code for, so specs open `/` with no
+    // code. The one-time code exchange itself is covered by
+    // `e2e-fake/one-time-code.spec.ts`, which starts with no token.
+    storageState: storageStateWithToken(
+      `http://localhost:${DEV_SERVER_PORT}`,
+      AUTH_TOKEN,
+    ),
     // Specs that read server state directly through `page.request` (see
     // support/rest.ts) bypass the app's ApiClient, which is the only thing
     // that attaches the bearer token. Set it as a default header on the whole

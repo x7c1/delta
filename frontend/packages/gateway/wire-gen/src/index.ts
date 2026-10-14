@@ -77,6 +77,9 @@ export type { CreatePromptTemplateRequest } from './generated/CreatePromptTempla
 export type { UpdatePromptTemplateRequest } from './generated/UpdatePromptTemplateRequest';
 export type { ErrorBody } from './generated/ErrorBody';
 export type { VersionResponse } from './generated/VersionResponse';
+export type { AuthCodeResponse } from './generated/AuthCodeResponse';
+export type { AuthExchangeRequest } from './generated/AuthExchangeRequest';
+export type { AuthExchangeResponse } from './generated/AuthExchangeResponse';
 export type { LatestReleaseResponse } from './generated/LatestReleaseResponse';
 export type { NewerRelease } from './generated/NewerRelease';
 export type { UpdateDownload } from './generated/UpdateDownload';

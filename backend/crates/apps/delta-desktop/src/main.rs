@@ -3,10 +3,13 @@
 //! A launcher, not a second frontend: it starts `delta-server` inside its own
 //! process on a loopback port and opens one webview window on
 //! `http://127.0.0.1:<port>/`, where the server hands out the built SPA
-//! (`embed-web`). Everything the page does — REST, `/ws`, `/pty`, `/comms`, and
-//! the Claude Code hook callbacks to `/hooks/*` — goes over plain HTTP to that
-//! loopback server, exactly as in the browser. The page is not served over
-//! `tauri://` and uses no Tauri IPC.
+//! (`embed-web`). The page served there carries no credential: the shell
+//! mints a one-time code in process and opens the window at
+//! `http://127.0.0.1:<port>/#code=<code>`, and the page trades the code for the
+//! server's bearer token. Each launch mints a fresh code. Everything the page
+//! does — REST, `/ws`, `/pty`, `/comms`, and the Claude Code hook callbacks to
+//! `/hooks/*` — goes over plain HTTP to that loopback server, exactly as in
+//! the browser. The page is not served over `tauri://` and uses no Tauri IPC.
 //!
 //! Startup, in order:
 //!
@@ -32,12 +35,13 @@
 //!    written into the configuration before the state is built, since the hook
 //!    URLs rendered into each session's settings carry them, and keeping them
 //!    stable is what lets a session that survived a restart still reach Delta;
-//! 5. build the state and serve on a tokio runtime the shell owns, then record
-//!    the port where the window's link handlers read it ([`started_server`])
-//!    and navigate the window from the placeholder to the server, on the main
-//!    thread. The startup failures the user has to act on are shown in a
-//!    message dialog over the placeholder, any other one in a generic dialog
-//!    pointing to the log; a failed start exits 1 once it is dismissed.
+//! 5. build the state and serve on a tokio runtime the shell owns, mint a
+//!    one-time code, then record the port where the window's link handlers read
+//!    it ([`started_server`]) and navigate the window from the placeholder to
+//!    the server with the code, on the main thread. The startup failures the
+//!    user has to act on are shown in a message dialog over the placeholder,
+//!    any other one in a generic dialog pointing to the log; a failed start
+//!    exits 1 once it is dismissed.
 //!
 //! Steps 1 and 5 are each logged at `info`, so the time a launch spent behind
 //! the placeholder can be read from the log.
@@ -100,7 +104,7 @@ use tauri_plugin_window_state::StateFlags;
 use tokio::runtime::{self, Runtime};
 
 use delta_bootstrap::InstalledApp;
-use delta_server::{config, serve, AppState};
+use delta_server::{config, open_url, serve, AppState};
 use started_server::StartedServer;
 
 /// The window's label and title.
@@ -275,9 +279,9 @@ fn start_in_background(
     .unwrap_or_else(|_| Err(anyhow::anyhow!("the server's start panicked")));
     let main_handle = handle.clone();
     let on_main_thread = match started {
-        Ok(port) => {
+        Ok(Started { port, code }) => {
             started_server.record(port, vars);
-            handle.run_on_main_thread(move || show_server(&main_handle, port))
+            handle.run_on_main_thread(move || show_server(&main_handle, port, &code))
         }
         Err(err) => handle.run_on_main_thread(move || {
             report_startup_failure(&main_handle, &err, path_not_imported.as_ref())
@@ -289,14 +293,15 @@ fn start_in_background(
     }
 }
 
-/// Navigate the window from the placeholder to the server on `port`. A failure
-/// is reported like any other failed start.
-fn show_server(handle: &AppHandle, port: u16) {
+/// Navigate the window from the placeholder to the server on `port`, opening
+/// the page with the one-time `code`. A failure is reported like any other
+/// failed start.
+fn show_server(handle: &AppHandle, port: u16, code: &str) {
     let Some(window) = handle.get_webview_window(WINDOW_LABEL) else {
         tracing::info!(port, "the window was closed before the server was up");
         return;
     };
-    let navigated = server_url(port).and_then(|url| Ok(window.navigate(url)?));
+    let navigated = server_url(port, code).and_then(|url| Ok(window.navigate(url)?));
     match navigated {
         Ok(()) => tracing::info!(port, "delta-desktop window navigating to the server"),
         Err(err) => report_startup_failure(
@@ -307,19 +312,29 @@ fn show_server(handle: &AppHandle, port: u16) {
     }
 }
 
-/// The server's root URL on the loopback `port`.
-fn server_url(port: u16) -> anyhow::Result<Url> {
-    Ok(format!("http://127.0.0.1:{port}/").parse()?)
+/// The URL the window opens: the server's root on the loopback `port`, with
+/// the one-time `code` in the fragment, which the page trades for the bearer
+/// token.
+fn server_url(port: u16, code: &str) -> anyhow::Result<Url> {
+    Ok(open_url::code_url(&open_url::loopback_origin(port), code).parse()?)
+}
+
+/// What a successful start hands the window: the port the server listens on,
+/// and a one-time code to open the page with.
+struct Started {
+    port: u16,
+    code: String,
 }
 
 /// Build the configuration and state, and start serving. Returns the port the
-/// server listens on. `child_env` is set on every command the server starts.
+/// server listens on and a fresh one-time code. `child_env` is set on every
+/// command the server starts.
 fn start_server(
     handle: &AppHandle,
     runtime: &runtime::Handle,
     identifier: &str,
     child_env: Vec<(String, String)>,
-) -> anyhow::Result<u16> {
+) -> anyhow::Result<Started> {
     let mut config = config::config_from_env_for(identifier)?;
     config.child_env = child_env;
     tracing::info!(
@@ -343,6 +358,7 @@ fn start_server(
 
     delta_server::log_claude_version(&config.launch.claude_bin, &config.child_env);
     let state = runtime.block_on(AppState::build(&config))?;
+    let code = state.mint_one_time_code();
 
     let handle = handle.clone();
     runtime.spawn(async move {
@@ -368,7 +384,10 @@ fn start_server(
             }
         }
     });
-    Ok(config.port)
+    Ok(Started {
+        port: config.port,
+        code,
+    })
 }
 
 /// Close the window, show what the erase kept, and exit 0 once the dialog is
@@ -547,4 +566,21 @@ fn show_startup_failure_dialog(handle: &AppHandle, message: String) {
     }
     let exit_handle = handle.clone();
     dialog.show(move |_| exit_handle.exit(1));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_window_opens_the_app_with_a_one_time_code() {
+        let url = server_url(51234, "abc123").unwrap();
+        assert_eq!(url.as_str(), "http://127.0.0.1:51234/#code=abc123");
+        assert_eq!(url.fragment(), Some("code=abc123"));
+        assert_eq!(
+            links::classify(&url, Some(51234)),
+            links::LinkKind::OwnOrigin,
+            "the URL with the code is the app, so the window keeps it"
+        );
+    }
 }

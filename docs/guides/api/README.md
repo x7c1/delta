@@ -81,13 +81,73 @@ endpoint matched, and it never answers under `/api`, `/ws`, `/pty`, `/comms`,
   plain `404`, with or without a bearer token, rather than the bearer guard's
   `401`.
 
-The page is not behind the bearer-token guard, since it is what delivers the
-token; it is behind the Origin/Host guard. At boot the server injects the
-per-run token into the page as `<meta name="delta-auth-token" content="…">`,
-the same tag Vite injects in development and the one the frontend reads, so
-the token is in neither a URL nor the built assets (the Vite plugin that
-injects it is dev-server only). The API base needs nothing: the build leaves
-`VITE_API_BASE_URL` unset, so the frontend calls same-origin paths.
+The page is not behind the bearer-token guard, since a browser loading it has
+no token yet; it is behind the Origin/Host guard. It is served exactly as
+built and carries no credential: the page obtains the token through a
+one-time code (see [Authentication](#authentication)). The API base needs
+nothing: the build leaves `VITE_API_BASE_URL` unset, so the frontend calls
+same-origin paths.
+
+## Authentication
+
+Every route except `/health`, `/hooks/*` (which carry the hook secret, see
+[hooks.md](hooks.md)) and `POST /api/auth/exchange` requires the server's
+per-run bearer token: `Authorization: Bearer <token>` on REST calls, a
+`token=<token>` query parameter on the live-channel upgrades (a browser cannot
+set headers there). A request without the valid token gets `401` with no body.
+[security.md](../security.md#handing-the-token-to-the-page) explains the
+design.
+
+A **non-browser client** (a script, `curl`) gets the token one of two ways:
+
+- **Fix it in advance** — start the server with `DELTA_AUTH_TOKEN=<token>`;
+  the server uses that value for the run instead of minting one. This is what
+  the test suites do. The server drops the variable from its own environment
+  once read, so the agents it starts do not inherit it.
+- **Read the token file** — a running `delta-server` keeps its token in
+  `auth-token` in its data directory (owner-only, `0600`), and removes it on a
+  clean stop:
+
+  ```sh
+  token="$(cat "<data dir>/auth-token")"
+  curl -H "Authorization: Bearer $token" http://127.0.0.1:7878/api/version
+  ```
+
+  The desktop app does not write this file; its server is reached through its
+  window.
+
+A **browser page** never receives the token in a page. It is opened at a URL
+with a one-time code in the fragment (`/#code=<code>`) and trades the code for
+the token:
+
+### `POST /api/auth/exchange`
+
+Trades a one-time code for the bearer token. Exempt from the bearer guard (the
+caller has no token yet), but behind the Origin/Host guard: a foreign `Origin`
+is refused with `403`.
+
+Request body:
+
+```json
+{ "code": "<one-time code>" }
+```
+
+- **200 OK** — the code was minted by this server, unused, and minted less than
+  10 minutes ago. It is now spent. Body `{ "token": "<bearer token>" }`, with
+  `Cache-Control: no-store`.
+- **401 Unauthorized** — the code was already used, has expired, or is unknown.
+  No body.
+- **400 / 415 / 422** — no JSON body, or one without a `code`.
+
+### `POST /api/auth/codes`
+
+Mints a fresh one-time code, for a URL that opens the app
+(`<origin>/#code=<code>`). Requires the bearer token; takes no body. This is
+what `delta-server open-url` calls.
+
+- **200 OK** — body `{ "code": "<one-time code>" }`, with
+  `Cache-Control: no-store`.
+- **401 Unauthorized** — no valid bearer token.
 
 ## Conventions
 

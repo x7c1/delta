@@ -14,6 +14,7 @@ use delta_usecase::{
 };
 
 use crate::comms_log::{CommsLogHub, CommsSubscription};
+use crate::one_time_codes::{OneTimeCodes, CODE_LIFETIME};
 use crate::serve::ServerStopped;
 use crate::storage_inventory::StorageInventory;
 
@@ -89,6 +90,9 @@ pub struct AppState {
     /// lifetime — see `config::config_from_env` — and never rotated. Held as an
     /// `Arc<str>` mirroring [`Self::tmux_socket`], so cloning the state is cheap.
     auth_token: Arc<str>,
+    /// The one-time codes a page trades for [`Self::auth_token`]; see
+    /// [`crate::one_time_codes`].
+    one_time_codes: Arc<OneTimeCodes>,
     /// The hook secret every `/hooks/*` request must carry as an `?hs=` query
     /// parameter, enforced by [`crate::hook_auth_guard`]. Fixed for the
     /// server's lifetime and, unlike [`Self::auth_token`], kept across restarts
@@ -229,6 +233,7 @@ impl AppState {
             tmux_socket: Arc::from(tmux_socket),
             child_env: Arc::from([]),
             auth_token: Arc::from(auth_token),
+            one_time_codes: Arc::new(OneTimeCodes::new(CODE_LIFETIME)),
             hook_secret: Arc::from(hook_secret),
             storage: Arc::new(storage),
             // An unwired log: `/comms` then serves an always-idle stream, which
@@ -356,6 +361,29 @@ impl AppState {
     /// router.
     pub fn token(&self) -> &str {
         &self.auth_token
+    }
+
+    /// Mint a one-time code a page can trade for [`Self::token`] once, within
+    /// ten minutes (see `crate::one_time_codes`). The desktop shell and the
+    /// `delta-server` binary put it in the URL they open or print
+    /// (`/#code=<code>`); `POST /api/auth/codes` mints one for `delta-server
+    /// open-url`.
+    pub fn mint_one_time_code(&self) -> String {
+        self.one_time_codes.mint()
+    }
+
+    /// Redeem a one-time code: true, and the code is spent, when it was minted
+    /// here, is unused and has not expired.
+    pub(crate) fn redeem_one_time_code(&self, code: &str) -> bool {
+        self.one_time_codes.redeem(code)
+    }
+
+    /// Make the codes minted from now on redeemable for `lifetime` instead of
+    /// ten minutes, so a test can mint a code that has already expired.
+    #[cfg(test)]
+    pub(crate) fn with_one_time_code_lifetime(mut self, lifetime: Duration) -> Self {
+        self.one_time_codes = Arc::new(OneTimeCodes::new(lifetime));
+        self
     }
 
     /// The hook secret every `/hooks/*` request must present as an `?hs=`

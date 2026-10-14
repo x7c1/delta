@@ -38,7 +38,8 @@ mod launch;
 use launch::launch_from_vars;
 
 mod secrets;
-use secrets::{auth_token, hook_secret};
+pub(crate) use secrets::mint_secret;
+use secrets::{auth_token, hook_secret, AUTH_TOKEN_VAR};
 
 #[cfg(test)]
 mod tests;
@@ -64,8 +65,13 @@ pub fn build_origin() -> BuildOrigin {
 ///
 /// The configuration of the CLI server: [`Config::launcher`] is
 /// [`Launcher::Cli`].
+///
+/// Takes `DELTA_AUTH_TOKEN` out of the process environment once it is read
+/// (`withhold_auth_token_from_children`).
 pub fn config_from_env() -> Result<Config, DataDirError> {
-    prepared(config_from_vars(|name| std::env::var_os(name)))
+    let config = config_from_vars(|name| std::env::var_os(name));
+    withhold_auth_token_from_children();
+    prepared(config)
 }
 
 /// [`config_from_env`] for a shell that runs under its own `identifier`, which
@@ -79,10 +85,24 @@ pub fn config_from_env() -> Result<Config, DataDirError> {
 /// Only the desktop shell builds its configuration here, so this is the one
 /// path whose [`Config::launcher`] is [`Launcher::Desktop`].
 pub fn config_from_env_for(identifier: &str) -> Result<Config, DataDirError> {
-    prepared(desktop_config_from_vars(
-        |name| std::env::var_os(name),
-        identifier,
-    ))
+    let config = desktop_config_from_vars(|name| std::env::var_os(name), identifier);
+    withhold_auth_token_from_children();
+    prepared(config)
+}
+
+/// Remove `DELTA_AUTH_TOKEN` from this process's environment.
+///
+/// Every command the server starts — tmux, and through it each agent, git, gh,
+/// the editor opener — inherits the process environment. The token is held in
+/// the configuration once it is read, so nothing the server starts needs it,
+/// and none of them should be able to read it: an agent runs whatever its
+/// session asks, and its environment is visible to anything it runs in turn.
+/// Called by the two `config_from_env*` entry points, which each shell calls
+/// once, before the server starts any command: the `delta-server` binary
+/// before its runtime starts a thread, the desktop shell on its startup thread
+/// while the window's event loop already runs.
+fn withhold_auth_token_from_children() {
+    std::env::remove_var(AUTH_TOKEN_VAR);
 }
 
 /// [`config_from_vars`] for the desktop shell running under `identifier`.
@@ -140,7 +160,7 @@ fn config_from_vars_for(
             .unwrap_or_else(|| default_worktree_base(home.clone())),
         tmux_socket: non_empty("DELTA_TMUX_SOCKET").unwrap_or_else(|| identifier.clone()),
         identifier,
-        auth_token: auth_token(text("DELTA_AUTH_TOKEN")),
+        auth_token: auth_token(text(AUTH_TOKEN_VAR)),
         hook_secret: hook_secret(text("DELTA_HOOK_SECRET")),
         transcript_root: transcript_root(
             text("DELTA_TRANSCRIPT_ROOT"),

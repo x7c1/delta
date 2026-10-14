@@ -21,6 +21,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use delta_wire::rest::{
+    WireAuthCodeResponse, WireAuthExchangeRequest, WireAuthExchangeResponse,
     WireCloneRepositoryRequest, WireCloneRootsResponse, WireCreateCloneRootRequest,
     WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
     WireDeleteSnapshotRequest, WireEraseResponse, WireErrorBody, WireGitBranchesResponse,
@@ -94,6 +95,9 @@ fn main() {
         .expect("export UpdatePromptTemplateRequest.ts");
     WireErrorBody::export_all(&config).expect("export ErrorBody.ts");
     WireVersionResponse::export_all(&config).expect("export VersionResponse.ts");
+    WireAuthExchangeRequest::export_all(&config).expect("export AuthExchangeRequest.ts");
+    WireAuthExchangeResponse::export_all(&config).expect("export AuthExchangeResponse.ts");
+    WireAuthCodeResponse::export_all(&config).expect("export AuthCodeResponse.ts");
     WireLatestReleaseResponse::export_all(&config).expect("export LatestReleaseResponse.ts");
     WireUpdateDownload::export_all(&config).expect("export UpdateDownload.ts");
     WireUpdateInstall::export_all(&config).expect("export UpdateInstall.ts");

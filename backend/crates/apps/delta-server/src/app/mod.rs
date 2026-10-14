@@ -32,10 +32,7 @@ use crate::ws;
 /// `static_web::mount`.
 pub fn router(state: AppState) -> Router {
     #[cfg(feature = "embed-web")]
-    let app = {
-        let token = state.token().to_owned();
-        static_web::mount(api_router(state), &static_web::BUILT, &token)
-    };
+    let app = static_web::mount(api_router(state), &static_web::BUILT);
     #[cfg(not(feature = "embed-web"))]
     let app = api_router(state);
     with_request_log(app)
@@ -64,6 +61,8 @@ fn api_router(state: AppState) -> Router {
         .bind(endpoint::HookSessionEnd, hooks::session_end)
         .bind(endpoint::HookStatusLine, hooks::status_line)
         // Browser REST surface: queries and commands.
+        .bind(endpoint::ExchangeAuthCode, api::exchange_auth_code)
+        .bind(endpoint::MintAuthCode, api::mint_auth_code)
         .bind(endpoint::ListSessions, api::list_sessions)
         .bind(endpoint::CreateSession, api::create_session)
         .bind(endpoint::OpenSession, api::open_session)

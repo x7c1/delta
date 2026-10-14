@@ -7,8 +7,10 @@
 //! new-window requests and navigations with [`classify`]:
 //!
 //! - a navigation within the app's own origin — the server's
-//!   `http://127.0.0.1:<port>` once it listens, and the placeholder page the
-//!   window shows until then ([`placeholder`]) — stays in the window;
+//!   `http://127.0.0.1:<port>` once it listens (including the URL with the
+//!   one-time code in its fragment the window is opened at), and the
+//!   placeholder page the window shows until then ([`placeholder`]) — stays in
+//!   the window;
 //! - a new-window request for an `http` / `https` URL, even one for the app's
 //!   own origin (a relative or footnote link), and a navigation to any other
 //!   `http` / `https` URL are handed to the operating system's default opener
@@ -113,6 +115,8 @@ mod tests {
         for url in [
             "http://127.0.0.1:51234/",
             "http://127.0.0.1:51234/sessions/42?tab=log#end",
+            // The URL the window opens, with its one-time code.
+            "http://127.0.0.1:51234/#code=0123abcd",
         ] {
             assert_eq!(classify_str(url), LinkKind::OwnOrigin, "{url}");
         }

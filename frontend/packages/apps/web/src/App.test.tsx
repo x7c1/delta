@@ -15,7 +15,7 @@ describe('App title-bar inset', () => {
 
   it('reserves the title-bar strip above the workspace in the macOS shell', () => {
     document.documentElement.dataset.shell = MACOS_SHELL;
-    render(<App />);
+    render(<App auth={{ kind: 'ready' }} />);
 
     const strip = screen.getByTestId('shell-title-bar');
     expect(strip).toHaveClass('h-[var(--shell-top-inset)]');
@@ -29,7 +29,7 @@ describe('App title-bar inset', () => {
   });
 
   it('reserves nothing outside the macOS shell', () => {
-    render(<App />);
+    render(<App auth={{ kind: 'ready' }} />);
 
     expect(screen.getByTestId('workspace')).toBeInTheDocument();
     expect(screen.queryByTestId('shell-title-bar')).not.toBeInTheDocument();
