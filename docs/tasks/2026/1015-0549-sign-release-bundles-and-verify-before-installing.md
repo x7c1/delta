@@ -107,9 +107,9 @@ version) never arises, so no exception is needed.
 
 ### Before merge (verified outside the check command)
 
-- [ ] Reading `release.yml`: only `sign` references the `release-signing`
+- [x] Reading `release.yml`: only `sign` references the `release-signing`
       environment; `sign` has `permissions: {}`, no checkout, and runs no
       project code; only `publish` holds `id-token: write` /
       `attestations: write`.
-- [ ] A bundle signed locally with the production secret key verifies with
+- [x] A bundle signed locally with the production secret key verifies with
       the compiled-in public key through the app's verification function.
