@@ -75,7 +75,7 @@ place that all three socket clients share rather than three copies.
 
 ### Before merge (verified outside the check command)
 
-- [ ] Against a running `make dev`, opening an already-used `#code=` link in a
+- [x] Against a running `make dev`, opening an already-used `#code=` link in a
       tab whose `localStorage` holds the current token lands in the app, and
       after restarting the server (new token) the open app switches to the
       reopen screen within one reconnect attempt. The merging session runs
