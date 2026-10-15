@@ -88,7 +88,7 @@ talking to a port it no longer owns.
 
 ### Before merge (verified outside the check command)
 
-- [ ] With `make dev`, a new Claude session started with the first message
+- [x] With `make dev`, a new Claude session started with the first message
       `- reply with ok` launches and receives that message; the status line
       still updates, and no `curl` command line visible in the process list
       carries the hook secret.
