@@ -130,3 +130,11 @@ commit) in `docs/guides/security.md`, and update the module docs in
       dialog's rendering and buttons are covered by the frontend tests, and
       clicking through it in the desktop window was not possible from the
       verifying session.)
+      Later, Ubuntu 26.04 (GNOME Wayland), 2026-10-15, dev desktop: a
+      worktree session from `HEAD` of a never-trusted scratch repository
+      showed the dialog (reason and commit, no path list as nothing is
+      compared for `HEAD`); Cancel closed it and created nothing; Launch
+      and trust started the session without Claude Code's own prompt and
+      recorded trust for the repository root and the worktree. A session
+      started directly in a directory got Claude Code's own prompt, as
+      before.

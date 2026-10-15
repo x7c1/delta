@@ -166,6 +166,16 @@ Keep the Overview section at the top of every guide over 100 lines.
       database (same directory as before) and, after launching one
       session, has `settings/<port>.json` and `tmux.conf` inside the data
       directory and nothing new under the temp directory.
+      Ubuntu 26.04, 2026-10-15: the installed v0.6.0 opens its previous
+      database in `~/.local/share/io.github.x7c1.delta/`, with
+      `settings/<port>.json` and `tmux.conf` inside and nothing under
+      `/tmp`; the tmux socket sits under `$TMUX_TMPDIR`
+      (`/run/user/<uid>`). The macOS half is still unrecorded.
 - [ ] `make dev` writes to `~/.local/share/io.github.x7c1.delta.dev/` (or
       the macOS equivalent), and a session launched without a repository
       runs its agent inside `sessions/<token>` of that directory.
+      Ubuntu 26.04, 2026-10-15: the dev desktop writes to
+      `~/.local/share/io.github.x7c1.delta.dev/`. A session without a
+      repository can no longer be started from the UI (the new-session
+      flow requires a repository, directory or PR), so the
+      `sessions/<token>` half was not exercised.

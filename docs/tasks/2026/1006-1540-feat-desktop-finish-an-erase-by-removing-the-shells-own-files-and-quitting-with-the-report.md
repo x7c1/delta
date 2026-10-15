@@ -90,5 +90,12 @@ the page and the shell, as the first task designed it.
       `~/Library/Application Support/io.github.x7c1.delta.dev` no longer
       exist, while the installed app's directories (without `.dev`) are
       untouched. Relaunching starts from a fresh state.
-- [ ] On Ubuntu (GNOME): the same, with `~/.local/share/<id>`,
+- [x] On Ubuntu (GNOME): the same, with `~/.local/share/<id>`,
       `~/.config/<id>` and `~/.cache/<id>`.
+      Ubuntu 26.04 (GNOME Wayland), 2026-10-15, dev desktop: the dialog
+      said nothing was kept; after it the app had quit,
+      `~/.local/share/io.github.x7c1.delta.dev` and
+      `~/.config/io.github.x7c1.delta.dev` were gone (`~/.cache` had
+      none), as were the dev tmux socket and the worktree base, while
+      the installed app's directories were untouched. Relaunching
+      started empty.

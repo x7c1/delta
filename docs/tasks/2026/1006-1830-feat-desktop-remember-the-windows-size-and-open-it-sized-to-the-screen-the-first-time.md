@@ -82,5 +82,10 @@ window state file to the list.
       (no `.dev`) keeps its own state. A second launch while running only
       brings the window forward and does not resize it. The window cannot
       be shrunk below the minimum.
-- [ ] On Ubuntu (GNOME Wayland): the same, and the window is placed by the
+- [x] On Ubuntu (GNOME Wayland): the same, and the window is placed by the
       compositor (no attempt to restore a position).
+      Ubuntu 26.04 (GNOME Wayland), 2026-10-15, dev desktop: with no
+      state file the window opened at 3277×1382 on a 4096×1728 screen
+      (80 %); a resized and a maximized window were restored after
+      Ctrl-Q and relaunch, at a position the compositor chose; a second
+      launch did not resize it. The minimum size was not tried.
