@@ -74,7 +74,9 @@ fn run_server() -> anyhow::Result<()> {
     serve::init_tracing();
 
     // Read before the runtime starts any thread: this also takes
-    // `DELTA_AUTH_TOKEN` out of the environment the server's children inherit.
+    // `DELTA_AUTH_TOKEN` and `DELTA_HOOK_SECRET` out of the environment the
+    // server's children inherit, which is sound only while this is the
+    // process's one thread.
     let config = config::config_from_env()?;
     tokio::runtime::Runtime::new()?.block_on(serve_until_stopped(config))
 }

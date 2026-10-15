@@ -49,6 +49,9 @@
 //! log directory, at a level a file in the data directory can change
 //! ([`logging`]). Before logging, the data directory is created owner-only (or
 //! made so): on Linux the log directory and Tauri's webview data sit inside it.
+//! Before even that, while the process has a single thread, `DELTA_AUTH_TOKEN`
+//! and `DELTA_HOOK_SECRET` are taken out of the environment, so no command the
+//! server starts inherits them; step 3 is handed their values.
 //!
 //! Links the page follows never take the window away from Delta; [`links`]
 //! says where they go instead.
@@ -113,6 +116,12 @@ const WINDOW_LABEL: &str = "main";
 const WINDOW_TITLE: &str = "Delta";
 
 fn main() {
+    // First, while this is the process's only thread: removing a variable
+    // while another thread may read the environment is undefined behaviour,
+    // and Tauri, the webview, logging and the runtime all start threads.
+    // Nothing later removes these variables; the server's configuration is
+    // handed the values instead (`config::config_from_env_for`).
+    let secrets = config::Secrets::take_from_env();
     let context = tauri::generate_context!();
     let identifier = context.config().identifier.clone();
     // Before anything writes into the data directory: on Linux the log
@@ -188,7 +197,13 @@ fn main() {
             );
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                start_in_background(&handle, &runtime_handle, &identifier, &started_server)
+                start_in_background(
+                    &handle,
+                    &runtime_handle,
+                    &identifier,
+                    secrets,
+                    &started_server,
+                )
             });
             Ok(())
         })
@@ -275,6 +290,7 @@ fn start_in_background(
     handle: &AppHandle,
     runtime: &runtime::Handle,
     identifier: &str,
+    secrets: config::Secrets,
     started_server: &StartedServer,
 ) {
     let login_env::LoginEnv {
@@ -284,7 +300,7 @@ fn start_in_background(
     // A panic would otherwise end only this thread and leave the window on the
     // placeholder for good; the panic itself is already logged by the hook.
     let started = panic::catch_unwind(AssertUnwindSafe(|| {
-        start_server(handle, runtime, identifier, vars.clone())
+        start_server(handle, runtime, identifier, secrets, vars.clone())
     }))
     .unwrap_or_else(|_| Err(anyhow::anyhow!("the server's start panicked")));
     let main_handle = handle.clone();
@@ -337,15 +353,17 @@ struct Started {
 }
 
 /// Build the configuration and state, and start serving. Returns the port the
-/// server listens on and a fresh one-time code. `child_env` is set on every
-/// command the server starts.
+/// server listens on and a fresh one-time code. `secrets` are the ones `main`
+/// took out of the environment; `child_env` is set on every command the server
+/// starts.
 fn start_server(
     handle: &AppHandle,
     runtime: &runtime::Handle,
     identifier: &str,
+    secrets: config::Secrets,
     child_env: Vec<(String, String)>,
 ) -> anyhow::Result<Started> {
-    let mut config = config::config_from_env_for(identifier)?;
+    let mut config = config::config_from_env_for(identifier, secrets)?;
     config.child_env = child_env;
     tracing::info!(
         identifier = %config.identifier,
