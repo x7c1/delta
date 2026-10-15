@@ -52,7 +52,7 @@ places that currently explain why `'unsafe-inline'` stays, and the CSP part of
 
 ### Before merge (verified outside the check command)
 
-- [ ] With the embedded build (`make server-embedded` or the desktop dev
+- [x] With the embedded build (`make server-embedded` or the desktop dev
       build), the page loads with the saved theme applied on first paint and
       the browser console shows no CSP violation. The merging session runs it
       and records the result in the PR.
