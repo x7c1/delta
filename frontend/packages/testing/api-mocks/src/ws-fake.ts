@@ -46,8 +46,8 @@ export function defaultScript(): SessionEvent[] {
     // arrived). Both windows populated with non-trivial values exercises the
     // meter fill, the zero-padded percentage column, and the `↻ HHhMMm` /
     // `↻ DDdHHh` countdown formats. `context_used_percentage` is set so the
-    // transcript composer's context-usage bar (top border of the composer card)
-    // also renders — it is hidden until the first non-null percentage arrives.
+    // context-usage meter on the composer rail also renders — it is hidden
+    // until the first non-null percentage arrives.
     {
       kind: 'status_updated',
       session_id: SESSION_ID,
