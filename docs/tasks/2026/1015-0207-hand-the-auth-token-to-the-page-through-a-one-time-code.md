@@ -137,6 +137,9 @@ change covers.
       through in the desktop window; `/pty` presents the token the same way
       `/ws` does, and `e2e-fake/starting-terminal.spec.ts` attaches a terminal
       with it.)
+      Later, Ubuntu 26.04 (GNOME Wayland), 2026-10-15, dev desktop: the
+      window opened the app through the one-time code in WebKitGTK, and
+      a session's terminal attached.
 - [x] Embedded server run directly (`make server-embedded`, then the binary):
       the printed URL opens the app in a browser; a second use of the same URL
       shows the re-open screen; the re-issue command prints a URL that opens

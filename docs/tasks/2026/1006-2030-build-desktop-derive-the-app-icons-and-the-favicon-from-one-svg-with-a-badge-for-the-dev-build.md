@@ -92,8 +92,14 @@ Mention the `.icns` inset rule in one sentence so nobody "fixes" it.
       neighbouring apps; `make desktop-dev` shows the badged icon in the
       Dock, distinguishable from the installed one. The browser tab at
       `http://127.0.0.1:7878/` (`make dev`) shows the favicon.
-- [ ] On Ubuntu (GNOME): the application grid, dock and Alt-Tab show the new
+- [x] On Ubuntu (GNOME): the application grid, dock and Alt-Tab show the new
       icon for the installed app (`dpkg-deb -c` lists
       `usr/share/icons/hicolor/*/apps/delta-desktop.png`), and the badged
       one for `make desktop-dev`; both at small sizes in the light and dark
       dock.
+      Ubuntu 26.04 (GNOME Wayland), 2026-10-15: the installed v0.6.0
+      shows the new icon in the application grid, dock and Alt-Tab, and
+      its `.deb` carries `usr/share/icons/hicolor/{32x32,128x128,256x256
+      @2,512x512}/apps/delta-desktop.png`. The dev desktop shows the
+      badged icon in the activities overview but the generic icon in the
+      dock and Alt-Tab, as expected for GTK3 on Wayland.
