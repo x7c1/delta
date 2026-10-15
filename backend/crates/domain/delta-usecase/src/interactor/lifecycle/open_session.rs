@@ -120,9 +120,7 @@ where
         // fresh or the file was lost. It lives at a Delta-owned path, not in
         // `workdir`, so resuming in a real project never touches that
         // project's own `.claude/settings.json`.
-        self.workspace
-            .write_session_settings(&self.session_settings_path, &self.session_settings_json)
-            .await?;
+        self.write_session_settings().await?;
         let command = vec![
             self.launch.claude_bin.clone(),
             SETTINGS_FLAG.to_owned(),

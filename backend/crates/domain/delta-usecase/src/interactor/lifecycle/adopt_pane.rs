@@ -23,6 +23,12 @@
 //! nothing in tmux: the agent is already up and input-ready, so unlike a resume
 //! there is no readiness window to hold the first send behind.
 //!
+//! One surviving pane is not kept: when the server could not get its previous
+//! port back, the agent's hooks still go to the old port, where another process
+//! may now listen. Boot adopts such a pane only to close the session through
+//! the ordinary close, with a reason the closed session's screen shows; a send
+//! then resumes it with hooks aimed at the new port.
+//!
 //! [`Interactor::readopt_surviving_sessions`]: crate::Interactor::readopt_surviving_sessions
 
 use delta_model::{Message, MessageUuid, Role, Send, Session};
@@ -30,8 +36,17 @@ use delta_model::{Message, MessageUuid, Role, Send, Session};
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::OpenHandle;
+use crate::interactor::HookEndpointChange;
 use crate::pane_token::PaneToken;
-use crate::ports::{GitWorktree, RememberedPane, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{
+    GitWorktree, RememberedPane, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace,
+};
+
+/// The reason recorded on a session boot closed because the server moved to a
+/// new port while the session's agent still called the old one — what the
+/// closed session's screen shows.
+pub(in crate::interactor) const PORT_MOVED_REASON: &str =
+    "Delta moved to a new port; resume to reconnect";
 
 /// What became of one session's remembered pane at boot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +54,10 @@ pub(in crate::interactor) enum Readoption {
     /// The pane is still running and the session is open on it again.
     /// `hooks_unreachable` says whether its agent can still reach this server.
     Adopted { hooks_unreachable: bool },
+    /// The pane was alive but its agent calls a port this server no longer
+    /// holds, so it was ended and the session closed with
+    /// [`PORT_MOVED_REASON`].
+    Ended,
     /// The pane is gone. Its record was cleared and the session stays closed;
     /// the next send resumes it as usual.
     Gone,
@@ -103,20 +122,23 @@ where
 
     /// Re-adopt this session's remembered pane at boot, if it is still running.
     ///
-    /// `hook_endpoint_changed` is the server's report that the hook URLs it
-    /// serves differ from the previous run's
-    /// (`delta_bootstrap::Config::hook_endpoint_changed`). That flag says
-    /// surviving agents *would* be stranded, not that any exist — it is also
-    /// true on a first run — so it is applied only here, to a pane actually
-    /// found alive: that session is marked [`RememberedPane::hooks_unreachable`],
-    /// persisted so a later restart whose endpoint happens to match does not
-    /// forget it.
+    /// `change` is the server's report of how the hook URLs it serves relate to
+    /// the previous run's ([`HookEndpointChange`]). It says surviving agents
+    /// *would* be stranded, not that any exist — a change is also reported on a
+    /// first run — so it is applied only here, to a pane actually found alive:
+    ///
+    /// - [`HookEndpointChange::Changed`] marks that session
+    ///   [`RememberedPane::hooks_unreachable`], persisted so a later restart
+    ///   whose endpoint happens to match does not forget it.
+    /// - [`HookEndpointChange::PortMoved`] ends it instead (see
+    ///   [`Self::end_for_moved_port`]): its hooks would reach whatever now
+    ///   listens on the old port.
     ///
     /// See [`Readoption`] for the outcomes. Only a store error is an `Err`; a
     /// tmux probe that could not run is [`Readoption::Unprobed`].
     pub(in crate::interactor) async fn readopt_remembered_pane(
         &mut self,
-        hook_endpoint_changed: bool,
+        change: HookEndpointChange,
     ) -> Result<Readoption> {
         if self.state.has_live_pane() {
             return Ok(Readoption::NotRemembered);
@@ -128,10 +150,22 @@ where
             return Ok(Readoption::NotRemembered);
         };
         let marked = RememberedPane {
-            hooks_unreachable: remembered.hooks_unreachable || hook_endpoint_changed,
+            hooks_unreachable: remembered.hooks_unreachable
+                || change != HookEndpointChange::Unchanged,
             ..remembered.clone()
         };
         match self.tmux.has_session(&remembered.tmux_session).await {
+            Ok(true) if change == HookEndpointChange::PortMoved => {
+                self.adopt_live_pane(&session, marked).await;
+                self.end_for_moved_port().await?;
+                tracing::info!(
+                    session_id = %self.id,
+                    token = %remembered.tmux_session,
+                    "ended a session whose pane survived the restart but whose hooks \
+                     still call the port Delta moved away from; sending resumes it"
+                );
+                Ok(Readoption::Ended)
+            }
             Ok(true) => {
                 self.adopt_live_pane(&session, marked.clone()).await;
                 // The record only moves when this adoption marked the hooks
@@ -176,6 +210,29 @@ where
                 Ok(Readoption::Unprobed)
             }
         }
+    }
+
+    /// Close the just-adopted session because its agent's hooks call a port
+    /// this server no longer holds, and record [`PORT_MOVED_REASON`] on it.
+    ///
+    /// The close is the ordinary one ([`Self::close_session`]): the transcript
+    /// synced a last time, the pane killed, the remembered pane forgotten, the
+    /// dialogs it stranded settled. So the session is left exactly as a user's
+    /// Close leaves it, and the next send resumes it with this run's settings.
+    /// Its events, and the `SessionClosed` an explicit close's caller would
+    /// announce, go out on the async seam, since no request is waiting on them.
+    async fn end_for_moved_port(&mut self) -> Result<()> {
+        let mut events = self.close_session().await?;
+        self.store
+            .record_closed_reason(self.id, PORT_MOVED_REASON)
+            .await?;
+        events.push(SessionEvent::SessionClosed {
+            session_id: self.id.clone(),
+        });
+        for event in events {
+            self.emit_async_event(event);
+        }
+        Ok(())
     }
 
     /// Adopt the remembered pane instead of resuming, when it is still alive —

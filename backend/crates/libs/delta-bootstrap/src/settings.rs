@@ -14,10 +14,35 @@
 //! written to a Delta-owned file and handed to `claude --settings <file>`, so it
 //! never has to be written into (and risk clobbering) the session's working
 //! directory.
+//!
+//! The command entries (`SessionStart` and `statusLine`) run a shell command,
+//! and a command line is visible to every local process for as long as it
+//! runs — the status line runs one on every refresh. Their URL carries the
+//! hook secret, so it is not on the command line: each command reads it from
+//! an owner-only `curl` configuration file next to the settings file
+//! (`curl -K <file>`), rendered here alongside the settings JSON.
 
 use std::time::Duration;
 
+use delta_usecase::SessionSettingsFile;
 use serde_json::json;
+
+use crate::data_layout::DataLayout;
+
+/// The session settings for one server: the JSON handed to
+/// `claude --settings`, and the files its command entries read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSettings {
+    /// The settings JSON.
+    pub json: String,
+    /// The `curl` configurations the command entries read their URLs from,
+    /// written next to the settings file whenever it is written.
+    pub files: Vec<SessionSettingsFile>,
+}
+
+/// The endpoints the command entries call, each through its own `curl`
+/// configuration file.
+const COMMAND_ENDPOINTS: [&str; 2] = ["session-start", "status-line"];
 
 /// The timeout, in seconds, Claude Code is given for every HTTP hook except
 /// `PermissionRequest`. These hooks answer at once, so the bound only matters
@@ -45,7 +70,8 @@ fn permission_hook_timeout_secs(decision_deadline: Duration) -> u64 {
     wait_secs + PERMISSION_HOOK_TIMEOUT_MARGIN.as_secs()
 }
 
-/// Render the session settings JSON for hooks pointing at `127.0.0.1:<port>`.
+/// Render the session settings for hooks pointing at `127.0.0.1:<port>`, with
+/// the command entries' `curl` configurations at their paths in `layout`.
 ///
 /// `hook_secret` is the secret carried back to the server as an `hs`
 /// query parameter on every hook URL, so the hook auth guard (see
@@ -54,18 +80,27 @@ fn permission_hook_timeout_secs(decision_deadline: Duration) -> u64 {
 /// Claude Code's native `http` hooks have no proven way to set request headers
 /// here, and the URL form works uniformly for both the `http` hooks and the
 /// `command` (`curl`) hook. The secret is hex text (URL-safe), so it needs no
-/// percent-encoding.
+/// percent-encoding. An `http` hook's URL stays inside Claude Code; a command
+/// entry's would be on a process's command line, so the command names its
+/// `curl` configuration file instead, and only that file holds the URL.
 ///
 /// `permission_decision_deadline` is how long the server holds a
 /// `PermissionRequest` hook response waiting for the browser's decision; the
 /// hook's timeout is that wait plus a margin, so Claude Code never gives up
 /// on the hook before Delta's own fallback.
 pub fn render_session_settings(
+    layout: &DataLayout,
     port: u16,
     hook_secret: &str,
     permission_decision_deadline: Duration,
-) -> String {
+) -> SessionSettings {
     let url = |path: &str| format!("http://127.0.0.1:{port}/hooks/{path}?hs={hook_secret}");
+    let curl_config_path = |path: &str| {
+        layout
+            .hook_curl_config(port, path)
+            .to_string_lossy()
+            .into_owned()
+    };
     let http_hook_with_timeout = |path: &str, timeout: u64| {
         json!({
             "hooks": [
@@ -79,14 +114,16 @@ pub fn render_session_settings(
     // command both use it). `-o /dev/null` discards the server's response so it
     // is never fed back to Claude — for a hook that means no hook output, for
     // `statusLine` an empty terminal status line; `-m 5` bounds the call if the
-    // server is somehow unreachable; the `content-type` header lets the
-    // server's JSON extractor parse the body; `--data-binary @-` forwards
-    // stdin verbatim.
+    // server is somehow unreachable; `-K` reads the URL, secret included, from
+    // the endpoint's owner-only configuration file so it never appears on the
+    // command line; the `content-type` header lets the server's JSON extractor
+    // parse the body; `--data-binary @-` forwards stdin verbatim. The file's
+    // path is quoted for the shell, since the data directory can be anywhere.
     let curl_post = |path: &str| {
         format!(
-            "curl -sS -m 5 -o /dev/null -X POST {} \
+            "curl -sS -m 5 -o /dev/null -X POST -K {} \
              -H 'content-type: application/json' --data-binary @-",
-            url(path)
+            shell_quote(&curl_config_path(path))
         )
     };
     // `SessionStart` is delivered only to `command` hooks (Claude Code does not
@@ -180,7 +217,28 @@ pub fn render_session_settings(
     });
     // Pretty-printed so the on-disk file is human-readable when inspected.
     // Rendering never fails for this fixed shape.
-    serde_json::to_string_pretty(&settings).expect("session settings serialize")
+    let json = serde_json::to_string_pretty(&settings).expect("session settings serialize");
+    let files = COMMAND_ENDPOINTS
+        .iter()
+        .map(|path| SessionSettingsFile {
+            path: curl_config_path(path),
+            contents: format!("url = {}\n", curl_config_quote(&url(path))),
+        })
+        .collect();
+    SessionSettings { json, files }
+}
+
+/// `value` as one single-quoted shell word: inside single quotes nothing is
+/// special, and a `'` in the value closes the quote, adds an escaped `'` and
+/// reopens it.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+/// `value` as a double-quoted `curl` configuration value, in which `\` and `"`
+/// are the characters that need escaping.
+fn curl_config_quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', r"\\").replace('"', r#"\""#))
 }
 
 #[cfg(test)]
@@ -189,8 +247,35 @@ mod tests {
 
     use super::*;
 
+    /// A data directory whose path needs shell quoting: a space, as in
+    /// macOS's `Application Support`, and a single quote.
+    const DATA_DIR: &str = "/data/Delta's data dir";
+
+    fn layout() -> DataLayout {
+        DataLayout::new(DATA_DIR)
+    }
+
+    fn render_full(port: u16, hook_secret: &str) -> SessionSettings {
+        render_session_settings(&layout(), port, hook_secret, PERMISSION_DECISION_DEADLINE)
+    }
+
     fn render(port: u16, hook_secret: &str) -> String {
-        render_session_settings(port, hook_secret, PERMISSION_DECISION_DEADLINE)
+        render_full(port, hook_secret).json
+    }
+
+    /// Every `command` string the settings carry, at any depth.
+    fn commands(value: &serde_json::Value) -> Vec<String> {
+        match value {
+            serde_json::Value::Object(map) => map
+                .iter()
+                .flat_map(|(key, value)| match (key.as_str(), value) {
+                    ("command", serde_json::Value::String(command)) => vec![command.clone()],
+                    _ => commands(value),
+                })
+                .collect(),
+            serde_json::Value::Array(items) => items.iter().flat_map(commands).collect(),
+            _ => Vec::new(),
+        }
     }
 
     #[test]
@@ -238,9 +323,8 @@ mod tests {
         let session_start_command = parsed["hooks"]["SessionStart"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();
-        assert!(
-            session_start_command.contains("http://127.0.0.1:9999/hooks/session-start?hs=sekret")
-        );
+        assert!(session_start_command
+            .contains(r"-K '/data/Delta'\''s data dir/settings/9999-session-start.curl'"));
         assert!(session_start_command.contains("--data-binary @-"));
         assert!(session_start_command.contains("-o /dev/null"));
 
@@ -285,8 +369,8 @@ mod tests {
             Duration::from_millis(90_500),
             Duration::from_secs(300),
         ] {
-            let rendered = render_session_settings(9999, "sekret", deadline);
-            let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+            let rendered = render_session_settings(&layout(), 9999, "sekret", deadline);
+            let parsed: serde_json::Value = serde_json::from_str(&rendered.json).unwrap();
             let timeout = parsed["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"]
                 .as_u64()
                 .unwrap();
@@ -310,8 +394,62 @@ mod tests {
         // empty.
         assert_eq!(parsed["statusLine"]["type"], "command");
         let command = parsed["statusLine"]["command"].as_str().unwrap();
-        assert!(command.contains("http://127.0.0.1:9999/hooks/status-line?hs=sekret"));
+        assert!(command.contains(r"-K '/data/Delta'\''s data dir/settings/9999-status-line.curl'"));
         assert!(command.contains("--data-binary @-"));
         assert!(command.contains("-o /dev/null"));
+    }
+
+    #[test]
+    fn no_command_carries_the_hook_secret() {
+        let rendered = render(9999, "0123abcd");
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+
+        let commands = commands(&parsed);
+        assert_eq!(
+            commands.len(),
+            2,
+            "SessionStart and statusLine: {commands:?}"
+        );
+        for command in commands {
+            assert!(!command.contains("0123abcd"), "{command}");
+            assert!(!command.contains("hs="), "{command}");
+        }
+    }
+
+    #[test]
+    fn each_command_endpoint_has_a_curl_config_holding_its_url() {
+        let rendered = render_full(9999, "0123abcd");
+
+        assert_eq!(
+            rendered.files,
+            vec![
+                SessionSettingsFile {
+                    path: "/data/Delta's data dir/settings/9999-session-start.curl".to_owned(),
+                    contents: "url = \"http://127.0.0.1:9999/hooks/session-start?hs=0123abcd\"\n"
+                        .to_owned(),
+                },
+                SessionSettingsFile {
+                    path: "/data/Delta's data dir/settings/9999-status-line.curl".to_owned(),
+                    contents: "url = \"http://127.0.0.1:9999/hooks/status-line?hs=0123abcd\"\n"
+                        .to_owned(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_quoted_value_survives_the_shell_and_curl_unchanged() {
+        assert_eq!(shell_quote("plain"), "'plain'");
+        assert_eq!(shell_quote("it's"), r"'it'\''s'");
+        assert_eq!(curl_config_quote(r#"a"b\c"#), r#""a\"b\\c""#);
+
+        // The shell reads the quoted word back as the original value.
+        let value = "/data/Delta's dir/$HOME `x` \\ \"q\"";
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("printf %s {}", shell_quote(value)))
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), value);
     }
 }

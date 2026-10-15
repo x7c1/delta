@@ -162,7 +162,7 @@ impl AppState {
             crate::version::VERSION,
         ));
         state
-            .readopt_surviving_sessions(config.hook_endpoint_changed)
+            .readopt_surviving_sessions(config.hook_endpoint_change)
             .await;
         Ok(state)
     }
@@ -180,15 +180,12 @@ impl AppState {
     /// at stay closed with their record kept, and that backstop still adopts
     /// each one before a send could resume it into a second process. Refusing
     /// to start over it would cost the user every session instead of a few.
-    async fn readopt_surviving_sessions(&self, hook_endpoint_changed: bool) {
-        match self
-            .interactor
-            .readopt_surviving_sessions(hook_endpoint_changed)
-            .await
-        {
+    async fn readopt_surviving_sessions(&self, change: delta_bootstrap::HookEndpointChange) {
+        match self.interactor.readopt_surviving_sessions(change).await {
             Ok(summary) => tracing::info!(
                 adopted = summary.adopted,
                 hooks_unreachable = summary.hooks_unreachable,
+                ended = summary.ended,
                 gone = summary.gone,
                 unprobed = summary.unprobed,
                 failed = summary.failed,

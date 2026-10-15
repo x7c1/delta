@@ -7,6 +7,11 @@
 /// The launched command is appended as a separate argv tail (not a shell
 /// string), so arguments such as `claude --resume <id>` reach the process
 /// without shell-quoting hazards.
+///
+/// The start directory is the one value here tmux reads as a format: it
+/// expands `-c` before using it, so a directory name containing `#(…)` would
+/// run a command and `#{…}` would be substituted. [`escape_format`] doubles
+/// each `#` so the directory is used literally.
 pub(super) fn new_session_args(name: &str, workdir: &str, command: &[String]) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "new-session".into(),
@@ -14,10 +19,19 @@ pub(super) fn new_session_args(name: &str, workdir: &str, command: &[String]) ->
         "-s".into(),
         name.into(),
         "-c".into(),
-        workdir.into(),
+        escape_format(workdir),
     ];
     args.extend(command.iter().cloned());
     args
+}
+
+/// Escape `value` for an argument tmux expands as a format.
+///
+/// Every format sequence (`#{…}`, `#(…)`, `#[…]`, `#,`, …) starts with `#`, and
+/// `##` expands to a single literal `#`, so doubling each `#` is all a value
+/// needs to come out of the expansion unchanged.
+fn escape_format(value: &str) -> String {
+    value.replace('#', "##")
 }
 
 /// How many `BSpace` keystrokes the shared clear sends after `C-u`, to wipe any
@@ -174,6 +188,15 @@ mod tests {
                 "claude",
             ],
         );
+    }
+
+    #[test]
+    fn new_session_args_escapes_format_sequences_in_the_start_directory() {
+        // tmux format-expands `-c`, so an unescaped `#(` in a directory name
+        // would run a command. Each `#` is doubled so the name stays literal.
+        let args = new_session_args("delta-1", "/work/a#(touch x)b", &["claude".to_owned()]);
+        assert_eq!(args[4], "-c");
+        assert_eq!(args[5], "/work/a##(touch x)b");
     }
 
     #[test]

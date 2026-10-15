@@ -47,7 +47,7 @@ pub use hooks::PermissionWait;
 pub use interactor_core::InteractorCore;
 pub use open_cwd::{ExternalHandler, ExternalHandlerId, VSCODE_HANDLER_ID};
 pub use permission_decision::PermissionDecision;
-pub use routing::ReadoptionSummary;
+pub use routing::{HookEndpointChange, ReadoptionSummary};
 pub use session_actor::runtime::{
     AttachablePane, PendingPermission, PendingQuestion, RunningSubagent, SessionLiveState,
 };
@@ -171,6 +171,7 @@ where
             transcript_root: None,
             session_settings_json: session_settings_json.into(),
             session_settings_path: session_settings_path.into(),
+            session_settings_files: Vec::new(),
             launch: LaunchConfig::default(),
             minter: PaneTokenMinter::new(),
             repository_origin_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
@@ -212,6 +213,26 @@ where
             panic!("with_launch_config must be called before any session actor is spawned");
         };
         core.launch = launch;
+        let core = Arc::new(core);
+        let sessions = SessionRegistry::new(&core);
+        Self { core, sessions }
+    }
+
+    /// Write `files` next to the session settings file every time it is
+    /// written, owner-only like it (see [`crate::SessionSettingsFile`]).
+    ///
+    /// The settings' command entries read their URLs from these files, so the
+    /// two are always written together: a launch, a resume and the startup
+    /// refresh each rewrite both. Same constraint as
+    /// [`Self::with_launch_config`]: must run before any session actor is
+    /// spawned.
+    pub fn with_session_settings_files(self, files: Vec<crate::SessionSettingsFile>) -> Self {
+        let Ok(mut core) = Arc::try_unwrap(self.core) else {
+            panic!(
+                "with_session_settings_files must be called before any session actor is spawned"
+            );
+        };
+        core.session_settings_files = files;
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
         Self { core, sessions }

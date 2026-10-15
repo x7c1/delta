@@ -4,7 +4,9 @@
 //! *detached* child (the parent does not wait for it to exit) using
 //! [`tokio::process::Command`]. It never invokes a shell: the command name
 //! and each argument are passed verbatim, so no metacharacter in a
-//! user-supplied path is ever interpreted.
+//! user-supplied path is ever interpreted. Keeping the path from being read
+//! as one of the command's own options is the caller's part: the interactor
+//! passes `--` before it.
 //!
 //! A missing binary on `PATH` maps to
 //! [`delta_usecase::Error::ExternalOpenerCommandNotFound`] so the browser
@@ -125,6 +127,18 @@ mod tests {
 
         let envs: Vec<_> = command.as_std().get_envs().collect();
         assert_eq!(envs, [("LANG".as_ref(), Some("en_US.UTF-8".as_ref()))]);
+    }
+
+    /// The arguments reach the command verbatim and in order, so the `--` the
+    /// interactor puts before a path still ends the command's option parsing.
+    #[test]
+    fn the_opened_command_carries_its_arguments_verbatim() {
+        let opener = SystemOpener::new(Vec::new());
+
+        let command = opener.command("code", &["--".to_owned(), "/work dir".to_owned()]);
+
+        let args: Vec<_> = command.as_std().get_args().collect();
+        assert_eq!(args, ["--", "/work dir"]);
     }
 
     /// A binary that exists spawns without waiting on the child.

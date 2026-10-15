@@ -1,7 +1,7 @@
 //! Spawning external tools (editors, IDEs, viewers) with a target argument.
 //!
 //! The `open cwd in an external tool` feature spawns a helper command with a
-//! path argument — initially only `code <path>` (Visual Studio Code opens the
+//! path argument — initially only `code -- <path>` (Visual Studio Code opens the
 //! path in a new window). The [`ExternalOpener`] port wraps that spawn so the
 //! interactor can drive it without depending on `std::process` directly, and
 //! so unit tests can substitute a fake that records the invocation without

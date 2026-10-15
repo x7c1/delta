@@ -53,6 +53,7 @@ export function seedSessionList(queryClient: QueryClient, ids: readonly string[]
       provider_thread_id: null,
       pull_request_number: null,
       failure_reason: null,
+      closed_reason: null,
     },
     open: false,
     pane_starting: false,

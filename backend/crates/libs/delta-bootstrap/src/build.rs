@@ -127,6 +127,7 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     // records into it — so no per-provider branch appears anywhere.
     let codex_adapter_factory: Arc<dyn AgentAdapterFactory> =
         Arc::new(CodexAdapterFactory::new(codex_launch).with_comms_log(comms_log));
+    let session_settings = config.session_settings();
     let interactor = Interactor::new(
         Box::new(tmux) as Box<dyn delta_usecase::TmuxDriver>,
         Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
@@ -135,9 +136,10 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
         Box::new(git_worktree) as Box<dyn delta_usecase::GitWorktree>,
         layout.sessions().to_string_lossy().into_owned(),
         config.worktree_base.clone(),
-        config.session_settings_json(),
+        session_settings.json,
         config.session_settings_path(),
     )
+    .with_session_settings_files(session_settings.files)
     .with_launch_config(config.launch.clone())
     .with_transcript_root(config.transcript_root.clone())
     .with_gh_cli(gh_cli)
@@ -189,6 +191,37 @@ mod tests {
             "wiring failed; if this host has no tmux on PATH that is the cause — \
              `build` refuses to wire without it"
         );
+    }
+
+    /// The wired settings write keeps the hook secret out of every command
+    /// line: the settings' commands name owner-only `curl` configurations
+    /// written next to the settings file, and only those hold the secret.
+    #[tokio::test]
+    async fn the_hook_secret_is_written_only_to_owner_only_curl_configs() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let config = test_config(&dir);
+        let interactor = build(&config, NullCommsLog::arc()).await.unwrap();
+
+        interactor.refresh_session_settings().await.unwrap();
+
+        let settings = std::fs::read_to_string(config.session_settings_path()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&settings).unwrap();
+        for command in [
+            &parsed["statusLine"]["command"],
+            &parsed["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+        ] {
+            let command = command.as_str().unwrap();
+            assert!(!command.contains(&*config.hook_secret), "{command}");
+        }
+        for endpoint in ["session-start", "status-line"] {
+            let path = config.data_layout().hook_curl_config(config.port, endpoint);
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "{}", path.display());
+            let contents = std::fs::read_to_string(&path).unwrap();
+            assert!(contents.contains(&*config.hook_secret), "{contents}");
+        }
     }
 
     /// The wired vocabulary is the gateway classifications, per provider — the

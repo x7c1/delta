@@ -8,6 +8,7 @@
 use delta_model::{MessageUuid, SendStatus};
 
 use crate::interactor::testing::*;
+use crate::HookEndpointChange;
 
 use super::readoption_support::{left_behind, survives, SURVIVING_TOKEN};
 
@@ -36,7 +37,9 @@ async fn a_held_send_whose_prompt_the_catch_up_shows_is_settled() {
         user_line("prompt-line", "fix the build\n"),
     );
 
-    ix.readopt_surviving_sessions(false).await.unwrap();
+    ix.readopt_surviving_sessions(HookEndpointChange::Unchanged)
+        .await
+        .unwrap();
 
     let row = ix.store().send(delivered.id).await.unwrap().expect("row");
     assert_eq!(row.status, SendStatus::Matched);
@@ -89,7 +92,9 @@ async fn a_line_older_than_the_send_or_already_claimed_settles_nothing() {
     ix.transcript_fake()
         .push_to("/work/sess-A.jsonl", user_line("echo-line", "continue"));
 
-    ix.readopt_surviving_sessions(false).await.unwrap();
+    ix.readopt_surviving_sessions(HookEndpointChange::Unchanged)
+        .await
+        .unwrap();
 
     let row = ix.store().send(first.id).await.unwrap().expect("row");
     assert_eq!(row.status, SendStatus::Matched);

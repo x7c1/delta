@@ -116,6 +116,10 @@ const SETTINGS_FLAG: &str = "--settings";
 const SESSION_ID_FLAG: &str = "--session-id";
 /// The `claude` flag that reattaches to a stored conversation on resume.
 const RESUME_FLAG: &str = "--resume";
+/// The end-of-options marker placed before a first prompt, so a prompt that
+/// starts with `-` is read as the positional prompt rather than as a flag.
+/// Mirrors the core's spawn path.
+const END_OF_OPTIONS: &str = "--";
 /// The tmux key name Claude's TUI treats as "interrupt the in-flight turn".
 const INTERRUPT_KEY: &str = "Escape";
 
@@ -311,8 +315,10 @@ impl<T: TmuxDriver> AgentAdapter for ClaudeCodePtyHookAdapter<T> {
         );
         // A first prompt rides the launch command line as a trailing positional
         // argument, which `claude` auto-submits at startup (matching the core's
-        // spawn path).
+        // spawn path). `--` ends option parsing first, so a prompt that starts
+        // with `-` is read as the prompt rather than as an unknown flag.
         if let Some(prompt) = req.first_prompt {
+            command.push(END_OF_OPTIONS.to_owned());
             command.push(prompt);
         }
         self.tmux

@@ -6,6 +6,7 @@
  * Not a test file itself: the `.testkit.` segment keeps it outside vitest's
  * `*.test.*` include glob.
  */
+import type { ComponentProps } from 'react';
 import { render, type RenderResult } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setupServer } from 'msw/node';
@@ -52,6 +53,7 @@ export const server = setupServer(...createHandlers());
 export function renderPane(
   threads = mockThreads,
   activeThreadId = MAIN_THREAD_ID,
+  props: Partial<ComponentProps<typeof TranscriptPane>> = {},
 ): RenderResult {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -65,6 +67,7 @@ export function renderPane(
           threads={threads}
           activeThread={active}
           readOnly={false}
+          {...props}
         />
       </ApiProvider>
     </QueryClientProvider>,

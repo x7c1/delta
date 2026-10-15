@@ -55,7 +55,8 @@ make dev
    running when the server restarts — after a crash, or when you restart only
    `delta-server` — still reaches it. `make down` ends the dev sessions along
    with the server, so none outlives that. Delete that file to rotate the
-   secret; `DELTA_HOOK_SECRET` overrides it without replacing it.
+   secret; `DELTA_HOOK_SECRET` overrides it without replacing it (it must be
+   64 lowercase hexadecimal characters, as a minted one is).
 
    A dev environment from before the data directory kept its database in
    `backend/delta.db`. That file is no longer read: `make dev` starts with an
@@ -246,6 +247,9 @@ to it instead.
   server on 7878. It records the port it took in the hook state file (below) and
   tries that one again on the next launch, falling back to a free loopback port
   — with a warning, and the new port recorded — when something else holds it.
+  Claude Code sessions that survived in tmux still call the old port then, so
+  the app ends them and lists them closed with a reason; sending to one resumes
+  it on the new port.
   `DELTA_PORT` pins a port; that one is used as-is and never recorded. The dev
   environment pins 7878 this way, so the port recording is exercised only by
   the installed app.
@@ -253,7 +257,9 @@ to it instead.
   session that outlives a restart still reaches the server with hook URLs it
   accepts. It is created `0600`; a file found readable by others is tightened
   to `0600` with a warning. `DELTA_HOOK_SECRET` overrides the recorded secret
-  without replacing it. Delete the file to rotate the secret.
+  without replacing it. Delete the file to rotate the secret. A secret that is
+  not 64 lowercase hexadecimal characters, in the file or the variable, stops
+  the start with an error naming where it came from.
 - **`PATH` and locale.** An app launched from Finder or a desktop file does not
   inherit your shell's environment, so at startup the app asks your login shell
   (`$SHELL`, or `/bin/sh`) for its `PATH`, `LANG` and every `LC_*`, and passes

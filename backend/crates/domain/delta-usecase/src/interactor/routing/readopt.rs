@@ -8,7 +8,7 @@ use crate::interactor::session_actor::input::SessionInput;
 use crate::interactor::Interactor;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
-use super::ReadoptionSummary;
+use super::{HookEndpointChange, ReadoptionSummary};
 
 impl<T, X, S, W, G> Interactor<T, X, S, W, G>
 where
@@ -29,10 +29,11 @@ where
     /// probe and the echo watchdog take over from there; a gone pane has its
     /// record cleared and the session stays closed.
     ///
-    /// `hook_endpoint_changed` is the server's report that its hook URLs differ
-    /// from the previous run's (`delta_bootstrap::Config::hook_endpoint_changed`).
-    /// It marks only the sessions actually re-adopted — the flag is also true on
-    /// a first run, when there is nothing to strand.
+    /// `change` is the server's report of how its hook URLs relate to the
+    /// previous run's (see [`HookEndpointChange`]). It applies only to the
+    /// sessions whose pane is actually alive, since a change is also reported
+    /// on a first run, when there is nothing to strand. A changed secret marks
+    /// them as unable to deliver hooks, and a moved port ends them.
     ///
     /// Running this before serving is what keeps a send from racing it; the
     /// resume backstop in `open_session` covers any send that does anyway.
@@ -48,7 +49,7 @@ where
     /// remember a pane. The next send resumes their thread as usual.
     pub async fn readopt_surviving_sessions(
         &self,
-        hook_endpoint_changed: bool,
+        change: HookEndpointChange,
     ) -> Result<ReadoptionSummary> {
         let mut summary = ReadoptionSummary::default();
         let mut claimed = HashSet::new();
@@ -71,10 +72,7 @@ where
                 continue;
             }
             let outcome = self
-                .request(&id, |reply| SessionInput::ReadoptPane {
-                    hook_endpoint_changed,
-                    reply,
-                })
+                .request(&id, |reply| SessionInput::ReadoptPane { change, reply })
                 .await;
             match outcome {
                 Ok(Readoption::Adopted { hooks_unreachable }) => {
@@ -83,6 +81,7 @@ where
                         summary.hooks_unreachable += 1;
                     }
                 }
+                Ok(Readoption::Ended) => summary.ended += 1,
                 Ok(Readoption::Gone) => summary.gone += 1,
                 Ok(Readoption::Unprobed) => summary.unprobed += 1,
                 Ok(Readoption::NotRemembered) => {}

@@ -7,6 +7,7 @@
 
 use crate::error::Error;
 use crate::interactor::testing::*;
+use crate::HookEndpointChange;
 
 use super::readoption_support::{left_behind, listing, survives};
 
@@ -15,7 +16,9 @@ async fn a_send_into_a_session_whose_hooks_are_unreachable_is_refused() {
     let ix = interactor();
     let id = left_behind(&ix, "sess-A", "delta-7").await;
     survives(&ix, "delta-7");
-    ix.readopt_surviving_sessions(true).await.unwrap();
+    ix.readopt_surviving_sessions(HookEndpointChange::Changed)
+        .await
+        .unwrap();
     let main = ix.store().main_thread_id(&id).await.unwrap();
 
     let result = ix.enqueue_send(to(main), "next", None).await;
@@ -52,7 +55,9 @@ async fn releasing_a_held_send_into_such_a_session_is_refused_and_keeps_it_held(
         .unwrap();
     ix.store().restore_all_dispatched().await.unwrap();
     survives(&ix, "delta-7");
-    ix.readopt_surviving_sessions(true).await.unwrap();
+    ix.readopt_surviving_sessions(HookEndpointChange::Changed)
+        .await
+        .unwrap();
 
     let result = ix.release_send(held.id).await;
 
@@ -82,7 +87,9 @@ async fn a_queued_send_of_such_a_session_is_not_flushed_into_its_pane() {
         .await
         .unwrap();
     survives(&ix, "delta-7");
-    ix.readopt_surviving_sessions(true).await.unwrap();
+    ix.readopt_surviving_sessions(HookEndpointChange::Changed)
+        .await
+        .unwrap();
 
     // A turn ends in the transcript (an API error writes no hook either way),
     // which is a queue-flush trigger.
@@ -104,7 +111,9 @@ async fn a_send_that_adopts_a_marked_pane_through_the_backstop_is_refused() {
     let id = left_behind(&ix, "sess-A", "delta-7").await;
     survives(&ix, "delta-7");
     ix.tmux_fake().fail_probes();
-    ix.readopt_surviving_sessions(true).await.unwrap();
+    ix.readopt_surviving_sessions(HookEndpointChange::Changed)
+        .await
+        .unwrap();
     *ix.tmux_fake().probe_fails.lock().unwrap() = false;
     let main = ix.store().main_thread_id(&id).await.unwrap();
 
@@ -127,7 +136,9 @@ async fn after_close_a_send_resumes_the_session_again() {
     let ix = interactor();
     let id = left_behind(&ix, "sess-A", "delta-7").await;
     survives(&ix, "delta-7");
-    ix.readopt_surviving_sessions(true).await.unwrap();
+    ix.readopt_surviving_sessions(HookEndpointChange::Changed)
+        .await
+        .unwrap();
     let main = ix.store().main_thread_id(&id).await.unwrap();
     assert!(matches!(
         ix.enqueue_send(to(main), "first", None).await,
@@ -157,7 +168,9 @@ async fn a_marked_record_whose_pane_died_does_not_refuse_the_send() {
     // Boot could not ask tmux, so the changed endpoint was recorded on the
     // pane it may still be running in.
     ix.tmux_fake().fail_probes();
-    ix.readopt_surviving_sessions(true).await.unwrap();
+    ix.readopt_surviving_sessions(HookEndpointChange::Changed)
+        .await
+        .unwrap();
     *ix.tmux_fake().probe_fails.lock().unwrap() = false;
     assert!(
         ix.store()

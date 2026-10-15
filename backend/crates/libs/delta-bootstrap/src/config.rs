@@ -1,10 +1,10 @@
 //! Runtime configuration for the composition root.
 
-use delta_usecase::{BuildOrigin, Launcher};
+use delta_usecase::{BuildOrigin, HookEndpointChange, Launcher};
 
 use crate::data_layout::DataLayout;
 use crate::secret::Secret;
-use crate::settings::render_session_settings;
+use crate::settings::{render_session_settings, SessionSettings};
 
 /// The identifier Delta runs under when nothing names another one.
 ///
@@ -71,6 +71,14 @@ pub struct Config {
     /// session that survived a restart in tmux still presents the secret the
     /// new process accepts. `DELTA_HOOK_SECRET` overrides it.
     pub hook_secret: Secret,
+    /// Whether [`Self::hook_secret`] is the one `DELTA_HOOK_SECRET` named
+    /// rather than one minted for want of it, so that adopting the persisted
+    /// secret (`delta_server::config::adopt_persisted_hook_secret`) lets it win.
+    ///
+    /// Read once with the rest of the environment: the variable is then
+    /// removed from the environment every child inherits, so it cannot be
+    /// read again later. Configuration built by hand (tests) leaves it `false`.
+    pub hook_secret_from_env: bool,
     /// The directory a hook-reported `transcript_path` must resolve under to be
     /// persisted and read. Defaults to
     /// `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects` (where real Claude Code
@@ -83,31 +91,34 @@ pub struct Config {
     pub transcript_root: String,
     /// TCP port the server listens on, used to render the session's hook URLs.
     pub port: u16,
-    /// Whether the hook endpoint this run serves — the port and secret in the
-    /// hook URLs — differs from the one the previous run served, as far as the
-    /// hook state file can tell. When it does, a Claude Code session that
+    /// How the hook endpoint this run serves — the port and secret in the
+    /// hook URLs — relates to the one the previous run served, as far as the
+    /// hook state file can tell. When it differs, a Claude Code session that
     /// survived the restart in tmux, still holding the old URLs, can no longer
     /// reach this server.
     ///
     /// Decided against the hook state file in the data directory (see
-    /// `delta_server::config::hook_state`). `true` when the secret was minted
-    /// afresh (a first run, an upgrade from a build that did not keep one, or
-    /// the file deleted to rotate it), when an explicit `DELTA_HOOK_SECRET`
-    /// differs from the recorded one, or when the desktop app could not get its
-    /// recorded port back and fell back to a fresh one. `false` otherwise,
-    /// including the CLI's fixed port, which is never compared. Configuration
-    /// built by hand (tests) leaves it `false`.
+    /// `delta_server::config::hook_state`).
+    /// [`HookEndpointChange::PortMoved`] when the desktop app could not get its
+    /// recorded port back and fell back to a fresh one: the old URLs then point
+    /// at a port another process may hold, so re-adoption ends those sessions.
+    /// [`HookEndpointChange::Changed`] when the secret was minted afresh (a
+    /// first run, an upgrade from a build that did not keep one, or the file
+    /// deleted to rotate it) or an explicit `DELTA_HOOK_SECRET` differs from
+    /// the recorded one. [`HookEndpointChange::Unchanged`] otherwise, including
+    /// the CLI's fixed port, which is never compared. Configuration built by
+    /// hand (tests) leaves it `Unchanged`.
     ///
     /// It says whether surviving sessions *would* be stranded, not that any
-    /// exist: a first run reads `true` with no session to strand, so a caller
-    /// pairs it with the sessions it actually finds. Explicit overrides are
-    /// blind spots, because neither `DELTA_PORT` nor `DELTA_HOOK_SECRET` is
+    /// exist: a first run reads `Changed` with no session to strand, so a
+    /// caller pairs it with the sessions it actually finds. Explicit overrides
+    /// are blind spots, because neither `DELTA_PORT` nor `DELTA_HOOK_SECRET` is
     /// recorded: an explicit port is never compared, so moving to or from one
-    /// reads `false`; and a secret is compared with the recorded one, not with
-    /// the previous run's, so the same `DELTA_HOOK_SECRET` on every start reads
-    /// `true` each time, while dropping it after a run that used it reads
-    /// `false`.
-    pub hook_endpoint_changed: bool,
+    /// reads as no move; and a secret is compared with the recorded one, not
+    /// with the previous run's, so the same `DELTA_HOOK_SECRET` on every start
+    /// reads `Changed` each time, while dropping it after a run that used it
+    /// reads `Unchanged`.
+    pub hook_endpoint_change: HookEndpointChange,
     /// How sessions are launched (which binary) and how long the launch
     /// watchdog waits. Defaults are production values; tests and alternative
     /// installs override the binary and shrink the deadlines.
@@ -151,10 +162,13 @@ impl Config {
         DataLayout::new(&self.data_dir)
     }
 
-    /// The Claude Code session settings JSON rendered for this configuration, so
-    /// the hook URLs always match the running port.
-    pub fn session_settings_json(&self) -> String {
+    /// The Claude Code session settings rendered for this configuration, so
+    /// the hook URLs always match the running port: the JSON written to
+    /// [`Self::session_settings_path`], and the `curl` configurations its
+    /// command entries read, written next to it.
+    pub fn session_settings(&self) -> SessionSettings {
         render_session_settings(
+            &self.data_layout(),
             self.port,
             &self.hook_secret,
             self.launch.permission_decision_deadline,
@@ -186,9 +200,10 @@ mod tests {
             tmux_socket: DEFAULT_IDENTIFIER.into(),
             auth_token: "tok".into(),
             hook_secret: "hs".into(),
+            hook_secret_from_env: false,
             transcript_root: "/home/u/.claude/projects".into(),
             port: 4000,
-            hook_endpoint_changed: false,
+            hook_endpoint_change: HookEndpointChange::Unchanged,
             launch: delta_usecase::LaunchConfig::default(),
             child_env: Vec::new(),
             release_feed_url: None,

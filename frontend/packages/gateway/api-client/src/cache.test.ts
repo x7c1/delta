@@ -186,6 +186,7 @@ describe('seedSessionThreads', () => {
             provider_thread_id: null,
             pull_request_number: null,
             failure_reason: null,
+            closed_reason: null,
           },
           open: true,
           pane_starting: false,

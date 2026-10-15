@@ -214,7 +214,7 @@ struct ClaudeSession {
 
 impl ClaudeSession {
     /// Launch
-    /// `claude --settings <rendered> --session-id <uuid> --permission-mode default <prompt>`
+    /// `claude --settings <rendered> --session-id <uuid> --permission-mode default -- <prompt>`
     /// in a fresh tmux session — Delta's spawn argv plus the explicit
     /// permission mode the suite is written against — with hooks pointing at
     /// the capture server on `hook_port`.
@@ -231,15 +231,27 @@ impl ClaudeSession {
         // The capture server does not verify the hook secret (it observes the
         // raw POSTs), but production rendering now always embeds one, so pass a
         // fixed value to keep the rendered settings identical in shape.
-        std::fs::write(
-            &settings_path,
-            render_session_settings(
-                hook_port,
-                "canary-hook-secret",
-                delta_usecase::PERMISSION_DECISION_DEADLINE,
-            ),
-        )
-        .expect("write rendered settings");
+        // The command hooks read their URLs from `curl` configurations whose
+        // paths the rendering names under the data layout, so they are written
+        // too, owner-only as Delta writes them.
+        let rendered = render_session_settings(
+            &DataLayout::new(&run_dir),
+            hook_port,
+            "canary-hook-secret",
+            delta_usecase::PERMISSION_DECISION_DEADLINE,
+        );
+        for file in &rendered.files {
+            let path = std::path::Path::new(&file.path);
+            std::fs::create_dir_all(path.parent().expect("a settings directory"))
+                .expect("create the settings directory");
+            std::fs::write(path, &file.contents).expect("write a curl configuration");
+            std::fs::set_permissions(
+                path,
+                <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o600),
+            )
+            .expect("restrict a curl configuration");
+        }
+        std::fs::write(&settings_path, rendered.json).expect("write rendered settings");
 
         let session_id = uuid::Uuid::now_v7().to_string();
         let claude_bin = std::env::var("DELTA_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_owned());
@@ -262,6 +274,8 @@ impl ClaudeSession {
             // dialog and no `PermissionRequest` POST would ever appear.
             "--permission-mode".into(),
             "default".into(),
+            // Delta ends option parsing before the prompt.
+            "--".into(),
             prompt.to_owned(),
         ]);
 

@@ -43,6 +43,7 @@ function failedSession(overrides: Partial<Session> = {}): SessionListItem {
       provider_thread_id: null,
       pull_request_number: null,
       failure_reason: 'git error: worktree add failed',
+      closed_reason: null,
       ...overrides,
     },
     open: false,

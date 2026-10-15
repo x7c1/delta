@@ -8,6 +8,10 @@ pub struct ReadoptionSummary {
     /// Of [`Self::adopted`], those whose agent can no longer deliver hooks to
     /// this server because the hook endpoint changed.
     pub hooks_unreachable: usize,
+    /// Sessions whose pane was alive but whose agent called a port this
+    /// server no longer holds; the pane was ended and the session closed with
+    /// a reason.
+    pub ended: usize,
     /// Sessions whose pane was gone; their record was cleared.
     pub gone: usize,
     /// Sessions tmux could not be asked about; left closed, record kept.

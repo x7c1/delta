@@ -97,6 +97,10 @@ fn minted_secrets_are_64_hex_characters_and_distinct() {
         assert!(secret.chars().all(|c| c.is_ascii_hexdigit()));
     }
     assert_ne!(config.auth_token, config.hook_secret);
+    assert!(
+        !config.hook_secret_from_env,
+        "an empty variable names no secret"
+    );
 }
 
 #[test]
@@ -124,6 +128,7 @@ fn explicit_variables_override_every_default() {
     assert_eq!(config.tmux_socket, "sock");
     assert_eq!(config.auth_token, "tok");
     assert_eq!(config.hook_secret, "hs");
+    assert!(config.hook_secret_from_env);
     assert_eq!(config.transcript_root, "/data/t");
     assert_eq!(config.port, 9000);
     assert_eq!(config.launch.claude_bin, "/bin/fake-claude");
@@ -241,29 +246,46 @@ fn adopting_the_persisted_secret_replaces_the_minted_one_and_flags_a_change() {
     let data_dir = dir.path().to_string_lossy().into_owned();
     let start = || {
         let mut config = config(&[("DELTA_DATA_DIR", &data_dir)]);
-        adopt_hook_secret(&mut config, None).unwrap();
+        adopt_persisted_hook_secret(&mut config).unwrap();
         config
     };
 
     let first = start();
-    assert!(first.hook_endpoint_changed, "a first run mints its secret");
+    assert_eq!(
+        first.hook_endpoint_change,
+        HookEndpointChange::Changed,
+        "a first run mints its secret"
+    );
 
     let second = start();
     assert_eq!(second.hook_secret, first.hook_secret);
-    assert!(!second.hook_endpoint_changed);
-    assert_eq!(
-        second.session_settings_json(),
-        first.session_settings_json()
-    );
+    assert_eq!(second.hook_endpoint_change, HookEndpointChange::Unchanged);
+    assert_eq!(second.session_settings(), first.session_settings());
     assert_eq!(
         second.session_settings_path(),
         first.session_settings_path()
     );
 
-    let mut overridden = config(&[("DELTA_DATA_DIR", &data_dir)]);
-    adopt_hook_secret(&mut overridden, Some("hs".into())).unwrap();
-    assert_eq!(overridden.hook_secret, "hs");
-    assert!(overridden.hook_endpoint_changed);
+    let explicit = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let mut overridden = config(&[
+        ("DELTA_DATA_DIR", &data_dir),
+        ("DELTA_HOOK_SECRET", explicit),
+    ]);
+    assert!(overridden.hook_secret_from_env);
+    adopt_persisted_hook_secret(&mut overridden).unwrap();
+    assert_eq!(overridden.hook_secret, explicit);
+    assert_eq!(overridden.hook_endpoint_change, HookEndpointChange::Changed);
+}
+
+#[test]
+fn a_malformed_hook_secret_variable_refuses_the_start_naming_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let data_dir = dir.path().to_string_lossy().into_owned();
+    let mut config = config(&[("DELTA_DATA_DIR", &data_dir), ("DELTA_HOOK_SECRET", "hs")]);
+
+    let err = adopt_persisted_hook_secret(&mut config).unwrap_err();
+
+    assert!(err.to_string().contains("DELTA_HOOK_SECRET"), "{err}");
 }
 
 #[test]

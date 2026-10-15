@@ -24,6 +24,8 @@ use super::{new_session, spawning_session};
 use crate::migrations::{migrate, Step, UNDO_HELD_AT_RENAME};
 use crate::SCHEMA_VERSION;
 
+mod session_pane_columns;
+
 /// Apply a synthetic next-version step to an open store, standing in for the
 /// first real migration that will ride a later change.
 ///
@@ -267,6 +269,10 @@ async fn a_session_written_before_a_later_step_stays_a_claude_row() {
 /// duplicate column, a table that already exists).
 fn downgrade_sql(version: u32) -> String {
     let mut sql = String::new();
+    // v11 added the session's close reason.
+    if version < 11 {
+        sql.push_str("ALTER TABLE session DROP COLUMN closed_reason;\n");
+    }
     // v10 added the session's remembered pane.
     if version < 10 {
         sql.push_str(
@@ -923,43 +929,4 @@ async fn schema_gate_refuses_a_database_from_a_newer_binary() {
         rendered.contains("make reset"),
         "error message must name `make reset`: {rendered}"
     );
-}
-
-/// A database written by the generation before the remembered pane — stamped 9
-/// — is migrated forward on open: the columns arrive, the file is re-stamped,
-/// and the session that was already there remembers no pane, so a restart
-/// re-adopts nothing from it (no earlier binary recorded where a pane was).
-#[tokio::test]
-async fn a_v9_database_gains_the_remembered_pane_and_keeps_its_sessions() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("v9.sqlite");
-    let path_str = path.to_str().unwrap();
-
-    {
-        let store = SqliteStore::open(path_str).unwrap();
-        store.register_session(new_session()).await.unwrap();
-        let conn = store.conn.lock().await;
-        conn.execute_batch(&downgrade_sql(9)).unwrap();
-    }
-    assert_eq!(read_user_version(path_str), 9);
-
-    let store = SqliteStore::open(path_str).unwrap();
-    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
-
-    let id = SessionId::from("sess-1");
-    assert!(
-        store.session(&id).await.unwrap().is_some(),
-        "the pre-existing session survives the migration"
-    );
-    assert_eq!(store.remembered_pane(&id).await.unwrap(), None);
-    assert!(store.remembered_panes().await.unwrap().is_empty());
-
-    // The new columns are usable through the normal write path.
-    let pane = delta_usecase::RememberedPane {
-        tmux_session: "delta-1".into(),
-        pane: "delta-1:0.0".into(),
-        hooks_unreachable: true,
-    };
-    store.remember_pane(&id, &pane).await.unwrap();
-    assert_eq!(store.remembered_pane(&id).await.unwrap(), Some(pane));
 }

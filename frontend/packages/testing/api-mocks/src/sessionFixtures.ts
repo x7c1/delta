@@ -82,6 +82,7 @@ export const mockSession: Session = {
   // `https://github.com/dev/delta/pull/138`.
   pull_request_number: 138,
   failure_reason: null,
+  closed_reason: null,
 };
 
 export const mockSession2: Session = {
@@ -100,6 +101,7 @@ export const mockSession2: Session = {
   // Started from a directory pick: no PR slot on the card.
   pull_request_number: null,
   failure_reason: null,
+  closed_reason: null,
 };
 
 export const mockSession3: Session = {
@@ -119,6 +121,7 @@ export const mockSession3: Session = {
   provider_thread_id: null,
   pull_request_number: null,
   failure_reason: null,
+  closed_reason: null,
 };
 
 export const mockSession4: Session = {
@@ -143,6 +146,7 @@ export const mockSession4: Session = {
   provider_thread_id: null,
   pull_request_number: null,
   failure_reason: null,
+  closed_reason: null,
 };
 
 export const mockThreads: Thread[] = [

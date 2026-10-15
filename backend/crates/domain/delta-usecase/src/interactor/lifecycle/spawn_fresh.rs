@@ -17,7 +17,7 @@ use crate::repository::{display_name, identity_key};
 use crate::worktree_spec::WorktreeSpec;
 
 use super::launch_prep::spawn_launch_preparation;
-use super::{SESSION_ID_FLAG, SETTINGS_FLAG};
+use super::{END_OF_OPTIONS, SESSION_ID_FLAG, SETTINGS_FLAG};
 
 /// The result of a fresh spawn: the launch's pane token and — when the spawn
 /// carried a first prompt — the already-enqueued `send` row for it (which
@@ -117,7 +117,8 @@ where
     /// TUI input is not yet ready when the keystrokes land, they are lost, the
     /// prompt is never submitted, and the spawn sits pending forever. The
     /// command is forwarded as an argv tail (no shell), so a multi-line or
-    /// quoted prompt is already safe.
+    /// quoted prompt is already safe; the prompt follows a `--` so one that
+    /// starts with `-` is not parsed as an option.
     ///
     /// `launch_option_ids` are the registered launch options the user selected
     /// for this session, in selection order. They are resolved to their
@@ -384,8 +385,10 @@ where
         // startup, so the prompt is delivered without any post-launch keystroke
         // injection (which is lost when the TUI input is not yet ready on a slow
         // cold start). The argv tail is forwarded without a shell, so a
-        // multi-line or quoted prompt is safe.
+        // multi-line or quoted prompt is safe, and `--` ends option parsing
+        // first so a prompt that starts with `-` is never read as a flag.
         if let Some(text) = first_prompt {
+            command.push(END_OF_OPTIONS.to_owned());
             command.push(text);
         }
 

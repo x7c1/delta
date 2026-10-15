@@ -76,7 +76,9 @@ async fn new_session_with_launch_options_applies_flags_in_order() {
             "--verbose".to_owned(),
             "--permission-mode".to_owned(),
             "auto".to_owned(),
-            // The first prompt stays the trailing positional argument.
+            // The first prompt stays the trailing positional argument,
+            // after the end-of-options marker.
+            "--".to_owned(),
             "hello".to_owned(),
         ],
         "launch-option flags sit between --session-id and the positional prompt, in selection order"

@@ -146,9 +146,9 @@ pub(in crate::interactor) enum SessionInput {
     /// per remembered pane before the server accepts requests; see
     /// `SessionContext::readopt_remembered_pane`.
     ReadoptPane {
-        /// Whether the hook endpoint changed since the previous run, so a pane
-        /// found alive is marked as unable to reach this server.
-        hook_endpoint_changed: bool,
+        /// How the hook endpoint relates to the previous run's, which decides
+        /// what becomes of a pane found alive.
+        change: crate::interactor::HookEndpointChange,
         reply: Reply<Readoption>,
     },
     /// Close the session: final sync, kill the pane, drop the binding. Replies

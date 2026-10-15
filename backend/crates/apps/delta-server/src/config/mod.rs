@@ -25,8 +25,8 @@
 use std::ffi::OsString;
 
 use delta_bootstrap::{
-    BuildOrigin, Config, DataDirError, DataDirOrigin, DataLayout, Launcher, DEFAULT_IDENTIFIER,
-    DEFAULT_RELEASE_FEED_URL,
+    BuildOrigin, Config, DataDirError, DataDirOrigin, DataLayout, HookEndpointChange, Launcher,
+    DEFAULT_IDENTIFIER, DEFAULT_RELEASE_FEED_URL,
 };
 
 pub mod hook_state;
@@ -40,7 +40,7 @@ use launch::launch_from_vars;
 
 mod secrets;
 pub(crate) use secrets::mint_secret;
-use secrets::{auth_token, hook_secret, AUTH_TOKEN_VAR};
+use secrets::{auth_token, hook_secret, AUTH_TOKEN_VAR, HOOK_SECRET_VAR};
 
 #[cfg(test)]
 mod tests;
@@ -67,11 +67,11 @@ pub fn build_origin() -> BuildOrigin {
 /// The configuration of the CLI server: [`Config::launcher`] is
 /// [`Launcher::Cli`].
 ///
-/// Takes `DELTA_AUTH_TOKEN` out of the process environment once it is read
-/// (`withhold_auth_token_from_children`).
+/// Takes `DELTA_AUTH_TOKEN` and `DELTA_HOOK_SECRET` out of the process
+/// environment once they are read (`withhold_secrets_from_children`).
 pub fn config_from_env() -> Result<Config, DataDirError> {
     let config = config_from_vars(|name| std::env::var_os(name));
-    withhold_auth_token_from_children();
+    withhold_secrets_from_children();
     prepared(config)
 }
 
@@ -87,23 +87,28 @@ pub fn config_from_env() -> Result<Config, DataDirError> {
 /// path whose [`Config::launcher`] is [`Launcher::Desktop`].
 pub fn config_from_env_for(identifier: &str) -> Result<Config, DataDirError> {
     let config = desktop_config_from_vars(|name| std::env::var_os(name), identifier);
-    withhold_auth_token_from_children();
+    withhold_secrets_from_children();
     prepared(config)
 }
 
-/// Remove `DELTA_AUTH_TOKEN` from this process's environment.
+/// Remove `DELTA_AUTH_TOKEN` and `DELTA_HOOK_SECRET` from this process's
+/// environment.
 ///
 /// Every command the server starts — tmux, and through it each agent, git, gh,
-/// the editor opener — inherits the process environment. The token is held in
-/// the configuration once it is read, so nothing the server starts needs it,
-/// and none of them should be able to read it: an agent runs whatever its
-/// session asks, and its environment is visible to anything it runs in turn.
+/// the editor opener — inherits the process environment. Both secrets are held
+/// in the configuration once they are read ([`Config::hook_secret_from_env`]
+/// records whether the hook secret came from the variable), so nothing the
+/// server starts needs them, and none of them should be able to read them: an
+/// agent runs whatever its session asks, and its environment is visible to
+/// anything it runs in turn. The hook secret is what lets a local process post
+/// as one of Delta's sessions, so it is withheld like the token.
 /// Called by the two `config_from_env*` entry points, which each shell calls
 /// once, before the server starts any command: the `delta-server` binary
 /// before its runtime starts a thread, the desktop shell on its startup thread
 /// while the window's event loop already runs.
-fn withhold_auth_token_from_children() {
+fn withhold_secrets_from_children() {
     std::env::remove_var(AUTH_TOKEN_VAR);
+    std::env::remove_var(HOOK_SECRET_VAR);
 }
 
 /// [`config_from_vars`] for the desktop shell running under `identifier`.
@@ -187,14 +192,15 @@ fn config_from_vars_for(
         tmux_socket: non_empty("DELTA_TMUX_SOCKET").unwrap_or_else(|| identifier.clone()),
         identifier,
         auth_token: auth_token(text(AUTH_TOKEN_VAR)).into(),
-        hook_secret: hook_secret(text("DELTA_HOOK_SECRET")).into(),
+        hook_secret: hook_secret(text(HOOK_SECRET_VAR)).into(),
+        hook_secret_from_env: non_empty(HOOK_SECRET_VAR).is_some(),
         transcript_root: transcript_root(
             text("DELTA_TRANSCRIPT_ROOT"),
             text("CLAUDE_CONFIG_DIR"),
             home,
         ),
         port: port_from_vars(&text).unwrap_or(DEFAULT_PORT),
-        hook_endpoint_changed: false,
+        hook_endpoint_change: HookEndpointChange::Unchanged,
         launch: launch_from_vars(&text),
         child_env: Vec::new(),
         release_feed_url: release_feed_url(text(RELEASE_FEED_URL_VAR), build_origin()),
@@ -261,23 +267,24 @@ fn default_base_parent(worktree_base: &str, home: Option<OsString>) -> Option<St
 /// Give `config` the hook secret kept in its data directory, and return the
 /// state file it came from.
 ///
-/// `DELTA_HOOK_SECRET` still wins when set; otherwise the recorded secret is
-/// reused, or minted and recorded on a first run — see [`hook_state`]. Sets
-/// [`Config::hook_endpoint_changed`] when the secret differs from the recorded
+/// `DELTA_HOOK_SECRET` still wins when set (as [`Config::hook_secret_from_env`]
+/// records — the variable itself is gone from the environment by now);
+/// otherwise the recorded secret is reused, or minted and recorded on a first
+/// run — see [`hook_state`], which also refuses a secret not of the form Delta
+/// mints. Records [`HookEndpointChange::Changed`] in
+/// [`Config::hook_endpoint_change`] when the secret differs from the recorded
 /// one. The desktop app goes on to settle its port against the same file
 /// ([`crate::serve::bind_app_listener`]).
 pub fn adopt_persisted_hook_secret(config: &mut Config) -> Result<HookStateFile, HookStateError> {
-    adopt_hook_secret(config, std::env::var("DELTA_HOOK_SECRET").ok())
-}
-
-fn adopt_hook_secret(
-    config: &mut Config,
-    explicit: Option<String>,
-) -> Result<HookStateFile, HookStateError> {
+    let explicit = config
+        .hook_secret_from_env
+        .then(|| config.hook_secret.to_string());
     let mut state = HookStateFile::open(config.data_layout().hook_state())?;
     let settled = state.settle_hook_secret(explicit)?;
     config.hook_secret = settled.secret.into();
-    config.hook_endpoint_changed |= settled.changed;
+    if settled.changed {
+        config.hook_endpoint_change = config.hook_endpoint_change.max(HookEndpointChange::Changed);
+    }
     Ok(state)
 }
 

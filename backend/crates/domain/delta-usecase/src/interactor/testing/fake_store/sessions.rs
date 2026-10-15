@@ -91,6 +91,7 @@ impl FakeStore {
             provider_thread_id: None,
             pull_request_number: None,
             failure_reason: None,
+            closed_reason: None,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -142,6 +143,7 @@ impl FakeStore {
             provider_thread_id: None,
             pull_request_number,
             failure_reason: None,
+            closed_reason: None,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -244,6 +246,14 @@ impl FakeStore {
         {
             session.status = SessionStatus::Failed;
             session.failure_reason = reason.map(str::to_owned);
+        }
+        Ok(())
+    }
+
+    pub(super) async fn record_closed_reason(&self, id: &SessionId, reason: &str) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(session) = g.sessions.iter_mut().find(|s| &s.id == id) {
+            session.closed_reason = Some(reason.to_owned());
         }
         Ok(())
     }

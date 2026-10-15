@@ -30,6 +30,7 @@ mod session_page;
 mod session_page_cursor;
 mod session_prune;
 mod session_removal;
+mod session_settings_file;
 mod turn;
 mod with_causes;
 mod worktree_branch;
@@ -51,9 +52,9 @@ pub use clone::Clone;
 pub use erase_report::EraseReport;
 pub use error::{Error, Result};
 pub use interactor::{
-    AttachablePane, BoxedInteractor, CoreRelease, ExternalHandler, ExternalHandlerId, Interactor,
-    PendingPermission, PendingQuestion, PermissionDecision, PermissionWait, ReadoptionSummary,
-    RunningSubagent, SessionLiveState, VSCODE_HANDLER_ID,
+    AttachablePane, BoxedInteractor, CoreRelease, ExternalHandler, ExternalHandlerId,
+    HookEndpointChange, Interactor, PendingPermission, PendingQuestion, PermissionDecision,
+    PermissionWait, ReadoptionSummary, RunningSubagent, SessionLiveState, VSCODE_HANDLER_ID,
 };
 pub use launch_config::{
     LaunchConfig, DEFAULT_SESSION_COMMAND, ECHO_DEADLINE, LAUNCH_PREP_DEADLINE,
@@ -96,6 +97,7 @@ pub use session_prune::{
     PruneCriteria, PruneReport, PruneStatus, SessionKeptItem, SkipReason, SkippedSession,
 };
 pub use session_removal::{DiskItem, KeepReason, KeptItem, SessionRemoval};
+pub use session_settings_file::SessionSettingsFile;
 pub use turn::{
     transition, turn_input_for_agent_event, OrphanedSend, Transition, TurnInput, TurnState,
 };

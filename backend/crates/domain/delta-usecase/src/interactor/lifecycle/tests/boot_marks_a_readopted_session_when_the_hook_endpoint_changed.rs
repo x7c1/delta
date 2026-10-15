@@ -4,6 +4,7 @@
 //! also set on a first run, when there is nothing to strand.
 
 use crate::interactor::testing::*;
+use crate::HookEndpointChange;
 
 use super::readoption_support::{left_behind, listing, survives};
 
@@ -14,7 +15,10 @@ async fn boot_marks_a_readopted_session_when_the_hook_endpoint_changed() {
     let gone = left_behind(&ix, "sess-gone", "delta-8").await;
     survives(&ix, "delta-7");
 
-    let summary = ix.readopt_surviving_sessions(true).await.unwrap();
+    let summary = ix
+        .readopt_surviving_sessions(HookEndpointChange::Changed)
+        .await
+        .unwrap();
 
     assert_eq!(summary.adopted, 1);
     assert_eq!(summary.hooks_unreachable, 1);
@@ -56,7 +60,9 @@ async fn boot_with_an_unchanged_endpoint_leaves_a_readopted_session_unmarked() {
     let alive = left_behind(&ix, "sess-alive", "delta-7").await;
     survives(&ix, "delta-7");
 
-    ix.readopt_surviving_sessions(false).await.unwrap();
+    ix.readopt_surviving_sessions(HookEndpointChange::Unchanged)
+        .await
+        .unwrap();
 
     let row = listing(&ix, &alive).await;
     assert!(row.open);
@@ -74,7 +80,10 @@ async fn an_unprobed_pane_keeps_the_mark_for_the_send_that_adopts_it_later() {
     survives(&ix, "delta-7");
     ix.tmux_fake().fail_probes();
 
-    let summary = ix.readopt_surviving_sessions(true).await.unwrap();
+    let summary = ix
+        .readopt_surviving_sessions(HookEndpointChange::Changed)
+        .await
+        .unwrap();
 
     assert_eq!(summary.unprobed, 1);
     assert_eq!(summary.adopted, 0);

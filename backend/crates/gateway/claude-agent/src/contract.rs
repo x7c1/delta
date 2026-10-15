@@ -160,7 +160,8 @@ async fn close_ends_the_session() {
 }
 
 /// Claude-specific: the launch command line is the exact spawn shape Claude
-/// needs (`--settings <path> --session-id <id>`, then the positional prompt),
+/// needs (`--settings <path> --session-id <id>`, then `--` and the positional
+/// prompt, so a prompt that starts with `-` is not parsed as a flag),
 /// and it is the Delta-minted id that becomes the provider session id. This
 /// pins the "change dependency direction, not behaviour" property of the
 /// adapter.
@@ -181,7 +182,7 @@ async fn claude_launch_builds_the_expected_command() {
                 name: "--model".to_owned(),
                 value: Some("opus".to_owned()),
             }],
-            first_prompt: Some("do the thing".to_owned()),
+            first_prompt: Some("- fix the build".to_owned()),
             worktree_repo_root: None,
         })
         .await
@@ -206,7 +207,8 @@ async fn claude_launch_builds_the_expected_command() {
             "sid-123".to_owned(),
             "--model".to_owned(),
             "opus".to_owned(),
-            "do the thing".to_owned(),
+            "--".to_owned(),
+            "- fix the build".to_owned(),
         ]
     );
 }

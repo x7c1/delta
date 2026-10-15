@@ -22,6 +22,12 @@ pub trait RememberedPaneStore: Send + Sync {
     /// names the pane the session's agent is running in. See
     /// [`RememberedPane`] for why this is persisted at all.
     ///
+    /// Clears the row's [`Session::closed_reason`] in the same write: a session
+    /// bound to a pane is open again, so the reason it was last closed for no
+    /// longer describes it.
+    ///
+    /// [`Session::closed_reason`]: delta_model::Session::closed_reason
+    ///
     /// Also clears the record of any *other* row that names the same tmux
     /// session, in the same write. Delta reuses `delta-<n>` names across
     /// restarts (the minter skips only names tmux still knows), so another row

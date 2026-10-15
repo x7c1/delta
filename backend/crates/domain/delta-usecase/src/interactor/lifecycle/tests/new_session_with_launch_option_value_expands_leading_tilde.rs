@@ -64,7 +64,9 @@ async fn new_session_with_launch_option_value_expands_leading_tilde() {
             // and sits right after its `--plugin-dir` name token.
             "--plugin-dir".to_owned(),
             expanded,
-            // The first prompt stays the trailing positional argument.
+            // The first prompt stays the trailing positional argument,
+            // after the end-of-options marker.
+            "--".to_owned(),
             "hello".to_owned(),
         ],
         "the launch-option value has its leading tilde expanded to $HOME"

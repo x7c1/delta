@@ -501,6 +501,9 @@ export function WorkspaceScreen() {
   // The focused session is open on a pane re-adopted after a restart whose
   // agent's hooks no longer reach this server (see `TranscriptPane`).
   const focusedHooksUnreachable = focusedItem?.hooks_unreachable ?? false;
+  // Why Delta closed the focused session on its own, if it did (see
+  // `TranscriptPane`).
+  const focusedClosedReason = focusedItem?.session.closed_reason ?? null;
   // The same session in the beat before its row reaches the loaded pages: it
   // was focused off the tracked spawn alone, so there is nothing to render yet
   // — but it is arriving, not gone.
@@ -710,6 +713,7 @@ export function WorkspaceScreen() {
               focusedCapabilities?.has_allow_for_session
             }
             hooksUnreachable={focusedHooksUnreachable}
+            closedReason={focusedClosedReason}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-secondary text-fg-subtle">

@@ -23,6 +23,9 @@ mod ticks;
 mod readoption_summary;
 pub use readoption_summary::ReadoptionSummary;
 
+mod hook_endpoint_change;
+pub use hook_endpoint_change::HookEndpointChange;
+
 #[cfg(test)]
 mod testing;
 #[cfg(test)]

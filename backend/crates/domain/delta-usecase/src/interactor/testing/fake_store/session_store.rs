@@ -57,6 +57,10 @@ impl SessionRecordStore for FakeStore {
         self.mark_session_failed(id, reason).await
     }
 
+    async fn record_closed_reason(&self, id: &SessionId, reason: &str) -> Result<()> {
+        self.record_closed_reason(id, reason).await
+    }
+
     async fn relocate_transcript(
         &self,
         id: &SessionId,

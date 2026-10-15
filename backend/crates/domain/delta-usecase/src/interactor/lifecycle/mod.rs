@@ -54,6 +54,12 @@ const SESSION_ID_FLAG: &str = "--session-id";
 /// `.claude/settings.json`.
 const SETTINGS_FLAG: &str = "--settings";
 
+/// The end-of-options marker placed before the first prompt on the `claude`
+/// launch argv. Without it a prompt that starts with `-` (a Markdown list item
+/// such as `- fix the build`) is parsed as an unknown option and the launch
+/// fails; after it, `claude` reads the prompt as its positional argument.
+const END_OF_OPTIONS: &str = "--";
+
 /// True iff `candidate` resolves to a path at or below `base` — the first gate
 /// on pre-accepting Claude Code's workspace-trust dialog.
 ///

@@ -26,7 +26,8 @@ name. Conventions (timestamps, id types, error bodies) are in
   "provider_session_id": null,
   "provider_thread_id": null,
   "pull_request_number": 138,
-  "failure_reason": null
+  "failure_reason": null,
+  "closed_reason": null
 }
 ```
 
@@ -41,6 +42,14 @@ name. Conventions (timestamps, id types, error bodies) are in
   **multi-line** when the watchdog quoted the pane into it. `null` for every
   other status, for the producers that name nothing, and for rows written
   before the field existed.
+- `closed_reason` is why Delta closed the session on its own, when it did:
+  `"Delta moved to a new port; resume to reconnect"` for a session whose
+  Claude Code process survived a desktop app restart that could not get its
+  previous port back (its hooks would have gone to whatever now holds that
+  port, so Delta ended it). The closed session's notice shows it. It is
+  cleared once the session is bound to a pane again, so it is `null` for every
+  open session, a session the user closed, one whose agent exited, and rows
+  written before the field existed.
 - `transcript_path` is empty while the session is still `spawning`, before the
   first hook reports it — and stays empty on a `failed` row, whose launch never
   produced one.
