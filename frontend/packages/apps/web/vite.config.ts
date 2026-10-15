@@ -61,7 +61,8 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'jsdom',
+    // jsdom, keeping Node's abort primitives for MSW; see the module.
+    environment: './vitest.environment.ts',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,

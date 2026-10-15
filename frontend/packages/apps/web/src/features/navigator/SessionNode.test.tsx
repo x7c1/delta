@@ -24,7 +24,7 @@ import { SessionNode } from './SessionNode';
 
 const server = setupServer(...createHandlers());
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => {
   server.resetHandlers();
   // Running and unread are read from the live store (thread-keyed), OR-aggregated

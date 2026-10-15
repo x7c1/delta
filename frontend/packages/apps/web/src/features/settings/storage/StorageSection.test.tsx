@@ -12,7 +12,7 @@ import { formatBytes } from './formatBytes';
 
 const server = setupServer(...createHandlers());
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => server.resetHandlers(...createHandlers()));
 afterAll(() => server.close());
 
