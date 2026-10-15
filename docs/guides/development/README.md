@@ -536,7 +536,9 @@ reusable workflows (`./...`) are exempt. It and its test
 (`make check-workflow-pins-test`) are part of `make check` and of CI's
 `workflow-pins` job. Dependabot (`.github/dependabot.yml`) proposes the new
 SHA and comment when an action releases, and weekly updates for the cargo and
-npm dependencies.
+npm dependencies. Minor and patch updates of each ecosystem come as one grouped
+PR; a major update comes as a PR of its own, so a failure names the dependency
+that caused it. Security updates are never grouped.
 
 CI's `audit` job checks the shipped dependencies for known advisories:
 `cargo deny check advisories` against the RustSec database, configured by
