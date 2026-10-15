@@ -37,7 +37,7 @@ import { useComposerStore } from '../../store/composerStore';
 import { TranscriptPane } from './TranscriptPane';
 import { renderPane, server } from './TranscriptPane.testkit';
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 

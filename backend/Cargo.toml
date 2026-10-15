@@ -59,6 +59,9 @@ dirs = "7"
 libc = "0.2"
 axum = { version = "0.8", features = ["ws"] }
 futures-util = "0.3"
+# A WebSocket client for tests that drive the server's live sockets over a real
+# connection. The same version axum's `ws` feature already builds on.
+tokio-tungstenite = "0.29"
 # Compiles a directory tree into the binary (delta-server embeds the built web
 # frontend with it under its `embed-web` feature).
 include_dir = "0.7"

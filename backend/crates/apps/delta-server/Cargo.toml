@@ -53,5 +53,7 @@ serde_json = { workspace = true }
 tempfile = { workspace = true }
 tmux-driver = { workspace = true }
 tokio = { workspace = true }
+# The live-socket tests (`src/app/tests/sockets.rs`) connect over a real socket.
+tokio-tungstenite = { workspace = true }
 tower = { workspace = true }
 uuid = { workspace = true }

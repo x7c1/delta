@@ -16,6 +16,7 @@ use delta_usecase::{
 use crate::comms_log::{CommsLogHub, CommsSubscription};
 use crate::one_time_codes::{OneTimeCodes, CODE_LIFETIME};
 use crate::serve::ServerStopped;
+use crate::socket_limits::SocketLimits;
 use crate::storage_inventory::StorageInventory;
 
 /// Capacity of the per-process event broadcast channel.
@@ -126,6 +127,9 @@ pub struct AppState {
     /// `POST /api/latest-release/download`. Not offered unless
     /// [`Self::with_release_update`] sets one that is.
     release_update: Arc<ReleaseUpdate>,
+    /// The connection caps of the three live sockets (`/ws`, `/comms`,
+    /// `/pty`); see [`crate::socket_limits`].
+    sockets: Arc<SocketLimits>,
 }
 
 impl AppState {
@@ -242,6 +246,7 @@ impl AppState {
             erasing: Arc::new(AtomicBool::new(false)),
             release_check: Arc::new(ReleaseCheck::disabled()),
             release_update: Arc::new(ReleaseUpdate::not_offered(NotOffered::CliLauncher)),
+            sockets: Arc::new(SocketLimits::new()),
         }
     }
 
@@ -339,6 +344,11 @@ impl AppState {
     /// without standing up a WebSocket client.
     pub fn watch_comms_log(&self, session_id: &str) -> CommsSubscription {
         self.comms_log.subscribe(session_id)
+    }
+
+    /// The connection caps every live-socket upgrade takes a slot from.
+    pub(crate) fn sockets(&self) -> &SocketLimits {
+        &self.sockets
     }
 
     /// Delta's dedicated tmux socket name (`tmux -L <socket>`).

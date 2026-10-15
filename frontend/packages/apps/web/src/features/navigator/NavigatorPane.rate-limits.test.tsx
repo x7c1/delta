@@ -23,7 +23,7 @@ import { useLiveStore } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { makeItem, renderPane, server } from './NavigatorPane.testkit';
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
