@@ -20,5 +20,8 @@
   "dependencies": {
     "@delta/wire-gen": "workspace:*",
     "msw": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5"
   }
 }
