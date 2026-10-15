@@ -74,6 +74,6 @@ workdir is already recorded) are out of scope and must keep working unchanged.
 
 ### Before merge (verified outside the check command)
 
-- [ ] `make dev`: starting a session from a directory and from a repository
+- [x] `make dev`: starting a session from a directory and from a repository
       still works end to end in the browser. The merging session runs it and
       records the result in the PR.
