@@ -51,6 +51,6 @@ describes the desktop ordering.
 
 ### Before merge (verified outside the check command)
 
-- [ ] `make desktop-dev` starts the desktop app and it loads the workspace
+- [x] `make desktop-dev` starts the desktop app and it loads the workspace
       as before. The merging session runs it on this Ubuntu machine and records
       the result in the PR.
