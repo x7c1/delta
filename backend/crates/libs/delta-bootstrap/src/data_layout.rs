@@ -213,8 +213,6 @@ fn make_owner_only(dir: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt as _;
-
     use super::*;
 
     fn mode(dir: &Path) -> u32 {
