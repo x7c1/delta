@@ -11,7 +11,9 @@
 //! ## What is served
 //!
 //! - `GET /` and `GET /index.html` — the page, with `Cache-Control: no-cache`
-//!   so a rebuilt binary's page (and so its new asset hashes) is picked up.
+//!   so a rebuilt binary's page (and so its new asset hashes) is picked up, and
+//!   a Content-Security-Policy that allows the page's inline scripts by hash
+//!   (`index_page::content_security_policy`).
 //! - Any other file in the directory — with a content type from its extension.
 //!   Vite's `assets/` files carry a content hash in their names, so they are
 //!   served `immutable` with a year-long `max-age`; anything else is `no-cache`.
@@ -91,9 +93,11 @@ const NO_CACHE: &str = "no-cache";
 /// If `site` has no `index.html` — a broken build, refused at boot rather than
 /// served.
 pub(crate) fn mount(api: Router, site: &'static Dir<'static>) -> Router {
+    let index = index_page::page(site);
     let web = Arc::new(StaticWeb {
         site,
-        index: index_page::page(site),
+        policy: index_page::content_security_policy(&index),
+        index,
     });
     // A clone taken before the fallback is installed: its fallback is still
     // the default one, behind the guard layers, so delegating to it answers a
@@ -113,6 +117,8 @@ struct StaticWeb {
     site: &'static Dir<'static>,
     /// `index.html`, served for `/`, `/index.html` and the SPA fallback.
     index: Bytes,
+    /// The Content-Security-Policy `index` is sent with, derived from it once.
+    policy: HeaderValue,
 }
 
 impl StaticWeb {
@@ -165,10 +171,9 @@ impl StaticWeb {
 
     fn index(&self) -> Response {
         let mut response = file_response(content_type("index.html"), NO_CACHE, self.index.clone());
-        response.headers_mut().insert(
-            header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(index_page::CONTENT_SECURITY_POLICY),
-        );
+        response
+            .headers_mut()
+            .insert(header::CONTENT_SECURITY_POLICY, self.policy.clone());
         response
     }
 }

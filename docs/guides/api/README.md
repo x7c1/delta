@@ -72,7 +72,8 @@ endpoint matched, and it never answers under `/api`, `/ws`, `/pty`, `/comms`,
 `/hooks` or `/health` — an unknown path there keeps its `401`/`404`.
 
 - `GET /` and `GET /index.html` — the page, `Cache-Control: no-cache`, with a
-  `Content-Security-Policy` response header.
+  `Content-Security-Policy` response header (see the
+  [security guide](../security.md#the-pages-content-security-policy)).
 - `GET /<file>` for any file of the build — typed by extension; the
   content-hashed `assets/*` files are `Cache-Control: public, max-age=31536000,
   immutable`, anything else `no-cache`. MSW's `mockServiceWorker.js` is not

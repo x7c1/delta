@@ -65,6 +65,9 @@ tokio-tungstenite = "0.29"
 # Compiles a directory tree into the binary (delta-server embeds the built web
 # frontend with it under its `embed-web` feature).
 include_dir = "0.7"
+# Encodes the `'sha256-…'` sources of the CSP delta-server sends with the
+# embedded page.
+base64 = "0.22"
 portable-pty = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
