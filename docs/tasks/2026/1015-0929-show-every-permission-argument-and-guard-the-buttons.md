@@ -90,6 +90,6 @@ Out of scope: separating the tmux server per session.
 
 ### Before merge (verified outside the check command)
 
-- [ ] In the browser against `make dev` with a real Claude session, a Bash
+- [x] In the browser against `make dev` with a real Claude session, a Bash
       permission request and an Edit permission request show their full
       arguments and the edit diff on the card.
