@@ -71,10 +71,16 @@ has no `.menu()`, `.on_menu_event()` or key code).
 
 ### Before merge (verified outside the check command)
 
-- [ ] On Ubuntu (GNOME Wayland, and X11 if available) with the dev build:
+- [x] On Ubuntu (GNOME Wayland, and X11 if available) with the dev build:
       Ctrl-Q quits when the page body or a text input has focus; with the
       terminal focused it does not quit and the pane receives it; after
       quitting, `tmux -L io.github.x7c1.delta.dev ls` still lists the
       session and the next launch re-adopts it; no menu bar appears.
+      Ubuntu 26.04 (GNOME Wayland), 2026-10-15, dev desktop: Ctrl-Q quit
+      with the page body and with the composer focused, and did not quit
+      with the terminal focused; no menu bar appeared; the three tmux
+      sessions stayed and were re-adopted on relaunch. Whether the pane
+      received the key could not be observed (Claude Code shows nothing
+      for it). X11 was not tried.
 - [x] On macOS: Cmd-Q, Cmd-C/V/X/A in the page and in the terminal still
       work as before.
