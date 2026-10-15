@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   invalidateThreadMessages,
@@ -145,6 +145,20 @@ export function WorkspaceScreen() {
     () => sessionsQuery.data?.pages.flatMap((page) => page.sessions) ?? [],
     [sessionsQuery.data],
   );
+
+  // Load the next page without cancelling a refetch already in flight. The
+  // navigator only knows whether a *next page* is loading, so it asks for one
+  // while an invalidation is re-walking the pages; TanStack's default
+  // (`cancelRefetch: true`) would abort that walk after its first page and
+  // append the new page to the stale ones, leaving pre-invalidation rows (a
+  // closed session still marked open) on screen. Deferring to the refetch keeps
+  // the consistency the comment above relies on; once it lands the navigator
+  // re-renders and asks again. A failed page surfaces through the query state
+  // (`isError`), so the returned promise needs no handler.
+  const { fetchNextPage } = sessionsQuery;
+  const loadMoreSessions = useCallback(() => {
+    void fetchNextPage({ cancelRefetch: false });
+  }, [fetchNextPage]);
 
   // Drop localStorage entries for sessions that no longer exist — preferences
   // keyed by session id (e.g. the timeline footer's expand/collapse) leak one
@@ -670,7 +684,7 @@ export function WorkspaceScreen() {
           sessions={sessions}
           hasMoreSessions={sessionsQuery.hasNextPage}
           isLoadingMoreSessions={sessionsQuery.isFetchingNextPage}
-          onLoadMoreSessions={sessionsQuery.fetchNextPage}
+          onLoadMoreSessions={loadMoreSessions}
         />
       </div>
 

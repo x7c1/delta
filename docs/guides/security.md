@@ -8,7 +8,10 @@ boundary: any process or web page on the same host can still reach the port.
 Delta therefore treats **reaching the loopback port as the trust boundary**
 ("unauthenticated-by-port") and layers explicit guards on top of it. This
 document states what each guard covers, how a browser page comes to hold the
-bearer token without any page carrying it, the one deliberate trade-off in how
+bearer token without any page carrying it, what the page's
+Content-Security-Policy allows, how the live sockets and transcript reads are
+bounded so one input cannot exhaust memory or block work, the one deliberate
+trade-off in how
 Delta pre-accepts Claude Code's workspace-trust dialog, how the files Delta
 writes into its data directory are protected, how the desktop app checks an
 update's signature and installs it (on Linux without the server ever holding
@@ -105,6 +108,72 @@ is opened at a URL with a **one-time code** in its fragment —
   for tests and scripts. The server removes it from its own environment as soon
   as it has read it, so the agents, tmux and every other command it starts do
   not inherit it.
+
+## The page's Content-Security-Policy
+
+Assistant output is attacker-influenceable (a prompt-injected agent can emit
+Markdown that references a foreign URL), so the page carries a
+Content-Security-Policy that keeps it from reaching any other origin: images,
+fonts, fetches and sockets are same-origin only (`data:` images and fonts
+aside), and the page cannot be framed. The per-directive rationale is in the
+comment above the `<meta http-equiv>` policy in
+`frontend/packages/apps/web/index.html`.
+
+The policy is set in more than one place, and the browser enforces every one
+it receives, so a resource must pass all of them:
+
+- **The `<meta>` tag** in `index.html`, present in every serving mode. Its
+  `script-src` keeps `'unsafe-inline'` and `'unsafe-eval'`, which Vite's dev
+  client (its inline HMR client and React Refresh preamble) needs.
+- **The response header from Vite** in development (`vite.config.ts`), the same
+  policy, which also enforces `frame-ancestors` (a `<meta>` policy cannot).
+- **The response header from delta-server** with the built page (`embed-web`).
+  Its `script-src` has neither `'unsafe-eval'` nor `'unsafe-inline'`: it allows
+  the page's own inline scripts — the theme bootstrap that sets `data-theme`
+  before the bundle loads — by their `'sha256-…'` sources, so an injected
+  inline script or event handler does not run. delta-server takes the hashes
+  from the embedded `index.html` when it sets up the static surface, so editing
+  the bootstrap cannot leave a stale hash behind, and a test checks them against
+  the page's inline scripts. `style-src` keeps `'unsafe-inline'`, because xterm
+  injects inline styles.
+
+## Resource bounds
+
+Everything behind the bearer token or the hook secret is still bounded, so one
+token holder (or one runaway tab, or one odd file) cannot exhaust memory or
+block the server's work.
+
+**Live sockets.** Each of the three WebSocket endpoints
+([live channels](api/live-channels.md)) bounds both the size of an inbound
+message and how many sockets may be open at once:
+
+| Endpoint | Largest inbound message | Open sockets |
+| --- | --- | --- |
+| `/ws` (events) | 4 KiB | 32, across all clients |
+| `/comms` (comms log) | 4 KiB | 8 per session |
+| `/pty` (terminal) | 1 MiB | 8 per session |
+
+The events and comms streams are server → client, so they accept only control
+frames inbound; the terminal carries keystrokes and pastes, so it allows a
+generous paste. A frame whose header announces more than the bound is refused
+before its payload is read, so the server never buffers it, and the socket is
+closed. An upgrade over its endpoint's cap is refused with `429 Too Many
+Requests` and a `warn` log naming the endpoint and the cap. A socket's slot is
+released whenever it ends — a normal close, a receive error, or a crash in its
+pump — so a failed socket never leaks one. The bounds are named constants in
+`delta-server`'s `socket_limits` module, each with the reason for its size.
+
+**Transcript reads.** A hook-reported transcript path must already lie under
+the transcript root. The reader then opens it non-blocking and reads it only if
+it is a regular file: a FIFO, a device or a directory is refused, so a FIFO
+placed under the root cannot park the read (and the session behind it) waiting
+for a writer. A transcript over 256 MiB (`MAX_TRANSCRIPT_BYTES` in
+`delta-transcript`, far above a real long session) is neither read nor treated
+as empty: it is refused with an error that the hook handler and the background
+tail log. Every read takes the whole file, so without the cap one huge file
+would make every hook cost in proportion to it. Lines are decoded one by one,
+so a line that is not valid UTF-8 is skipped (logged at `debug` with its line
+number) and the rest of the transcript still ingests.
 
 ## The Claude Code trust-seeding trade-off
 

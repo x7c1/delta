@@ -23,7 +23,7 @@ import { useComposerStore } from '../../store/composerStore';
 import { Composer } from './Composer';
 import { resetComposerState, server } from './Composer.testkit';
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 

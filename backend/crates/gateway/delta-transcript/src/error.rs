@@ -17,6 +17,30 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// The transcript path names something other than a regular file — a FIFO,
+    /// a device, a directory. Refused rather than read: reading a FIFO would
+    /// block until a writer appears, and a device may never end.
+    #[error("transcript at {} is not a regular file", path.display())]
+    NotRegularFile { path: PathBuf },
+
+    /// The transcript is larger than the reader accepts (see
+    /// [`crate::MAX_TRANSCRIPT_BYTES`]). Refused rather than read as empty, so
+    /// the caller reports it instead of the session silently going quiet.
+    #[error(
+        "transcript at {} is {size} bytes, over the {cap}-byte limit",
+        path.display()
+    )]
+    TooLarge { path: PathBuf, size: u64, cap: u64 },
+
+    /// The blocking task reading the transcript at `path` ended without a
+    /// result: it panicked, or the runtime cancelled it while shutting down.
+    #[error("transcript read at {} was aborted: {source}", path.display())]
+    ReadAborted {
+        path: PathBuf,
+        #[source]
+        source: tokio::task::JoinError,
+    },
+
     /// A line could not be parsed as JSON.
     #[error("transcript parse error: {0}")]
     Parse(#[from] serde_json::Error),

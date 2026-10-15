@@ -8,7 +8,10 @@ follows the provider's capabilities (see
 [settings.md — `GET /api/providers`](settings.md#get-apiproviders)): a PTY bridge
 (`/pty`) for a provider with an attachable terminal, or a comms log (`/comms`)
 for a provider Delta drives headlessly. Shared conventions are in
-[README.md](README.md).
+[README.md](README.md). Each socket bounds the size of what a client may send
+and how many may be open at once; an upgrade over the cap is refused with `429`
+(the bounds are in
+[security.md — Resource bounds](../security.md#resource-bounds)).
 
 ## `GET /ws` (WebSocket)
 

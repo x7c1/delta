@@ -22,7 +22,7 @@ import {
   unstubGlobals,
 } from './SettingsView.testkit';
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 // A fresh mock registry per test, not just a reset of the per-test overrides:
 // `createHandlers()` closes over an in-memory store, so one shared instance
 // would let a template (or launch option) created by one test leak into the
