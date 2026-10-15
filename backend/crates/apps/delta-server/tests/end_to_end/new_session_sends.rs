@@ -7,6 +7,10 @@ use serde_json::json;
 
 use crate::support::{build_app, get, post_json};
 
+/// The directory the new sessions here are started in. The end-to-end
+/// workspace resolves any path as-is, so it need not exist.
+const WORKDIR: &str = "/tmp/delta-e2e-workdir";
+
 /// A new-session send (`new_session: true`, no thread) spawns a fresh session
 /// with the first prompt enqueued onto its `main` thread before the launch:
 /// Delta mints the session id up front, so the response carries the real,
@@ -20,7 +24,11 @@ async fn new_session_send_spawns_and_persists_first_prompt() {
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "text": "kick off a new conversation" }),
+        json!({
+            "new_session": true,
+            "text": "kick off a new conversation",
+            "workdir": WORKDIR,
+        }),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
@@ -141,6 +149,7 @@ async fn new_session_send_records_the_pull_request_it_was_opened_from() {
         json!({
             "new_session": true,
             "text": "resume PR work",
+            "workdir": WORKDIR,
             "pull_request_number": 138,
         }),
     )
@@ -197,7 +206,12 @@ async fn new_session_send_with_a_non_positive_pull_request_number_is_bad_request
     let (status, _) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "text": "go", "pull_request_number": 0 }),
+        json!({
+            "new_session": true,
+            "text": "go",
+            "workdir": WORKDIR,
+            "pull_request_number": 0,
+        }),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -205,6 +219,47 @@ async fn new_session_send_with_a_non_positive_pull_request_number_is_bad_request
         tmux.created.load(Ordering::SeqCst),
         0,
         "a rejected request spawns nothing"
+    );
+
+    let _ = std::fs::remove_file(&transcript_path);
+}
+
+/// A new-session send that names no working directory — neither a directory
+/// nor a repository to branch a worktree off — is refused before anything is
+/// written or launched: no session row is listed and no pane is created.
+#[tokio::test]
+async fn new_session_send_without_a_workdir_is_bad_request() {
+    let (app, tmux, transcript_path, _state) = build_app();
+
+    for body in [
+        json!({ "new_session": true, "text": "go" }),
+        json!({
+            "new_session": true,
+            "text": "go",
+            "worktree": { "start_point": { "kind": "head" } },
+        }),
+    ] {
+        let (status, refused) = post_json(&app, "/api/sends", body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            refused["error"]
+                .as_str()
+                .is_some_and(|message| message.contains("working directory")),
+            "the refusal says a working directory is required: {refused}"
+        );
+    }
+
+    assert_eq!(
+        tmux.created.load(Ordering::SeqCst),
+        0,
+        "a refused request launches no pane"
+    );
+    let (status, list) = get(&app, "/api/sessions").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        list["sessions"].as_array().map(Vec::len),
+        Some(0),
+        "a refused request writes no session row"
     );
 
     let _ = std::fs::remove_file(&transcript_path);

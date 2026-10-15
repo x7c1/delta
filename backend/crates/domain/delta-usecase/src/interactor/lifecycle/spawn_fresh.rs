@@ -9,7 +9,6 @@ use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::{
     LaunchTarget, LaunchingSpawn, PaneLaunch, PlannedWorktree,
 };
-use crate::pane_token::PaneToken;
 use crate::ports::{
     pane_for, GitWorktree, SessionStore, SpawningSession, TmuxDriver, Transcript, Workspace,
 };
@@ -19,13 +18,10 @@ use crate::worktree_spec::WorktreeSpec;
 use super::launch_prep::spawn_launch_preparation;
 use super::{END_OF_OPTIONS, SESSION_ID_FLAG, SETTINGS_FLAG};
 
-/// The result of a fresh spawn: the launch's pane token and — when the spawn
-/// carried a first prompt — the already-enqueued `send` row for it (which
-/// names the eagerly-created session row and its `main` thread).
+/// The result of a fresh spawn: when the spawn carried a first prompt, the
+/// already-enqueued `send` row for it (which names the eagerly-created session
+/// row and its `main` thread).
 pub(in crate::interactor) struct FreshSpawn {
-    /// The launch's tmux pane token. `Some` for a pane-backed spawn (Claude);
-    /// `None` for a terminal-less agent spawn (Codex), which has no pane.
-    pub token: Option<PaneToken>,
     /// The send row for the first prompt, written before the launch; `None`
     /// for a prompt-less plain spawn. For a Claude spawn it is `dispatched`
     /// (awaiting its echo); for a Codex spawn it is already completed at the
@@ -54,12 +50,12 @@ where
     ///
     /// This method runs inside the `POST /api/sends` request, so it holds only
     /// the work that is cheap *and* the work whose failure the caller should
-    /// see as a `4xx`: validating a user-selected workdir
+    /// see as a `4xx`: validating the user-selected workdir
     /// ([`Workspace::resolve_existing_dir`]), the worktree gate
-    /// (`WorktreeRequiresWorkdir` / `WorktreeNotAGitRepo`), resolving the
-    /// selected launch options, minting the pane token, and the local git
-    /// config reads (`repo_root`, `origin_url`) that name the repository. It
-    /// then computes the launch directory **without creating it** (see
+    /// (`WorktreeNotAGitRepo`), resolving the selected launch options, minting
+    /// the pane token, and the local git config reads (`repo_root`,
+    /// `origin_url`) that name the repository. It then computes the launch
+    /// directory **without creating it** (see
     /// [`InteractorCore::plan_worktree_launch_dir`]), writes the eager session
     /// row (status `spawning`) with its `main` thread and the first prompt's
     /// `send` row, moves the turn machine to `AwaitingEcho`, records a
@@ -135,39 +131,30 @@ where
     pub(in crate::interactor) async fn spawn_fresh(
         &mut self,
         first_prompt: Option<String>,
-        workdir: Option<String>,
+        workdir: String,
         launch_option_ids: Vec<i64>,
         worktree: Option<WorktreeSpec>,
         pull_request_number: Option<i64>,
     ) -> Result<FreshSpawn> {
         let session_id = self.id.clone();
-        // Validate a user-selected workdir before minting or launching anything,
-        // so an invalid path is rejected with no side effects. The canonical
-        // path becomes the launch directory; `None` defers to `<base>/<token>`
-        // computed after the token is minted, below.
-        let requested_workdir = match workdir {
-            Some(dir) => Some(self.workspace.resolve_existing_dir(&dir).await?),
-            None => None,
-        };
+        // Validate the user-selected workdir before minting or launching
+        // anything, so an invalid path is rejected with no side effects. The
+        // canonical path becomes the launch directory (or, for a worktree
+        // spawn, the repository the worktree branches off).
+        let requested_workdir = self.workspace.resolve_existing_dir(&workdir).await?;
 
         // Resolve an opt-in worktree request against the validated workdir,
         // before minting or launching anything so a bad request is rejected with
-        // no side effects. A worktree needs a selected directory that is a git
-        // repository: no workdir is `WorktreeRequiresWorkdir`, and a workdir that
-        // is not a git repo is `WorktreeNotAGitRepo` — both `400`s. On success we
-        // hold the repository root; the actual `git worktree add` (a real side
-        // effect) is deferred to the launch task. `repo_root` runs no fetch, so
-        // this gate stays lightweight.
+        // no side effects. A worktree needs the selected directory to be a git
+        // repository: one that is not is `WorktreeNotAGitRepo`, a `400`. On
+        // success we hold the repository root; the actual `git worktree add` (a
+        // real side effect) is deferred to the launch task. `repo_root` runs no
+        // fetch, so this gate stays lightweight.
         let worktree_repo_root = match &worktree {
-            Some(_) => {
-                let Some(dir) = requested_workdir.as_deref() else {
-                    return Err(crate::error::Error::WorktreeRequiresWorkdir);
-                };
-                match self.git_worktree.repo_root(dir).await? {
-                    Some(root) => Some(root),
-                    None => return Err(crate::error::Error::WorktreeNotAGitRepo(dir.to_owned())),
-                }
-            }
+            Some(_) => match self.git_worktree.repo_root(&requested_workdir).await? {
+                Some(root) => Some(root),
+                None => return Err(crate::error::Error::WorktreeNotAGitRepo(requested_workdir)),
+            },
             None => None,
         };
 
@@ -193,24 +180,17 @@ where
         // working tree, and so a candidate for pre-accepting Claude Code's
         // workspace-trust dialog; the launch task applies the launch-trust rule
         // (see the `launch_trust` module) once the worktree is built. A
-        // worktree is always a git working tree; a user-selected workdir is
-        // checked once here; the default `<base>/<token>` scratch dir is empty
-        // and never triggers the dialog, so it is never a candidate (avoids
-        // bloating `~/.claude.json` for ordinary sessions).
+        // worktree is always a git working tree; a plain workdir is checked
+        // once here, and one outside any repository is never a candidate.
         //
         // `launch_repo_root` is the repository root containing the effective
         // launch directory at spawn time — the worktree's repo for a worktree
-        // spawn, the user-selected workdir's repo for a plain spawn, `None`
-        // for the default `<base>/<token>` scratch dir (always non-git). It
-        // feeds the navigator's "repo name" line via `insert_spawning_session`
-        // below, doubles as the trust-seeding signal (so we never call
-        // `repo_root` twice on the same path), and drives the
-        // `repository_display_name` derivation below — which in turn shapes
-        // the worktree directory name. The user-selected workdir as it will
-        // be stored in `session.requested_workdir` is captured alongside,
-        // because the workdir-resolution match below consumes
-        // `requested_workdir` to compute the effective launch dir.
-        let requested_workdir_recorded = requested_workdir.clone();
+        // spawn, the user-selected workdir's repo for a plain spawn (`None`
+        // when that directory is outside any repository). It feeds the
+        // navigator's "repo name" line via `insert_spawning_session` below,
+        // doubles as the trust-seeding signal (so we never call `repo_root`
+        // twice on the same path), and drives the `repository_display_name`
+        // derivation below — which in turn shapes the worktree directory name.
         let (launch_repo_root, seed_trust): (Option<String>, bool) = match &worktree {
             Some(_) => {
                 let root = worktree_repo_root
@@ -221,22 +201,16 @@ where
                 // pre-accepted is decided after the build.
                 (Some(root), true)
             }
-            None => match requested_workdir.as_deref() {
-                // A user-selected workdir may be a real git repo (without a
-                // worktree request). Look up `repo_root` once, both to gate
-                // trust-seeding (idem) and to feed the navigator's "repo
-                // name" line — `None` here is "launched outside a repo", and
-                // the frontend then falls back to the cwd basename.
-                Some(dir) => {
-                    let root = self.git_worktree.repo_root(dir).await?;
-                    let trust = root.is_some();
-                    (root, trust)
-                }
-                // The default per-token scratch dir is empty, so `claude`
-                // never shows the trust dialog there; skip the git check on
-                // the hot path.
-                None => (None, false),
-            },
+            // A user-selected workdir may be a real git repo (without a
+            // worktree request). Look up `repo_root` once, both to gate
+            // trust-seeding (idem) and to feed the navigator's "repo name"
+            // line — `None` here is "launched outside a repo", and the
+            // frontend then falls back to the cwd basename.
+            None => {
+                let root = self.git_worktree.repo_root(&requested_workdir).await?;
+                let trust = root.is_some();
+                (root, trust)
+            }
         };
 
         // Snapshot a short repository identity label for the navigator card's
@@ -269,9 +243,9 @@ where
         // tree**, so the eager row below can record them while the build is
         // still ahead of us.
         //
-        // With no worktree request the launch dir is the validated workdir (or
-        // the default `<base>/<token>`), and its branch is read straight off
-        // the directory (`None` for the scratch dir, which is never a repo).
+        // With no worktree request the launch dir is the validated workdir, and
+        // its branch is read straight off the directory (`None` outside a
+        // repository).
         // With a worktree request the session launches in a per-session
         // worktree under the neutral `worktree_base` — outside any repo tree,
         // so the worktree does not inherit a surrounding `CLAUDE.md`/settings —
@@ -306,16 +280,11 @@ where
                     }),
                 )
             }
-            None => match requested_workdir {
-                Some(dir) => {
-                    let branch = self.git_worktree.current_branch(&dir).await?;
-                    (dir, branch, None)
-                }
-                // The default per-token scratch dir is created empty and is
-                // never a git repository, so there is no branch to read and no
-                // trust dialog to seed; skip both on the hot path.
-                None => (self.scratch_workdir_for(token.as_str()), None, None),
-            },
+            None => {
+                let dir = requested_workdir.clone();
+                let branch = self.git_worktree.current_branch(&dir).await?;
+                (dir, branch, None)
+            }
         };
 
         // Eagerly create the session row and its `main` thread, then the first
@@ -329,12 +298,9 @@ where
         // existing worktree.
         // Record the dir the user picked, before any worktree resolution. For
         // a worktree spawn `cwd` (= `workdir` above) holds the auto-generated
-        // worktree path under `$DELTA_WORKTREE_BASE`;
-        // `requested_workdir_recorded` holds the canonical user-selected dir
-        // (which is also the worktree's `repo_root`). For a plain spawn with a
-        // user-selected workdir this equals `cwd`. `None` only for the default
-        // per-token scratch dir, so a scratch session contributes nothing to
-        // Recent dirs.
+        // worktree path under `$DELTA_WORKTREE_BASE`; `requested_workdir` holds
+        // the canonical user-selected dir (which is also the worktree's
+        // `repo_root`). For a plain spawn the two are equal.
         let (_session, main_thread_id) = self
             .store
             .insert_spawning_session(SpawningSession {
@@ -342,7 +308,7 @@ where
                 cwd: &workdir,
                 branch_at_launch: branch_at_launch.as_deref(),
                 repo_root: launch_repo_root.as_deref(),
-                requested_workdir: requested_workdir_recorded.as_deref(),
+                requested_workdir: Some(&requested_workdir),
                 repository_display_name: repository_display_name.as_deref(),
                 // The fresh-spawn path drives Claude Code (tmux PTY + hooks).
                 provider: AgentProvider::Claude,
@@ -399,7 +365,6 @@ where
         let launching = LaunchingSpawn {
             token: token.clone(),
             workdir,
-            scratch_workdir: planned_worktree.is_none() && requested_workdir_recorded.is_none(),
             worktree: planned_worktree,
             target: LaunchTarget::Pane(PaneLaunch {
                 pane,
@@ -421,9 +386,6 @@ where
             has_first_prompt = first_send.is_some(),
             "fresh session accepted; preparing its launch in the background"
         );
-        Ok(FreshSpawn {
-            token: Some(token),
-            first_send,
-        })
+        Ok(FreshSpawn { first_send })
     }
 }

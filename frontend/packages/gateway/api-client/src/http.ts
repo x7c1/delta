@@ -16,7 +16,6 @@ import type {
   LaunchTrustRequest,
   LaunchTrustResponse,
   MessagesResponse,
-  NewSessionResponse,
   OpenCwdRequest,
   PermissionDecision,
   PermissionDecisionRequest,
@@ -187,19 +186,6 @@ export class ApiClient {
     }
     const suffix = query.length > 0 ? `?${query.join('&')}` : '';
     return this.request<SessionsResponse>(`/api/sessions${suffix}`);
-  }
-
-  /**
-   * `POST /api/sessions` — eagerly spawn a brand-new session.
-   *
-   * The session is listed by `GET /api/sessions` right away with
-   * `status: "spawning"`; its first hook flips it to `active` (announced via
-   * `session_registered`).
-   */
-  newSession(): Promise<NewSessionResponse> {
-    return this.request<NewSessionResponse>('/api/sessions', {
-      method: 'POST',
-    });
   }
 
   /** `POST /api/sessions/{id}/open` — resume a closed session (204). */

@@ -8,22 +8,19 @@ use async_trait::async_trait;
 use crate::error::Result;
 use crate::ports::Workspace;
 
+use super::TEST_WORKDIR;
+
 /// Records the session settings written, so tests can assert the path and the
-/// rendered JSON the server passed in, and the directories it was asked to
-/// create. Also models a small set of "existing"
+/// rendered JSON the server passed in. Also models a small set of "existing"
 /// directories so the workdir-validation path can be exercised: a resolvable
 /// path is returned canonicalized (here, prefixed with `/canon` so a test can
 /// tell the canonical form apart from the input), anything else is an
 /// `InvalidWorkdir`.
-#[derive(Default)]
 pub(crate) struct FakeWorkspace {
     pub(crate) written: Mutex<Vec<(String, String)>>,
-    /// The directories `create_private_dir` was asked to create, in order.
-    pub(crate) created_dirs: Mutex<Vec<String>>,
-    /// When set, `create_private_dir` fails instead of recording the
-    /// directory, simulating a scratch directory that cannot be created.
-    pub(crate) fail_create_dir: Mutex<bool>,
     /// Paths that "exist" as directories; `resolve_existing_dir` accepts these.
+    /// Starts with [`TEST_WORKDIR`], the directory tests that need no
+    /// particular one start their sessions in.
     pub(crate) existing_dirs: Mutex<Vec<String>>,
     /// Scripted `list_dirs` children, keyed by the listed path: the bare names
     /// of its subdirectories. A path absent from the map lists no children.
@@ -34,6 +31,19 @@ pub(crate) struct FakeWorkspace {
     pub(crate) non_empty_dirs: Mutex<Vec<String>>,
     /// The directories `remove_empty_dir` removed, in order.
     pub(crate) removed_empty_dirs: Mutex<Vec<String>>,
+}
+
+impl Default for FakeWorkspace {
+    fn default() -> Self {
+        Self {
+            written: Mutex::default(),
+            existing_dirs: Mutex::new(vec![TEST_WORKDIR.to_owned()]),
+            children: Mutex::default(),
+            removed_trees: Mutex::default(),
+            non_empty_dirs: Mutex::default(),
+            removed_empty_dirs: Mutex::default(),
+        }
+    }
 }
 
 impl FakeWorkspace {
@@ -60,16 +70,6 @@ impl Workspace for FakeWorkspace {
             .lock()
             .unwrap()
             .push((settings_path.to_owned(), settings_json.to_owned()));
-        Ok(())
-    }
-
-    async fn create_private_dir(&self, path: &str) -> Result<()> {
-        if *self.fail_create_dir.lock().unwrap() {
-            return Err(crate::error::Error::Workspace(format!(
-                "{path}: could not create the directory"
-            )));
-        }
-        self.created_dirs.lock().unwrap().push(path.to_owned());
         Ok(())
     }
 

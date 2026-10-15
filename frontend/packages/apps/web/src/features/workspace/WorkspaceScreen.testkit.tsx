@@ -168,7 +168,7 @@ export function trackedSpawn(sessionId: string) {
     threadId: SESSION_2_MAIN_THREAD_ID,
     text: 'first message',
     firstSendId: 1,
-    workdir: null,
+    workdir: '/projects/app',
     launchOptionIds: [],
     provider: 'claude' as const,
     worktree: null,

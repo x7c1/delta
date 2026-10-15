@@ -51,7 +51,7 @@ async fn codex_worktree_session_grants_its_repo_root_to_the_adapter() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: AgentProvider::Codex,
-                workdir: Some("/projects/app".to_owned()),
+                workdir: "/projects/app".to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: Some(WorktreeSpec::new(WorktreeStartPoint::UseRemoteBranch(
                     "pr-head".to_owned(),
@@ -140,7 +140,7 @@ async fn a_plain_codex_session_names_no_repository() {
         SendTarget::NewSession {
             pull_request_number: None,
             provider: AgentProvider::Codex,
-            workdir: Some("/projects/app".to_owned()),
+            workdir: "/projects/app".to_owned(),
             launch_option_ids: Vec::new(),
             // No worktree: the plain-directory case.
             worktree: None,

@@ -986,8 +986,8 @@ In order:
    `~/.delta/worktrees`.
 5. The `~/.claude.json` trust entry goes with each removed worktree; the file
    itself is Claude Code's and is never deleted.
-6. In the data directory, `sessions/`, `settings/`, `tmux.conf`, `updates/`
-   and the migration snapshots are deleted.
+6. In the data directory, `settings/`, `tmux.conf`, `updates/`, the migration
+   snapshots and any `sessions/` an older version left are deleted.
 7. The response is sent, and the server stops serving (the `/ws` stream closes).
 8. Once the store is closed, `delta.db`, `delta.db-wal`, `delta.db-shm`, the hook
    state file and the data directory itself are deleted — the directory only

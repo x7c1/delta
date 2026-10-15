@@ -85,8 +85,8 @@ async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
     let port = listener.local_addr().expect("local addr").port();
 
     // The run directory is the server's data directory: the database, the
-    // session settings, the tmux configuration and the per-spawn working
-    // directories all land in it, so the run leaves nothing elsewhere.
+    // session settings and the tmux configuration all land in it, so the run
+    // leaves nothing elsewhere.
     let config = Config {
         identifier: tmux_socket.clone(),
         data_dir: temp.path().to_string_lossy().into_owned(),

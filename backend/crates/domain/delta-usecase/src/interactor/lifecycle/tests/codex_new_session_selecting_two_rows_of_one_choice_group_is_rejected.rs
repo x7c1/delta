@@ -35,7 +35,7 @@ async fn codex_new_session_selecting_two_rows_of_one_choice_group_is_rejected() 
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: AgentProvider::Codex,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: models,
                 worktree: None,
             },
@@ -83,7 +83,7 @@ async fn codex_new_session_selecting_two_rows_of_one_choice_group_is_rejected() 
         SendTarget::NewSession {
             pull_request_number: None,
             provider: AgentProvider::Codex,
-            workdir: None,
+            workdir: TEST_WORKDIR.to_owned(),
             launch_option_ids: configs,
             worktree: None,
         },

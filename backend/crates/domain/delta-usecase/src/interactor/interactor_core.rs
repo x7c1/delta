@@ -35,24 +35,15 @@ pub struct InteractorCore<T, X, S, W, G> {
     pub(in crate::interactor) store: S,
     pub(in crate::interactor) workspace: W,
     pub(in crate::interactor) git_worktree: G,
-    /// Base directory for per-spawn working directories.
-    ///
-    /// Each fresh spawn runs in its own `<base>/<token>` subdirectory. The
-    /// workdir is no longer the hook-binding key — correlation is by the
-    /// Delta-minted session id pinned via `claude --session-id` — so this base
-    /// is free to become a user-selected project path in a later change without
-    /// breaking spawn↔session correlation.
-    pub(in crate::interactor) session_workdir_base: String,
     /// Base directory for per-session git worktrees
     /// (`<base>/<org>-<repo>-<session-id>`, where `<org>-<repo>` is the
     /// repository-identity slug).
     ///
-    /// Kept separate from [`Self::session_workdir_base`] and pointed at a
-    /// neutral location *outside* any repository tree: Claude Code discovers
-    /// `CLAUDE.md`/settings by walking up from its cwd, so a worktree nested
-    /// under another repo would inherit that repo's config. Used only for
-    /// worktree sessions; default per-token spawns still use
-    /// [`Self::session_workdir_base`].
+    /// Pointed at a neutral location *outside* any repository tree: Claude
+    /// Code discovers `CLAUDE.md`/settings by walking up from its cwd, so a
+    /// worktree nested under another repo would inherit that repo's config.
+    /// Used only for worktree sessions; a plain session launches in the
+    /// directory the user selected.
     pub(in crate::interactor) worktree_base: String,
     /// The directory a hook-reported `transcript_path` must resolve under to be
     /// registered (and therefore later read and surfaced to the browser).

@@ -193,7 +193,7 @@ describe('NavigatorPane launched-session placement', () => {
       threadId: 999,
       text: 'first message',
       firstSendId: 1,
-      workdir: null,
+      workdir: '/projects/app',
       launchOptionIds: [],
       provider: 'claude' as const,
       worktree: null,

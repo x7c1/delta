@@ -27,7 +27,7 @@ async fn new_session_records_branch_at_launch_and_repo_root() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: Some("/projects/app".to_owned()),
+                workdir: "/projects/app".to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },
@@ -76,7 +76,7 @@ async fn new_session_in_a_non_git_dir_records_no_branch_or_repo_root() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: Some("/scratch".to_owned()),
+                workdir: "/scratch".to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },

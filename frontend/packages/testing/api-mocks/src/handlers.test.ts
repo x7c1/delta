@@ -383,7 +383,18 @@ describe('GET /api/sessions/{id}/sends mock', () => {
   });
 });
 
+const SENDS_URL = 'http://localhost/api/sends';
+
 describe('new-session send mock (eager rows)', () => {
+  it('refuses a new-session send without a working directory', async () => {
+    const httpHandlers = createMockApi().handlers as HttpHandler[];
+    const response = await runPost(httpHandlers, '/api/sends', SENDS_URL, {
+      new_session: true,
+      text: 'kick off',
+    });
+    expect(response.status).toBe(400);
+  });
+
   it('mints real session/thread/send ids and lists the spawning row', async () => {
     const { handlers } = createMockApi();
     const httpHandlers = handlers as HttpHandler[];
@@ -391,6 +402,7 @@ describe('new-session send mock (eager rows)', () => {
     const body = (await (
       await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
         new_session: true,
+        workdir: MOCK_GIT_REPO_ROOT,
         text: 'kick off',
       })
     ).json()) as SendResponse;
@@ -425,6 +437,7 @@ describe('new-session send mock (eager rows)', () => {
     const first = (await (
       await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
         new_session: true,
+        workdir: MOCK_GIT_REPO_ROOT,
         text: 'kick off',
       })
     ).json()) as SendResponse;
@@ -465,6 +478,7 @@ describe('new-session send mock (eager rows)', () => {
     const first = (await (
       await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
         new_session: true,
+        workdir: MOCK_GIT_REPO_ROOT,
         text: 'kick off',
       })
     ).json()) as SendResponse;
@@ -491,10 +505,12 @@ describe('new-session send mock (eager rows)', () => {
 
     await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
       new_session: true,
+      workdir: MOCK_GIT_REPO_ROOT,
       text: 'will register',
     });
     await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
       new_session: true,
+      workdir: MOCK_GIT_REPO_ROOT,
       text: 'will fail',
     });
     const registered = mockSpawnSessionId(1);
@@ -548,6 +564,7 @@ describe('new-session send mock (eager rows)', () => {
     const first = (await (
       await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
         new_session: true,
+        workdir: MOCK_GIT_REPO_ROOT,
         text: 'kick off',
       })
     ).json()) as SendResponse;

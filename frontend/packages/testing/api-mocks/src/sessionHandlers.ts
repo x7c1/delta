@@ -1,7 +1,6 @@
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
   MessagesResponse,
-  NewSessionResponse,
   SendsResponse,
   SessionsResponse,
   ThreadsResponse,
@@ -122,14 +121,6 @@ export function sessionHandlers({
       const next_cursor = nextOffset < items.length ? String(nextOffset) : null;
 
       const body: SessionsResponse = { sessions: page, next_cursor };
-      return HttpResponse.json(body);
-    }),
-
-    // Eager spawn. In mock mode the session is considered ready immediately; it
-    // does not get added to the list (a real spawn only appears after its first
-    // hook binds it via `session_registered`).
-    http.post('*/api/sessions', () => {
-      const body: NewSessionResponse = { status: 'ready' };
       return HttpResponse.json(body);
     }),
 

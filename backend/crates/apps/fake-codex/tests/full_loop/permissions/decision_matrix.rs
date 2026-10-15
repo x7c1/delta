@@ -131,7 +131,7 @@ async fn permission_full_loop(
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "provider": "codex", "text": "run a command" }),
+        json!({ "new_session": true, "workdir": scenario.workdir(), "provider": "codex", "text": "run a command" }),
     )
     .await;
     assert_eq!(

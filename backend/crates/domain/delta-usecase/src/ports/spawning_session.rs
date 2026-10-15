@@ -24,10 +24,11 @@ pub struct SpawningSession<'a> {
     /// the launch directory is not inside a git repository. See
     /// [`delta_model::Session::repo_root`].
     pub repo_root: Option<&'a str>,
-    /// The dir the user picked, before any worktree resolution. `None` when no
-    /// workdir was selected (the default per-token scratch dir is used). For a
-    /// worktree-on spawn it holds the user-selected dir (the worktree's repo
-    /// root); for a plain spawn with a user-selected workdir it equals `cwd`.
+    /// The dir the user picked, before any worktree resolution. Always `Some`
+    /// for a spawn (every session starts in a directory the user chose); the
+    /// column stays nullable for rows older versions wrote. For a worktree-on
+    /// spawn it holds the user-selected dir (the worktree's repo root); for a
+    /// plain spawn it equals `cwd`.
     /// See [`delta_model::Session::requested_workdir`].
     pub requested_workdir: Option<&'a str>,
     /// The cross-worktree repository identity label (`org/repo` from the

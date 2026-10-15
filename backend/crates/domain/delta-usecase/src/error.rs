@@ -253,12 +253,6 @@ pub enum Error {
     #[error("not a git repository: {0}")]
     WorktreeNotAGitRepo(String),
 
-    /// A worktree was requested for a fresh session, but no working directory
-    /// was selected to root it in. A worktree needs a git repository to branch
-    /// off, so this request shape is rejected as `400`.
-    #[error("a worktree requires a selected working directory")]
-    WorktreeRequiresWorkdir,
-
     /// A worktree removal from Settings → Storage named a path that is not a
     /// directory directly under the worktree base. Only what Delta lists
     /// there is removable from Storage, so anything else is refused before

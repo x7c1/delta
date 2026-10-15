@@ -64,7 +64,6 @@ fn api_router(state: AppState) -> Router {
         .bind(endpoint::ExchangeAuthCode, api::exchange_auth_code)
         .bind(endpoint::MintAuthCode, api::mint_auth_code)
         .bind(endpoint::ListSessions, api::list_sessions)
-        .bind(endpoint::CreateSession, api::create_session)
         .bind(endpoint::OpenSession, api::open_session)
         .bind(endpoint::CloseSession, api::close_session)
         .bind(endpoint::DeleteSession, api::delete_session)

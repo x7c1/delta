@@ -36,7 +36,7 @@ async fn new_session_with_launch_option_value_expands_leading_tilde() {
         SendTarget::NewSession {
             pull_request_number: None,
             provider: crate::AgentProvider::Claude,
-            workdir: None,
+            workdir: TEST_WORKDIR.to_owned(),
             launch_option_ids: vec![plugin_dir.id],
             worktree: None,
         },

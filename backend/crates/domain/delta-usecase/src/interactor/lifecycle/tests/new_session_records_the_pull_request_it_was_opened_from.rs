@@ -16,7 +16,7 @@ async fn new_session_from_a_pr_records_the_number_on_the_spawning_row() {
             SendTarget::NewSession {
                 pull_request_number: Some(138),
                 provider: AgentProvider::Claude,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },
@@ -51,7 +51,7 @@ async fn new_session_without_a_pr_records_no_number() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: AgentProvider::Claude,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },
@@ -78,7 +78,7 @@ async fn a_codex_session_from_a_pr_records_the_number_too() {
             SendTarget::NewSession {
                 pull_request_number: Some(174),
                 provider: AgentProvider::Codex,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },
@@ -106,7 +106,7 @@ async fn the_pull_request_number_survives_close_and_resume() {
             SendTarget::NewSession {
                 pull_request_number: Some(138),
                 provider: AgentProvider::Claude,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },

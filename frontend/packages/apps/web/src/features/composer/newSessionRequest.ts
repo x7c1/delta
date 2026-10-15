@@ -7,9 +7,10 @@ import type { NewSessionLaunch } from '../../store/liveStore';
  * failed-spawn Retry so the two can never drift apart (they did — see
  * {@link NewSessionLaunch}).
  *
- * Every optional field is attached only when it carries meaning: `workdir` and
- * `launch_option_ids` are omitted when unset/empty so the server applies its
- * defaults, `worktree` and `pull_request_number` are omitted unless the session
+ * `workdir` is always attached — the server refuses a new session without
+ * one. Every optional field is attached only when it carries meaning:
+ * `launch_option_ids` is omitted when empty so the server applies no extra
+ * flags, `worktree` and `pull_request_number` are omitted unless the session
  * actually has one, and `provider` is omitted when it equals
  * `PROVIDER_WIRE_DEFAULT` — the backend resolves an omitted `provider` to
  * exactly that, so omitting it keeps a send on the default provider
@@ -34,7 +35,7 @@ export function newSessionSendBody(
   return {
     new_session: true,
     text,
-    ...(workdir ? { workdir } : {}),
+    workdir,
     ...(launchOptionIds.length > 0
       ? { launch_option_ids: launchOptionIds }
       : {}),

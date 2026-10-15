@@ -13,7 +13,7 @@ async fn a_first_prompt_starting_with_a_dash_follows_the_end_of_options_marker()
         SendTarget::NewSession {
             pull_request_number: None,
             provider: crate::AgentProvider::Claude,
-            workdir: None,
+            workdir: TEST_WORKDIR.to_owned(),
             launch_option_ids: vec![],
             worktree: None,
         },

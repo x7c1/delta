@@ -59,7 +59,7 @@ async fn codex_usage_and_account_rate_limits_reach_the_browser_broadcast() {
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "provider": "codex", "text": "count my tokens" }),
+        json!({ "new_session": true, "workdir": scenario.workdir(), "provider": "codex", "text": "count my tokens" }),
     )
     .await;
     assert_eq!(

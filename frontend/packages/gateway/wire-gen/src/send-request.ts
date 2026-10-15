@@ -31,11 +31,12 @@ export interface SendToNewSession {
   new_session: true;
   text: string;
   /**
-   * The working directory the fresh session should start in. Honored only for a
-   * new-session send; when omitted the server uses its default per-spawn
-   * directory.
+   * The working directory the fresh session should start in — with a
+   * `worktree`, the repository the worktree branches off. Required: the server
+   * refuses a new-session send without one (`400`). Optional on the generated
+   * wire shape only because a thread send leaves it out.
    */
-  workdir?: string;
+  workdir: string;
   /**
    * The ids of registered launch options to apply to the fresh session's
    * `claude` launch, in selection order. Honored only for a new-session send;

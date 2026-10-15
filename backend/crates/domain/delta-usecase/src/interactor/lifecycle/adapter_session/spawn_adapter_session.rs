@@ -38,9 +38,9 @@ where
     /// *and* the work whose failure the caller should see as a `4xx` —
     /// resolving the user-selected launch options and having the provider's
     /// adapter vet them, looking the provider's factory up in the registry,
-    /// validating a user-selected workdir, the worktree gate
-    /// (`WorktreeRequiresWorkdir` / `WorktreeNotAGitRepo`), and the local git
-    /// config reads (`repo_root`, `origin_url`) that name the repository. It
+    /// validating the user-selected workdir, the worktree gate
+    /// (`WorktreeNotAGitRepo`), and the local git config reads (`repo_root`,
+    /// `origin_url`) that name the repository. It
     /// then *plans* the launch directory without creating it
     /// ([`InteractorCore::plan_worktree_launch_dir`]), writes the eager session
     /// row (status `spawning`) with its `main` thread and the first prompt's
@@ -96,7 +96,7 @@ where
         &mut self,
         provider: AgentProvider,
         first_prompt: Option<String>,
-        workdir: Option<String>,
+        workdir: String,
         launch_option_ids: Vec<i64>,
         worktree: Option<WorktreeSpec>,
         pull_request_number: Option<i64>,
@@ -126,21 +126,16 @@ where
             )));
         };
 
-        // Validate a user-selected workdir before anything is created, so an
+        // Validate the user-selected workdir before anything is created, so an
         // invalid path fails cleanly with no side effects (mirrors the workdir
-        // gate in `spawn_fresh`). `None` falls back to a per-session directory
-        // under the spawn base, keyed by the session id (there is no pane token
-        // to key it by).
-        let requested_workdir = match workdir {
-            Some(dir) => Some(self.workspace.resolve_existing_dir(&dir).await?),
-            None => None,
-        };
+        // gate in `spawn_fresh`).
+        let requested_workdir = self.workspace.resolve_existing_dir(&workdir).await?;
 
         // Resolve an opt-in worktree request exactly like the Claude path: a
-        // worktree needs a selected directory that is a git repository
-        // (`WorktreeRequiresWorkdir` / `WorktreeNotAGitRepo` otherwise — both
-        // rejected before any side effect), and the effective launch directory
-        // becomes the per-session worktree under `$DELTA_WORKTREE_BASE`. A
+        // worktree needs the selected directory to be a git repository
+        // (`WorktreeNotAGitRepo` otherwise — rejected before any side effect),
+        // and the effective launch directory becomes the per-session worktree
+        // under `$DELTA_WORKTREE_BASE`. A
         // PR-origin start always arrives as a `UseRemoteBranch(<pr-head>)`
         // worktree request, so this is the path a "start a session from a PR"
         // click takes. `launch_repo_root` / `repository_display_name` feed the
@@ -150,15 +145,12 @@ where
         // *planned* worktree rather than a `current_branch` read, because the
         // directory does not exist yet (the bind re-observes the built
         // worktree's real branch for the per-message stamp). Without a worktree
-        // the cwd is the user-selected dir (its git snapshot columns stay NULL,
-        // as before) or a per-session scratch dir under the spawn base, keyed by
-        // the session id (there is no pane token to key it by).
+        // the cwd is the user-selected dir and its git snapshot columns stay
+        // NULL.
         let (launch_repo_root, repository_display_name, branch_at_launch, cwd, planned_worktree) =
             match worktree {
                 Some(spec) => {
-                    let Some(dir) = requested_workdir.as_deref() else {
-                        return Err(Error::WorktreeRequiresWorkdir);
-                    };
+                    let dir = requested_workdir.as_str();
                     let repo_root = match self.git_worktree.repo_root(dir).await? {
                         Some(root) => root,
                         None => return Err(Error::WorktreeNotAGitRepo(dir.to_owned())),
@@ -187,13 +179,7 @@ where
                         Some(planned_worktree),
                     )
                 }
-                None => {
-                    let cwd = match &requested_workdir {
-                        Some(dir) => dir.clone(),
-                        None => self.scratch_workdir_for(session_id.as_str()),
-                    };
-                    (None, None, None, cwd, None)
-                }
+                None => (None, None, None, requested_workdir.clone(), None),
             };
 
         // Ask the provider's adapter whether it can be launched with these
@@ -226,7 +212,7 @@ where
                 cwd: &cwd,
                 branch_at_launch: branch_at_launch.as_deref(),
                 repo_root: launch_repo_root.as_deref(),
-                requested_workdir: requested_workdir.as_deref(),
+                requested_workdir: Some(&requested_workdir),
                 repository_display_name: repository_display_name.as_deref(),
                 provider,
                 // The PR this session was opened from, when the composer's
@@ -256,7 +242,6 @@ where
         let launching = LaunchingSpawn {
             token: PaneToken::for_adapter_launch(&session_id),
             workdir: cwd,
-            scratch_workdir: planned_worktree.is_none() && requested_workdir.is_none(),
             worktree: planned_worktree,
             target: LaunchTarget::Adapter(AdapterLaunch {
                 provider,
@@ -280,9 +265,6 @@ where
             "adapter-backed session accepted (terminal-less); preparing its launch \
              in the background"
         );
-        Ok(FreshSpawn {
-            token: None,
-            first_send,
-        })
+        Ok(FreshSpawn { first_send })
     }
 }

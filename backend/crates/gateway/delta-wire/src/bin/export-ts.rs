@@ -26,15 +26,15 @@ use delta_wire::rest::{
     WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
     WireDeleteSnapshotRequest, WireEraseResponse, WireErrorBody, WireGitBranchesResponse,
     WireGitRepoResponse, WireLatestReleaseResponse, WireLaunchOptionsResponse,
-    WireLaunchTrustRequest, WireLaunchTrustResponse, WireMessagesResponse, WireNewSessionResponse,
-    WireOpenCwdRequest, WirePermissionDecisionRequest, WirePromptTemplatesResponse,
-    WireProvidersResponse, WirePrunePreviewResponse, WirePruneSessionsRequest,
-    WirePruneSessionsResponse, WirePullRequestsResponse, WireQuestionAnswerRequest,
-    WireQuestionCancelRequest, WireRemoveWorktreeRequest, WireRepositoriesResponse,
-    WireSendResponse, WireSendsResponse, WireSessionsResponse, WireStorageResponse,
-    WireStorageWorktreesResponse, WireThreadsResponse, WireUpdateDownload, WireUpdateInstall,
-    WireUpdateLaunchOptionRequest, WireUpdatePromptTemplateRequest, WireVersionResponse,
-    WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireLaunchTrustRequest, WireLaunchTrustResponse, WireMessagesResponse, WireOpenCwdRequest,
+    WirePermissionDecisionRequest, WirePromptTemplatesResponse, WireProvidersResponse,
+    WirePrunePreviewResponse, WirePruneSessionsRequest, WirePruneSessionsResponse,
+    WirePullRequestsResponse, WireQuestionAnswerRequest, WireQuestionCancelRequest,
+    WireRemoveWorktreeRequest, WireRepositoriesResponse, WireSendResponse, WireSendsResponse,
+    WireSessionsResponse, WireStorageResponse, WireStorageWorktreesResponse, WireThreadsResponse,
+    WireUpdateDownload, WireUpdateInstall, WireUpdateLaunchOptionRequest,
+    WireUpdatePromptTemplateRequest, WireVersionResponse, WireWorkdirListResponse,
+    WireWorkdirRecentResponse,
 };
 use delta_wire::{event_kinds, export_config, WireCommsFrame, WireSessionEvent};
 use ts_rs::TS;
@@ -62,7 +62,6 @@ fn main() {
     // shape pulls in every wire twin it is composed of (Session, Thread,
     // Message, ContentBlock, Send, …) via `export_all`.
     WireSessionsResponse::export_all(&config).expect("export SessionsResponse.ts");
-    WireNewSessionResponse::export_all(&config).expect("export NewSessionResponse.ts");
     WireThreadsResponse::export_all(&config).expect("export ThreadsResponse.ts");
     WireMessagesResponse::export_all(&config).expect("export MessagesResponse.ts");
     WireCreateSendRequest::export_all(&config).expect("export CreateSendRequest.ts");

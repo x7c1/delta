@@ -350,7 +350,7 @@ describe('liveStore turn tracking', () => {
       threadId: 42,
       text: 'first message',
       firstSendId: 9,
-      workdir: null,
+      workdir: '/projects/app',
       launchOptionIds: [],
       provider: 'claude',
       worktree: null,
@@ -578,7 +578,7 @@ describe('liveStore sending (pre-acceptance submits)', () => {
       id: 'l1',
       target: {
         kind: 'new-session',
-        workdir: null,
+        workdir: '/projects/app',
         launchOptionIds: [7],
         provider: 'claude',
         worktree: null,

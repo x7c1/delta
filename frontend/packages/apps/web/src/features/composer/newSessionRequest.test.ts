@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { NewSessionLaunch } from '../../store/liveStore';
 import { newSessionSendBody } from './newSessionRequest';
 
-/** A launch with nothing selected: the shape a bare New session send has. */
+/** A launch with only its directory chosen: the shape a bare New session send has. */
 const bare: NewSessionLaunch = {
-  workdir: null,
+  workdir: '/projects/delta',
   launchOptionIds: [],
   provider: 'claude',
   worktree: null,
@@ -12,10 +12,11 @@ const bare: NewSessionLaunch = {
 };
 
 describe('newSessionSendBody', () => {
-  it('omits every optional field when nothing was selected', () => {
+  it('omits every optional field when nothing but the directory was selected', () => {
     expect(newSessionSendBody('hi', bare)).toEqual({
       new_session: true,
       text: 'hi',
+      workdir: '/projects/delta',
     });
   });
 
@@ -23,7 +24,6 @@ describe('newSessionSendBody', () => {
     expect(
       newSessionSendBody('resume PR work', {
         ...bare,
-        workdir: '/projects/delta',
         pullRequestNumber: 138,
       }),
     ).toEqual({
@@ -38,10 +38,7 @@ describe('newSessionSendBody', () => {
     // Not `null` on the wire: an omitted field is what the server's serde
     // default reads as "no PR", and it keeps a non-PR send byte-identical to
     // the body sent before this field existed.
-    const body = newSessionSendBody('hi', {
-      ...bare,
-      workdir: '/projects/delta',
-    });
+    const body = newSessionSendBody('hi', bare);
     expect(body).not.toHaveProperty('pull_request_number');
   });
 });

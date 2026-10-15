@@ -45,7 +45,7 @@ async fn codex_prompt_streams_persists_and_completes_over_the_full_stack() {
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "provider": "codex", "text": "hello codex" }),
+        json!({ "new_session": true, "workdir": scenario.workdir(), "provider": "codex", "text": "hello codex" }),
     )
     .await;
     assert_eq!(
@@ -199,7 +199,7 @@ async fn codex_reasoning_persists_as_a_thinking_block_and_is_never_reply_text() 
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "provider": "codex", "text": "think it through" }),
+        json!({ "new_session": true, "workdir": scenario.workdir(), "provider": "codex", "text": "think it through" }),
     )
     .await;
     assert_eq!(

@@ -73,10 +73,10 @@ pub use ports::{
     PromptTemplateStore, PublishedRelease, RateLimitWindow, RecentWorkdir, ReleaseAsset,
     ReleaseFeed, ReleaseFeedError, RememberedPane, RememberedPaneStore, RemoteBranches,
     RepositoryCloneRow, SendStore, SessionEndHook, SessionEvent, SessionHistoryStore,
-    SessionLifecycle, SessionPageRow, SessionRecordStore, SessionStartHook, SessionStore,
-    SignedAsset, SpawningSession, StatusSnapshot, StopHook, SubagentLaunchStore, ThreadStore,
-    TmuxDriver, Transcript, TranscriptMessage, TranscriptRead, UpdateInstaller,
-    UserPromptSubmitHook, Workspace, WorktreeInspection, WorktreeRemoval, WorktreeStartPoint,
+    SessionPageRow, SessionRecordStore, SessionStartHook, SessionStore, SignedAsset,
+    SpawningSession, StatusSnapshot, StopHook, SubagentLaunchStore, ThreadStore, TmuxDriver,
+    Transcript, TranscriptMessage, TranscriptRead, UpdateInstaller, UserPromptSubmitHook,
+    Workspace, WorktreeInspection, WorktreeRemoval, WorktreeStartPoint,
 };
 pub use pull_request::PullRequest;
 pub use pull_request_lens::PullRequestLens;
