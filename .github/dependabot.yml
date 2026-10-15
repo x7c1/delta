@@ -1,19 +1,36 @@
 # Weekly update PRs. For the workflows this keeps the pinned commit SHAs (and
 # their `# vX.Y.Z` comments) current; see docs/guides/development/README.md
 # ("Workflows and dependency audit").
+#
+# Minor and patch updates of each ecosystem arrive as one grouped PR, since
+# they rarely break anything and one run of CI covers them all. Major updates
+# stay one PR each, so a failing one points at the dependency that broke.
+# Security updates are not grouped either.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      github-actions-minor-and-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
 
   - package-ecosystem: cargo
     directory: /backend
     schedule:
       interval: weekly
+    groups:
+      cargo-minor-and-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
 
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly
+    groups:
+      npm-minor-and-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
