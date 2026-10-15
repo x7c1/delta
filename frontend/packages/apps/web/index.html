@@ -32,12 +32,15 @@
                                       dev, Vite's injected HMR client / React
                                       Refresh preamble (inline) and its use of
                                       eval. A hash for the theme script is not
-                                      used because adding any hash makes the
-                                      browser ignore 'unsafe-inline', which
+                                      used here because adding any hash makes
+                                      the browser ignore 'unsafe-inline', which
                                       would break Vite's dev inline scripts.
                                       The built page served by delta-server
                                       gets a stricter header policy on top
-                                      (both are enforced): no 'unsafe-eval'.
+                                      (both are enforced): no 'unsafe-eval',
+                                      and instead of 'unsafe-inline' the
+                                      'sha256-…' source of each inline script,
+                                      taken from the built page itself.
         style-src 'self' 'unsafe-inline'
                                     — xterm and the Vite dev client inject
                                       inline styles.

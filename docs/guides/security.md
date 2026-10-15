@@ -8,9 +8,10 @@ boundary: any process or web page on the same host can still reach the port.
 Delta therefore treats **reaching the loopback port as the trust boundary**
 ("unauthenticated-by-port") and layers explicit guards on top of it. This
 document states what each guard covers, how a browser page comes to hold the
-bearer token without any page carrying it, how the live sockets and transcript
-reads are bounded so one input cannot exhaust memory or block work, the one
-deliberate trade-off in how
+bearer token without any page carrying it, what the page's
+Content-Security-Policy allows, how the live sockets and transcript reads are
+bounded so one input cannot exhaust memory or block work, the one deliberate
+trade-off in how
 Delta pre-accepts Claude Code's workspace-trust dialog, how the files Delta
 writes into its data directory are protected, how the desktop app checks an
 update's signature and installs it (on Linux without the server ever holding
@@ -107,6 +108,34 @@ is opened at a URL with a **one-time code** in its fragment —
   for tests and scripts. The server removes it from its own environment as soon
   as it has read it, so the agents, tmux and every other command it starts do
   not inherit it.
+
+## The page's Content-Security-Policy
+
+Assistant output is attacker-influenceable (a prompt-injected agent can emit
+Markdown that references a foreign URL), so the page carries a
+Content-Security-Policy that keeps it from reaching any other origin: images,
+fonts, fetches and sockets are same-origin only (`data:` images and fonts
+aside), and the page cannot be framed. The per-directive rationale is in the
+comment above the `<meta http-equiv>` policy in
+`frontend/packages/apps/web/index.html`.
+
+The policy is set in more than one place, and the browser enforces every one
+it receives, so a resource must pass all of them:
+
+- **The `<meta>` tag** in `index.html`, present in every serving mode. Its
+  `script-src` keeps `'unsafe-inline'` and `'unsafe-eval'`, which Vite's dev
+  client (its inline HMR client and React Refresh preamble) needs.
+- **The response header from Vite** in development (`vite.config.ts`), the same
+  policy, which also enforces `frame-ancestors` (a `<meta>` policy cannot).
+- **The response header from delta-server** with the built page (`embed-web`).
+  Its `script-src` has neither `'unsafe-eval'` nor `'unsafe-inline'`: it allows
+  the page's own inline scripts — the theme bootstrap that sets `data-theme`
+  before the bundle loads — by their `'sha256-…'` sources, so an injected
+  inline script or event handler does not run. delta-server takes the hashes
+  from the embedded `index.html` when it sets up the static surface, so editing
+  the bootstrap cannot leave a stale hash behind, and a test checks them against
+  the page's inline scripts. `style-src` keeps `'unsafe-inline'`, because xterm
+  injects inline styles.
 
 ## Resource bounds
 
