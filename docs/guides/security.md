@@ -96,9 +96,14 @@ is opened at a URL with a **one-time code** in its fragment —
   A cookie is deliberately not used: cookies are not scoped by port, so a cookie
   set on `127.0.0.1` would be sent to every other listener on `127.0.0.1`. The
   page presents the token exactly as before (`Authorization` header, `token=`
-  on the socket upgrades). When it holds none, its link was already used, or
-  the server answers `401` (it was restarted and minted a new token), the page
-  shows a short screen asking for a new link instead of the app.
+  on the socket upgrades). When it holds none, or the server answers `401`
+  (it was restarted and minted a new token), the page shows a short screen
+  asking for a new link instead of the app. A link that was already used falls
+  back to the token the page already holds, so reopening an old link from a
+  bookmark or the history still works while that token does; with none stored
+  it shows the same screen. A refused socket upgrade only closes the socket in
+  a browser, so each socket that drops on its own re-checks the token over REST
+  and lets that `401` switch the page to the screen.
 - **The token file.** For `open-url` and other local clients of the same user,
   `delta-server` writes its token to `<data dir>/auth-token` on start, created
   with mode **0600** inside the **0700** data directory, replacing any file an

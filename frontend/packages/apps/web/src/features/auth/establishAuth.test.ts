@@ -51,7 +51,22 @@ describe('establishAuth', () => {
     await expect(establishAuth(vi.fn())).resolves.toEqual({ kind: 'missing' });
   });
 
-  it('reports a refused code, and still removes it from the URL', async () => {
+  it('falls back to the stored token when the code is refused', async () => {
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'kept');
+    openAt('/#code=used');
+    const exchange = vi
+      .fn()
+      .mockRejectedValue(new ApiError(401, 'Unauthorized'));
+
+    const state = await establishAuth(exchange);
+
+    expect(state).toEqual({ kind: 'ready' });
+    expect(exchange).toHaveBeenCalledWith('used');
+    expect(storedAuthToken()).toBe('kept');
+    expect(window.location.hash).toBe('');
+  });
+
+  it('reports a refused code when no token is stored, and still removes it from the URL', async () => {
     openAt('/#code=used');
     const exchange = vi
       .fn()
@@ -72,6 +87,23 @@ describe('establishAuth', () => {
     const state = await establishAuth(exchange);
 
     expect(state).toEqual({ kind: 'exchange-failed', message: 'network down' });
+  });
+
+  it('reports an exchange that failed for another reason even with a stored token', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, 'kept');
+    openAt('/#code=c');
+    const exchange = vi
+      .fn()
+      .mockRejectedValue(new ApiError(503, 'Service Unavailable'));
+
+    const state = await establishAuth(exchange);
+
+    expect(state).toEqual({
+      kind: 'exchange-failed',
+      message: 'Service Unavailable',
+    });
+    expect(storedAuthToken()).toBe('kept');
   });
 
   it('ignores a fragment without a code', async () => {

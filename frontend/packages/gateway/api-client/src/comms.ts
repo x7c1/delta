@@ -27,6 +27,13 @@ export interface CommsLogOptions {
   /** Called with a frame that could not be parsed; the stream continues. */
   onError?: (error: unknown) => void;
   socketFactory?: (url: string) => WebSocket;
+  /**
+   * Called once when the socket closes without the app having closed it — the
+   * server dropped it, or refused the upgrade. The app hands it
+   * `ApiClient.recheckAuth`, since a refused token shows up here only as a
+   * close.
+   */
+  onUnexpectedClose?: () => void;
 }
 
 export interface CommsLogConnection {
@@ -68,7 +75,13 @@ export function connectCommsLog(
   const socket = factory(withSessionId(options.url, options.sessionId));
 
   socket.addEventListener('open', () => options.onStatus?.('open'));
-  socket.addEventListener('close', () => options.onStatus?.('closed'));
+  let closedByClient = false;
+  socket.addEventListener('close', () => {
+    options.onStatus?.('closed');
+    if (!closedByClient) {
+      options.onUnexpectedClose?.();
+    }
+  });
   socket.addEventListener('message', (event: MessageEvent) => {
     if (typeof event.data !== 'string') {
       return;
@@ -87,6 +100,7 @@ export function connectCommsLog(
 
   return {
     close() {
+      closedByClient = true;
       socket.close();
     },
   };

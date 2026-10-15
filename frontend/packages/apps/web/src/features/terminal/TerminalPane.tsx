@@ -7,6 +7,7 @@ import type { SessionId } from '@delta/model';
 import { Panel } from '@delta/ui-kit';
 import '@xterm/xterm/css/xterm.css';
 import { isMockMode, wsUrl } from '../../config';
+import { useApiClient } from '../../data/apiContext';
 import { useThemeContext } from '../../hooks/themeContext';
 import { reportTerminalFocus } from '../../shell';
 import { useNavStore } from '../../store/navStore';
@@ -121,6 +122,7 @@ export function TerminalPane({
   const entriesRef = useRef<Map<SessionId, PaneEntry>>(new Map());
   const pendingTeardownRef = useRef<number | null>(null);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
+  const api = useApiClient();
   // Subscribe to the resolved theme so a picker change repaints every live
   // xterm instance below without requiring a session detach + reattach.
   const { resolved: resolvedTheme } = useThemeContext();
@@ -216,7 +218,8 @@ export function TerminalPane({
       entry = undefined;
     }
     if (!entry) {
-      entry = createEntry(sessionId, parent);
+      // A refused token closes the bridge without saying why.
+      entry = createEntry(sessionId, parent, () => void api.recheckAuth());
       entries.set(sessionId, entry);
     }
     // Re-read on every view so an entry built while starting is kept once its
@@ -234,7 +237,7 @@ export function TerminalPane({
     // `paneState` rather than `hasLivePane` alone: the branch above tells the
     // three pane-less states apart (only `closed` and `failed` tear an entry
     // down), so a move between two of them has to re-run it.
-  }, [canAttach, hidden, paneState, sessionId]);
+  }, [api, canAttach, hidden, paneState, sessionId]);
 
   // When the active theme changes, repaint every live xterm: each Terminal
   // reads its background once at construction (see `createEntry`), so a
@@ -343,8 +346,15 @@ const NOTE_BY_PANE_STATE: Record<TerminalPaneState, string | null> = {
   failed: 'This session never started, so it has no terminal.',
 };
 
-/** Build a live xterm bound to `sessionId`'s pane, appended into `parent`. */
-function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
+/**
+ * Build a live xterm bound to `sessionId`'s pane, appended into `parent`.
+ * `onUnexpectedClose` runs when the bridge drops without the pane closing it.
+ */
+function createEntry(
+  sessionId: SessionId,
+  parent: HTMLDivElement,
+  onUnexpectedClose: () => void,
+): PaneEntry {
   const el = document.createElement('div');
   el.className = 'absolute inset-0';
   parent.appendChild(el);
@@ -402,6 +412,7 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
           entry.connection.resize(entry.term.rows, entry.term.cols);
         }
       },
+      onUnexpectedClose,
     }),
     observer: undefined as unknown as ResizeObserver,
     rafId: 0,

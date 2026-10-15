@@ -6,7 +6,8 @@ import { storeAuthToken, storedAuthToken } from './tokenStore';
  *
  * - `ready` — a token is stored; the app renders and presents it.
  * - `missing` — the page was opened without a code and holds no token.
- * - `code-refused` — the code in the URL was used, expired or unknown.
+ * - `code-refused` — the code in the URL was used, expired or unknown, and
+ *   no token is stored to fall back to.
  * - `token-refused` — the server answered `401` to the stored token (it was
  *   restarted and minted a new one). Reached at run time, not at boot.
  * - `exchange-failed` — the code could not be traded for another reason (the
@@ -57,10 +58,15 @@ export type ExchangeCode = (code: string) => Promise<string>;
 /**
  * Settle the page's token at boot.
  *
- * A code in the URL is traded for the token, which is stored for this origin;
- * a refused code shows the screen asking for a new link, whatever is stored,
- * since a link that no longer works should say so. Without a code, a stored
- * token is used as is — a `401` to it later flips the app to `token-refused`.
+ * A code in the URL is traded for the token, which is stored for this origin.
+ * A refused code (`401`: used, expired or unknown) falls back to the stored
+ * token when there is one, so an old link reopened from a bookmark or the
+ * history still lands in the app while the page holds a token the server
+ * accepts; only with nothing stored does it show the screen asking for a new
+ * link. Without a code, a stored token is used as is. Either way a stale
+ * stored token is caught by the first `401` it gets, which flips the app to
+ * `token-refused`. An exchange that fails for another reason (the server is
+ * unreachable) reports `exchange-failed` whatever is stored.
  */
 export async function establishAuth(
   exchange: ExchangeCode,
@@ -74,7 +80,7 @@ export async function establishAuth(
     token = await exchange(code);
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
-      return { kind: 'code-refused' };
+      return storedAuthToken() ? { kind: 'ready' } : { kind: 'code-refused' };
     }
     console.error('could not trade the one-time code for a token', error);
     return { kind: 'exchange-failed', message: describe(error) };

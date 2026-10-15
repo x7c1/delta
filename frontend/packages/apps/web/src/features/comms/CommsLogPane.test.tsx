@@ -33,8 +33,18 @@ let connected: {
   onFrame: (frame: CommsFrame) => void;
   onStatus?: (status: 'open' | 'closed') => void;
   onError?: (error: unknown) => void;
+  onUnexpectedClose?: () => void;
 } | null = null;
 let closeCalls = 0;
+
+// The API client stands in only for the auth re-check a dropped socket asks for.
+// One object, as `ApiProvider`'s memoised client is: the effects that open the
+// socket depend on it.
+const { recheckAuth, api } = vi.hoisted(() => {
+  const recheckAuth = vi.fn();
+  return { recheckAuth, api: { recheckAuth } };
+});
+vi.mock('../../data/apiContext', () => ({ useApiClient: () => api }));
 
 vi.mock('@delta/api-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@delta/api-client')>();
@@ -108,10 +118,20 @@ function stubScrollMetrics(body: HTMLElement): void {
 beforeEach(() => {
   connected = null;
   closeCalls = 0;
+  recheckAuth.mockReset().mockResolvedValue(undefined);
   useNavStore.setState({ commsOpen: true });
 });
 
 describe('CommsLogPane', () => {
+  it('re-checks the token when the socket drops on its own', () => {
+    render(<CommsLogPane sessionId={'sess-1' as SessionId} attachable />);
+    expect(recheckAuth).not.toHaveBeenCalled();
+
+    act(() => connected?.onUnexpectedClose?.());
+
+    expect(recheckAuth).toHaveBeenCalledTimes(1);
+  });
+
   it('subscribes to the focused session and renders its frames in order', () => {
     render(<CommsLogPane sessionId={'sess-1' as SessionId} attachable />);
     expect(connected?.sessionId).toBe('sess-1');

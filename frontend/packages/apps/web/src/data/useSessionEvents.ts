@@ -6,6 +6,7 @@ import {
   type SessionEventSource,
 } from '@delta/api-client';
 import { isMockMode, wsUrl } from '../config';
+import { useApiClient } from './apiContext';
 import { useLiveStore } from '../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
 import { applySessionEvent } from './applySessionEvent';
@@ -16,7 +17,9 @@ import { createMockEventSource } from './mockEventControl';
  * mode), and route every event through {@link applySessionEvent}. Connection
  * status is mirrored into the live store.
  *
- * The source reconnects on its own after a dropped socket. Events broadcast
+ * The source reconnects on its own after a dropped socket, and each drop
+ * re-checks the token over REST (`ApiClient.recheckAuth`): a server that
+ * refuses it closes the socket without saying why. Events broadcast
  * during the gap are lost (the server does not replay), so on every *re*-open
  * we resync: refetch all REST resources — sessions, threads, messages, and the
  * open-send lists behind the pending strip all catch up — and drop the
@@ -31,6 +34,7 @@ import { createMockEventSource } from './mockEventControl';
 export function useSessionEvents(): void {
   const queryClient = useQueryClient();
   const setConnection = useLiveStore((state) => state.setConnection);
+  const api = useApiClient();
 
   useEffect(() => {
     let disposed = false;
@@ -89,7 +93,12 @@ export function useSessionEvents(): void {
         attach(s);
       });
     } else {
-      attach(new WsEventSource({ url: wsUrl('/ws') }));
+      attach(
+        new WsEventSource({
+          url: wsUrl('/ws'),
+          onUnexpectedClose: () => void api.recheckAuth(),
+        }),
+      );
     }
 
     return () => {
@@ -99,5 +108,5 @@ export function useSessionEvents(): void {
       }
       source?.close();
     };
-  }, [queryClient, setConnection]);
+  }, [api, queryClient, setConnection]);
 }

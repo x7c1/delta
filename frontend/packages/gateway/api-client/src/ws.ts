@@ -99,6 +99,12 @@ export interface WsClientOptions {
   socketFactory?: (url: string) => WebSocket;
   /** Backoff schedule (ms) for reconnection; the last value repeats. */
   reconnectDelaysMs?: number[];
+  /**
+   * Called once for every close the app did not ask for, before the reconnect
+   * is scheduled. The app hands it `ApiClient.recheckAuth`, since a refused
+   * token shows up here only as a close.
+   */
+  onUnexpectedClose?: () => void;
 }
 
 /**
@@ -113,13 +119,15 @@ export interface WsClientOptions {
  * would stop growing. So on an unexpected close this source schedules a backoff
  * reconnect and re-emits `connecting` → `open`, letting the app resync the gap
  * on each fresh `open`. An explicit {@link close} (component unmount) suppresses
- * reconnection.
+ * reconnection. A server that refuses the token also shows up only as a close,
+ * so each unexpected one is reported to {@link WsClientOptions.onUnexpectedClose}.
  */
 export class WsEventSource implements SessionEventSource {
   private readonly emitter = new EventEmitter();
   private readonly factory: (url: string) => WebSocket;
   private readonly url: string;
   private readonly reconnectDelaysMs: number[];
+  private readonly onUnexpectedClose: () => void;
   private socket: WebSocket | null = null;
   private closedByClient = false;
   private attempt = 0;
@@ -131,6 +139,7 @@ export class WsEventSource implements SessionEventSource {
     this.url = options.url;
     this.reconnectDelaysMs =
       options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS;
+    this.onUnexpectedClose = options.onUnexpectedClose ?? (() => {});
     this.connect();
   }
 
@@ -161,6 +170,7 @@ export class WsEventSource implements SessionEventSource {
     if (this.closedByClient) {
       return;
     }
+    this.onUnexpectedClose();
     // Reconnect after a backoff. Events broadcast while we are disconnected are
     // gone (the server does not replay), so the app resyncs on the next `open`.
     const delay =
