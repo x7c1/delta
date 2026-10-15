@@ -15,7 +15,7 @@ import {
   waitFor,
   type RenderResult,
 } from '@testing-library/react';
-import { expect, vi } from 'vitest';
+import { expect, onTestFinished, vi } from 'vitest';
 import { ApiClient } from '@delta/api-client';
 import type { Message, Thread } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
@@ -189,10 +189,16 @@ export function resetGlobals() {
  * Stub the first lane axis row's bounding rect so click-to-jump tests can
  * supply deterministic playhead coordinates without measuring real layout
  * (jsdom does not run CSS, so every rect is 0 by default).
+ *
+ * The spy is restored when the calling test finishes. `vi.spyOn` returns the
+ * existing spy for an already-spied method, so a spy leaked from an earlier
+ * test would make `original` the spy itself and recurse forever.
  */
 export function stubAxisRect(rect: Partial<DOMRect>): void {
   const original = HTMLElement.prototype.getBoundingClientRect;
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+  const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect');
+  onTestFinished(() => spy.mockRestore());
+  spy.mockImplementation(
     function (this: HTMLElement) {
       if (this.hasAttribute('data-timeline-axis')) {
         return {
