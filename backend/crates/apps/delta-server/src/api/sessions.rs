@@ -1,4 +1,4 @@
-//! `/api/sessions` and `/api/threads` — listing, creating, opening, closing and
+//! `/api/sessions` and `/api/threads` — listing, opening, closing and
 //! removing sessions, and reading their threads, sends and messages.
 
 use axum::extract::{Path, Query, State};
@@ -8,8 +8,8 @@ use serde::Deserialize;
 
 use delta_usecase::{SessionId, ThreadId};
 use delta_wire::rest::{
-    WireMessagesResponse, WireNewSessionResponse, WireSendsResponse, WireSessionListItem,
-    WireSessionsResponse, WireThreadsResponse,
+    WireMessagesResponse, WireSendsResponse, WireSessionListItem, WireSessionsResponse,
+    WireThreadsResponse,
 };
 
 use crate::state::AppState;
@@ -73,21 +73,6 @@ pub(crate) async fn list_sessions(
             .collect(),
         next_cursor: page.next.as_ref().map(session_cursor::encode),
     }))
-}
-
-/// `POST /api/sessions` — spawn a fresh session eagerly.
-///
-/// Used by cold start (an empty session list) and the "New" button. Returns the
-/// tmux/process lifecycle so the UI can show a "starting" indicator until the
-/// session is usable. The conversational session is still registered later by
-/// the first `UserPromptSubmit` hook, but the row is written before the launch,
-/// so the session is listed by `GET /api/sessions` straight away with
-/// `status: "spawning"` and flips to `active` at registration.
-pub(crate) async fn create_session(
-    State(state): State<AppState>,
-) -> Result<Json<WireNewSessionResponse>, ApiError> {
-    let status = state.ensure_session().await?;
-    Ok(Json(WireNewSessionResponse::from(status)))
 }
 
 /// `POST /api/sessions/{id}/open` — resume a closed, known session.

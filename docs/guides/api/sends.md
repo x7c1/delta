@@ -102,8 +102,10 @@ Request (new session):
 The remaining fields describe how to *launch* a session, so they are meaningful
 only with `new_session: true` and are ignored on a thread send:
 
-- `workdir` (optional) — the directory the fresh session starts in. Must be an
-  existing directory. Defaults to the per-spawn directory.
+- `workdir` (**required** with `new_session: true`) — the directory the fresh
+  session starts in, or, with `worktree`, the repository the worktree branches
+  off. Must be an existing directory. There is no default: a session always
+  starts in a directory the user chose.
 - `provider` (optional) — `"claude"` or `"codex"`. Defaults to `"claude"`.
 - `launch_option_ids` (optional) — ids of registered
   [launch options](settings.md#get-apilaunch-options) to apply, in selection
@@ -205,9 +207,11 @@ Response:
 
 - **400** — the target is ambiguous or contradictory (a JSON body): neither
   `thread_id` nor `new_session` given, both given, or `new_session` combined with
-  a branch (`semantic_parent_uuid`). Also a `workdir` that does not exist or is
-  not a directory, a `worktree` requested without a `workdir` or for a directory
-  that is not a git repository, a non-positive `pull_request_number` (pull
+  a branch (`semantic_parent_uuid`). Also a `new_session` send without a
+  `workdir` (refused before any row is written or anything launches; the
+  message says a working directory is required), a `workdir` that does not
+  exist or is not a directory, a `worktree` requested for a directory that is
+  not a git repository, a non-positive `pull_request_number` (pull
   requests are numbered from 1), and a launch-option selection that is refused
   (body `code: "launch_option_rejected"`): on every provider, two selected rows
   of one choice group (the same single-valued option, such as two Claude

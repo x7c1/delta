@@ -182,43 +182,51 @@ export function Composer({ mode }: ComposerProps) {
         clearResumeUnavailable(activeThread.session_id);
       }
 
+      // A new session must start in a chosen directory: the server refuses a
+      // new-session send without one. Send is disabled until one is picked
+      // (`submitDisabled` below); this guard holds for every submit path.
+      if (isNew && !newSessionWorkdir) {
+        return;
+      }
+
       // A new session's full configuration, assembled once and used twice: for
       // the request body and for the submit target that retains it, so a failed
-      // launch can be retried as the identical launch. (Unused for a thread
-      // send, where the session already exists with its own configuration.)
+      // launch can be retried as the identical launch. `null` for a thread
+      // send, where the session already exists with its own configuration.
       //
       // The worktree request is attached only when the opt-in toggle is on AND
-      // a directory is selected AND a concrete start-point has been chosen: the
-      // picker only surfaces the toggle once a git-repo directory is chosen, so
-      // the first two guards mirror that and keep the backend-rejected
-      // "worktree without workdir" state unreachable. The pending-branch
-      // sentinel is filtered here too (and gates the Send button below); the
-      // backend rejects worktree requests without a concrete branch, so it must
-      // never reach the wire.
-      const launch: NewSessionLaunch = {
-        workdir: newSessionWorkdir,
-        launchOptionIds: newSessionLaunchOptionIds,
-        provider: newSessionProvider,
-        worktree:
-          newSessionWorktreeEnabled &&
-          newSessionWorkdir &&
-          newSessionWorktreeStartPoint.kind !== 'pending_remote_branch'
-            ? { start_point: newSessionWorktreeStartPoint }
-            : null,
-        // The session's PR origin, recorded by the backend as a spawn-time
-        // snapshot and rendered on the navigator card. A later directory pick
-        // resets the provenance to `directory`, so it is `null` again.
-        pullRequestNumber:
-          newSessionWorkdirSource.kind === 'pr'
-            ? newSessionWorkdirSource.number
-            : null,
-      };
+      // a concrete start-point has been chosen: the picker only surfaces the
+      // toggle once a git-repo directory is chosen. The pending-branch sentinel
+      // is filtered here (and gates the Send button below); the backend rejects
+      // worktree requests without a concrete branch, so it must never reach the
+      // wire.
+      const launch: NewSessionLaunch | null =
+        isNew && newSessionWorkdir
+          ? {
+              workdir: newSessionWorkdir,
+              launchOptionIds: newSessionLaunchOptionIds,
+              provider: newSessionProvider,
+              worktree:
+                newSessionWorktreeEnabled &&
+                newSessionWorktreeStartPoint.kind !== 'pending_remote_branch'
+                  ? { start_point: newSessionWorktreeStartPoint }
+                  : null,
+              // The session's PR origin, recorded by the backend as a
+              // spawn-time snapshot and rendered on the navigator card. A later
+              // directory pick resets the provenance to `directory`, so it is
+              // `null` again.
+              pullRequestNumber:
+                newSessionWorkdirSource.kind === 'pr'
+                  ? newSessionWorkdirSource.number
+                  : null,
+            }
+          : null;
 
       // A new worktree session may need the user's confirmation before
       // Claude Code's trust is pre-accepted for it (see confirmLaunchTrust).
       // Cancelling sends nothing and keeps the draft.
       let confirmedCommit: string | null = null;
-      if (isNew) {
+      if (launch) {
         setConfirmingLaunch(true);
         const decision = await confirmLaunchTrust(client, launch).finally(() =>
           setConfirmingLaunch(false),
@@ -236,7 +244,7 @@ export function Composer({ mode }: ComposerProps) {
       // ensure-opens (resumes) it before dispatching, so continuing a sub-thread
       // stays on that sub-thread instead of jumping to the session's main thread.
       let body: SendRequest;
-      if (isNew) {
+      if (launch) {
         body = newSessionSendBody(text, launch, confirmedCommit);
       } else if (branching) {
         body = {
@@ -251,13 +259,13 @@ export function Composer({ mode }: ComposerProps) {
 
       try {
         const send = await submitSend({
-          target: activeThread
-            ? {
+          target: launch
+            ? { kind: 'new-session', ...launch }
+            : {
                 kind: 'thread',
-                sessionId: activeThread.session_id,
-                threadId: activeThread.id,
-              }
-            : { kind: 'new-session', ...launch },
+                sessionId: activeThread!.session_id,
+                threadId: activeThread!.id,
+              },
           text,
           body,
         });

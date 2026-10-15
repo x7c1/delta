@@ -40,7 +40,7 @@ async fn spawn_with_first_prompt(ix: &TestInteractor) -> (SessionId, i64) {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },

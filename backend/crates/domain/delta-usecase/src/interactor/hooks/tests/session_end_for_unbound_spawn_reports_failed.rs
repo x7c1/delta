@@ -7,7 +7,7 @@ use crate::ports::{SessionEndHook, SessionEvent};
 async fn session_end_for_unbound_spawn_reports_failed() {
     let ix = interactor();
 
-    // Cold-start spawn that never received its first UserPromptSubmit, so it is
+    // Prompt-less spawn that never received its first UserPromptSubmit, so it is
     // still pending (unbound).
     ix.new_session().await.unwrap();
     let id = ix.pending_session_ids().await.remove(0);

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use delta_usecase::Workspace;
 
-/// A no-op `Workspace` so `ensure_session` does not touch the real filesystem.
+/// A no-op `Workspace` so a spawn does not touch the real filesystem.
 pub(super) struct NoopWorkspace;
 
 #[async_trait]
@@ -17,13 +17,10 @@ impl Workspace for NoopWorkspace {
         Ok(())
     }
 
-    async fn create_private_dir(&self, _path: &str) -> delta_usecase::Result<()> {
-        Ok(())
-    }
-
     async fn resolve_existing_dir(&self, path: &str) -> delta_usecase::Result<String> {
-        // The end-to-end tests never request a user-selected workdir, so a real
-        // resolution is unnecessary; echo the path back as already-canonical.
+        // The end-to-end tests name a workdir only because a new session
+        // requires one; a real resolution is unnecessary, so echo the path back
+        // as already-canonical.
         Ok(path.to_owned())
     }
 

@@ -43,7 +43,7 @@ async fn the_comms_log_replays_a_live_sessions_frames_then_tails_new_ones() {
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "provider": "codex", "text": "hello codex" }),
+        json!({ "new_session": true, "workdir": scenario.workdir(), "provider": "codex", "text": "hello codex" }),
     )
     .await;
     assert_eq!(

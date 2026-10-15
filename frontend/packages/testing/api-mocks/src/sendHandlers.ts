@@ -9,7 +9,6 @@ import type {
   Thread,
 } from '@delta/wire-gen';
 import { mockSpawnSessionId } from './fixtures';
-import { MOCK_WORKDIR_HOME } from './workdirFixtures';
 import type { HandlerContext } from './handlerContext';
 import { resumeUnavailableResponse } from './sessionHandlers';
 
@@ -97,6 +96,17 @@ export function sendHandlers({
       // carries real session/thread/send ids. `locator_quote` is ignored for this
       // target (a brand-new session has no earlier passage to anchor).
       if (isNewSessionSend(payload)) {
+        // Mirror the server's refusal: a session always starts in a directory
+        // the user chose, so a new-session send without one is a `400`.
+        if (!payload.workdir?.trim()) {
+          return HttpResponse.json(
+            {
+              error:
+                'a working directory (`workdir`) is required to start a new session',
+            },
+            { status: 400 },
+          );
+        }
         const sessionId = mockSpawnSessionId(store.nextSpawnOrdinal++);
         const createdAt = new Date().toISOString();
         const mainThread: Thread = {
@@ -111,7 +121,7 @@ export function sendHandlers({
         store.sessions.push({
           session: {
             id: sessionId,
-            cwd: payload.workdir ?? MOCK_WORKDIR_HOME,
+            cwd: payload.workdir,
             // Empty while spawning: the wire keeps the string shape and the
             // real path is only learned from the first hook.
             transcript_path: '',

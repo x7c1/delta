@@ -12,7 +12,8 @@
 //!   delta-hook-state.json     the hook secret and the desktop app's port
 //!   logs/                     the desktop app's log files, on Linux only
 //!                             (written by the shell, not the server)
-//!   sessions/<token>/         per-spawn working directories
+//!   sessions/                 left by older versions (per-spawn working
+//!                             directories); no longer created
 //!   settings/<port>.json      the Claude Code session settings (hook URLs)
 //!   tmux.conf                 the configuration Delta's tmux server loads
 //!   updates/                  the desktop app's downloaded, verified release
@@ -44,7 +45,7 @@ const DATABASE_FILE: &str = "delta.db";
 /// The hook state file's name.
 const HOOK_STATE_FILE: &str = "delta-hook-state.json";
 
-/// The per-spawn working-directory base's name.
+/// The name of the per-spawn working-directory base older versions created.
 const SESSIONS_DIR: &str = "sessions";
 
 /// The directory holding one session settings file per port.
@@ -115,7 +116,12 @@ impl DataLayout {
         self.dir.join(HOOK_STATE_FILE)
     }
 
-    /// The base of the per-spawn working directories (`sessions/<token>`).
+    /// The base of the per-spawn working directories older versions launched a
+    /// session in when it named no directory (`sessions/<token>`).
+    ///
+    /// No longer created — every session starts in a directory the user chose
+    /// — but one left by an older version is still listed in Settings →
+    /// Storage, kept owner-only and removed by an erase.
     pub fn sessions(&self) -> PathBuf {
         self.dir.join(SESSIONS_DIR)
     }
@@ -160,9 +166,9 @@ impl DataLayout {
         self.dir.join(UPDATES_DIR)
     }
 
-    /// Create the data directory (owner-only) and `sessions/` in it, before
-    /// anything is opened or written there, and make the directories Delta
-    /// owns owner-only when they already exist.
+    /// Create the data directory (owner-only), before anything is opened or
+    /// written there, and make the directories Delta owns owner-only when they
+    /// already exist.
     ///
     /// The data directory holds the hook secret, the bearer token file, the
     /// database (every prompt and reply), its snapshots and, on Linux, the
@@ -171,8 +177,9 @@ impl DataLayout {
     /// first) would leave all of that readable by other local users, so:
     ///
     /// - a missing directory is created `0700`;
-    /// - an existing `sessions/` and `updates/` are tightened to `0700`, since
-    ///   Delta created them by name wherever the data directory is;
+    /// - an existing `sessions/` (left by an older version) and `updates/` are
+    ///   tightened to `0700`, since Delta created them by name wherever the
+    ///   data directory is;
     /// - an existing data directory and its `logs/` are tightened to `0700`
     ///   only for [`DataDirOrigin::Default`]: an explicit `DELTA_DATA_DIR` may
     ///   name a directory the user owns and shares on purpose, and its mode is
@@ -185,13 +192,14 @@ impl DataLayout {
     /// directory whose mode cannot be changed (one another user owns) is
     /// logged at `warn` and the start goes on.
     pub fn create_dirs(&self, origin: DataDirOrigin) -> Result<(), DataDirError> {
-        for dir in [self.dir.clone(), self.sessions()] {
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .mode(DATA_DIR_MODE)
-                .create(&dir)
-                .map_err(|source| DataDirError { path: dir, source })?;
-        }
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(DATA_DIR_MODE)
+            .create(&self.dir)
+            .map_err(|source| DataDirError {
+                path: self.dir.clone(),
+                source,
+            })?;
         let mut owned = vec![self.sessions(), self.updates()];
         if origin == DataDirOrigin::Default {
             owned.extend([self.dir.clone(), self.dir.join(LOGS_DIR)]);
@@ -237,17 +245,19 @@ mod tests {
     }
 
     #[test]
-    fn create_dirs_makes_an_owner_only_data_dir_with_its_sessions_dir() {
+    fn create_dirs_makes_an_owner_only_data_dir_without_a_sessions_dir() {
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::new(root.path().join("nested").join("data"));
 
         layout.create_dirs(DataDirOrigin::Default).unwrap();
-        // Idempotent: a second start finds both in place.
+        // Idempotent: a second start finds it in place.
         layout.create_dirs(DataDirOrigin::Default).unwrap();
 
-        for dir in [layout.dir().to_path_buf(), layout.sessions()] {
-            assert_eq!(mode(&dir), DATA_DIR_MODE, "{}", dir.display());
-        }
+        assert_eq!(mode(layout.dir()), DATA_DIR_MODE);
+        assert!(
+            !layout.sessions().exists(),
+            "no per-spawn working-directory base is created"
+        );
     }
 
     #[test]

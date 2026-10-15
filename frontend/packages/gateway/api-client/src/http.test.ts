@@ -86,20 +86,6 @@ describe('ApiClient', () => {
     );
   });
 
-  it('posts to spawn a new session and returns its lifecycle status', async () => {
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValue(jsonResponse({ status: 'starting' }));
-    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
-
-    const result = await client.newSession();
-
-    expect(result.status).toBe('starting');
-    const [url, init] = fetchFn.mock.calls[0];
-    expect(url).toBe('http://localhost/api/sessions');
-    expect(init.method).toBe('POST');
-  });
-
   it('opens and closes a session via the 204 endpoints', async () => {
     const fetchFn = vi.fn().mockResolvedValue(noContent());
     const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
@@ -347,43 +333,16 @@ describe('ApiClient', () => {
     );
     const client = new ApiClient({ fetchFn });
 
-    const result = await client.createSend({ new_session: true, text: 'first' });
-
-    // Synthetic id:0 send until the spawn binds.
-    expect(result.send.id).toBe(0);
-    const [, init] = fetchFn.mock.calls[0];
-    expect(JSON.parse(init.body)).toEqual({ new_session: true, text: 'first' });
-  });
-
-  it('serializes a new-session send carrying a working directory', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(
-      jsonResponse(
-        {
-          send: {
-            id: 0,
-            session_id: '',
-            thread_id: 0,
-            semantic_parent_uuid: null,
-            text: 'first',
-            locator_quote: null,
-            status: 'dispatched',
-            matched_uuid: null,
-            created_at: '2026-01-01T00:00:00Z',
-          },
-        },
-        201,
-      ),
-    );
-    const client = new ApiClient({ fetchFn });
-
-    await client.createSend({
+    const result = await client.createSend({
       new_session: true,
       text: 'first',
       workdir: '/projects/app',
     });
 
-    // The chosen workdir must survive serialization onto the new-session body.
+    // Synthetic id:0 send until the spawn binds.
+    expect(result.send.id).toBe(0);
     const [, init] = fetchFn.mock.calls[0];
+    // The chosen workdir must survive serialization onto the new-session body.
     expect(JSON.parse(init.body)).toEqual({
       new_session: true,
       text: 'first',

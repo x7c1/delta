@@ -52,7 +52,7 @@ async fn codex_interrupt_settles_the_in_flight_turn_over_the_full_stack() {
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "provider": "codex", "text": "start a long task" }),
+        json!({ "new_session": true, "workdir": scenario.workdir(), "provider": "codex", "text": "start a long task" }),
     )
     .await;
     assert_eq!(

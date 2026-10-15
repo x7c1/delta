@@ -8,8 +8,8 @@ use delta_usecase::TmuxDriver;
 
 /// A `TmuxDriver` that records the lines it would have sent instead of touching
 /// a real tmux pane, so the test can assert the keystrokes were dispatched. It
-/// also models the session lifecycle in memory so `ensure_session` works without
-/// a real tmux.
+/// also models the session lifecycle in memory so a spawn works without a real
+/// tmux.
 #[derive(Default)]
 pub(crate) struct FakeTmux {
     /// The number of lines dispatched via `send_line`.

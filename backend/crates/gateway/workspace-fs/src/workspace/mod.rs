@@ -1,11 +1,10 @@
 //! [`FsWorkspace`]: the filesystem-backed [`Workspace`].
 //!
 //! Split by responsibility: this module holds the struct and the [`Workspace`]
-//! trait wiring, `create_dir` the owner-only directory creation (a scratch
-//! working directory, and the settings file's directory), `settings` the
-//! hardened settings-file write, `browse` the read-only directory queries the
-//! picker needs, and `remove_dir` the deletion of a leftover worktree
-//! directory.
+//! trait wiring, `create_dir` the owner-only directory creation (the settings
+//! file's directory), `settings` the hardened settings-file write, `browse` the
+//! read-only directory queries the picker needs, and `remove_dir` the deletion
+//! of a leftover worktree directory.
 
 mod browse;
 mod create_dir;
@@ -16,8 +15,8 @@ use async_trait::async_trait;
 
 use delta_usecase::{DirListing, Workspace};
 
-/// Writes the Claude Code session settings file, creates the scratch working
-/// directories sessions launch in, and browses local directories.
+/// Writes the Claude Code session settings file and browses local
+/// directories.
 #[derive(Debug, Default, Clone)]
 pub struct FsWorkspace;
 
@@ -36,15 +35,6 @@ impl Workspace for FsWorkspace {
         settings_json: &str,
     ) -> std::result::Result<(), delta_usecase::Error> {
         self.write(settings_path, settings_json)
-            .await
-            .map_err(delta_usecase::Error::from)
-    }
-
-    async fn create_private_dir(
-        &self,
-        path: &str,
-    ) -> std::result::Result<(), delta_usecase::Error> {
-        self.create_dir(path)
             .await
             .map_err(delta_usecase::Error::from)
     }

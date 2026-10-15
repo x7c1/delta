@@ -95,6 +95,15 @@ impl ScenarioGuard {
         read_json_lines(&self.thread_start_log)
     }
 
+    /// The working directory a new session started by this test launches in:
+    /// an empty directory inside this guard's temp dir, created here (a new
+    /// session must name an existing directory) and removed with the guard.
+    pub(crate) fn workdir(&self) -> String {
+        let dir = self.dir.join("work");
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.to_string_lossy().into_owned()
+    }
+
     /// An on-disk database path inside this guard's temp dir, for a test that
     /// needs a SECOND store handle over the same rows (an in-memory store cannot
     /// be shared: its connection owns the whole database).
@@ -168,8 +177,8 @@ pub(crate) fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (R
 
     let interactor = Interactor::new(
         // The guard's directory stands in for the server's data directory: the
-        // tmux configuration, the scratch working directories and the settings
-        // file land in it and go with it on drop.
+        // tmux configuration and the settings file land in it and go with it on
+        // drop.
         Box::new(Tmux::new(
             "delta-codex-full-loop",
             scenario
@@ -183,7 +192,6 @@ pub(crate) fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (R
         Box::new(store) as Box<dyn delta_usecase::SessionStore>,
         Box::new(FsWorkspace::new()) as Box<dyn Workspace>,
         Box::new(Git::new(Vec::new())) as Box<dyn GitWorktree>,
-        scenario.dir.join("sessions").to_string_lossy().into_owned(),
         std::env::temp_dir()
             .join("delta-codex-full-loop-worktrees")
             .to_string_lossy()

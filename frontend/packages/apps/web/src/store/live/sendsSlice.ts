@@ -17,8 +17,11 @@ import type { AgentProvider, WorktreeSpec } from '@delta/wire-gen';
  * ({@link SpawnItem}), and back onto the retried request body.
  */
 export interface NewSessionLaunch {
-  /** The chosen working directory, or `null` for the server's default. */
-  workdir: string | null;
+  /**
+   * The chosen working directory (with a worktree, the repository it branches
+   * off). Required: the server refuses a new session without one.
+   */
+  workdir: string;
   /** The selected launch-option ids, in selection order. */
   launchOptionIds: number[];
   /**

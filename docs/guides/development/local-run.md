@@ -48,8 +48,7 @@ make dev
    <file>` with Delta's rendered session settings (so the hooks point at
    `http://127.0.0.1:7878/hooks/...`); the settings file lives in the data
    directory, so a real project's own `.claude/settings.json` is never touched.
-   A session started without a repository or a chosen directory runs in
-   `sessions/<token>` there. Nothing is spawned on startup. The hook URLs also
+   Nothing is spawned on startup. The hook URLs also
    carry a hook secret, which the server keeps in `delta-hook-state.json` in the
    data directory (mode `0600`) and reuses on every start, so a session still
    running when the server restarts — after a crash, or when you restart only

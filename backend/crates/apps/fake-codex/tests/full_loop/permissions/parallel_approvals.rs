@@ -70,7 +70,7 @@ async fn codex_parallel_approvals_are_all_answerable_and_gate_the_turn() {
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "provider": "codex", "text": "read three files" }),
+        json!({ "new_session": true, "workdir": scenario.workdir(), "provider": "codex", "text": "read three files" }),
     )
     .await;
     assert_eq!(

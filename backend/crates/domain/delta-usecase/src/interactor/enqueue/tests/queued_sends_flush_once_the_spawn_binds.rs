@@ -31,7 +31,7 @@ async fn a_queued_send_flushes_at_the_first_turn_end() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },
@@ -109,7 +109,7 @@ async fn a_queued_send_flushes_at_the_first_turn_end() {
     );
 }
 
-/// A prompt-less spawn (the cold-start path) binds *idle*, and no `Stop` is
+/// A prompt-less spawn binds *idle*, and no `Stop` is
 /// coming to flush its queue. The flush the bind posts to the actor's own
 /// mailbox is what dispatches it — and, crucially, it runs after the hook
 /// handler has returned rather than from inside it.
@@ -121,7 +121,7 @@ async fn a_queued_send_flushes_when_a_prompt_less_spawn_binds() {
     let ids = ix.pending_session_ids().await;
     let session_id = ids
         .first()
-        .expect("the cold start recorded a spawn")
+        .expect("the prompt-less spawn recorded a spawn")
         .clone();
 
     let main = ix.store().main_thread_id(&session_id).await.unwrap();

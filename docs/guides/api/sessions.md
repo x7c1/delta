@@ -130,45 +130,6 @@ Response:
 
 - **400** — a malformed `cursor`.
 
-### `POST /api/sessions`
-
-Spawn a fresh session eagerly. Used by cold start (an empty session list) and the
-"New" button: the server starts a tmux session running `claude --settings <file>`
-in a fresh per-spawn working directory. The settings file (rendered with this
-server's hook URLs) is Delta-owned and lives outside the working directory, so
-Claude Code's hooks point back at this server without touching any
-`.claude/settings.json` in the working directory.
-
-This drives only the tmux/process lifecycle; the conversational session is still
-registered later by the first `SessionStart`/`UserPromptSubmit` hook. The row
-itself is written before the launch, exactly as for a new-session send, so the
-session is listed by `GET /api/sessions` straight away with `status: "spawning"`
-and flips to `active` at registration. The response likewise returns before the
-launch preparation runs — the same split
-[`POST /api/sends`](sends.md#post-apisends) makes — so a preparation failure
-arrives as a `spawn_failed` event with a `reason` rather than as a `500`, and
-marks the row `failed` rather than deleting it. The call is idempotent across
-that whole window: a second call made while the first session's launch is still
-being prepared reuses it instead of starting a rival session.
-
-Authentication is assumed: the server relies on a cached Claude Code token (or
-`CLAUDE_CODE_OAUTH_TOKEN`) and does not perform interactive OAuth. If the session
-never becomes usable, the user answers prompts in the embedded terminal (`/pty`).
-
-- **200** — the spawn was accepted:
-
-  ```json
-  { "status": "ready" }
-  ```
-
-  `status` is `ready` when an existing session was reused, or `starting` when the
-  session was just created and may still be coming up.
-
-- **500** — the synchronous part failed: probing tmux for a free session name,
-  or writing the session row. Writing the settings file and starting the tmux
-  session are no longer part of this response (see above); they fail as a
-  `spawn_failed` event instead.
-
 ### `POST /api/sessions/{id}/open`
 
 Resume a closed, known session. For a pane-backed (Claude) session this
@@ -188,8 +149,8 @@ it broadcasts `session_opened`. Re-opening an already-open session is a no-op.
   still running, rewriting the session settings file, seeding git trust, or
   starting the tmux session failed; for a Codex session, the
   adapter's thread-resume call failed. The session's working directory is
-  already known from the original spawn, so unlike `POST /api/sessions` there
-  is no working-directory preparation step to fail here.
+  already known from the original spawn, so there is no working-directory
+  preparation step to fail here.
 
 ### `POST /api/sessions/{id}/close`
 
@@ -296,9 +257,10 @@ A git failure other than git's refusal (the repository is gone, `git` is
 missing) keeps the item as well. Whatever is kept never refuses the removal:
 the rows are deleted regardless, and the server logs, at `info`, what was
 removed and what was kept and why. A session that ran in the user's own
-directory or in a scratch directory has nothing of this kind, and git is not
-asked anything. The agent's own transcript and state files (Claude Code's
-JSONL, Codex's thread) are never touched. A session removed here cannot be
+directory (or in the per-spawn directory an older version gave a session
+started without one) has nothing of this kind, and git is not asked anything.
+The agent's own transcript and state files (Claude Code's JSONL, Codex's
+thread) are never touched. A session removed here cannot be
 resumed, because the row `POST /api/sessions/{id}/open` resumes by id is gone.
 
 Removal also stops nothing that is still running, and a session reads as closed

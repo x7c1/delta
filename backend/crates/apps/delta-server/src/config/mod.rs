@@ -14,9 +14,9 @@
 //! `DELTA_IDENTIFIER` — and the test harnesses point `DELTA_DATA_DIR` at their
 //! run directory.
 //!
-//! The server boots fine when no tmux session exists yet: the session is created
-//! lazily on the first `POST /api/sessions`, so none of these need a live session
-//! at startup.
+//! The server boots fine when no tmux session exists yet: a session is created
+//! lazily by the first new-session `POST /api/sends`, so none of these need a
+//! live session at startup.
 //!
 //! One value is not from the environment alone: the hook secret is kept in a
 //! state file in the data directory so it survives restarts, which

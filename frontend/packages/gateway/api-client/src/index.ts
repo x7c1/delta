@@ -31,7 +31,6 @@ export {
   useSessionThreadsQuery,
   useListedSessionThreads,
   useSessionSendsQuery,
-  useNewSessionMutation,
   useOpenSessionMutation,
   useCloseSessionMutation,
   useDeleteSessionMutation,

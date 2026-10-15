@@ -307,7 +307,7 @@ describe('usePendingSends on the new-session surface', () => {
   const NEW_SESSION_SURFACE: PendingSurface = { kind: 'new-session' };
 
   const LAUNCH = {
-    workdir: null,
+    workdir: '/projects/app',
     launchOptionIds: [],
     provider: 'claude' as const,
     worktree: null,

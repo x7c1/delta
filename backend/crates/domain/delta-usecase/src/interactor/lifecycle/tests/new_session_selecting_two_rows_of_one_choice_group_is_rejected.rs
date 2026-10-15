@@ -44,7 +44,7 @@ async fn new_session_selecting_two_rows_of_one_choice_group_is_rejected() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: vec![fable.id, custom.id],
                 worktree: None,
             },
@@ -96,7 +96,7 @@ async fn new_session_selecting_two_rows_of_one_choice_group_is_rejected() {
         SendTarget::NewSession {
             pull_request_number: None,
             provider: crate::AgentProvider::Claude,
-            workdir: None,
+            workdir: TEST_WORKDIR.to_owned(),
             launch_option_ids: plugin_dirs,
             worktree: None,
         },

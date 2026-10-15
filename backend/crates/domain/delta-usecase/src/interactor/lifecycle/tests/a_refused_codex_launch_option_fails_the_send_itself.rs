@@ -42,7 +42,7 @@ async fn a_refused_codex_launch_option_fails_the_send_itself() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: AgentProvider::Codex,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: vec![refused.id],
                 worktree: None,
             },

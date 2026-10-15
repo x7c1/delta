@@ -11,12 +11,10 @@ use crate::agent::AgentAdapter;
 impl SessionRuntime {
     /// Whether a pane is live: bound to the session, spawned and awaiting its
     /// first `UserPromptSubmit`, or accepted with its launch preparation still
-    /// running. Used to keep the single-session cold start idempotent — an
-    /// accepted-but-not-yet-launched session has to count, or a second
-    /// `POST /api/sessions` arriving while the first one's worktree is still
-    /// being checked out would start a rival session. A terminal-less agent
-    /// session also counts as live so the same check does not spawn a pane
-    /// alongside an open Codex session.
+    /// running. An accepted-but-not-yet-launched session has to count, so a
+    /// session whose worktree is still being checked out is listed (and
+    /// pruned, and erased) as the live session it is about to be. A
+    /// terminal-less agent session counts as live too.
     pub fn has_live_pane(&self) -> bool {
         self.open.is_some()
             || self.launching_spawn.is_some()

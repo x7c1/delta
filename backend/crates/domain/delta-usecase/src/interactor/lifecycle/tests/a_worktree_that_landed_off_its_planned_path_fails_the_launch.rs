@@ -42,7 +42,7 @@ async fn a_worktree_that_landed_off_its_planned_path_fails_the_launch() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: Some("/projects/app".to_owned()),
+                workdir: "/projects/app".to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: Some(WorktreeSpec::new(WorktreeStartPoint::UseRemoteBranch(
                     "feature/x".to_owned(),

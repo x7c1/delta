@@ -26,8 +26,6 @@ export type { SendStatus } from './generated/SendStatus';
 
 export type { SessionListItem } from './generated/SessionListItem';
 export type { SessionsResponse } from './generated/SessionsResponse';
-export type { SessionLifecycle } from './generated/SessionLifecycle';
-export type { NewSessionResponse } from './generated/NewSessionResponse';
 export type { ThreadsResponse } from './generated/ThreadsResponse';
 export type { MessagesResponse } from './generated/MessagesResponse';
 export type { CreateSendRequest } from './generated/CreateSendRequest';

@@ -50,9 +50,8 @@ async fn open_session_does_not_pre_accept_an_untrusted_worktree() {
     );
 }
 
-/// Resuming a session whose cwd is NOT a git repository (the default scratch
-/// dir) does not seed trust — `repo_root` returns `None`, so the trust step is
-/// skipped.
+/// Resuming a session whose cwd is NOT a git repository does not seed trust —
+/// `repo_root` returns `None`, so the trust step is skipped.
 #[tokio::test]
 async fn open_session_does_not_seed_trust_when_cwd_is_not_a_git_repo() {
     let ix = interactor();
