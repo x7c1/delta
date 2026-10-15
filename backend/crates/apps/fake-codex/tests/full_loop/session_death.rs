@@ -67,7 +67,7 @@ async fn codex_app_server_death_settles_the_turn_and_its_pending_approvals() {
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "provider": "codex", "text": "read two files" }),
+        json!({ "new_session": true, "workdir": scenario.workdir(), "provider": "codex", "text": "read two files" }),
     )
     .await;
     assert_eq!(
@@ -231,7 +231,7 @@ async fn a_send_after_a_death_resumes_the_session_and_completes_a_fresh_turn() {
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "provider": "codex", "text": "first message" }),
+        json!({ "new_session": true, "workdir": scenario.workdir(), "provider": "codex", "text": "first message" }),
     )
     .await;
     assert_eq!(

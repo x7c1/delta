@@ -33,11 +33,12 @@ pub enum SendTarget {
     /// ignored — a brand-new session has no earlier passage to anchor — so the
     /// held first prompt carries no quote.
     NewSession {
-        /// The working directory the session should launch in. When `Some`, it
-        /// is a user-selected path validated (and canonicalized) before launch;
-        /// when `None`, the session uses its default per-spawn `<base>/<token>`
-        /// directory.
-        workdir: Option<String>,
+        /// The working directory the session should launch in: a user-selected
+        /// path, validated (and canonicalized) before launch. With a
+        /// `worktree` request it is the repository the worktree branches off.
+        /// Required — the wire boundary refuses a new-session request without
+        /// one.
+        workdir: String,
         /// The user-selected subset of registered launch options to apply to
         /// the spawned `claude`, in selection order. Each id is resolved to its
         /// registered `(name, value?)` flag record at spawn and pushed onto the

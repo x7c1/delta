@@ -10,7 +10,7 @@ use tokio::sync::{broadcast, watch};
 use delta_bootstrap::{AppInteractor, Config};
 use delta_usecase::{
     AsyncEventReceiver, AsyncEventSink, CommsLogSink, NewerRelease, NotOffered, ReleaseCheck,
-    ReleaseUpdate, SessionEvent, SessionLifecycle,
+    ReleaseUpdate, SessionEvent,
 };
 
 use crate::comms_log::{CommsLogHub, CommsSubscription};
@@ -470,15 +470,6 @@ impl AppState {
         id: &delta_usecase::SessionId,
     ) -> delta_usecase::Result<()> {
         self.interactor.clear_session_input(id).await
-    }
-
-    /// Ensure a Claude Code session is up, spawning one lazily if absent.
-    ///
-    /// Delegates to the use case, which mints a fresh tmux session in its own
-    /// working directory with the rendered hook settings. Idempotent: an
-    /// existing open session keeps the server reporting `Ready`.
-    pub async fn ensure_session(&self) -> delta_usecase::Result<SessionLifecycle> {
-        self.interactor.ensure_session().await
     }
 
     /// Subscribe to the event stream (one receiver per browser connection).

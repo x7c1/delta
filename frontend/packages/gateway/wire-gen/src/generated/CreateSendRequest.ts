@@ -47,11 +47,12 @@ text: string,
  */
 locator_quote?: string, 
 /**
- * The working directory a fresh session should start in. Only meaningful
- * with `new_session: true`; for a thread send the session already has a
- * fixed cwd, so this is ignored. When omitted, a `new_session` send uses
- * the default per-spawn directory. The path is validated (it must be an
- * existing directory) before the session launches.
+ * The working directory a fresh session should start in — with a
+ * `worktree`, the repository the worktree branches off. Required with
+ * `new_session: true` (omitting it is a `400`); for a thread send the
+ * session already has a fixed cwd, so this is ignored. Optional in the
+ * schema only because a thread send leaves it out. The path is validated
+ * (it must be an existing directory) before the session launches.
  */
 workdir?: string, 
 /**
@@ -66,10 +67,8 @@ launch_option_ids?: Array<number>,
 /**
  * An opt-in request to start a fresh session inside a git worktree of the
  * selected `workdir`. Only meaningful with `new_session: true` and a
- * `workdir` that is a git repository; for a thread send (or a new session
- * without a workdir) it is rejected/ignored downstream. When omitted, the
- * session starts directly in the selected/default directory (the unchanged
- * behavior).
+ * `workdir` that is a git repository; for a thread send it is ignored.
+ * When omitted, the session starts directly in the selected directory.
  */
 worktree?: WorktreeSpec, 
 /**

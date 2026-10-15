@@ -220,8 +220,7 @@ fail instead of redirecting the write. A settings directory that already exists
 directory as the swap target. An existing real directory is left as it is: it
 may be one Delta does not own and is not Delta's to tighten. The permission bits
 are re-applied on every write, because the creation mode does not touch a file
-that already exists. The per-spawn working directories under
-`sessions/` are created **0700** the same way, refusing a symlink.
+that already exists.
 
 That leaves one case open by construction, and only for a data directory pointed
 at a place other users can write to: a `settings` directory another local user
@@ -248,8 +247,9 @@ another local user, and the umask's default mode (typically `0644` for a file,
   the default mode. At every start the server makes an existing data directory
   it names itself, and its `logs/`, owner-only, which repairs a directory an
   earlier version left open. A directory named with `DELTA_DATA_DIR` keeps its
-  mode, since it may be shared on purpose; `sessions/` and `updates/`, which
-  Delta creates by name, are made owner-only wherever they are. A symlink in
+  mode, since it may be shared on purpose; `updates/`, which Delta creates by
+  name, and a `sessions/` an older version created (Delta no longer does) are
+  made owner-only wherever they are. A symlink in
   place of any of them is left alone, target included.
 - **The database.** The database file is created **0600** before SQLite opens
   it, so the `-wal`/`-shm` files SQLite creates take the same mode, and after

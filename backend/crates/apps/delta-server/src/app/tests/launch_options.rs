@@ -464,6 +464,8 @@ async fn a_claude_send_selecting_two_rows_of_one_choice_group_is_rejected() {
         .take(2)
         .collect();
     assert_eq!(models.len(), 2, "two shipped model rows");
+    // A new session needs an existing directory to start in.
+    let workdir = tempfile::tempdir().unwrap();
 
     let response = app
         .clone()
@@ -478,6 +480,7 @@ async fn a_claude_send_selecting_two_rows_of_one_choice_group_is_rejected() {
                     serde_json::json!({
                         "new_session": true,
                         "text": "hello",
+                        "workdir": workdir.path(),
                         "launch_option_ids": models,
                     })
                     .to_string(),

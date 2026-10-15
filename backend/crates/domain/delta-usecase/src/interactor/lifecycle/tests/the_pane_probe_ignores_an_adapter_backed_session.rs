@@ -22,7 +22,7 @@ async fn the_pane_probe_ignores_an_adapter_backed_session() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: AgentProvider::Codex,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },

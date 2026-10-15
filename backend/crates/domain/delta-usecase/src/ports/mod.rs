@@ -66,8 +66,6 @@ mod session_start_hook;
 pub use session_start_hook::SessionStartHook;
 mod session_event;
 pub use session_event::SessionEvent;
-mod session_lifecycle;
-pub use session_lifecycle::SessionLifecycle;
 mod session_store;
 pub use session_store::{
     CloneRoot, CloneRootStore, LaunchOptionStore, MessageStore, PermissionStore,

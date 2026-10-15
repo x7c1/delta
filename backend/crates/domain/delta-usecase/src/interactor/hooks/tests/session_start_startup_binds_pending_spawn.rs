@@ -7,7 +7,7 @@ use crate::ports::SessionEvent;
 #[tokio::test]
 async fn session_start_startup_binds_pending_spawn() {
     let ix = interactor();
-    // Cold-start spawn (no first prompt).
+    // Prompt-less spawn.
     ix.new_session().await.unwrap();
     let session_id = ix.pending_session_ids().await.remove(0);
     assert!(ix.bound_pane(&session_id).await.is_none());

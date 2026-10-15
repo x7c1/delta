@@ -22,8 +22,9 @@ impl StorageInventory {
     }
 
     /// Delete what the data directory holds that the store does not keep open:
-    /// the per-spawn working directories, the session settings, the tmux
-    /// configuration, the downloaded updates and the migration snapshots.
+    /// the per-spawn working directories an older version left, the session
+    /// settings, the tmux configuration, the downloaded updates and the
+    /// migration snapshots.
     ///
     /// Run after every session is closed and Delta's tmux server is gone, so
     /// nothing is still running in a working directory or about to read its

@@ -39,7 +39,7 @@ async fn codex_second_message_dispatches_over_the_adapter_not_a_claude_resume() 
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "provider": "codex", "text": "first message" }),
+        json!({ "new_session": true, "workdir": scenario.workdir(), "provider": "codex", "text": "first message" }),
     )
     .await;
     assert_eq!(

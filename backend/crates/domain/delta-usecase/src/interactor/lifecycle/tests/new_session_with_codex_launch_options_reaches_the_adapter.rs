@@ -54,7 +54,7 @@ async fn new_session_with_codex_launch_options_reaches_the_adapter() {
         SendTarget::NewSession {
             pull_request_number: None,
             provider: AgentProvider::Codex,
-            workdir: None,
+            workdir: TEST_WORKDIR.to_owned(),
             launch_option_ids: vec![sandbox.id, ephemeral.id, 9999],
             worktree: None,
         },

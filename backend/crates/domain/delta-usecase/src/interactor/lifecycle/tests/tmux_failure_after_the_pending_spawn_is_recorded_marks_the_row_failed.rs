@@ -26,7 +26,7 @@ async fn tmux_failure_after_the_pending_spawn_is_recorded_marks_the_row_failed()
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },

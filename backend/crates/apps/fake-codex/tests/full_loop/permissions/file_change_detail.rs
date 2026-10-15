@@ -68,7 +68,7 @@ async fn codex_file_change_approval_reaches_the_browser_with_its_paths_and_diff(
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "provider": "codex", "text": "edit a file" }),
+        json!({ "new_session": true, "workdir": scenario.workdir(), "provider": "codex", "text": "edit a file" }),
     )
     .await;
     assert_eq!(

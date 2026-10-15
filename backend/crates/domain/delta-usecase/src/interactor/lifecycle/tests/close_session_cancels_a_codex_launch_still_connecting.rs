@@ -24,7 +24,7 @@ async fn close_session_cancels_a_codex_launch_still_connecting() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: AgentProvider::Codex,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },

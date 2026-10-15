@@ -18,7 +18,7 @@ async fn new_session_with_codex_provider_creates_a_terminal_less_session() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: AgentProvider::Codex,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },

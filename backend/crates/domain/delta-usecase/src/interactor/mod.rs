@@ -145,9 +145,8 @@ where
     G: GitWorktree + 'static,
 {
     /// Construct an Interactor from the five injected ports plus the spawn
-    /// configuration (the base working directory, the worktree base directory,
-    /// the rendered settings JSON, and the Delta-owned path that JSON is written
-    /// to for `--settings`).
+    /// configuration (the worktree base directory, the rendered settings JSON,
+    /// and the Delta-owned path that JSON is written to for `--settings`).
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tmux: T,
@@ -155,7 +154,6 @@ where
         store: S,
         workspace: W,
         git_worktree: G,
-        session_workdir_base: impl Into<String>,
         worktree_base: impl Into<String>,
         session_settings_json: impl Into<String>,
         session_settings_path: impl Into<String>,
@@ -166,7 +164,6 @@ where
             store,
             workspace,
             git_worktree,
-            session_workdir_base: session_workdir_base.into(),
             worktree_base: worktree_base.into(),
             transcript_root: None,
             session_settings_json: session_settings_json.into(),

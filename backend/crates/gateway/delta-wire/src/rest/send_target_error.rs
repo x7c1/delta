@@ -17,6 +17,10 @@ pub enum SendTargetError {
     /// `pull_request_number` was given as zero or a negative number. Pull
     /// requests are numbered from 1, so nothing could ever resolve it.
     NonPositivePullRequestNumber,
+    /// `new_session: true` was given without a `workdir`. A session always
+    /// starts in a directory the user chose — a plain directory, or the
+    /// repository a worktree branches off — so there is nothing to launch in.
+    WorkdirRequired,
 }
 
 impl SendTargetError {
@@ -32,6 +36,9 @@ impl SendTargetError {
             }
             SendTargetError::NonPositivePullRequestNumber => {
                 "`pull_request_number` must be a positive pull request number"
+            }
+            SendTargetError::WorkdirRequired => {
+                "a working directory (`workdir`) is required to start a new session"
             }
         }
     }

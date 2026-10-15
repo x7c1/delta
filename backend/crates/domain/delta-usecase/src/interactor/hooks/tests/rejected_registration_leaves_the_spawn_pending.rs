@@ -14,7 +14,7 @@ use crate::ports::SessionEvent;
 async fn rejected_registration_leaves_the_spawn_pending() {
     let root = tempfile::tempdir().unwrap();
     let ix = interactor_with_transcript_root(root.path().to_str().unwrap());
-    // Cold-start spawn (no first prompt), so `SessionStart(startup)` is the
+    // Prompt-less spawn, so `SessionStart(startup)` is the
     // first hook to reach it.
     ix.new_session().await.unwrap();
     let session_id = ix.pending_session_ids().await.remove(0);

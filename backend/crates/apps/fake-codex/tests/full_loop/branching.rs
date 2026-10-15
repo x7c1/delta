@@ -73,7 +73,7 @@ async fn codex_branch_from_selected_text_injects_context_and_completes_over_the_
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "provider": "codex", "text": "first message" }),
+        json!({ "new_session": true, "workdir": scenario.workdir(), "provider": "codex", "text": "first message" }),
     )
     .await;
     assert_eq!(

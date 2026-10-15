@@ -12,7 +12,6 @@ import {
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
   MessagesResponse,
-  NewSessionResponse,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -239,29 +238,11 @@ export function useThreadsMessagesQueries(
 }
 
 /**
- * Spawn a brand-new session (`POST /api/sessions`); refresh the session list.
+ * Resume a closed session (`POST /api/sessions/{id}/open`).
  *
- * Library surface for an explicit "New session" affordance. The current UI does
- * not use it: New starts an empty composer and the first Send (`new_session:
- * true`) spawns the session, so the optimistic pending item reconciles in one
- * round-trip. Likewise `useOpenSessionMutation` exists for an explicit Resume,
- * but the UI resumes a closed session by sending to its main thread (the backend
- * auto-resumes). The wired ones are `useCloseSessionMutation` and
- * `useDeleteSessionMutation` — the navigator's `Close` and `Remove` items.
+ * Library surface for an explicit Resume: the current UI resumes a closed
+ * session by sending to its main thread (the backend auto-resumes).
  */
-export function useNewSessionMutation(
-  client: ApiClient,
-): UseMutationResult<NewSessionResponse, Error, void> {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => client.newSession(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-    },
-  });
-}
-
-/** Resume a closed session (`POST /api/sessions/{id}/open`). */
 export function useOpenSessionMutation(
   client: ApiClient,
 ): UseMutationResult<void, Error, SessionId> {

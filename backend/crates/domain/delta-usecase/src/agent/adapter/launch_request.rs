@@ -21,8 +21,8 @@ pub struct LaunchRequest {
     pub first_prompt: Option<String>,
     /// The root of the repository this session's worktree was cut from, when
     /// [`Self::workdir`] is a git worktree Delta created for the session;
-    /// `None` for a session launched directly in a user-selected (or scratch)
-    /// directory. See the `adapter` module docs' *The worktree's source
-    /// repository* for why an adapter is told this.
+    /// `None` for a session launched directly in a user-selected directory.
+    /// See the `adapter` module docs' *The worktree's source repository* for
+    /// why an adapter is told this.
     pub worktree_repo_root: Option<String>,
 }

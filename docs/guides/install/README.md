@@ -55,8 +55,11 @@ It holds:
 - `logs/`, on Ubuntu only, the app's log files (on macOS they are in
   `~/Library/Logs/io.github.x7c1.delta/`; see
   [logging](../development/logging.md#the-desktop-apps-log-file)).
-- `sessions/`, the working directories of sessions started without a
-  repository or a chosen folder.
+- `sessions/`, only when an older version left it: the working directories
+  it gave sessions started without a repository or a chosen folder. Delta no
+  longer creates it (every session starts in a folder you choose) and leaves an
+  existing one in place; Settings → Storage still lists it, and erasing
+  everything deletes it.
 - `settings/<port>.json`, the settings a session is launched with. There is one
   file for every port the app has used, and beside each, the
   `settings/<port>-<endpoint>.curl` files the settings' status line and
@@ -70,7 +73,8 @@ It holds:
 
 The directory is readable by you only (mode `0700`): the app creates it that
 way before anything else writes there, and at startup restricts one an earlier
-version left readable, together with its `logs/`, `sessions/` and `updates/`.
+version left readable, together with its `logs/`, `updates/` and any
+`sessions/` an older version left.
 The database, the files SQLite keeps beside it, its snapshots, the log files,
 the hook state file and the settings files are readable by you only (mode
 `0600`) as well. A directory named with `DELTA_DATA_DIR` keeps the mode it has;

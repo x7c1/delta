@@ -22,7 +22,7 @@ async fn composer_first_send_writes_real_rows_before_spawn() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },
@@ -54,11 +54,11 @@ async fn composer_first_send_writes_real_rows_before_spawn() {
 
     ix.await_launch().await;
 
-    // The spawn created exactly one tmux session in its own workdir.
+    // The spawn created exactly one tmux session, in the selected workdir.
     let created = ix.tmux_fake().created.lock().unwrap().clone();
     assert_eq!(created.len(), 1);
     assert_eq!(created[0].name, "delta-1");
-    assert_eq!(created[0].workdir, "/work/delta-1");
+    assert_eq!(created[0].workdir, FakeWorkspace::canonical(TEST_WORKDIR));
 
     // The first prompt rides on the launch command line as a trailing positional
     // argument (claude auto-submits it at startup), NOT injected into the pane

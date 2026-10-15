@@ -19,23 +19,18 @@ async fn spawn_skips_tmux_session_names_already_in_use() {
         FakeStore::default(),
         FakeWorkspace::default(),
         FakeGitWorktree::default(),
-        TEST_WORKDIR_BASE,
         TEST_WORKTREE_BASE,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
     );
 
-    let token = ix.new_session().await.expect("spawn does not collide");
-
-    assert_eq!(
-        token.as_str(),
-        "delta-3",
-        "the spawn skipped the two surviving names and minted the next free one",
-    );
+    ix.new_session().await.expect("spawn does not collide");
     ix.await_launch().await;
 
     let created = ix.tmux_fake().created.lock().unwrap().clone();
     assert_eq!(created.len(), 1, "exactly one session was created");
-    assert_eq!(created[0].name, "delta-3", "created under the free name");
-    assert_eq!(created[0].workdir, "/work/delta-3", "<base>/<free token>");
+    assert_eq!(
+        created[0].name, "delta-3",
+        "the spawn skipped the two surviving names and minted the next free one",
+    );
 }

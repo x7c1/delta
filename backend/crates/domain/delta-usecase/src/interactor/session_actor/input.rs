@@ -46,13 +46,16 @@ pub(in crate::interactor) enum SessionInput {
     /// first prompt on the launch command line.
     SpawnFresh {
         first_prompt: Option<String>,
-        workdir: Option<String>,
+        /// The user-selected directory to launch in (or, with `worktree`, the
+        /// repository to branch the worktree off). Required: a session always
+        /// starts in a directory the user chose.
+        workdir: String,
         /// The user-selected registered launch options to resolve to argv flags
         /// at spawn, in selection order.
         launch_option_ids: Vec<i64>,
         /// An opt-in request to start the session inside a git worktree of the
-        /// selected `workdir`. Only meaningful when `workdir` is `Some` and that
-        /// directory is a git repository.
+        /// selected `workdir`. Only meaningful when that directory is a git
+        /// repository.
         worktree: Option<WorktreeSpec>,
         /// The AI-agent backend to launch on. [`AgentProvider::Claude`] takes
         /// the historical tmux + hooks path (`spawn_fresh`); every other
@@ -400,7 +403,8 @@ pub(in crate::interactor) enum SessionInput {
         reply: oneshot::Sender<SessionListingState>,
     },
     /// Whether any pane is live for the session (bound, or spawned and
-    /// awaiting its first hook). Drives the cold-start idempotence check.
+    /// awaiting its first hook). Drives the session list's live group and the
+    /// live-session checks of prune and erase.
     QueryIsLive { reply: oneshot::Sender<bool> },
     /// The session's queryable live state — the turn phase plus the pending
     /// permission dialog, snapshotted in one message so the sends envelope

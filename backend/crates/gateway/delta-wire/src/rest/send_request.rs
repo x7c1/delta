@@ -51,11 +51,12 @@ pub struct WireCreateSendRequest {
     #[serde(default)]
     #[ts(optional)]
     pub locator_quote: Option<String>,
-    /// The working directory a fresh session should start in. Only meaningful
-    /// with `new_session: true`; for a thread send the session already has a
-    /// fixed cwd, so this is ignored. When omitted, a `new_session` send uses
-    /// the default per-spawn directory. The path is validated (it must be an
-    /// existing directory) before the session launches.
+    /// The working directory a fresh session should start in — with a
+    /// `worktree`, the repository the worktree branches off. Required with
+    /// `new_session: true` (omitting it is a `400`); for a thread send the
+    /// session already has a fixed cwd, so this is ignored. Optional in the
+    /// schema only because a thread send leaves it out. The path is validated
+    /// (it must be an existing directory) before the session launches.
     #[serde(default)]
     #[ts(optional)]
     pub workdir: Option<String>,
@@ -70,10 +71,8 @@ pub struct WireCreateSendRequest {
     pub launch_option_ids: Option<Vec<i64>>,
     /// An opt-in request to start a fresh session inside a git worktree of the
     /// selected `workdir`. Only meaningful with `new_session: true` and a
-    /// `workdir` that is a git repository; for a thread send (or a new session
-    /// without a workdir) it is rejected/ignored downstream. When omitted, the
-    /// session starts directly in the selected/default directory (the unchanged
-    /// behavior).
+    /// `workdir` that is a git repository; for a thread send it is ignored.
+    /// When omitted, the session starts directly in the selected directory.
     #[serde(default)]
     #[ts(optional)]
     pub worktree: Option<WireWorktreeSpec>,
@@ -118,8 +117,13 @@ impl WireCreateSendRequest {
                 if self.pull_request_number.is_some_and(|number| number <= 0) {
                     return Err(SendTargetError::NonPositivePullRequestNumber);
                 }
+                // Refused here, before the request reaches the session layer,
+                // so no row is written and nothing launches.
+                let Some(workdir) = self.workdir.filter(|dir| !dir.trim().is_empty()) else {
+                    return Err(SendTargetError::WorkdirRequired);
+                };
                 SendTarget::NewSession {
-                    workdir: self.workdir,
+                    workdir,
                     launch_option_ids: self.launch_option_ids.unwrap_or_default(),
                     worktree: self.worktree.map(Into::into),
                     // Omitted provider defaults to Claude, keeping the existing
@@ -215,7 +219,7 @@ mod tests {
             semantic_parent_uuid: None,
             text: "kick off".into(),
             locator_quote: None,
-            workdir: None,
+            workdir: Some("/projects/app".into()),
             launch_option_ids: None,
             worktree: None,
             provider: None,
@@ -225,11 +229,36 @@ mod tests {
         assert!(matches!(
             target,
             SendTarget::NewSession {
-                workdir: None,
                 launch_option_ids,
                 ..
             } if launch_option_ids.is_empty()
         ));
+    }
+
+    /// A `new_session` send without a `workdir` (or with a blank one) is the
+    /// `WorkdirRequired` case: a session always starts in a directory the user
+    /// chose, so there is no fallback to launch in.
+    #[test]
+    fn new_session_without_a_workdir_is_rejected() {
+        for workdir in [None, Some(String::new()), Some("  ".to_owned())] {
+            let req = WireCreateSendRequest {
+                thread_id: None,
+                new_session: true,
+                semantic_parent_uuid: None,
+                text: "kick off".into(),
+                locator_quote: None,
+                workdir: workdir.clone(),
+                launch_option_ids: None,
+                worktree: None,
+                provider: None,
+                pull_request_number: None,
+            };
+            assert_eq!(
+                req.into_target().unwrap_err(),
+                SendTargetError::WorkdirRequired,
+                "workdir {workdir:?} names no directory"
+            );
+        }
     }
 
     /// A `new_session` send carrying a `workdir` maps that directory onto the
@@ -250,7 +279,7 @@ mod tests {
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(
-            matches!(target, SendTarget::NewSession { workdir, .. } if workdir.as_deref() == Some("/projects/app")),
+            matches!(target, SendTarget::NewSession { workdir, .. } if workdir == "/projects/app"),
             "the workdir rides on the NewSession target"
         );
     }
@@ -375,7 +404,7 @@ mod tests {
             semantic_parent_uuid: None,
             text: "with options".into(),
             locator_quote: None,
-            workdir: None,
+            workdir: Some("/projects/app".into()),
             launch_option_ids: Some(vec![3, 1, 2]),
             worktree: None,
             provider: None,
@@ -426,7 +455,7 @@ mod tests {
     #[test]
     fn new_session_defaults_to_claude_when_provider_is_omitted() {
         let req: WireCreateSendRequest =
-            serde_json::from_str(r#"{"new_session":true,"text":"go"}"#).unwrap();
+            serde_json::from_str(r#"{"new_session":true,"text":"go","workdir":"/p"}"#).unwrap();
         assert_eq!(
             req.provider, None,
             "an omitted provider deserializes as None"
@@ -442,8 +471,10 @@ mod tests {
     /// `NewSession` target, where composition dispatches it to the Codex path.
     #[test]
     fn new_session_with_codex_provider_carries_it() {
-        let req: WireCreateSendRequest =
-            serde_json::from_str(r#"{"new_session":true,"text":"go","provider":"codex"}"#).unwrap();
+        let req: WireCreateSendRequest = serde_json::from_str(
+            r#"{"new_session":true,"text":"go","workdir":"/p","provider":"codex"}"#,
+        )
+        .unwrap();
         assert_eq!(req.provider, Some(WireAgentProvider::Codex));
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(
@@ -458,7 +489,7 @@ mod tests {
     #[test]
     fn new_session_with_a_pull_request_number_carries_it() {
         let req: WireCreateSendRequest = serde_json::from_str(
-            r#"{"new_session":true,"text":"resume PR work","pull_request_number":138}"#,
+            r#"{"new_session":true,"text":"resume PR work","workdir":"/p","pull_request_number":138}"#,
         )
         .unwrap();
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
@@ -479,7 +510,7 @@ mod tests {
     #[test]
     fn new_session_without_a_pull_request_number_carries_none() {
         let req: WireCreateSendRequest =
-            serde_json::from_str(r#"{"new_session":true,"text":"go"}"#).unwrap();
+            serde_json::from_str(r#"{"new_session":true,"text":"go","workdir":"/p"}"#).unwrap();
         assert_eq!(req.pull_request_number, None);
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(matches!(

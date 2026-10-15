@@ -58,6 +58,7 @@ async fn codex_launch_options_reach_thread_start_over_the_full_stack() {
         "/api/sends",
         json!({
             "new_session": true,
+            "workdir": scenario.workdir(),
             "provider": "codex",
             "text": "hello codex",
             "launch_option_ids": [model, config, ephemeral],
@@ -127,6 +128,7 @@ async fn a_codex_launch_option_overriding_a_delta_owned_field_fails_the_spawn() 
         "/api/sends",
         json!({
             "new_session": true,
+            "workdir": scenario.workdir(),
             "provider": "codex",
             "text": "hello codex",
             "launch_option_ids": [cwd],
@@ -279,6 +281,7 @@ async fn two_conflicting_codex_config_options_fail_the_spawn() {
         "/api/sends",
         json!({
             "new_session": true,
+            "workdir": scenario.workdir(),
             "provider": "codex",
             "text": "hello codex",
             "launch_option_ids": [high, low],

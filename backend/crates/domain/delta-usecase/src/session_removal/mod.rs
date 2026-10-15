@@ -13,9 +13,10 @@ use std::fmt;
 /// What removing a session did to the disk state Delta created for it.
 ///
 /// Both lists are empty for a session that did not run in a worktree Delta
-/// created (it ran in the user's own directory, or in a scratch directory):
-/// there was nothing of Delta's on disk to consider. The session's rows are
-/// deleted whatever this says — a kept item never refuses a removal.
+/// created (it ran in the user's own directory, or in a per-spawn directory
+/// an older version created): there was nothing of Delta's on disk to
+/// consider. The session's rows are deleted whatever this says — a kept item
+/// never refuses a removal.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionRemoval {
     /// What was removed, in the order it was removed.

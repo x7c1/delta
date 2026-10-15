@@ -36,8 +36,8 @@ use super::{PlannedWorktree, SessionRuntime};
 /// replaced. A preparation that fails before its checkpoint never reaches
 /// either swap and is rolled back from here instead, on `LaunchFinished`.
 ///
-/// Its presence makes [`SessionRuntime::has_live_pane`] true (a cold start must
-/// not spawn a second session alongside it), keeps
+/// Its presence makes [`SessionRuntime::has_live_pane`] true (the session is
+/// listed in the live group while it starts), keeps
 /// [`SessionRuntime::is_empty`] false (the actor must stay alive to receive
 /// the launch's outcome), and makes
 /// [`SessionRuntime::is_launching_or_pending`] true (a plain send arriving now
@@ -59,16 +59,10 @@ pub struct LaunchingSpawn {
     pub token: PaneToken,
     /// The directory the agent will be launched in, as planned by the accept
     /// phase — the worktree path for a worktree spawn, the user-selected
-    /// directory for a plain one, the per-token (Claude) or per-session
-    /// (adapter) scratch dir otherwise. Also what the eager session row already
+    /// directory for a plain one. Also what the eager session row already
     /// stored as its `cwd`, which is why it is computed before the build rather
     /// than read back from it.
     pub workdir: String,
-    /// Whether [`Self::workdir`] is the per-token (Claude) or per-session
-    /// (adapter) scratch dir under the spawn base, which the preparation creates
-    /// before launching there. A worktree is created by its build, and a
-    /// user-selected directory already exists (it was resolved on accept).
-    pub scratch_workdir: bool,
     /// The worktree still to build, when one was requested. `None` for a plain
     /// spawn, which has no git work left to do.
     pub worktree: Option<PlannedWorktree>,

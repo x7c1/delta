@@ -25,7 +25,7 @@ async fn list_sessions_page_reports_a_starting_pane_until_it_binds() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },
