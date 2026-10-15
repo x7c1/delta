@@ -2,6 +2,7 @@
 //! set of "existing" directories for the workdir-validation path.
 
 use std::sync::Mutex;
+use std::time::SystemTime;
 
 use async_trait::async_trait;
 
@@ -25,6 +26,9 @@ pub(crate) struct FakeWorkspace {
     /// Scripted `list_dirs` children, keyed by the listed path: the bare names
     /// of its subdirectories. A path absent from the map lists no children.
     pub(crate) children: Mutex<Vec<(String, Vec<String>)>>,
+    /// Scripted `modified_at` answers, keyed by path. A path absent from it
+    /// fails, as a directory whose metadata cannot be read does.
+    pub(crate) modified: Mutex<Vec<(String, SystemTime)>>,
     /// The paths `remove_dir_tree` was asked to delete, in order.
     pub(crate) removed_trees: Mutex<Vec<String>>,
     /// Directories `remove_empty_dir` finds non-empty (it leaves them).
@@ -39,6 +43,7 @@ impl Default for FakeWorkspace {
             written: Mutex::default(),
             existing_dirs: Mutex::new(vec![TEST_WORKDIR.to_owned()]),
             children: Mutex::default(),
+            modified: Mutex::default(),
             removed_trees: Mutex::default(),
             non_empty_dirs: Mutex::default(),
             removed_empty_dirs: Mutex::default(),
@@ -59,6 +64,12 @@ impl FakeWorkspace {
             dir.to_owned(),
             names.iter().map(|name| (*name).to_owned()).collect(),
         ));
+        self
+    }
+
+    /// Script `modified_at(path)` to report `at`.
+    pub(crate) fn with_modified(self, path: &str, at: SystemTime) -> Self {
+        self.modified.lock().unwrap().push((path.to_owned(), at));
         self
     }
 }
@@ -114,6 +125,16 @@ impl Workspace for FakeWorkspace {
             parent: None,
             entries,
         })
+    }
+
+    async fn modified_at(&self, path: &str) -> Result<SystemTime> {
+        self.modified
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(dir, _)| dir == path)
+            .map(|(_, at)| *at)
+            .ok_or_else(|| crate::error::Error::Workspace(format!("{path}: no metadata scripted")))
     }
 
     async fn remove_dir_tree(&self, path: &str) -> Result<()> {

@@ -1,8 +1,10 @@
-//! The read-only filesystem queries the directory picker needs: validating a
-//! user-selected working directory and listing its subdirectories.
+//! The read-only filesystem queries: validating a user-selected working
+//! directory and listing its subdirectories (the directory picker), and when
+//! a directory was last modified (the worktree list in Settings → Storage).
 
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use delta_usecase::{DirEntry, DirListing};
 
@@ -86,6 +88,13 @@ impl FsWorkspace {
             parent,
             entries,
         })
+    }
+
+    /// When `path` was last modified, as
+    /// [`delta_usecase::Workspace::modified_at`] describes.
+    pub(super) async fn modified(&self, path: &str) -> Result<SystemTime, Error> {
+        let meta = tokio::fs::metadata(path).await?;
+        Ok(meta.modified()?)
     }
 }
 
@@ -250,6 +259,30 @@ mod tests {
         assert!(
             listing.parent.is_none(),
             "the filesystem root has no parent"
+        );
+    }
+
+    #[tokio::test]
+    async fn modified_at_reports_the_directory_modification_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = FsWorkspace::new();
+
+        let modified = ws.modified_at(dir.path().to_str().unwrap()).await.unwrap();
+
+        let expected = std::fs::metadata(dir.path()).unwrap().modified().unwrap();
+        assert_eq!(modified, expected);
+    }
+
+    #[tokio::test]
+    async fn modified_at_fails_when_the_metadata_cannot_be_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("gone");
+        let ws = FsWorkspace::new();
+
+        let err = ws.modified_at(missing.to_str().unwrap()).await.unwrap_err();
+        assert!(
+            matches!(err, delta_usecase::Error::Workspace(_)),
+            "an unreadable path is a workspace failure, got {err:?}"
         );
     }
 }

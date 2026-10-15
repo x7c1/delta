@@ -74,15 +74,16 @@ function failureText(error: unknown): string {
 }
 
 /**
- * Storage block, the last one and set apart: erase everything Delta created
- * on this machine that holds no work, then stop Delta.
+ * The Erase everything category, a child of Storage in the Settings menu:
+ * erase everything Delta created on this machine that holds no work, then
+ * stop Delta.
  *
  * Before the user confirms it says what will stay — the worktrees
  * {@link keepsWorktree} picks, by directory name, and the branches
  * {@link keptBranches} picks, each with why, both from the Worktrees block's
  * own query — and the confirmation needs the word `erase` typed. On success
  * the whole app is replaced by the report (see {@link useShowErased}).
- * `active` gates the worktree fetch to while the Storage category is shown.
+ * `active` gates the worktree fetch to while the category is shown.
  */
 export function EraseBlock({ active }: { active: boolean }) {
   const client = useApiClient();
@@ -104,11 +105,11 @@ export function EraseBlock({ active }: { active: boolean }) {
 
   return (
     <section
-      className="mt-6 flex flex-col gap-2 rounded-lg border border-danger/30 bg-danger/5 px-3 py-3"
+      className="flex flex-col gap-2 rounded-lg border border-danger/30 bg-danger/5 px-3 py-3"
       data-testid="storage-erase"
     >
       <div className="flex flex-col gap-1">
-        <h4 className="text-secondary font-medium text-danger">Erase everything</h4>
+        <h3 className="text-secondary font-semibold text-danger">Erase everything</h3>
         <p className="text-caption text-fg-muted">
           Delta closes every session, removes its worktrees and branches that
           hold no work, deletes its own files, and stops. What stays:
@@ -125,10 +126,17 @@ export function EraseBlock({ active }: { active: boolean }) {
       {worktreesQuery.isPending ? (
         <p className="text-caption text-fg-muted">Checking which worktrees and branches will stay…</p>
       ) : worktreesQuery.isError ? (
-        <p className="text-caption text-danger" data-testid="storage-erase-kept-error">
-          Could not list the worktrees and branches that will stay:{' '}
-          {errorMessage(worktreesQuery.error)}
-        </p>
+        // This category shows no other view of the worktrees, so the retry
+        // has to be here.
+        <div className="flex items-center gap-2">
+          <p className="text-caption text-danger" data-testid="storage-erase-kept-error">
+            Could not list the worktrees and branches that will stay:{' '}
+            {errorMessage(worktreesQuery.error)}
+          </p>
+          <Button size="sm" variant="secondary" onClick={() => worktreesQuery.refetch()}>
+            Retry
+          </Button>
+        </div>
       ) : (
         <>
           {kept.length === 0 ? (

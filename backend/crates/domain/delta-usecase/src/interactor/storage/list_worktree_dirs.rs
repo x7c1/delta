@@ -1,5 +1,7 @@
 //! Listing the directories under the worktree base for Settings → Storage.
 
+use std::time::UNIX_EPOCH;
+
 use delta_model::SessionId;
 
 use crate::error::{Error, Result};
@@ -20,10 +22,11 @@ where
     G: GitWorktree,
 {
     /// Every directory directly under the worktree base, sorted by name, each
-    /// with whether a listed session still works in it and what git says
-    /// about it: its repository, whether it holds uncommitted work, the
-    /// branch checked out in it ([`Self::worktree_branch`]), and the branch
-    /// Delta cut for its session when that is no longer the checked-out one
+    /// with whether a listed session still works in it, when it was last
+    /// modified ([`Self::modified_at`]), and what git says about it: its
+    /// repository, whether it holds uncommitted work, the branch checked out
+    /// in it ([`Self::worktree_branch`]), and the branch Delta cut for its
+    /// session when that is no longer the checked-out one
     /// ([`Self::launch_branch`]).
     ///
     /// "Works in it" is the check removing a session uses to keep a worktree
@@ -63,8 +66,10 @@ where
                 }
                 None => (None, None),
             };
+            let modified_at = self.modified_at(&path).await;
             dirs.push(WorktreeDir {
                 in_use,
+                modified_at,
                 branch,
                 launch_branch,
                 repo_root: inspection.as_ref().map(|found| found.repo_root.clone()),
@@ -73,6 +78,30 @@ where
             });
         }
         Ok(dirs)
+    }
+
+    /// When the directory at `path` was last modified, as an ISO-8601 UTC
+    /// timestamp, or `None` — with a warning — when its metadata cannot be
+    /// read: the age only helps the user decide, so a directory without one
+    /// is still listed.
+    async fn modified_at(&self, path: &str) -> Option<String> {
+        let modified = match self.workspace.modified_at(path).await {
+            Ok(modified) => modified,
+            Err(err) => {
+                tracing::warn!(path, error = %err, "could not read a worktree directory's modification time");
+                return None;
+            }
+        };
+        match modified.duration_since(UNIX_EPOCH) {
+            Ok(since_epoch) => Some(delta_model::iso8601_utc(since_epoch.as_secs())),
+            Err(_) => {
+                tracing::warn!(
+                    path,
+                    "a worktree directory's modification time is before the Unix epoch"
+                );
+                None
+            }
+        }
     }
 
     /// The branch checked out in the worktree at `path`, which git `found`,

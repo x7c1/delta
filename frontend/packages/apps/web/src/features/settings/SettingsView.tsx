@@ -5,6 +5,7 @@ import {
   type SettingsCategoryId,
   useSettingsStore,
 } from '../../store/settingsStore';
+import { EraseBlock } from './storage/EraseBlock';
 import { StorageSection } from './storage/StorageSection';
 import { LaunchOptionsSection } from './LaunchOptionsSection';
 import { PromptTemplatesSection } from './PromptTemplatesSection';
@@ -36,13 +37,16 @@ export function SettingsView() {
   const setActiveCategory = useSettingsStore((state) => state.setActiveCategory);
 
   // Single source of truth for category id + label + content. Adding a new
-  // top-level category is one entry here plus a new id in `settingsStore.ts`.
-  // The renderer receives `active` so each category can gate its data queries
-  // on the dialog being open AND the category being the visible one — an
-  // inactive category does not fire its initial fetch.
+  // category is one entry here plus a new id in `settingsStore.ts`. A child
+  // category names its `parent` and follows it directly; the rail indents it
+  // and otherwise treats it as any other entry (the arrow keys walk this flat
+  // order). The renderer receives `active` so each category can gate its data
+  // queries on the dialog being open AND the category being the visible one —
+  // an inactive category does not fire its initial fetch.
   const categories: {
     id: SettingsCategoryId;
     label: string;
+    parent?: SettingsCategoryId;
     render: (active: boolean) => ReactNode;
   }[] = [
     {
@@ -78,6 +82,14 @@ export function SettingsView() {
       id: 'storage',
       label: 'Storage',
       render: (active) => <StorageSection active={active} />,
+    },
+    {
+      id: 'erase-everything',
+      label: 'Erase everything',
+      // Rarely used and irreversible, so kept out of Storage's own panel,
+      // where a long worktree list would push it below a scroll.
+      parent: 'storage',
+      render: (active) => <EraseBlock active={active} />,
     },
   ];
 
@@ -167,8 +179,11 @@ export function SettingsView() {
                 // ARIA "roving tabindex" pattern for a tablist).
                 tabIndex={selected ? 0 : -1}
                 onClick={() => setActiveCategory(category.id)}
+                data-parent={category.parent}
                 className={cn(
-                  'rounded px-3 py-1.5 text-left text-caption font-medium transition',
+                  'rounded py-1.5 pr-3 text-left text-caption font-medium transition',
+                  // A child category's label sits one step in from its parent's.
+                  category.parent === undefined ? 'pl-3' : 'pl-6',
                   selected
                     ? 'bg-accent/10 text-accent ring-1 ring-accent/30'
                     : 'text-fg-muted hover:bg-surface-elevated hover:text-fg',

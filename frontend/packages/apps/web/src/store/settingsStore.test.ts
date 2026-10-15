@@ -65,6 +65,15 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().activeCategory).toBe('clone-roots');
   });
 
+  it('preserves a persisted child category across rehydration', async () => {
+    localStorage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ state: { activeCategory: 'erase-everything' }, version: 0 }),
+    );
+    await useSettingsStore.persist.rehydrate();
+    expect(useSettingsStore.getState().activeCategory).toBe('erase-everything');
+  });
+
   describe('visualEffects', () => {
     it('defaults to auto on a fresh state', () => {
       expect(useSettingsStore.getState().visualEffects).toBe(
