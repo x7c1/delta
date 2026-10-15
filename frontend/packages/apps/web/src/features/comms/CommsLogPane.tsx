@@ -10,6 +10,7 @@ import type { CommsFrame } from '@delta/wire-gen';
 import type { SessionId } from '@delta/model';
 import { Panel } from '@delta/ui-kit';
 import { isMockMode, wsUrl } from '../../config';
+import { useApiClient } from '../../data/apiContext';
 import { loadMockCommsFrames } from '../../data/mockCommsFrames';
 import { useNavStore } from '../../store/navStore';
 
@@ -76,6 +77,7 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
   const [frames, setFrames] = useState<CommsFrame[]>([]);
   const [connected, setConnected] = useState(false);
   const setCommsOpen = useNavStore((state) => state.setCommsOpen);
+  const api = useApiClient();
   const bodyRef = useRef<HTMLDivElement | null>(null);
   // Whether the pane is following the tail: armed while the reader sits at the
   // end of the log, disarmed as soon as they scroll up to study an earlier frame.
@@ -135,12 +137,14 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
       // the console, but never a reason to stop showing the rest of the log.
       onError: (error) =>
         console.warn('ignoring an unreadable comms frame', error),
+      // A refused token closes the socket without saying why.
+      onUnexpectedClose: () => void api.recheckAuth(),
     });
     return () => {
       setConnected(false);
       connection.close();
     };
-  }, [hasLiveWire, sessionId]);
+  }, [api, hasLiveWire, sessionId]);
 
   // Arm / disarm tail-following from the reader's own scrolling.
   useEffect(() => {

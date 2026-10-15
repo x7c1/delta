@@ -6,7 +6,8 @@ import { AUTH_TOKEN_STORAGE_KEY } from './support/endpoints';
  * The page's one-time code handoff, end to end through the Vite dev server's
  * proxy to the real backend: a page holding no token shows the screen that
  * asks for a link; a URL with a freshly minted code opens the app (and the
- * code leaves the address bar); the same URL a second time is refused.
+ * code leaves the address bar); the same URL a second time still opens the
+ * app while a token is stored, and is refused once none is.
  *
  * Every other spec starts holding the fixed token (see the config's
  * `storageState`); this one starts with none.
@@ -40,7 +41,24 @@ test('a one-time code opens the app once', async ({ page }) => {
   await page.reload();
   await waitForSettledApp(page);
 
-  // The same link a second time no longer works.
+  // The same, already-used link while the token is stored still opens the app
+  // on that token, and the code leaves the address bar.
+  await page.goto('about:blank');
+  await page.goto(`/#code=${code}`);
+  await waitForSettledApp(page);
+  expect(new URL(page.url()).hash).toBe('');
+  expect(
+    await page.evaluate(
+      (key) => window.localStorage.getItem(key),
+      AUTH_TOKEN_STORAGE_KEY,
+    ),
+  ).not.toBeNull();
+
+  // With no stored token, the same used link is refused.
+  await page.evaluate(
+    (key) => window.localStorage.removeItem(key),
+    AUTH_TOKEN_STORAGE_KEY,
+  );
   await page.goto('about:blank');
   await page.goto(`/#code=${code}`);
   await expect(page.getByTestId('reopen-screen')).toBeVisible();

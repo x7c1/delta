@@ -81,7 +81,10 @@ const { connectPtyMock, ptyCloses } = vi.hoisted(() => {
   const ptyCloses = new Map<string, number>();
   return {
     ptyCloses,
-    connectPtyMock: vi.fn((options: { sessionId: string }) => ({
+    connectPtyMock: vi.fn((options: {
+      sessionId: string;
+      onUnexpectedClose?: () => void;
+    }) => ({
       close: () => {
         ptyCloses.set(
           options.sessionId,
@@ -102,6 +105,15 @@ vi.mock('@delta/api-client', async () => {
     connectPty: connectPtyMock,
   };
 });
+
+// The API client stands in only for the auth re-check a dropped bridge asks for.
+// One object, as `ApiProvider`'s memoised client is: the effects that open the
+// socket depend on it.
+const { recheckAuth, api } = vi.hoisted(() => {
+  const recheckAuth = vi.fn();
+  return { recheckAuth, api: { recheckAuth } };
+});
+vi.mock('../../data/apiContext', () => ({ useApiClient: () => api }));
 
 // Resolve the canvas background from `<html data-theme="…">` so the bridge
 // effect can be observed flipping the value as the active theme changes.
@@ -232,6 +244,24 @@ describe('TerminalPane attaching to a session that is still starting', () => {
 
     expect(fakeTerminals).toHaveLength(1);
     expect(connectPtyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-checks the token when the bridge drops on its own', () => {
+    recheckAuth.mockReset().mockResolvedValue(undefined);
+    render(
+      <ThemeProvider>
+        <TerminalPane
+          sessionId={'s1' as SessionId}
+          paneState="open"
+          hasTerminal={true}
+        />
+      </ThemeProvider>,
+    );
+    expect(recheckAuth).not.toHaveBeenCalled();
+
+    connectPtyMock.mock.calls[0][0].onUnexpectedClose?.();
+
+    expect(recheckAuth).toHaveBeenCalledTimes(1);
   });
 
   it('says a starting session is starting, and never that it is closed', () => {

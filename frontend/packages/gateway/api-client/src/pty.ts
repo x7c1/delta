@@ -23,6 +23,13 @@ export interface PtyConnectionOptions {
   /** Called when the socket opens / closes. */
   onStatus?: (status: 'open' | 'closed') => void;
   socketFactory?: (url: string) => WebSocket;
+  /**
+   * Called once when the socket closes without the app having closed it — the
+   * server dropped it, or refused the upgrade. The app hands it
+   * `ApiClient.recheckAuth`, since a refused token shows up here only as a
+   * close.
+   */
+  onUnexpectedClose?: () => void;
 }
 
 export interface PtyConnection {
@@ -53,7 +60,13 @@ export function connectPty(options: PtyConnectionOptions): PtyConnection {
   socket.binaryType = 'arraybuffer';
 
   socket.addEventListener('open', () => options.onStatus?.('open'));
-  socket.addEventListener('close', () => options.onStatus?.('closed'));
+  let closedByClient = false;
+  socket.addEventListener('close', () => {
+    options.onStatus?.('closed');
+    if (!closedByClient) {
+      options.onUnexpectedClose?.();
+    }
+  });
   socket.addEventListener('message', (event: MessageEvent) => {
     if (event.data instanceof ArrayBuffer) {
       options.onData(new Uint8Array(event.data));
@@ -78,6 +91,7 @@ export function connectPty(options: PtyConnectionOptions): PtyConnection {
       socket.send(JSON.stringify({ type: 'resize', rows, cols }));
     },
     close() {
+      closedByClient = true;
       socket.close();
     },
   };
