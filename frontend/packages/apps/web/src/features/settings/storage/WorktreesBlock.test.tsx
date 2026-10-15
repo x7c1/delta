@@ -8,7 +8,7 @@ import { renderWithApi } from './testSupport';
 
 const server = setupServer(...createHandlers());
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => {
   server.resetHandlers(...createHandlers());
   server.events.removeAllListeners();
