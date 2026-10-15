@@ -132,4 +132,9 @@ to every spawn.** The desktop binary stops writing the process environment.
       `~/.local/bin` present) and the locale is UTF-8. Launch it from a
       terminal with a modified `PATH` and confirm the login shell's `PATH`
       still wins, as before.
-- [ ] On Ubuntu (GNOME), the same from the application grid.
+- [x] On Ubuntu (GNOME), the same from the application grid.
+      Ubuntu 26.04 (GNOME Wayland), 2026-10-15: the dev desktop launched
+      from the application grid (through a temporary `.desktop` entry)
+      read the login shell's `LANG` and `PATH`; a session's pane had
+      `~/.nix-profile/bin` and `~/.local/bin` on `PATH` and
+      `LANG=en_US.UTF-8`.

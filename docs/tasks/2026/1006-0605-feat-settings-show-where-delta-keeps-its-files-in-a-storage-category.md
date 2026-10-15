@@ -135,8 +135,12 @@ builds the category and the read-only inventory only.
       `delta.db-shm` (`stat -f %z`; not `du`, which counts disk blocks and
       would also pick up the snapshots). Verified against a server booted on
       a throwaway `DELTA_DATA_DIR` (snapshots empty, sizes equal).
-- [ ] The same check on an Ubuntu install. Needs a Linux machine; not run
+- [x] The same check on an Ubuntu install. Needs a Linux machine; not run
       before merge.
+      Ubuntu 26.04, 2026-10-15, dev desktop: Settings → Storage showed
+      937.3 KB for the database, equal to the summed lengths of
+      `delta.db`, `delta.db-wal` and `delta.db-shm` (959,776 bytes);
+      every reported path exists.
 - [x] The identifier alone selects the data directory: a server started with
       only `DELTA_IDENTIFIER` set reports `~/Library/Application Support/<identifier>/`
       as its data directory (mode `0700`, database present) — the path

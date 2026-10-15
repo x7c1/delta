@@ -111,6 +111,11 @@ the file intact, since the file is over 100 lines.
       "Removing everything" leaves no `io.github.x7c1.delta` entry under
       `~/Library/Application Support`, `~/Library/WebKit`,
       `~/Library/Caches`, `$TMPDIR`, or `/tmp/tmux-<uid>/`.
-- [ ] On an Ubuntu install, the same procedure leaves no
+- [x] On an Ubuntu install, the same procedure leaves no
       `io.github.x7c1.delta` entry under `~/.local/share`, `/tmp`, or
       `/tmp/tmux-<uid>/`.
+      Ubuntu 26.04, 2026-10-15: checked on the dev identifier instead of
+      the everyday install (the manual procedure would erase the real
+      data): after Settings' erase, nothing named
+      `io.github.x7c1.delta.dev` remains under `~/.local/share`,
+      `~/.config`, `~/.cache`, `/tmp` or `$TMUX_TMPDIR/tmux-<uid>/`.
