@@ -35,7 +35,7 @@ const server = setupServer(...createHandlers());
 const requestLog: string[] = [];
 
 beforeAll(() => {
-  server.listen({ onUnhandledRequest: 'error' });
+  server.listen({ onUnhandledFrame: 'error' });
   server.events.on('request:start', ({ request }) => {
     requestLog.push(`${request.method} ${new URL(request.url).pathname}`);
   });

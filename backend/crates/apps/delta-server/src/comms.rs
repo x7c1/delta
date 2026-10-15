@@ -23,10 +23,11 @@
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
 use crate::comms_log::CommsSubscription;
+use crate::socket_limits::{bound_inbound, SocketSlot, IDLE_INBOUND_LIMIT};
 use crate::state::AppState;
 
 /// Query parameters for the comms-log stream: whose log to watch.
@@ -37,16 +38,23 @@ pub struct CommsQuery {
     session_id: String,
 }
 
+/// Accept a comms-log socket, within the session's socket cap and with inbound
+/// messages bounded (see [`crate::socket_limits`]).
 pub async fn comms_handler(
     State(state): State<AppState>,
     Query(query): Query<CommsQuery>,
     upgrade: WebSocketUpgrade,
-) -> impl IntoResponse {
+) -> Response {
+    let slot = match state.sockets().acquire_comms(&query.session_id) {
+        Ok(slot) => slot,
+        Err(refused) => return refused.into_response(),
+    };
     // Subscribe BEFORE the upgrade completes, so frames recorded during the
     // handshake are already on this watcher's stream rather than lost between
     // accepting the socket and joining the log.
     let watcher = state.watch_comms_log(&query.session_id);
-    upgrade.on_upgrade(move |socket| pump_frames(socket, watcher))
+    bound_inbound(upgrade, IDLE_INBOUND_LIMIT)
+        .on_upgrade(move |socket| pump_frames(socket, watcher, slot))
 }
 
 /// Forward one session's frames to one browser socket until either side ends.
@@ -57,7 +65,10 @@ pub async fn comms_handler(
 /// with its subscription — ends at once rather than lingering until the next
 /// send fails. The stream carries no client-to-server messages, so anything else
 /// received is ignored.
-async fn pump_frames(mut socket: WebSocket, mut watcher: CommsSubscription) {
+///
+/// `_slot` is this socket's place under the session's connection cap, held for
+/// exactly as long as the pump runs.
+async fn pump_frames(mut socket: WebSocket, mut watcher: CommsSubscription, _slot: SocketSlot) {
     loop {
         tokio::select! {
             frame = watcher.next() => match frame {
@@ -78,7 +89,12 @@ async fn pump_frames(mut socket: WebSocket, mut watcher: CommsSubscription) {
                 None => break,
             },
             incoming = socket.recv() => match incoming {
-                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(Message::Close(_))) | None => break,
+                // A dropped connection, or an inbound message over its bound.
+                Some(Err(err)) => {
+                    tracing::debug!(error = %err, "comms socket receive failed; closing");
+                    break;
+                }
                 Some(Ok(_)) => {}
             },
         }

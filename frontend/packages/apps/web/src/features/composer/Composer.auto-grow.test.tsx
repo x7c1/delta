@@ -18,7 +18,7 @@ import { useComposerStore } from '../../store/composerStore';
 import { COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT } from './autoGrow';
 import { renderComposer, resetComposerState, server } from './Composer.testkit';
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
