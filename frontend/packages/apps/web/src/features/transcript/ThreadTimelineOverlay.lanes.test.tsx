@@ -623,11 +623,13 @@ describe('ThreadTimelineOverlay cluster mark size', () => {
     const computed = window.getComputedStyle(cluster);
     expect(computed.width).toBe(`${MARK_SMALL_PX}px`);
     expect(computed.height).toBe(`${MARK_SMALL_PX}px`);
-    expect(computed.outlineWidth === '' || computed.outlineWidth === '0px').toBe(
-      true,
-    );
-    expect(computed.borderTopWidth === '' || computed.borderTopWidth === '0px').toBe(
-      true,
-    );
+    // An outline paints nothing unless its style is something other than
+    // `none` and its width is non-zero. Check the style first: jsdom
+    // reports the initial `outline-width: medium` without applying the
+    // spec rule that resolves it to 0 when `outline-style` is `none`.
+    expect(
+      computed.outlineStyle === 'none' || computed.outlineWidth === '0px',
+    ).toBe(true);
+    expect(computed.borderTopWidth).toBe('0px');
   });
 });
