@@ -856,6 +856,8 @@ dependencies = [
  "delta-bootstrap",
  "delta-server",
  "dirs",
+ "gdkwayland-sys",
+ "gdkx11",
  "glib",
  "gtk",
  "libc",

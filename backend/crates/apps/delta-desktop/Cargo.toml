@@ -48,7 +48,12 @@ update-installer = { workspace = true }
 # `set_window_app_id` in src/main.rs), Ctrl-Q is caught on the GTK window
 # (src/quit_shortcut.rs), and the window's content size is read from it
 # (src/window_size/follow_resizes.rs); these are the versions Tauri builds on.
+# A second launch's activation token is handed to GDK on the display it runs
+# on (src/activation_token.rs): `gdkx11` for X11, and `gdkwayland-sys` for
+# Wayland, which has no safe binding.
 [target.'cfg(target_os = "linux")'.dependencies]
+gdkwayland-sys = "0.18"
+gdkx11 = "0.18"
 glib = "0.18"
 gtk = "0.18"
 

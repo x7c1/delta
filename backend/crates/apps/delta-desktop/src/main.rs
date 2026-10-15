@@ -58,7 +58,9 @@
 //! ([`window_size`]).
 //!
 //! Only one copy runs at a time: launching the app again focuses the running
-//! window and exits (see [`focus_running_window`]).
+//! window and exits (see [`focus_running_window`]). On Linux the second launch
+//! passes its activation token on, so a Wayland compositor lets the window
+//! come to the front (`activation_token.rs`).
 //!
 //! Closing the window ends the process and the server with it. The tmux server
 //! on Delta's socket is left running, so the Claude Code sessions open in it
@@ -82,6 +84,8 @@
 //! has exited ([`relaunch`]), and quits. The tmux server is left running, as
 //! when the window is closed, so the new process re-adopts the sessions.
 
+#[cfg(target_os = "linux")]
+mod activation_token;
 mod erase;
 mod links;
 mod logging;
@@ -113,6 +117,9 @@ const WINDOW_LABEL: &str = "main";
 const WINDOW_TITLE: &str = "Delta";
 
 fn main() {
+    // First, before any thread starts: it changes the environment.
+    #[cfg(target_os = "linux")]
+    let launch_token = activation_token::take_from_env();
     let context = tauri::generate_context!();
     let identifier = context.config().identifier.clone();
     // Before anything writes into the data directory: on Linux the log
@@ -127,6 +134,15 @@ fn main() {
     }
     #[cfg(target_os = "linux")]
     set_window_app_id(&identifier);
+    #[cfg(target_os = "linux")]
+    let activation = activation_token::LaunchActivation {
+        token: launch_token,
+        handoff: activation_token::Handoff::for_app(&identifier),
+    };
+    #[cfg(target_os = "linux")]
+    activation.leave_for_running_instance();
+    #[cfg(target_os = "linux")]
+    let handoff = activation.handoff.clone();
 
     let runtime = match Runtime::new() {
         Ok(runtime) => runtime,
@@ -149,9 +165,15 @@ fn main() {
         // up while the app is built, before the event loop runs, so a second
         // launch exits here before GTK would forward an `activate` to the
         // running copy.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            focus_running_window(app);
-        }))
+        .plugin(tauri_plugin_single_instance::init(
+            move |app, _argv, _cwd| {
+                focus_running_window(
+                    app,
+                    #[cfg(target_os = "linux")]
+                    handoff.as_ref().and_then(activation_token::Handoff::take),
+                );
+            },
+        ))
         // Remembers whether the window is maximized; the size is
         // `window_size`'s own, as the plugin's grows on Linux (see there).
         // After single-instance, so a second launch exits before this loads
@@ -171,6 +193,10 @@ fn main() {
         // Tauri panics on an error returned from here, so every failure is
         // reported (and exits 1) inside the hook instead.
         .setup(move |app| {
+            // Only the running instance gets here; a second launch has
+            // exited in the single-instance plugin.
+            #[cfg(target_os = "linux")]
+            activation_token::claim(activation);
             logging::warn_if_the_resolver_disagrees(
                 app.handle(),
                 &app.state::<Arc<logging::LogGuard>>(),
@@ -247,7 +273,10 @@ fn set_window_app_id(identifier: &str) {
 /// as changed — and the next launch would then find every session the first
 /// copy left running unable to reach it. A second launch therefore only focuses
 /// the window that is already open. The CLI server is not affected.
-fn focus_running_window(app: &AppHandle) {
+///
+/// On Linux the window is presented with the activation `token` the second
+/// launch left, when it had one (`activation_token::focus`).
+fn focus_running_window(app: &AppHandle, #[cfg(target_os = "linux")] token: Option<String>) {
     let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
         // Not expected in practice: `setup` builds the window before anything
         // else, and a start that could not build it shows a dialog and exits.
@@ -257,10 +286,16 @@ fn focus_running_window(app: &AppHandle) {
         );
         return;
     };
+    let unminimized = window.unminimize();
+    let shown = window.show();
+    #[cfg(target_os = "linux")]
+    let focused = activation_token::focus(&window, token);
+    #[cfg(not(target_os = "linux"))]
+    let focused = window.set_focus();
     for (step, result) in [
-        ("unminimize", window.unminimize()),
-        ("show", window.show()),
-        ("focus", window.set_focus()),
+        ("unminimize", unminimized),
+        ("show", shown),
+        ("focus", focused),
     ] {
         if let Err(err) = result {
             tracing::warn!("could not {step} the running window on a second launch: {err}");
