@@ -28,7 +28,7 @@ pub struct WirePendingPermission {
     /// What allowing the request would do to files on disk, when the provider
     /// stated it. The same detail the `permission_requested` event carries, so a
     /// client that missed that event rebuilds the *same* card from this refetch
-    /// rather than one degraded to the input summary.
+    /// rather than one without the change view.
     ///
     /// Absent from the envelope entirely when nothing is known, which is every
     /// request that is not a file change.

@@ -4,9 +4,9 @@ import type { FileChange } from "./FileChange";
 /**
  * What a pending permission request would do to files on disk.
  *
- * Present only when the provider actually stated the change set — never
+ * Present only when the request actually states the change set — never
  * synthesised empty — so a client can treat its absence as "nothing is known
- * here" and fall back to the request's input summary.
+ * here" and show the request's arguments alone.
  */
 export type FileChangeDetail = { 
 /**

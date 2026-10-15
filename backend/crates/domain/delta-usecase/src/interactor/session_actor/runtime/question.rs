@@ -43,6 +43,18 @@ impl SessionRuntime {
         self.pending_question.as_ref()
     }
 
+    /// Record that keys answering (or cancelling) question `request_id` are
+    /// about to be injected, so a later answer or cancel for it is refused.
+    pub fn mark_question_answered(&mut self, request_id: i64) {
+        self.answered_question = Some(request_id);
+    }
+
+    /// Whether the browser has already injected keys for question
+    /// `request_id`.
+    pub fn is_question_answered(&self, request_id: i64) -> bool {
+        self.answered_question == Some(request_id)
+    }
+
     /// Drop the pending question if `request_id` is the one it tracks. Keyed so
     /// a stale resolution can never wipe a newer question's state — the same
     /// guard [`Self::resolve_pending_permission`] applies.

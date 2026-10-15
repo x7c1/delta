@@ -388,6 +388,21 @@ describe('QuestionCard on a question that is no longer pending', () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
+  it('asks for the waiting permission request first when the server refuses for it', async () => {
+    // The question is still pending; a permission dialog sits over it in the
+    // terminal, so the server sent no keys and a retry after answering the
+    // permission succeeds.
+    const { onNotPending } = renderConflicting(
+      false,
+      new ApiError(409, 'blocked', 'question_blocked_by_permission'),
+    );
+
+    expect(await screen.findByTestId('question-error')).toHaveTextContent(
+      'A permission request is waiting — answer it first, then try again.',
+    );
+    expect(onNotPending).not.toHaveBeenCalled();
+  });
+
   it('treats any other failure as retryable, closed session or not', async () => {
     const { onNotPending } = renderConflicting(true, new Error('boom'));
 

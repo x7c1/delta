@@ -30,10 +30,13 @@ where
     /// Returns [`Error::QuestionNotPending`] (`409`) when no matching question
     /// is pending (already answered, stale, or no live pane), and
     /// [`Error::InvalidQuestionAnswer`] (`400`) for a malformed selection — in
-    /// both cases the browser falls back to the terminal.
+    /// both cases the browser falls back to the terminal — and
+    /// [`Error::QuestionBlockedByPermission`] (`409`) while a permission dialog
+    /// is pending in the session, which a later retry can get past.
     ///
     /// [`Error::QuestionNotPending`]: crate::error::Error::QuestionNotPending
     /// [`Error::InvalidQuestionAnswer`]: crate::error::Error::InvalidQuestionAnswer
+    /// [`Error::QuestionBlockedByPermission`]: crate::error::Error::QuestionBlockedByPermission
     pub async fn answer_question(
         &self,
         session_id: &SessionId,
@@ -59,9 +62,12 @@ where
     /// Returns [`Error::QuestionNotPending`] (`409`) when no matching question is
     /// pending (already answered/cancelled, stale, or no live pane), in which
     /// case the browser falls back to the terminal. Unlike an answer there is no
-    /// `400` case — cancel carries no selection to malform.
+    /// `400` case — cancel carries no selection to malform. Like an answer, it
+    /// is refused with [`Error::QuestionBlockedByPermission`] (`409`) while a
+    /// permission dialog is pending in the session.
     ///
     /// [`Error::QuestionNotPending`]: crate::error::Error::QuestionNotPending
+    /// [`Error::QuestionBlockedByPermission`]: crate::error::Error::QuestionBlockedByPermission
     pub async fn cancel_question(&self, session_id: &SessionId, request_id: i64) -> Result<()> {
         self.request(session_id, |reply| SessionInput::CancelQuestion {
             request_id,

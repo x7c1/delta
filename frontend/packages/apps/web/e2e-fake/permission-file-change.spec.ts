@@ -52,8 +52,11 @@ test('a file-change approval names the file it would change and shows the diff o
     'write access to the worktree',
   );
 
-  // And the blob it replaced is gone — not shown alongside it.
-  await expect(notice.getByText(/itemId/)).toHaveCount(0);
+  // The approval's own params are listed beside it, each under its name, so
+  // nothing the request carries is left off the card.
+  await expect(
+    notice.getByTestId('permission-notice-argument-itemId'),
+  ).toBeVisible();
 
   // The diff is one click away, not inline: a real patch can be hundreds of
   // lines, and burying Allow/Deny under it makes the common answer harder.

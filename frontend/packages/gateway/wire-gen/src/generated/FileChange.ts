@@ -15,7 +15,10 @@ path: string,
  */
 kind: FileChangeKind | null, 
 /**
- * The unified diff of the proposed change, as the provider produced it.
+ * The diff of the proposed change: the unified diff a provider produced,
+ * or one rendered from a request whose input carries the change (a Claude
+ * `Write`'s content as `+` lines, an `Edit`'s `old_string` / `new_string`
+ * as `-` / `+` lines under a header naming the edit).
  * Shown behind an expand control rather than inline: it can be long, and
  * the paths are what the answer usually turns on.
  */

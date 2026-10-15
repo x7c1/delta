@@ -161,3 +161,63 @@ async fn a_malformed_selection_is_a_bad_request_and_injects_nothing() {
         "nothing is injected for a malformed answer"
     );
 }
+
+#[tokio::test]
+async fn answering_while_a_permission_is_pending_is_refused_and_injects_nothing() {
+    let ix = interactor();
+    ix.seed_session().await;
+    let session = SessionId::from("sess-1");
+    let request_id = pending_question_id(&ix, &session, SINGLE).await;
+    // A permission dialog raised by a parallel tool call now sits over the
+    // question in the TUI.
+    ix.on_permission_request(
+        &session,
+        "Bash",
+        r#"{"command":"ls"}"#,
+        SEED_TRANSCRIPT_PATH,
+    )
+    .await
+    .unwrap();
+
+    let err = ix
+        .answer_question(&session, request_id, vec![vec![0]])
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::QuestionBlockedByPermission(id) if id == request_id),
+        "got {err:?}"
+    );
+    assert!(
+        ix.tmux_fake().keyed.lock().unwrap().is_empty(),
+        "no key may reach the permission dialog"
+    );
+    // The question itself is untouched and still pending.
+    assert!(ix.live_state_for(&session).await.pending_question.is_some());
+}
+
+#[tokio::test]
+async fn a_second_answer_to_the_same_question_is_refused() {
+    let ix = interactor();
+    ix.seed_session().await;
+    let session = SessionId::from("sess-1");
+    let request_id = pending_question_id(&ix, &session, SINGLE).await;
+
+    ix.answer_question(&session, request_id, vec![vec![1]])
+        .await
+        .unwrap();
+    // The question stays pending until its tool_result lands, so only the
+    // answered mark stops a repeated POST from typing the keys again.
+    let err = ix
+        .answer_question(&session, request_id, vec![vec![1]])
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::QuestionNotPending(id) if id == request_id),
+        "got {err:?}"
+    );
+    assert_eq!(
+        ix.tmux_fake().keyed.lock().unwrap().len(),
+        1,
+        "the keys are injected once"
+    );
+}

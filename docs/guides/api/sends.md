@@ -650,7 +650,8 @@ was permitted, exactly as for a plain `allow`.
   rest of the card usable.
 - **409** (body `code: "permission_not_pending"`) — the request is no longer
   awaiting a browser decision: it was already decided, its hook wait timed out
-  and the interactive TUI prompt owns it now, or its session stopped being
+  (or the hook request was dropped mid-wait) and the interactive TUI prompt owns
+  it now, or its session stopped being
   driven by an agent — closed by hand, closed because its pane went away, or an
   adapter-backed agent process that died — in which case the settle has already
   resolved every pending request (see
@@ -700,12 +701,18 @@ a multi-select one.
 - **400** — the selection could not be turned into a key sequence (out of range,
   or an unsupported combination).
 - **409** (body `code: "question_not_pending"`) — the question is no longer
-  pending: already answered, its turn ended, or the session has no live pane. The
+  pending: already answered (a repeated answer is refused once the first one's
+  keys were sent), its turn ended, or the session has no live pane. The
   browser falls back to answering in the terminal, unless the session is closed:
   then the card says the session was closed and offers only Dismiss. The 409
   also makes the browser refetch the session list, so a tab that missed the
   session's close (a live socket gone silently half-open) learns of it and
   switches to that copy.
+- **409** (body `code: "question_blocked_by_permission"`) — a permission request
+  is pending in the same session. Its dialog is drawn over the question in the
+  terminal, so keys sent now would answer the dialog instead; nothing is sent.
+  The question is still pending, and the same answer succeeds once the
+  permission is answered.
 
 ### `POST /api/sessions/{id}/questions/cancel`
 
@@ -726,3 +733,6 @@ Request:
 - **409** (body `code: "question_not_pending"`) — the question is no longer
   pending: already answered or cancelled, its turn ended, or the session has no
   live pane.
+- **409** (body `code: "question_blocked_by_permission"`) — a permission request
+  is pending in the same session, so the `Escape` would dismiss its dialog
+  instead; nothing is sent.

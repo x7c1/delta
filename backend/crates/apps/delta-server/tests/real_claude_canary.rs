@@ -233,7 +233,11 @@ impl ClaudeSession {
         // fixed value to keep the rendered settings identical in shape.
         std::fs::write(
             &settings_path,
-            render_session_settings(hook_port, "canary-hook-secret"),
+            render_session_settings(
+                hook_port,
+                "canary-hook-secret",
+                delta_usecase::PERMISSION_DECISION_DEADLINE,
+            ),
         )
         .expect("write rendered settings");
 

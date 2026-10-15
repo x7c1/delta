@@ -129,6 +129,18 @@ function isNotPending(err: unknown): boolean {
 }
 
 /**
+ * Whether a rejected answer/cancel POST was refused because a permission
+ * request is pending in the same session. Its dialog sits over the question in
+ * the terminal, so the server sends no keys; the question is still pending and
+ * a retry succeeds once the permission is answered.
+ */
+function isBlockedByPermission(err: unknown): boolean {
+  return (
+    err instanceof ApiError && err.code === 'question_blocked_by_permission'
+  );
+}
+
+/**
  * The interactive question card for Claude Code's `AskUserQuestion` tool.
  *
  * It renders each question's header and prompt and turns its options into
@@ -204,6 +216,9 @@ export function QuestionCard({
   // Whether the failure was the server's `question_not_pending` (as opposed to
   // a malformed selection or a network error, which a retry can fix).
   const [notPending, setNotPending] = useState(false);
+  // Whether the failure was a permission request waiting in front of the
+  // question, which calls for different advice than a generic failure.
+  const [blockedByPermission, setBlockedByPermission] = useState(false);
   // The question cannot be answered anywhere: the server says it is no longer
   // pending and the session it belonged to is closed.
   const closed = failed && notPending && sessionClosed;
@@ -215,6 +230,7 @@ export function QuestionCard({
     setFailedAction(action);
     const gone = isNotPending(err);
     setNotPending(gone);
+    setBlockedByPermission(isBlockedByPermission(err));
     if (gone) {
       onNotPending?.();
     }
@@ -381,9 +397,11 @@ export function QuestionCard({
       )}
       {failed && !closed && (
         <p className="text-danger" role="alert" data-testid="question-error">
-          {failedAction === 'cancel'
-            ? "Couldn't cancel the question — cancel it in the terminal, or try again."
-            : "Couldn't submit your answer — answer in the terminal, or try again."}
+          {blockedByPermission
+            ? 'A permission request is waiting — answer it first, then try again.'
+            : failedAction === 'cancel'
+              ? "Couldn't cancel the question — cancel it in the terminal, or try again."
+              : "Couldn't submit your answer — answer in the terminal, or try again."}
         </p>
       )}
 

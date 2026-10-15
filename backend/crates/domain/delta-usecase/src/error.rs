@@ -99,7 +99,8 @@ pub enum Error {
 
     /// A permission decision arrived for a request no browser decision can
     /// reach anymore: the id is unknown, the request was already decided, or
-    /// its hook wait timed out and fell back to the interactive TUI prompt.
+    /// its hook wait ended without one (it timed out, or the hook request was
+    /// dropped) and the interactive TUI prompt owns it now.
     /// Surfaced as `409` so the browser switches to guidance chosen by the
     /// provider's `has_terminal` capability.
     #[error("permission request {0} is not awaiting a decision")]
@@ -125,6 +126,14 @@ pub enum Error {
     /// browser falls back to the answer-in-the-terminal guidance.
     #[error("question request {0} is not awaiting an answer")]
     QuestionNotPending(i64),
+
+    /// An answer or cancel arrived for a pending question while a permission
+    /// dialog is also pending in the same session. The dialog is drawn over
+    /// the TUI, so the keys meant for the question would answer the dialog
+    /// instead. Surfaced as `409` with its own code: the question is still
+    /// pending, and a retry once the permission is answered can succeed.
+    #[error("question request {0} cannot be answered while a permission request is pending")]
+    QuestionBlockedByPermission(i64),
 
     /// The browser's answer to a pending question could not be turned into a
     /// key sequence: a malformed selection, or a sub-case the generator refuses

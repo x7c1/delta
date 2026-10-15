@@ -142,7 +142,7 @@ async fn deciding_after_the_wait_was_abandoned_is_a_conflict() {
     // The transport's deadline fired: the waiter is abandoned and the hook
     // passes through to the TUI prompt. The row stays pending for the
     // tool_result fallback.
-    ix.abandon_permission_decision(wait.request_id).await;
+    ix.abandon_permission_decision(wait.request_id);
 
     let err = ix
         .decide_permission(wait.request_id, PermissionDecision::Allow)
@@ -276,4 +276,37 @@ async fn a_session_scoped_allow_is_refused_and_leaves_the_request_answerable() {
         .await
         .unwrap();
     assert_eq!(wait.decision.await.unwrap(), PermissionDecision::Allow);
+}
+
+#[tokio::test]
+async fn a_claude_edit_request_carries_its_change_to_the_notice() {
+    // Claude's Edit input holds the whole replacement, so the notice gets the
+    // same change view a correlated Codex patch does.
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+
+    let wait = ix
+        .on_permission_request(
+            &session,
+            "Edit",
+            r#"{"file_path":"/work/a.rs","old_string":"old","new_string":"new"}"#,
+            SEED_TRANSCRIPT_PATH,
+        )
+        .await
+        .unwrap();
+
+    match wait.events.as_slice() {
+        [SessionEvent::PermissionRequested { file_change, .. }] => {
+            let detail = file_change.as_ref().expect("an Edit carries its change");
+            assert_eq!(detail.changes.len(), 1);
+            assert_eq!(detail.changes[0].path, "/work/a.rs");
+            assert_eq!(detail.changes[0].diff, "@@ edit @@\n-old\n+new");
+        }
+        other => panic!("expected a single PermissionRequested, got {other:?}"),
+    }
+    // The queryable mirror a reconnecting tab re-seeds from carries it too.
+    let live = ix.live_state_for(&session).await;
+    let pending = live.pending_permission().expect("the dialog is pending");
+    assert!(pending.file_change.is_some());
 }

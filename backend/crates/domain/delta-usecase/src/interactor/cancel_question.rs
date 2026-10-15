@@ -37,9 +37,13 @@ where
     /// [`pending_question`](crate::interactor::session_actor::runtime::SessionRuntime),
     /// exactly like [`answer_question`](Self::answer_question):
     ///
-    /// - No pending question, one with a different id, or no live pane →
+    /// - No pending question, one with a different id, one already answered or
+    ///   cancelled from the browser, or no live pane →
     ///   [`Error::QuestionNotPending`] (`409`), a graceful no-op the browser
     ///   surfaces as the cancel-in-the-terminal fallback.
+    /// - A permission dialog pending in the same session →
+    ///   [`Error::QuestionBlockedByPermission`] (`409`): the `Escape` would
+    ///   dismiss the dialog drawn over the question instead.
     ///
     /// There is no malformed-input case here (cancel carries no selection), so
     /// unlike `answer_question` this never returns [`Error::InvalidQuestionAnswer`].
@@ -57,8 +61,11 @@ where
         let Some(pending) = self.state.pending_question() else {
             return Err(Error::QuestionNotPending(request_id));
         };
-        if pending.request_id != request_id {
+        if pending.request_id != request_id || self.state.is_question_answered(request_id) {
             return Err(Error::QuestionNotPending(request_id));
+        }
+        if self.state.has_pending_permission() {
+            return Err(Error::QuestionBlockedByPermission(request_id));
         }
 
         // No live pane means the TUI is gone; treat it like a stale question so
@@ -70,6 +77,7 @@ where
 
         let keys = cancel_keys();
         let names: Vec<&str> = keys.iter().map(|key| key.tmux_name()).collect();
+        self.state.mark_question_answered(request_id);
         self.tmux.send_keys(&pane, &names).await?;
         Ok(())
     }

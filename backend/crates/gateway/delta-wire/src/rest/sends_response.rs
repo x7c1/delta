@@ -130,8 +130,8 @@ mod tests {
 
     /// A file-change dialog: the envelope carries the same detail the
     /// `permission_requested` event does, so a client that missed the event
-    /// rebuilds the same card from a refetch instead of one degraded to the
-    /// input summary.
+    /// rebuilds the same card from a refetch instead of one without the
+    /// change view.
     #[test]
     fn sends_response_reports_a_pending_file_change_with_its_detail() {
         let body = WireSendsResponse::new(

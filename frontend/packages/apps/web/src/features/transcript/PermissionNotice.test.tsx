@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { ApiClient, ApiError } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
 import type { PermissionNotice } from '../../store/liveStore';
 import { PermissionNoticeCard } from './PermissionNotice';
+import { ELIDE_HEAD, ELIDE_LIMIT, ELIDE_TAIL } from './permissionText';
+import { REQUEST_SWITCH_GUARD_MS } from './useRequestSwitchGuard';
 
 /** The guidance a provider WITH a terminal gets: the prompt lives there. */
 const TERMINAL_GUIDANCE = 'Answer the prompt in the terminal.';
@@ -85,10 +93,10 @@ function renderCard({
   const onOpenTerminal = vi.fn();
   const onDismiss = vi.fn();
   const onNotPending = vi.fn();
-  render(
+  const card = (shown: PermissionNotice) => (
     <ApiProvider client={client}>
       <PermissionNoticeCard
-        notice={{ ...notice(), ...noticeOverrides }}
+        notice={shown}
         providerHasTerminal={providerHasTerminal}
         providerHasAllowForSession={providerHasAllowForSession}
         sessionClosed={sessionClosed}
@@ -96,9 +104,13 @@ function renderCard({
         onOpenTerminal={onOpenTerminal}
         onDismiss={onDismiss}
       />
-    </ApiProvider>,
+    </ApiProvider>
   );
-  return { decide, onOpenTerminal, onDismiss, onNotPending };
+  const { rerender } = render(card({ ...notice(), ...noticeOverrides }));
+  /** Re-point the mounted card at another request, as a promotion does. */
+  const showNext = (next: Partial<PermissionNotice>) =>
+    rerender(card({ ...notice(), ...noticeOverrides, ...next }));
+  return { decide, onOpenTerminal, onDismiss, onNotPending, showNext };
 }
 
 describe('PermissionNoticeCard conflict fallback', () => {
@@ -366,8 +378,10 @@ describe('PermissionNoticeCard file-change detail', () => {
     expect(screen.getByText('src/added.rs')).toBeInTheDocument();
     expect(screen.getByText('edit')).toBeInTheDocument();
     expect(screen.getByText('new file')).toBeInTheDocument();
-    // The params blob it replaces is gone, not shown alongside.
-    expect(screen.queryByText(/itemId/)).not.toBeInTheDocument();
+    // The request's own params are still listed beside it, as they are.
+    expect(
+      screen.getByTestId('permission-notice-argument-itemId'),
+    ).toHaveTextContent('fc_1');
   });
 
   it("shows the provider's own reason when it gave one", () => {
@@ -401,10 +415,9 @@ describe('PermissionNoticeCard file-change detail', () => {
     expect(screen.getByText(/\+fresh/)).toBeInTheDocument();
   });
 
-  it('falls back to the input summary when there is no detail', () => {
-    // A Claude permission, a command execution, and a file change whose item the
-    // server could not correlate all land here — the card renders exactly what
-    // it always did, with no empty detail block.
+  it('shows only the arguments when there is no detail', () => {
+    // A command execution, and a file change whose item the server could not
+    // correlate, land here — no empty detail block.
     renderCard();
 
     expect(screen.getByText('rm -rf scratch')).toBeInTheDocument();
@@ -416,8 +429,8 @@ describe('PermissionNoticeCard file-change detail', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('falls back to the input summary when the detail names no file', () => {
-    // An empty change list says nothing the summary does not, so it is treated
+  it('shows only the arguments when the detail names no file', () => {
+    // An empty change list says nothing the arguments do not, so it is treated
     // as no detail rather than rendered as an empty block.
     renderCard({
       noticeOverrides: {
@@ -449,8 +462,8 @@ describe('PermissionNoticeCard file-change detail', () => {
   });
 
   it('states the write root even with no detail to show it beside', () => {
-    // The change set could not be correlated, so the card is back to the JSON
-    // summary — and that is exactly when dropping the broadest thing the Allow
+    // The change set could not be correlated, so the card has only the
+    // arguments — and that is exactly when dropping the broadest thing the Allow
     // grants would be worst, since nothing else on the card names a scope.
     renderCard({
       noticeOverrides: {
@@ -477,77 +490,240 @@ describe('PermissionNoticeCard file-change detail', () => {
   });
 });
 
-describe('PermissionNoticeCard truncated summary', () => {
+describe('PermissionNoticeCard arguments', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  /**
-   * A command of the shape that motivated this: a provider that found the patch
-   * helper on `PATH` and shells out to it, so the approval arrives as a command
-   * execution and the patch body — the only part that says what would be
-   * written — sits well past the summary limit.
-   */
-  const APPLY_PATCH_COMMAND =
-    `zsh -lc "printf '%s\\n' '*** Begin Patch' '*** Update File: notes.txt' ` +
-    `'@@' '-before' '+after' '*** End Patch' | ` +
-    `~/.cache/agent/apply-patch/apply_patch-x86_64-unknown-linux-gnu"`;
+  /** The rendered value of one labelled argument. */
+  const argument = (label: string) =>
+    screen.getByTestId(`permission-notice-argument-${label}`);
 
-  /** The control that reveals the untruncated text. */
-  const fullTextToggle = () =>
-    screen.queryByRole('button', { name: /Full text/ });
-
-  it('offers the full command behind an expand control when the line is clipped', () => {
-    // The clipped line still reads as it always did; the part the answer turns
-    // on is one click away instead of unreachable.
-    expect(APPLY_PATCH_COMMAND.length).toBeGreaterThan(120);
+  it('shows every field of the request, each under its name', () => {
     renderCard({
       noticeOverrides: {
-        toolInput: JSON.stringify({ command: APPLY_PATCH_COMMAND }),
+        toolName: 'Edit',
+        toolInput: JSON.stringify({
+          file_path: '/repo/a.rs',
+          old_string: 'one',
+          new_string: 'two',
+          replace_all: true,
+        }),
       },
     });
 
-    expect(
-      screen.getByText(`${APPLY_PATCH_COMMAND.slice(0, 120)}…`),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(APPLY_PATCH_COMMAND)).not.toBeInTheDocument();
-
-    const toggle = fullTextToggle();
-    expect(toggle).toBeInTheDocument();
-    fireEvent.click(toggle as HTMLElement);
-
-    expect(screen.getByText(APPLY_PATCH_COMMAND)).toBeInTheDocument();
+    const list = screen.getByTestId('permission-notice-arguments');
+    for (const label of ['file_path', 'old_string', 'new_string', 'replace_all']) {
+      expect(list).toHaveTextContent(label);
+    }
+    expect(argument('file_path')).toHaveTextContent('/repo/a.rs');
+    expect(argument('old_string')).toHaveTextContent('one');
+    expect(argument('new_string')).toHaveTextContent('two');
+    expect(argument('replace_all')).toHaveTextContent('true');
   });
 
-  it('adds no expand control when the command fits on the line', () => {
-    // The default notice's `rm -rf scratch` is far short of the limit: nothing
-    // was cut, so a control promising "the full text" would open onto the text
-    // already on screen.
+  it("shows a Codex command's working directory", () => {
+    renderCard({
+      noticeOverrides: {
+        toolName: 'ls -la',
+        toolInput: JSON.stringify({
+          itemId: 'item_1',
+          command: 'ls -la',
+          cwd: '/repo/sub',
+        }),
+      },
+    });
+
+    expect(argument('cwd')).toHaveTextContent('/repo/sub');
+  });
+
+  it('keeps line breaks and indentation as they are', () => {
+    const command = 'cat <<EOF\n  indented\nEOF';
+    renderCard({ noticeOverrides: { toolInput: JSON.stringify({ command }) } });
+
+    expect(argument('command').textContent).toBe(command);
+  });
+
+  it('shows the tail and a padding marker when spaces push the end aside', () => {
+    renderCard({
+      noticeOverrides: {
+        toolInput: JSON.stringify({
+          command: `ls${' '.repeat(200)}; rm -rf x`,
+        }),
+      },
+    });
+
+    const value = argument('command');
+    expect(value).toHaveTextContent('; rm -rf x');
+    expect(value).toHaveTextContent('[200 spaces]');
+    expect(value.querySelector('[data-segment="marker"]')).not.toBeNull();
+  });
+
+  it('marks long runs of whitespace or blank lines at either end', () => {
+    renderCard({
+      noticeOverrides: {
+        toolInput: JSON.stringify({
+          command: `\n\n\n\n\nls${' '.repeat(10)}`,
+        }),
+      },
+    });
+
+    const value = argument('command');
+    expect(value).toHaveTextContent('[5 line breaks]');
+    expect(value).toHaveTextContent('[10 spaces]');
+  });
+
+  it('shows the head, the elided count and the tail of a value over the limit', () => {
+    const head = 'H'.repeat(ELIDE_HEAD);
+    const middle = 'm'.repeat(ELIDE_LIMIT);
+    const tail = 'T'.repeat(ELIDE_TAIL);
+    renderCard({
+      noticeOverrides: {
+        toolInput: JSON.stringify({ command: `${head}${middle}${tail}` }),
+      },
+    });
+
+    const text = argument('command').textContent ?? '';
+    expect(text.startsWith(head)).toBe(true);
+    expect(text.endsWith(tail)).toBe(true);
+    expect(text).toContain(`[… ${ELIDE_LIMIT} characters elided …]`);
+    expect(text).not.toContain('m');
+
+    fireEvent.click(screen.getByRole('button', { name: /Show all/ }));
+    expect(argument('command').textContent).toBe(`${head}${middle}${tail}`);
+  });
+
+  it('shows a direction-changing character as an escape, with a warning', () => {
+    renderCard({
+      noticeOverrides: {
+        toolInput: JSON.stringify({ command: 'echo safe\u202Etxt.sh' }),
+      },
+    });
+
+    expect(argument('command')).toHaveTextContent('echo safe\\u{202E}txt.sh');
+    expect(argument('command').textContent).not.toContain('\u202E');
+    expect(
+      screen.getByTestId('permission-notice-invisible-warning'),
+    ).toBeInTheDocument();
+  });
+
+  it('escapes invisible characters in a heading that names the command', () => {
+    // A Codex command execution uses the command itself as the tool name.
+    renderCard({
+      noticeOverrides: {
+        toolName: 'rm\u200B -rf x',
+        toolInput: JSON.stringify({ command: 'rm\u200B -rf x' }),
+      },
+    });
+
+    const heading = screen.getByTestId('permission-notice-tool-name');
+    expect(heading).toHaveTextContent('rm\\u{200B} -rf x');
+    expect(heading.textContent).not.toContain('\u200B');
+  });
+
+  it('escapes control characters but keeps tabs and line breaks', () => {
+    renderCard({
+      noticeOverrides: {
+        toolInput: JSON.stringify({ command: 'a\tb\nc\u0007d' }),
+      },
+    });
+
+    expect(argument('command').textContent).toBe('a\tb\nc\\u{7}d');
+  });
+
+  it('adds no warning to a request without such characters', () => {
     renderCard();
 
-    expect(screen.getByText('rm -rf scratch')).toBeInTheDocument();
-    expect(fullTextToggle()).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('permission-notice-invisible-warning'),
+    ).not.toBeInTheDocument();
   });
 
-  it('expands the JSON fallback of an uncorrelated file change too', () => {
-    // No provider test anywhere in this path: the rule is that a clipped summary
-    // can be opened, so the params blob a file-change approval falls back to
-    // when its item could not be correlated gets the same treatment.
-    const toolInput = JSON.stringify({
-      itemId: `fc_${'0'.repeat(140)}`,
-      turnId: 'turn_1',
-    });
-    expect(toolInput.length).toBeGreaterThan(120);
-    renderCard({ noticeOverrides: { toolName: 'file_change', toolInput } });
+  it('shows the whole input unlabelled when it is not an object', () => {
+    renderCard({ noticeOverrides: { toolInput: 'not json' } });
+
+    expect(argument('input')).toHaveTextContent('not json');
+  });
+});
+
+describe('PermissionNoticeCard request switch', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /** The answer buttons the guard covers. */
+  const answerButtons = () => [
+    screen.getByRole('button', { name: 'Allow' }),
+    screen.getByRole('button', { name: 'Deny' }),
+    screen.getByRole('button', { name: 'Dismiss' }),
+  ];
+
+  it('leaves the first request it mounts with answerable at once', () => {
+    renderCard();
+
+    for (const button of answerButtons()) {
+      expect(button).not.toBeDisabled();
+    }
+    expect(
+      screen.queryByTestId('permission-notice-new-request'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('disables the buttons for a moment after switching to a new request', () => {
+    vi.useFakeTimers();
+    const { decide, onDismiss, showNext } = renderCard();
+
+    showNext({ requestId: 8, toolInput: '{"command":"cat next.txt"}' });
 
     expect(
-      screen.queryByTestId('permission-notice-file-change'),
+      screen.getByTestId('permission-notice-new-request'),
+    ).toHaveTextContent('New request');
+    for (const button of answerButtons()) {
+      expect(button).toBeDisabled();
+    }
+    // A click inside the window answers nothing.
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(decide).not.toHaveBeenCalled();
+    expect(onDismiss).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(REQUEST_SWITCH_GUARD_MS - 1);
+    });
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeDisabled();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    for (const button of answerButtons()) {
+      expect(button).not.toBeDisabled();
+    }
+    expect(
+      screen.queryByTestId('permission-notice-new-request'),
     ).not.toBeInTheDocument();
 
-    const toggle = fullTextToggle();
-    expect(toggle).toBeInTheDocument();
-    fireEvent.click(toggle as HTMLElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }));
+    expect(decide).toHaveBeenCalledWith(8, 'allow');
+  });
 
-    expect(screen.getByText(toolInput)).toBeInTheDocument();
+  it('restarts the window when another request takes its place inside it', () => {
+    vi.useFakeTimers();
+    const { showNext } = renderCard();
+
+    showNext({ requestId: 8 });
+    act(() => {
+      vi.advanceTimersByTime(REQUEST_SWITCH_GUARD_MS - 100);
+    });
+    showNext({ requestId: 9 });
+    act(() => {
+      vi.advanceTimersByTime(REQUEST_SWITCH_GUARD_MS - 1);
+    });
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeDisabled();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.getByRole('button', { name: 'Allow' })).not.toBeDisabled();
   });
 });

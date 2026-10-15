@@ -199,7 +199,7 @@ what `delta-server open-url` calls.
     first), `session_hooks_unreachable` (a send into a session re-adopted after
     a restart whose agent's hooks no longer reach the server — close it and
     send again), `permission_not_pending`, `question_not_pending`,
-    `send_not_cancellable`, `send_not_releasable`, `clone_root_duplicate`,
+    `question_blocked_by_permission`, `send_not_cancellable`, `send_not_releasable`, `clone_root_duplicate`,
     `clone_dest_exists` (the one path a clone could land on is already taken —
     there is no fallback naming), or `launch_option_builtin` (a delete aimed at
     a launch option Delta ships), or one of the `update_*` codes from

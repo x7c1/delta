@@ -6,10 +6,11 @@ use super::AgentFileChange;
 /// so before asking.
 ///
 /// This is *display* detail for a live prompt: it exists so the approval card
-/// can name the files it is gating and show the diff, instead of a truncated
-/// blob of request params. It is `Some` only when the provider actually stated
-/// the change set — the adapter never synthesises an empty detail, so a `None`
-/// means "nothing is known here" and the card falls back to its input summary.
+/// can name the files it is gating and show the diff beside the request's
+/// arguments. It is `Some` only when the request actually states the change set
+/// — a correlated Codex patch, or a Claude file tool whose input carries the
+/// change — and never an empty detail, so a `None` means "nothing is known
+/// here" and the card shows the arguments alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentFileChangeDetail {
     /// The files the request would change, in the order the provider listed

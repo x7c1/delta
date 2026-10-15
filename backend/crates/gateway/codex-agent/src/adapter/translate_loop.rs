@@ -189,7 +189,7 @@ fn maintain_file_change_items(items: &Arc<Mutex<FileChangeItems>>, notification:
 /// makes "a detail is present" mean "these files would change" everywhere
 /// downstream. An item can end up naming none — a `changes: []` array, or one
 /// whose every entry was dropped for lacking a path — and a detail minted from
-/// it would say nothing the input summary does not, while obliging every client
+/// it would say nothing the arguments do not, while obliging every client
 /// (not just Delta's own card) to carry an empty-state branch the wire contract
 /// promises it will never need.
 fn attach_file_changes(

@@ -15,7 +15,35 @@
 //! never has to be written into (and risk clobbering) the session's working
 //! directory.
 
+use std::time::Duration;
+
 use serde_json::json;
+
+/// The timeout, in seconds, Claude Code is given for every HTTP hook except
+/// `PermissionRequest`. These hooks answer at once, so the bound only matters
+/// when the server is unreachable.
+const HOOK_TIMEOUT_SECS: u64 = 30;
+
+/// How much longer than Delta's decision wait Claude Code waits on the
+/// `PermissionRequest` hook.
+const PERMISSION_HOOK_TIMEOUT_MARGIN: Duration = Duration::from_secs(20);
+
+/// The timeout, in seconds, Claude Code is given for the `PermissionRequest`
+/// hook when Delta waits `decision_deadline` for the browser's decision.
+///
+/// The hook response blocks for that whole wait, so the timeout must outlast
+/// it: with a shorter one Claude Code would abandon the hook mid-wait and show
+/// its own prompt while the browser card still offers Allow and Deny, and an
+/// answer given on the card would land on nothing. With the margin, the
+/// fallback to the terminal prompt is always Delta's deliberate empty
+/// passthrough at the end of its own wait. Derived from the configured wait
+/// rather than fixed, so a deadline stretched through the environment keeps
+/// the same guarantee.
+fn permission_hook_timeout_secs(decision_deadline: Duration) -> u64 {
+    // Round a fractional deadline up: the timeout is whole seconds.
+    let wait_secs = decision_deadline.as_secs() + u64::from(decision_deadline.subsec_nanos() > 0);
+    wait_secs + PERMISSION_HOOK_TIMEOUT_MARGIN.as_secs()
+}
 
 /// Render the session settings JSON for hooks pointing at `127.0.0.1:<port>`.
 ///
@@ -27,15 +55,25 @@ use serde_json::json;
 /// here, and the URL form works uniformly for both the `http` hooks and the
 /// `command` (`curl`) hook. The secret is hex text (URL-safe), so it needs no
 /// percent-encoding.
-pub fn render_session_settings(port: u16, hook_secret: &str) -> String {
+///
+/// `permission_decision_deadline` is how long the server holds a
+/// `PermissionRequest` hook response waiting for the browser's decision; the
+/// hook's timeout is that wait plus a margin, so Claude Code never gives up
+/// on the hook before Delta's own fallback.
+pub fn render_session_settings(
+    port: u16,
+    hook_secret: &str,
+    permission_decision_deadline: Duration,
+) -> String {
     let url = |path: &str| format!("http://127.0.0.1:{port}/hooks/{path}?hs={hook_secret}");
-    let http_hook = |path: &str| {
+    let http_hook_with_timeout = |path: &str, timeout: u64| {
         json!({
             "hooks": [
-                { "type": "http", "url": url(path), "timeout": 30 }
+                { "type": "http", "url": url(path), "timeout": timeout }
             ]
         })
     };
+    let http_hook = |path: &str| http_hook_with_timeout(path, HOOK_TIMEOUT_SECS);
     // The shared `curl` invocation for every entry that forwards its stdin JSON
     // to the server (the `SessionStart` command hook and the `statusLine`
     // command both use it). `-o /dev/null` discards the server's response so it
@@ -98,7 +136,7 @@ pub fn render_session_settings(port: u16, hook_secret: &str) -> String {
             "PreToolUse": [{
                 "matcher": "*",
                 "hooks": [
-                    { "type": "http", "url": url("pre-tool-use"), "timeout": 30 }
+                    { "type": "http", "url": url("pre-tool-use"), "timeout": HOOK_TIMEOUT_SECS }
                 ]
             }],
             // PostToolUse fires when a tool call completes. Delta acts on it
@@ -110,14 +148,19 @@ pub fn render_session_settings(port: u16, hook_secret: &str) -> String {
             "PostToolUse": [{
                 "matcher": "*",
                 "hooks": [
-                    { "type": "http", "url": url("post-tool-use"), "timeout": 30 }
+                    { "type": "http", "url": url("post-tool-use"), "timeout": HOOK_TIMEOUT_SECS }
                 ]
             }],
             // PermissionRequest fires only when an interactive permission dialog
             // actually appears (not for auto/classifier-approved calls), so it is
             // the signal for "a human answer is genuinely pending". PreToolUse
-            // fires for every call and only records the request.
-            "PermissionRequest": [http_hook("permission-request")],
+            // fires for every call and only records the request. Its response
+            // blocks on the browser's decision, so it gets the longer timeout
+            // (see `permission_hook_timeout_secs`).
+            "PermissionRequest": [http_hook_with_timeout(
+                "permission-request",
+                permission_hook_timeout_secs(permission_decision_deadline),
+            )],
             // SessionStart fires when a session's TUI is ready to accept input
             // (source=startup on a fresh launch, source=resume after
             // `claude --resume`). It is Delta's launch-readiness signal: it binds
@@ -142,11 +185,17 @@ pub fn render_session_settings(port: u16, hook_secret: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use delta_usecase::PERMISSION_DECISION_DEADLINE;
+
     use super::*;
+
+    fn render(port: u16, hook_secret: &str) -> String {
+        render_session_settings(port, hook_secret, PERMISSION_DECISION_DEADLINE)
+    }
 
     #[test]
     fn embeds_the_port_in_every_hook_url() {
-        let rendered = render_session_settings(9999, "sekret");
+        let rendered = render(9999, "sekret");
         let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
 
         // The embedded terminal is dark, so the session's theme is forced dark.
@@ -202,8 +251,55 @@ mod tests {
     }
 
     #[test]
+    fn permission_request_hook_outlasts_the_decision_wait() {
+        let rendered = render(9999, "sekret");
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+        let timeout = |event: &str| {
+            parsed["hooks"][event][0]["hooks"][0]["timeout"]
+                .as_u64()
+                .unwrap_or_else(|| panic!("{event} has a numeric timeout"))
+        };
+
+        assert!(
+            timeout("PermissionRequest") > PERMISSION_DECISION_DEADLINE.as_secs(),
+            "the PermissionRequest hook must outlast Delta's decision wait"
+        );
+        for event in [
+            "UserPromptSubmit",
+            "Stop",
+            "MessageDisplay",
+            "PreToolUse",
+            "PostToolUse",
+            "SessionEnd",
+        ] {
+            assert_eq!(timeout(event), 30, "{event} keeps the short timeout");
+        }
+    }
+
+    #[test]
+    fn permission_request_hook_timeout_follows_a_configured_wait() {
+        // A wait stretched (or shrunk) through the environment keeps the hook
+        // timeout above it, including a fractional one.
+        for deadline in [
+            Duration::from_millis(30),
+            Duration::from_millis(90_500),
+            Duration::from_secs(300),
+        ] {
+            let rendered = render_session_settings(9999, "sekret", deadline);
+            let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+            let timeout = parsed["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"]
+                .as_u64()
+                .unwrap();
+            assert!(
+                Duration::from_secs(timeout) > deadline,
+                "timeout {timeout}s must outlast a {deadline:?} wait"
+            );
+        }
+    }
+
+    #[test]
     fn emits_a_status_line_command_targeting_the_same_port() {
-        let rendered = render_session_settings(9999, "sekret");
+        let rendered = render(9999, "sekret");
         let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
 
         // `statusLine` is a top-level `command` entry (not a hook): Claude Code

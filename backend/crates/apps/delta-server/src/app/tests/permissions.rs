@@ -328,3 +328,59 @@ async fn permission_decision_for_an_unknown_request_is_a_conflict() {
         Some("permission_not_pending"),
     );
 }
+
+#[tokio::test]
+async fn a_dropped_permission_hook_request_abandons_the_pending_decision() {
+    // The production decision wait (far longer than this test), so the only
+    // way the waiter can go away is the hook request itself being dropped —
+    // what the transport does when Claude Code disconnects mid-wait.
+    let state = AppState::build(&test_config()).await.unwrap();
+    register_session(&state).await;
+    let hook_router = router(state.clone());
+    let api_router = router(state);
+
+    let hook_body = serde_json::json!({
+        "session_id": "sess-1",
+        "tool_name": "Bash",
+        "tool_input": {"command": "ls"},
+        "transcript_path": "/tmp/does-not-exist.jsonl"
+    })
+    .to_string();
+    let hook = tokio::spawn(async move {
+        hook_router
+            .oneshot(
+                Request::builder()
+                    .header("host", "127.0.0.1")
+                    .header("authorization", super::bearer())
+                    .method("POST")
+                    .uri(format!("/hooks/permission-request{}", super::hook_query()))
+                    .header("content-type", "application/json")
+                    .body(Body::from(hook_body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    });
+
+    // Let the hook register its waiter, then drop the in-flight request.
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    hook.abort();
+    assert!(hook.await.unwrap_err().is_cancelled());
+
+    // The decision has nowhere to go any more, so it is refused as not
+    // pending instead of being accepted for a hook nobody is waiting on.
+    let decision = api_router
+        .oneshot(
+            Request::builder()
+                .header("host", "127.0.0.1")
+                .header("authorization", super::bearer())
+                .method("POST")
+                .uri("/api/permissions/1/decision")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{ "decision": "allow" }"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(decision.status(), StatusCode::CONFLICT);
+}

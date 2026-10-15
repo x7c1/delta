@@ -91,3 +91,44 @@ async fn cancelling_with_no_pending_question_is_a_conflict() {
     assert!(matches!(err, Error::QuestionNotPending(1)), "got {err:?}");
     assert!(ix.tmux_fake().keyed.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn cancelling_while_a_permission_is_pending_is_refused_and_injects_nothing() {
+    let ix = interactor();
+    ix.seed_session().await;
+    let session = SessionId::from("sess-1");
+    let request_id = pending_question_id(&ix, &session, SINGLE).await;
+    ix.on_permission_request(
+        &session,
+        "Bash",
+        r#"{"command":"ls"}"#,
+        SEED_TRANSCRIPT_PATH,
+    )
+    .await
+    .unwrap();
+
+    let err = ix.cancel_question(&session, request_id).await.unwrap_err();
+    assert!(
+        matches!(err, Error::QuestionBlockedByPermission(id) if id == request_id),
+        "got {err:?}"
+    );
+    assert!(ix.tmux_fake().keyed.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_cancel_after_an_answer_is_refused() {
+    let ix = interactor();
+    ix.seed_session().await;
+    let session = SessionId::from("sess-1");
+    let request_id = pending_question_id(&ix, &session, SINGLE).await;
+
+    ix.answer_question(&session, request_id, vec![vec![0]])
+        .await
+        .unwrap();
+    let err = ix.cancel_question(&session, request_id).await.unwrap_err();
+    assert!(
+        matches!(err, Error::QuestionNotPending(id) if id == request_id),
+        "got {err:?}"
+    );
+    assert_eq!(ix.tmux_fake().keyed.lock().unwrap().len(), 1);
+}

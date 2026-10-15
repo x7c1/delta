@@ -63,6 +63,11 @@ const PERMISSION_DECISION_UNSUPPORTED_CODE: &str = "permission_decision_unsuppor
 /// switches the card to the answer-in-the-terminal fallback on this code.
 const QUESTION_NOT_PENDING_CODE: &str = "question_not_pending";
 
+/// Stable `code` for a `409` answering a question while a permission dialog
+/// is pending in the same session: the question is still pending, so the
+/// frontend keeps its controls for a retry instead of the terminal fallback.
+const QUESTION_BLOCKED_BY_PERMISSION_CODE: &str = "question_blocked_by_permission";
+
 /// Stable machine-readable code for a send that can no longer be cancelled (it
 /// never existed, is already terminal, or its echo has already arrived). The
 /// frontend drops its cancel control and reconciles its pending strip from the
@@ -325,6 +330,13 @@ impl IntoResponse for ApiError {
                     Error::QuestionNotPending(_) => {
                         (StatusCode::CONFLICT, Some(QUESTION_NOT_PENDING_CODE))
                     }
+                    // The question is still pending, but a permission dialog
+                    // sits over it in the TUI: a conflict with current state
+                    // that a retry after the permission is answered resolves.
+                    Error::QuestionBlockedByPermission(_) => (
+                        StatusCode::CONFLICT,
+                        Some(QUESTION_BLOCKED_BY_PERMISSION_CODE),
+                    ),
                     // The send is unknown, already terminal, or its echo has
                     // already arrived, so a cancel can no longer take effect: a
                     // conflict with current state, with a stable code so the

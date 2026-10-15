@@ -45,7 +45,7 @@ export interface QueuedPermissionRequest {
    *
    * Independent of {@link fileChange} and broader than it: a request can carry
    * this with no change set at all, which is exactly the case where the card
-   * would otherwise show only the input summary.
+   * would otherwise show only the request's arguments.
    */
   grantRoot?: string;
 }

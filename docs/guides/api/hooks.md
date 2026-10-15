@@ -285,14 +285,26 @@ The response then blocks Claude Code until one of two things happens:
   quietly sending `allow` (see
   [sends.md](sends.md#post-apipermissionsiddecision)).
 
-- **The deadline passes** — 50 seconds, kept under Claude Code's own 60-second
-  hook timeout so the fallback is Delta's passthrough rather than Claude
+- **The deadline passes** — 50 seconds. The session settings give this hook a
+  timeout 20 seconds longer than that wait (every other HTTP hook keeps 30
+  seconds), so the fallback is Delta's passthrough rather than Claude
   abandoning the hook mid-wait. The waiter is discarded and the response is an
   empty **200** — there is no decision to report — so the tool call falls back
   to the interactive TUI prompt exactly as it would without this hook. The
   request row stays pending and the eventual `tool_result` resolves it; a
   browser decision arriving after this point is a `409`
   (`permission_not_pending`).
+
+If the hook request is dropped before either happens (Claude Code disconnects
+mid-wait), the waiter is discarded the same way, so a decision sent afterwards
+is a `409` rather than one accepted for a wait nobody is listening to.
+
+The `permission_requested` notice carries the tool input as it is, and for
+Claude's `Write`, `Edit`, `MultiEdit` and `NotebookEdit` also a `file_change`
+built from that input: the written content as `+` lines, each
+`old_string` / `new_string` pair as `-` / `+` lines under a header naming the
+edit and whether it replaces every occurrence, or a notebook cell's new source
+as `+` lines under a header naming the edit mode and the cell.
 
 ## Status line
 
