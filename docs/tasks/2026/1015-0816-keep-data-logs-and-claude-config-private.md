@@ -91,5 +91,5 @@ and two log lines record whole prompts at the default level.
 
 ### Before merge (verified outside the check command)
 
-- [ ] macOS desktop (`make desktop-dev`): after start, the data directory,
+- [x] macOS desktop (`make desktop-dev`): after start, the data directory,
       `delta.db` and the log file have modes `0700`/`0600`/`0600` (`stat`).
