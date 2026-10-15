@@ -9,6 +9,14 @@ export interface PromptTemplatePopoverProps {
   onSelect: (template: PromptTemplate) => void;
   /** Open the settings registry (the footer item). */
   onManage: () => void;
+  /**
+   * Whether the popover may move focus into itself. `false` while it is only
+   * open because the pointer rests on the button: the user may be typing in
+   * the composer, so the caret stays in the textarea and the pointer alone
+   * drives the preview. Turning it `true` later (a click pins the popover)
+   * claims focus then, exactly as an initial keyboard or click open does.
+   */
+  takeFocus: boolean;
 }
 
 /**
@@ -20,8 +28,14 @@ export interface PromptTemplatePopoverProps {
  * settings list makes, for the same reason: any inline preview would either
  * truncate a multi-paragraph body into nonsense or swamp the list. The right
  * column then shows the focused (or hovered) template's text IN FULL, scrolling
- * within a capped height, so the user reads what they are about to insert
+ * within a fixed height, so the user reads what they are about to insert
  * before committing to it.
+ *
+ * The two columns share ONE fixed height that never depends on the previewed
+ * text. The panel opens upward, so its bottom edge is pinned and its top edge
+ * follows its height: were the height the preview's, hovering a longer or
+ * shorter template would move the label column under the pointer, sliding the
+ * hovered row away (often onto another row, whose hover moved it again).
  *
  * It opens UPWARD (`bottom-full`): the composer sits at the bottom of the
  * screen, so a downward panel would fall off it. Escape, click-outside and
@@ -36,6 +50,7 @@ export interface PromptTemplatePopoverProps {
 export function PromptTemplatePopover({
   onSelect,
   onManage,
+  takeFocus,
 }: PromptTemplatePopoverProps) {
   const client = useApiClient();
   const query = usePromptTemplatesQuery(client, true);
@@ -51,10 +66,11 @@ export function PromptTemplatePopover({
   // template, or the footer when the registry is empty or unreadable. Gated on
   // a ref rather than on `open`, because the first open lands while the list is
   // still in flight: the effect must wait for the rows to exist, then fire
-  // exactly once, and never yank focus back from a subsequent ↑/↓.
+  // exactly once, and never yank focus back from a subsequent ↑/↓. A popover
+  // opened by hover waits for `takeFocus` before claiming it.
   const claimedFocus = useRef(false);
   useEffect(() => {
-    if (claimedFocus.current || query.isPending) {
+    if (!takeFocus || claimedFocus.current || query.isPending) {
       return;
     }
     claimedFocus.current = true;
@@ -64,7 +80,7 @@ export function PromptTemplatePopover({
     } else {
       manageRef.current?.focus();
     }
-  }, [query.isPending, templates.length]);
+  }, [takeFocus, query.isPending, templates.length]);
 
   // A refetch (a template deleted in settings while this is open) can shorten
   // the list under the highlight; keep it on a row that exists.
@@ -130,10 +146,16 @@ export function PromptTemplatePopover({
           No prompt templates yet.
         </p>
       ) : (
-        <div className="flex min-h-0">
+        // The fixed height both columns share — see the doc comment above for
+        // why it must not follow the previewed text. Each column scrolls
+        // within it.
+        <div
+          data-testid="prompt-templates-popover-body"
+          className="flex h-[min(50vh,18rem)]"
+        >
           <div
             data-testid="prompt-templates-popover-list"
-            className="max-h-[50vh] w-52 shrink-0 overflow-y-auto border-r border-border-default py-1 scrollbar-hover"
+            className="w-52 shrink-0 overflow-y-auto border-r border-border-default py-1 scrollbar-hover"
           >
             {templates.map((template, index) => (
               <button
@@ -160,13 +182,13 @@ export function PromptTemplatePopover({
             ))}
           </div>
           {/* The body, whole. `whitespace-pre-wrap` keeps the blank lines and
-              indentation the user wrote; the cap turns a long template into a
-              scroll rather than a popover taller than the window. */}
+              indentation the user wrote; the shared fixed height turns a long
+              template into a scroll rather than a taller popover. */}
           <div
             role="note"
             aria-label="Prompt template preview"
             data-testid="prompt-templates-popover-preview"
-            className="max-h-[50vh] min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-body text-fg-muted scrollbar-hover"
+            className="min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-body text-fg-muted scrollbar-hover"
           >
             {preview}
           </div>

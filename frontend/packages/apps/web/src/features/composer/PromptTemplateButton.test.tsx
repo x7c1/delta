@@ -6,8 +6,16 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -22,7 +30,11 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { Composer, composerDraftKey, type ComposerMode } from './Composer';
 import { ComposerDraftTargetProvider } from './composerDraftTarget';
 import { ComposerRail } from './ComposerRail';
-import { PromptTemplateButton } from './PromptTemplateButton';
+import {
+  HOVER_CLOSE_DELAY_MS,
+  HOVER_OPEN_DELAY_MS,
+  PromptTemplateButton,
+} from './PromptTemplateButton';
 import { ProviderTabs } from './ProviderTabs';
 
 const server = setupServer(...createHandlers());
@@ -482,6 +494,254 @@ describe('PromptTemplateButton', () => {
       await screen.findByTestId('prompt-templates-popover-error'),
     ).toBeInTheDocument();
     expect(screen.getByTestId('prompt-templates-manage')).toBeInTheDocument();
+  });
+});
+
+describe('PromptTemplatePopover height', () => {
+  beforeEach(resetStores);
+
+  it('keeps one box whichever template is previewed', async () => {
+    // One template of a single word, one of a hundred lines: were the height
+    // the preview's, the upward-opening panel's top edge (and with it the
+    // label column) would jump between the two hovers.
+    const longText = Array.from(
+      { length: 100 },
+      (_, i) => `Line ${i + 1} of a very long template.`,
+    ).join('\n');
+    server.use(
+      http.get('*/api/prompt-templates', () =>
+        HttpResponse.json({
+          prompt_templates: [
+            {
+              id: 1,
+              label: 'Short',
+              text: 'Go.',
+              created_at: '2026-01-01T00:00:00Z',
+              updated_at: '2026-01-01T00:00:00Z',
+            },
+            {
+              id: 2,
+              label: 'Long',
+              text: longText,
+              created_at: '2026-01-01T00:00:00Z',
+              updated_at: '2026-01-01T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+    );
+    renderComposer();
+    const popover = await openPopover();
+    const body = within(popover).getByTestId('prompt-templates-popover-body');
+    const list = within(popover).getByTestId('prompt-templates-popover-list');
+    const preview = within(popover).getByTestId(
+      'prompt-templates-popover-preview',
+    );
+    const boxes = () =>
+      [popover, body, list, preview].map((node) => node.className);
+
+    fireEvent.mouseEnter(screen.getByTestId('prompt-template-option-1'));
+    expect(preview).toHaveTextContent('Go.');
+    const shortBoxes = boxes();
+
+    fireEvent.mouseEnter(screen.getByTestId('prompt-template-option-2'));
+    expect(preview).toHaveTextContent('Line 100 of a very long template.');
+    expect(boxes()).toEqual(shortBoxes);
+
+    // The height is a fixed one on the row both columns share, and neither
+    // column nor the panel caps itself by its content (a `max-h` would let the
+    // box follow the text up to the cap).
+    expect(body.className).toMatch(/(^|\s)h-\[/);
+    for (const className of boxes()) {
+      expect(className).not.toMatch(/(^|\s)max-h-/);
+    }
+  });
+});
+
+describe('PromptTemplateButton on hover', () => {
+  beforeEach(() => {
+    resetStores();
+    // Only the timer queue: the msw and React Query plumbing awaits promises,
+    // which must keep resolving on their own.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Let `ms` of fake time pass, flushing the renders it triggers. */
+  async function advance(ms: number) {
+    await act(() => vi.advanceTimersByTimeAsync(ms));
+  }
+
+  /** Rest the pointer on the button until the popover opens, list loaded. */
+  async function hoverOpen() {
+    fireEvent.pointerEnter(screen.getByTestId('prompt-templates-button'));
+    await advance(HOVER_OPEN_DELAY_MS);
+    // A few more ticks for the list request to land.
+    await advance(50);
+    expect(screen.getByTestId('prompt-template-option-1')).toBeInTheDocument();
+  }
+
+  const popoverShown = () => screen.queryByTestId('prompt-templates-popover');
+
+  it('opens after the intent delay and leaves focus in the textarea', async () => {
+    useComposerStore.getState().setDraft(MAIN_THREAD_ID, 'hello world');
+    renderComposer();
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    placeCaret(textarea, 5);
+
+    fireEvent.pointerEnter(screen.getByTestId('prompt-templates-button'));
+    await advance(HOVER_OPEN_DELAY_MS - 10);
+    expect(popoverShown()).not.toBeInTheDocument();
+
+    await advance(10);
+    expect(popoverShown()).toBeInTheDocument();
+    expect(screen.getByTestId('prompt-templates-button')).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+
+    // Even once the rows exist, the caret stays where the user was typing.
+    await advance(50);
+    expect(screen.getByTestId('prompt-template-option-1')).toBeInTheDocument();
+    expect(textarea).toHaveFocus();
+    expect(textarea.selectionStart).toBe(5);
+
+    // The hovered row still drives the preview.
+    fireEvent.mouseEnter(screen.getByTestId('prompt-template-option-2'));
+    expect(
+      screen.getByTestId('prompt-templates-popover-preview').textContent,
+    ).toContain(MULTILINE_TEMPLATE_FIRST_LINE);
+  });
+
+  it('does not open when the pointer only passes over the button', async () => {
+    renderComposer();
+    const button = screen.getByTestId('prompt-templates-button');
+
+    fireEvent.pointerEnter(button);
+    await advance(HOVER_OPEN_DELAY_MS / 2);
+    fireEvent.pointerLeave(button);
+    await advance(HOVER_OPEN_DELAY_MS * 4);
+
+    expect(popoverShown()).not.toBeInTheDocument();
+  });
+
+  it('closes after the grace delay once the pointer has left', async () => {
+    renderComposer();
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    placeCaret(textarea, 0);
+    await hoverOpen();
+
+    fireEvent.pointerLeave(screen.getByTestId('prompt-templates-button'));
+    await advance(HOVER_CLOSE_DELAY_MS - 10);
+    expect(popoverShown()).toBeInTheDocument();
+
+    await advance(10);
+    expect(popoverShown()).not.toBeInTheDocument();
+    expect(textarea).toHaveFocus();
+  });
+
+  it('stays open while the pointer travels from the button into the popover', async () => {
+    renderComposer();
+    await hoverOpen();
+
+    // Out of the button into the gap above it, then into the popover. The gap
+    // is outside the container, so this is a real leave and re-enter.
+    fireEvent.pointerOut(screen.getByTestId('prompt-templates-button'), {
+      relatedTarget: document.body,
+    });
+    await advance(HOVER_CLOSE_DELAY_MS / 2);
+    fireEvent.pointerOver(screen.getByTestId('prompt-template-option-2'), {
+      relatedTarget: document.body,
+    });
+    await advance(HOVER_CLOSE_DELAY_MS * 4);
+
+    expect(popoverShown()).toBeInTheDocument();
+  });
+
+  it('inserts a clicked row at the caret as it stands at the click', async () => {
+    useComposerStore.getState().setDraft(MAIN_THREAD_ID, 'after');
+    renderComposer();
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    placeCaret(textarea, 0);
+    await hoverOpen();
+
+    // The textarea kept focus, so the user typed on after it opened; a caret
+    // captured at open (offset 0) would be stale by now.
+    fireEvent.change(textarea, { target: { value: 'before after' } });
+    placeCaret(textarea, 'before '.length);
+    expect(popoverShown()).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('prompt-template-option-1'));
+
+    expect(popoverShown()).not.toBeInTheDocument();
+    expect(useComposerStore.getState().drafts[MAIN_THREAD_ID]).toBe(
+      `before ${SHORT_TEMPLATE_TEXT}after`,
+    );
+    expect(textarea).toHaveFocus();
+    expect(textarea.selectionStart).toBe(
+      'before '.length + SHORT_TEMPLATE_TEXT.length,
+    );
+  });
+
+  it('pins on a click: focus moves in, and leaving no longer closes it', async () => {
+    useComposerStore.getState().setDraft(MAIN_THREAD_ID, 'hello world');
+    renderComposer();
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    placeCaret(textarea, 5);
+    await hoverOpen();
+    const button = screen.getByTestId('prompt-templates-button');
+
+    fireEvent.pointerDown(button);
+    fireEvent.click(button);
+    await advance(0);
+
+    expect(popoverShown()).toBeInTheDocument();
+    expect(screen.getByTestId('prompt-template-option-1')).toHaveFocus();
+
+    fireEvent.pointerLeave(button);
+    await advance(HOVER_CLOSE_DELAY_MS * 4);
+    expect(popoverShown()).toBeInTheDocument();
+
+    // From here it is the click-opened popover: arrows and Escape as ever.
+    fireEvent.keyDown(screen.getByTestId('prompt-template-option-1'), {
+      key: 'ArrowDown',
+    });
+    expect(screen.getByTestId('prompt-template-option-2')).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(popoverShown()).not.toBeInTheDocument();
+    expect(textarea).toHaveFocus();
+    expect(textarea.selectionStart).toBe(5);
+  });
+
+  it('closes on Escape and on a click outside, leaving focus alone', async () => {
+    renderComposer();
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    placeCaret(textarea, 0);
+
+    await hoverOpen();
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+    expect(popoverShown()).not.toBeInTheDocument();
+    expect(textarea).toHaveFocus();
+
+    fireEvent.pointerLeave(screen.getByTestId('prompt-templates-button'));
+    await hoverOpen();
+    fireEvent.pointerDown(document.body);
+    expect(popoverShown()).not.toBeInTheDocument();
+  });
+
+  it('ignores touch, where a tap stays a plain click', async () => {
+    renderComposer();
+    const button = screen.getByTestId('prompt-templates-button');
+
+    fireEvent.pointerEnter(button, { pointerType: 'touch' });
+    await advance(HOVER_OPEN_DELAY_MS * 4);
+    expect(popoverShown()).not.toBeInTheDocument();
+
+    fireEvent.click(button);
+    await advance(50);
+    expect(screen.getByTestId('prompt-template-option-1')).toHaveFocus();
   });
 });
 
