@@ -100,10 +100,13 @@ a sentence there describes the wait.
       session left open across the restart is re-adopted.
 - [ ] On Ubuntu (GNOME): the same, from the application grid.
       Ubuntu 26.04 (GNOME Wayland), 2026-10-15, dev desktop from the
-      application grid: the window appears on the placeholder and
-      switches to the app; sessions left open across a quit are
-      re-adopted. A second launch does not bring the window forward:
-      GNOME shows a "ready" notification instead (focus-stealing
-      prevention). The slow-`SHELL` and hidden-`tmux` cases were not
-      run.
+      application grid: with `SHELL` sleeping 7 seconds the window
+      appeared at once on the placeholder and switched to the app when
+      the login shell answered; with `tmux` removed from the login
+      shell's `PATH` the "required command 'tmux' was not found on PATH"
+      dialog appeared over the placeholder and the app quit when it was
+      dismissed; sessions left open across a quit are re-adopted. A
+      second launch does not bring the window forward and opens no
+      second window: GNOME shows a "ready" notification instead
+      (focus-stealing prevention), so this box stays open.
 
