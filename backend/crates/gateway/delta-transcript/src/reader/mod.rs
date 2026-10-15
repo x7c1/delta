@@ -2,13 +2,25 @@
 
 mod find_session_transcript;
 
+use std::io::Read;
+use std::path::Path;
+
 use async_trait::async_trait;
 use tokio::fs;
 
 use delta_usecase::{Transcript, TranscriptRead};
 
-use crate::error::Error;
+use crate::error::{Error, Result};
 use crate::parse::{correlate_turn_durations, parse_line_outcome, ParsedLine};
+
+/// The largest transcript [`JsonlTranscript`] reads, in bytes.
+///
+/// Every read takes the whole file (see the type doc), so without a bound one
+/// huge file would make every hook — and every background tail tick — cost time
+/// and memory in proportion to it. Real long sessions stay in the tens of
+/// megabytes; 256 MiB is comfortably above them while keeping one read's
+/// buffer bounded. A larger transcript is refused with [`Error::TooLarge`].
+pub const MAX_TRANSCRIPT_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Reads Claude Code JSONL transcripts from the filesystem.
 ///
@@ -16,11 +28,18 @@ use crate::parse::{correlate_turn_durations, parse_line_outcome, ParsedLine};
 /// line index. For a local single-session tool the transcript is small, so a
 /// full read on each hook is simple and correct; callers that want true
 /// streaming can poll this on an interval. Lines that produce no message —
-/// blank, no-uuid (e.g. `file-history-snapshot`), or unparsable — still advance
-/// the line index, so the reported `total_lines` and each message's `seq` track
-/// the file's true position and the caller's line cursor reads each line exactly
-/// once. Unparsable non-blank lines are skipped (with a warning) rather than
-/// aborting the whole read, so one malformed line cannot stall ingestion.
+/// blank, no-uuid (e.g. `file-history-snapshot`), not UTF-8, or unparsable —
+/// still advance the line index, so the reported `total_lines` and each
+/// message's `seq` track the file's true position and the caller's line cursor
+/// reads each line exactly once. Unparsable non-blank lines are skipped (with a
+/// warning), and lines that are not UTF-8 are skipped (at `debug`, with their
+/// line number), rather than aborting the whole read, so one malformed line
+/// cannot stall ingestion.
+///
+/// The read is bounded: only a regular file is read — a FIFO, a device or a
+/// directory is refused with [`Error::NotRegularFile`], and the file is opened
+/// non-blocking so that check cannot itself block — and a file over
+/// [`MAX_TRANSCRIPT_BYTES`] is refused with [`Error::TooLarge`].
 ///
 /// Only newline-terminated lines are consumed. The transcript is appended
 /// incrementally with unbuffered `writeln!`, which emits the JSON body and its
@@ -49,29 +68,40 @@ impl Transcript for JsonlTranscript {
         path: &str,
         from_line: usize,
     ) -> std::result::Result<TranscriptRead, delta_usecase::Error> {
-        let contents = match fs::read_to_string(path).await {
-            Ok(c) => c,
-            // A not-yet-created transcript is not an error: nothing to read.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(TranscriptRead {
-                    messages: Vec::new(),
-                    total_lines: 0,
-                    relocated_cwd: None,
-                })
-            }
-            Err(e) => return Err(Error::io(path, e).into()),
+        // The whole file is read on every call, and the caller skips the lines
+        // before its cursor. Reading only the bytes past the last offset would
+        // make a read cost what was appended rather than the file's size, but it
+        // changes what the reader is handed (a byte offset, not a line index), so
+        // it is left for a change to the `Transcript` contract; until then the
+        // size cap bounds the cost.
+        let owned_path = path.to_owned();
+        let contents = tokio::task::spawn_blocking(move || read_transcript(Path::new(&owned_path)))
+            .await
+            .map_err(|source| Error::ReadAborted {
+                path: path.into(),
+                source,
+            })??;
+        // A not-yet-created transcript is not an error: nothing to read.
+        let Some(contents) = contents else {
+            return Ok(TranscriptRead {
+                messages: Vec::new(),
+                total_lines: 0,
+                relocated_cwd: None,
+            });
         };
 
         // Consume only newline-terminated lines: a trailing remainder without a
         // `\n` is a line still being appended, so defer it to the next read
-        // instead of counting it (see the type doc for why). Slicing up to and
-        // including the last `\n` yields the terminated prefix (an empty slice
-        // when no newline has been written yet), whose `lines()` never yields a
-        // partial line.
-        let terminated = match contents.rfind('\n') {
-            Some(last) => &contents[..=last],
-            None => "",
-        };
+        // instead of counting it (see the type doc for why). Splitting the
+        // prefix that stops just before the last `\n` yields exactly the
+        // complete lines (one empty line for a file that is a lone `\n`); with
+        // no `\n` written yet there are none.
+        let lines = contents
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map(|last| contents[..last].split(|&b| b == b'\n'))
+            .into_iter()
+            .flatten();
 
         // Parse every line in range into an outcome first, keeping `turn_duration`
         // outcomes interleaved in file order, so a turn's latency can be
@@ -80,11 +110,26 @@ impl Transcript for JsonlTranscript {
         let mut outcomes = Vec::new();
         let mut total_lines = 0;
         let mut relocated_cwd = None;
-        for (idx, line) in terminated.lines().enumerate() {
+        for (idx, line) in lines.enumerate() {
             total_lines = idx + 1;
             if idx < from_line {
                 continue;
             }
+            // Decoded line by line, so one line that is not UTF-8 costs only
+            // itself. A `\r` before the `\n` is dropped, as `str::lines` does.
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            let line = match std::str::from_utf8(line) {
+                Ok(line) => line,
+                Err(err) => {
+                    tracing::debug!(
+                        path,
+                        line = idx + 1,
+                        error = %err,
+                        "skipping a transcript line that is not UTF-8"
+                    );
+                    continue;
+                }
+            };
             match parse_line_outcome(line) {
                 Ok(ParsedLine::Message(mut msg)) => {
                     // The message's absolute line index is its persisted `seq`.
@@ -137,6 +182,59 @@ impl Transcript for JsonlTranscript {
             .await
             .map_err(Into::into)
     }
+}
+
+/// The bytes of the transcript at `path`, or `None` when there is no file
+/// there yet.
+///
+/// Opened non-blocking, so a FIFO at the path does not park this thread
+/// waiting for a writer; the open file's own metadata then decides, so what is
+/// checked is what is read. Anything but a regular file is refused, as is a
+/// file over [`MAX_TRANSCRIPT_BYTES`] — including one that grows past it while
+/// it is read, which the bounded read below catches.
+fn read_transcript(path: &Path) -> Result<Option<Vec<u8>>> {
+    let file = match open_nonblocking(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(Error::io(path, err)),
+    };
+    let metadata = file.metadata().map_err(|err| Error::io(path, err))?;
+    if !metadata.file_type().is_file() {
+        return Err(Error::NotRegularFile {
+            path: path.to_path_buf(),
+        });
+    }
+    let too_large = |size| Error::TooLarge {
+        path: path.to_path_buf(),
+        size,
+        cap: MAX_TRANSCRIPT_BYTES,
+    };
+    if metadata.len() > MAX_TRANSCRIPT_BYTES {
+        return Err(too_large(metadata.len()));
+    }
+    // The file is regular, so the non-blocking flag has no effect on reading it.
+    let mut contents = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_TRANSCRIPT_BYTES + 1)
+        .read_to_end(&mut contents)
+        .map_err(|err| Error::io(path, err))?;
+    if contents.len() as u64 > MAX_TRANSCRIPT_BYTES {
+        return Err(too_large(contents.len() as u64));
+    }
+    Ok(Some(contents))
+}
+
+#[cfg(unix)]
+fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_nonblocking(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(path)
 }
 
 #[cfg(test)]
@@ -248,6 +346,127 @@ mod tests {
             message.contains(&path),
             "the error must name {path}, got {message:?}"
         );
+    }
+
+    /// A FIFO at the transcript path is refused as not a regular file, without
+    /// blocking on the writer that never comes.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_fifo_is_refused_without_blocking() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("transcript.jsonl");
+        let c_path = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        // SAFETY: `c_path` is a valid NUL-terminated path that outlives the call.
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        let path = fifo.to_str().unwrap().to_owned();
+
+        let read = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            JsonlTranscript::new().read_from(&path, 0),
+        )
+        .await
+        .expect("reading a FIFO must not block");
+        let message = read.unwrap_err().to_string();
+        assert!(
+            message.contains("not a regular file") && message.contains(&path),
+            "the error names the FIFO as not a regular file, got {message:?}"
+        );
+        // The port renders the error to a message; the reader's own result
+        // carries the variant. Safe to call directly: the read above proved the
+        // open does not block.
+        let err = read_transcript(&fifo).unwrap_err();
+        assert!(
+            matches!(&err, Error::NotRegularFile { path } if *path == fifo),
+            "expected the not-a-regular-file error, got {err:?}"
+        );
+    }
+
+    /// A transcript over the size cap is refused, not read (and not read as
+    /// empty).
+    #[test]
+    fn a_file_over_the_cap_is_refused() {
+        let file = tempfile_jsonl();
+        // Sparse, so the test writes no real data.
+        file.file.set_len(MAX_TRANSCRIPT_BYTES + 1).unwrap();
+
+        let err = read_transcript(file.path()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                Error::TooLarge { size, cap, .. }
+                    if size == MAX_TRANSCRIPT_BYTES + 1 && cap == MAX_TRANSCRIPT_BYTES
+            ),
+            "expected the too-large error, got {err:?}"
+        );
+    }
+
+    /// The same refusal reaches the caller through the port, naming the file.
+    #[tokio::test]
+    async fn a_file_over_the_cap_is_an_error_for_the_caller() {
+        let file = tempfile_jsonl();
+        file.file.set_len(MAX_TRANSCRIPT_BYTES + 1).unwrap();
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let message = JsonlTranscript::new()
+            .read_from(&path, 0)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains(&path) && message.contains("limit"),
+            "the error names the oversized transcript, got {message:?}"
+        );
+    }
+
+    /// One line that is not UTF-8 is skipped on its own: every other line is
+    /// still read, at its true position.
+    #[tokio::test]
+    async fn a_line_that_is_not_utf8_is_skipped_alone() {
+        let mut file = tempfile_jsonl();
+        writeln!(
+            file,
+            r#"{{"uuid":"u1","type":"user","message":{{"content":"a","role":"user"}}}}"#
+        )
+        .unwrap();
+        file.write_all(b"{\"uuid\":\"bad\",\"note\":\"\xff\xfe\"}\n")
+            .unwrap();
+        writeln!(
+            file,
+            r#"{{"uuid":"u3","type":"user","message":{{"content":"c","role":"user"}}}}"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let out = JsonlTranscript::new().read_from(&path, 0).await.unwrap();
+        assert_eq!(out.total_lines, 3, "the skipped line still counts");
+        let texts: Vec<_> = out
+            .messages
+            .iter()
+            .map(|m| (m.seq, m.flatten_text()))
+            .collect();
+        assert_eq!(
+            texts,
+            vec![(0, Some("a".to_owned())), (2, Some("c".to_owned()))]
+        );
+    }
+
+    /// Lines ending in `\r\n` read as they did through `str::lines`.
+    #[tokio::test]
+    async fn a_crlf_line_ending_is_accepted() {
+        let mut file = tempfile_jsonl();
+        file.write_all(
+            b"{\"uuid\":\"u1\",\"type\":\"user\",\"message\":{\"content\":\"a\",\"role\":\"user\"}}\r\n",
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let out = JsonlTranscript::new().read_from(&path, 0).await.unwrap();
+        assert_eq!(out.total_lines, 1);
+        assert_eq!(out.messages[0].flatten_text().as_deref(), Some("a"));
     }
 
     #[tokio::test]

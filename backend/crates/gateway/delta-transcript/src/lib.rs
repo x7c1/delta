@@ -18,4 +18,4 @@ pub use error::{Error, Result};
 // crate's golden corpus) can feed raw JSONL fixtures through the exact
 // production parsing without going through the filesystem reader.
 pub use parse::parse_line;
-pub use reader::JsonlTranscript;
+pub use reader::{JsonlTranscript, MAX_TRANSCRIPT_BYTES};

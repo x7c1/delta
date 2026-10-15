@@ -15,17 +15,22 @@
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use delta_wire::WireSessionEvent;
 use tokio::sync::broadcast::error::RecvError;
 
+use crate::socket_limits::{bound_inbound, SocketSlot, IDLE_INBOUND_LIMIT};
 use crate::state::AppState;
 
-pub async fn ws_handler(
-    State(state): State<AppState>,
-    upgrade: WebSocketUpgrade,
-) -> impl IntoResponse {
-    upgrade.on_upgrade(move |socket| pump_events(socket, state))
+/// Accept a browser's event socket, within the process-wide socket cap and with
+/// inbound messages bounded (see [`crate::socket_limits`]).
+pub async fn ws_handler(State(state): State<AppState>, upgrade: WebSocketUpgrade) -> Response {
+    let slot = match state.sockets().acquire_events() {
+        Ok(slot) => slot,
+        Err(refused) => return refused.into_response(),
+    };
+    bound_inbound(upgrade, IDLE_INBOUND_LIMIT)
+        .on_upgrade(move |socket| pump_events(socket, state, slot))
 }
 
 /// Forward broadcast events to one browser socket until it closes.
@@ -40,7 +45,10 @@ pub async fn ws_handler(
 /// The socket also ends when the server is asked to stop (an erase): the task
 /// holds the state, and with it the store, which the server must close before
 /// it deletes the database.
-async fn pump_events(mut socket: WebSocket, state: AppState) {
+///
+/// `_slot` is this socket's place under the connection cap, held for exactly
+/// as long as the pump runs.
+async fn pump_events(mut socket: WebSocket, state: AppState, _slot: SocketSlot) {
     let mut rx = state.subscribe();
     let stopping = state.stopping();
     tokio::pin!(stopping);
@@ -69,7 +77,12 @@ async fn pump_events(mut socket: WebSocket, state: AppState) {
                 // A close frame or a dropped connection: this subscriber is
                 // done. Pings are answered by axum itself; any other frame is
                 // unexpected on this one-way stream and simply dropped.
-                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(Message::Close(_))) | None => break,
+                // A dropped connection, or an inbound message over its bound.
+                Some(Err(err)) => {
+                    tracing::debug!(error = %err, "event socket receive failed; closing");
+                    break;
+                }
                 Some(Ok(_)) => {}
             },
         }
