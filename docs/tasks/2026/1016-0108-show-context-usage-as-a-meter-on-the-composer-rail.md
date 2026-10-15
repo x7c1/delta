@@ -68,7 +68,7 @@ left. Move the usage indicator there:
 
 ### Before merge (verified outside the check command)
 
-- [ ] `make mock` (or `make dev`) in a browser: in a thread with usage, the
+- [x] `make mock` (or `make dev`) in a browser: in a thread with usage, the
       meter sits at the right end of the rail at the template button's height,
       the bar grows with the percentage, and nothing is drawn on the card's top
       border; the tooltip opens upward. The merging session checks this with a
