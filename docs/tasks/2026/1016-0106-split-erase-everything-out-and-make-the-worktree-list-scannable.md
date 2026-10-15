@@ -89,7 +89,7 @@ Keep the existing remove flow (confirm panel, per-row errors) unchanged.
 
 ### Before merge (verified outside the check command)
 
-- [ ] `make dev` (or `make mock`): open Settings, check the menu shows Erase
+- [x] `make dev` (or `make mock`): open Settings, check the menu shows Erase
       everything indented under Storage, the Storage panel shows the grouped
       list with ages and no erase block, and the erase panel works up to its
       confirm step (do not confirm). The merging session checks this in a
