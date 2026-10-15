@@ -1,11 +1,67 @@
 //! The secrets the server always holds, minted when the environment hands in
 //! none.
 
+use std::ffi::OsString;
+
 /// The environment variable that fixes the per-run bearer token in advance.
-pub(super) const AUTH_TOKEN_VAR: &str = "DELTA_AUTH_TOKEN";
+const AUTH_TOKEN_VAR: &str = "DELTA_AUTH_TOKEN";
 
 /// The environment variable that fixes the hook secret in advance.
-pub(super) const HOOK_SECRET_VAR: &str = "DELTA_HOOK_SECRET";
+const HOOK_SECRET_VAR: &str = "DELTA_HOOK_SECRET";
+
+/// The secrets a shell hands the configuration: the values of
+/// `DELTA_AUTH_TOKEN` and `DELTA_HOOK_SECRET`, each `None` when the variable
+/// is unset or not valid Unicode.
+///
+/// Read apart from the rest of the environment because reading them also
+/// removes them from it ([`Secrets::take_from_env`]); [`Secrets::default`]
+/// names neither.
+#[derive(Default)]
+pub struct Secrets {
+    /// The value of `DELTA_AUTH_TOKEN`; empty or `None` mints one.
+    pub(super) auth_token: Option<String>,
+    /// The value of `DELTA_HOOK_SECRET`; empty or `None` leaves it to the
+    /// data directory's hook state.
+    pub(super) hook_secret: Option<String>,
+}
+
+impl Secrets {
+    /// Read both secrets from the process environment, and remove them from
+    /// it.
+    ///
+    /// Every command the server starts — tmux, and through it each agent,
+    /// git, gh, the editor opener — inherits the process environment. Both
+    /// secrets are held in the configuration once they are read
+    /// ([`delta_bootstrap::Config::hook_secret_from_env`] records whether the
+    /// hook secret came from the variable), so nothing the server starts needs
+    /// them, and none of them should be able to read them: an agent runs
+    /// whatever its session asks, and its environment is visible to anything
+    /// it runs in turn. The hook secret is what lets a local process post as
+    /// one of Delta's sessions, so it is withheld like the token.
+    ///
+    /// Must be called before the process starts any other thread: changing
+    /// the environment while another thread may read it is undefined
+    /// behaviour in libc. The `delta-server` binary calls it (through
+    /// [`super::config_from_env`]) before its runtime starts, the desktop
+    /// shell as the first statement of its `main`, before Tauri, logging or
+    /// any thread. No other code removes these variables.
+    pub fn take_from_env() -> Self {
+        let secrets = Self::from_vars(|name| std::env::var_os(name));
+        std::env::remove_var(AUTH_TOKEN_VAR);
+        std::env::remove_var(HOOK_SECRET_VAR);
+        secrets
+    }
+
+    /// The secrets `var` names, answering like [`std::env::var_os`]. Removes
+    /// nothing.
+    pub(super) fn from_vars(var: impl Fn(&str) -> Option<OsString>) -> Self {
+        let text = |name: &str| var(name).and_then(|value| value.into_string().ok());
+        Self {
+            auth_token: text(AUTH_TOKEN_VAR),
+            hook_secret: text(HOOK_SECRET_VAR),
+        }
+    }
+}
 
 /// How many characters a hook secret has: the 64 hexadecimal digits
 /// [`mint_secret`] renders.

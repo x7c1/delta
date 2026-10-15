@@ -17,7 +17,7 @@ use std::io::{Read, Write};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use portable_pty::{CommandBuilder, PtySize};
 use serde::Deserialize;
@@ -25,6 +25,7 @@ use tokio::sync::mpsc;
 
 use delta_usecase::SessionId;
 
+use crate::socket_limits::{bound_inbound, SocketSlot, PTY_INBOUND_LIMIT};
 use crate::state::AppState;
 
 /// Query parameters for the PTY bridge: the session to attach to.
@@ -43,13 +44,24 @@ enum ControlMessage {
     Resize { rows: u16, cols: u16 },
 }
 
+/// Accept a terminal socket, within the session's socket cap and with inbound
+/// messages bounded to a generous paste (see [`crate::socket_limits`]).
 pub async fn pty_handler(
     State(state): State<AppState>,
     Query(query): Query<PtyQuery>,
     upgrade: WebSocketUpgrade,
-) -> impl IntoResponse {
+) -> Response {
+    let slot = match state.sockets().acquire_pty(&query.session_id) {
+        Ok(slot) => slot,
+        Err(refused) => return refused.into_response(),
+    };
     let session_id = SessionId::from(query.session_id);
-    upgrade.on_upgrade(move |socket| bridge(socket, state, session_id))
+    bound_pty_inbound(upgrade).on_upgrade(move |socket| bridge(socket, state, session_id, slot))
+}
+
+/// `upgrade` with the terminal bridge's inbound bound applied.
+fn bound_pty_inbound(upgrade: WebSocketUpgrade) -> WebSocketUpgrade {
+    bound_inbound(upgrade, PTY_INBOUND_LIMIT)
 }
 
 /// Bridge a browser WebSocket to a tmux pane through a PTY.
@@ -59,7 +71,10 @@ pub async fn pty_handler(
 /// completes would leave that record behind with no bridge to release it —
 /// telling the launch watchdog forever that somebody is watching a pane nobody
 /// is. When nothing resolves, the socket is logged and closed.
-async fn bridge(mut socket: WebSocket, state: AppState, session_id: SessionId) {
+///
+/// `_slot` is this socket's place under the session's connection cap, held for
+/// exactly as long as the bridge runs.
+async fn bridge(mut socket: WebSocket, state: AppState, session_id: SessionId, _slot: SocketSlot) {
     // A bound session resolves its pane, and so does a fresh spawn whose pane is
     // up but unbound; anything else resolves nothing, and the bridge closes the
     // socket cleanly rather than attach to a pane that does not exist.
@@ -230,7 +245,15 @@ async fn run_bridge(socket: WebSocket, attach: CommandBuilder) -> anyhow::Result
     // Text frames are JSON control messages (resize). The master is owned here
     // so a resize can be applied directly.
     let mut input_task = tokio::spawn(async move {
-        while let Some(Ok(msg)) = stream.next().await {
+        while let Some(msg) = stream.next().await {
+            let msg = match msg {
+                Ok(msg) => msg,
+                // A dropped connection, or an inbound message over its bound.
+                Err(err) => {
+                    tracing::debug!(error = %err, "pty socket receive failed; closing");
+                    break;
+                }
+            };
             match msg {
                 Message::Binary(b) => {
                     if in_tx.send(b.into()).is_err() {
@@ -385,5 +408,87 @@ mod tests {
     fn garbage_control_message_is_rejected() {
         let result = serde_json::from_str::<ControlMessage>("not json at all");
         assert!(result.is_err(), "non-JSON text is not accepted");
+    }
+
+    mod inbound_bound {
+        use axum::routing::get;
+        use axum::Router;
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::Message as ClientMessage;
+
+        use super::*;
+        use crate::socket_limits::test_client::{
+            assert_closed, assert_huge_frame_header_is_refused, connect, send_regardless, serve,
+            PATIENCE,
+        };
+
+        /// Serve the bridge — with the upgrade bounded as `pty_handler` bounds
+        /// it — running `program` in place of the tmux attach client, so the
+        /// bound is exercised against a real PTY without a tmux pane.
+        async fn serve_bridge(program: &'static [&'static str]) -> u16 {
+            let app = Router::new().route(
+                "/pty",
+                get(move |upgrade: WebSocketUpgrade| async move {
+                    bound_pty_inbound(upgrade).on_upgrade(move |socket| async move {
+                        let mut command = CommandBuilder::new(program[0]);
+                        command.args(&program[1..]);
+                        run_bridge(socket, command).await.unwrap();
+                    })
+                }),
+            );
+            serve(app).await
+        }
+
+        /// A paste of exactly the bound reaches the program behind the PTY
+        /// whole: `wc -c` counts every byte of it.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_paste_at_the_bound_is_delivered() {
+            let port = serve_bridge(&["wc", "-c"]).await;
+            let mut client = connect(port, "/pty").await.unwrap();
+
+            // Newline-terminated lines, so the terminal's line discipline (in
+            // its default canonical mode) hands each one to `wc` in turn.
+            let line = format!("{}\n", "a".repeat(63));
+            let paste = line.repeat(PTY_INBOUND_LIMIT / line.len());
+            assert_eq!(paste.len(), PTY_INBOUND_LIMIT);
+            send_regardless(&mut client, ClientMessage::binary(paste.into_bytes())).await;
+            // End of input, at the start of a line.
+            send_regardless(&mut client, ClientMessage::binary(vec![0x04])).await;
+
+            let expected = PTY_INBOUND_LIMIT.to_string();
+            let mut output = Vec::new();
+            loop {
+                match tokio::time::timeout(PATIENCE, client.next()).await {
+                    Ok(Some(Ok(ClientMessage::Binary(chunk)))) => {
+                        output.extend_from_slice(&chunk);
+                        // The count is printed last; only the tail can hold it.
+                        let tail = &output[output.len().saturating_sub(64)..];
+                        if String::from_utf8_lossy(tail).contains(&expected) {
+                            return;
+                        }
+                    }
+                    Ok(Some(Ok(_))) => {}
+                    other => {
+                        panic!("the bridge ended before `wc` reported {expected} bytes: {other:?}")
+                    }
+                }
+            }
+        }
+
+        /// One byte over the bound ends the socket, and so does a frame that
+        /// merely announces a huge payload.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_message_over_the_bound_ends_the_bridge() {
+            let port = serve_bridge(&["cat"]).await;
+            let mut client = connect(port, "/pty").await.unwrap();
+            send_regardless(
+                &mut client,
+                ClientMessage::binary(vec![b'a'; PTY_INBOUND_LIMIT + 1]),
+            )
+            .await;
+            assert_closed(&mut client).await;
+
+            assert_huge_frame_header_is_refused(port, "/pty").await;
+        }
     }
 }

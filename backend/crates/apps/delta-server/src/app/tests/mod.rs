@@ -19,6 +19,7 @@ mod pull_requests;
 mod request_log;
 mod session_prune;
 mod sessions;
+mod sockets;
 mod static_web;
 mod status_line;
 mod storage;
