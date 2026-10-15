@@ -77,7 +77,7 @@ Touch devices have no hover; a tap must keep working as the click it is today.
 
 ### Before merge (verified outside the check command)
 
-- [ ] `make mock` (or `make dev`) in a browser: with several templates of
+- [x] `make mock` (or `make dev`) in a browser: with several templates of
       different lengths, hover the button, move down the list with the mouse,
       and confirm the popover stays put and the row under the pointer stays
       under it. The merging session checks this (screenshots or a short GIF)
