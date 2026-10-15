@@ -30,6 +30,7 @@ pub fn init(identifier: &str) -> LogGuard {
     if let Some(fallback) = &resolved.fallback {
         tracing::warn!("{fallback}");
     }
+    delta_server::warn_if_tracing_everything(&resolved.directives);
     if let Some(unavailable) = &file_unavailable {
         tracing::warn!("{unavailable}");
     }

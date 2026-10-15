@@ -76,6 +76,16 @@ pub enum Error {
     /// step that would never be applied to anything.
     #[error("delta SQLite migration ladder is inconsistent: {0}")]
     InvalidLadder(String),
+
+    /// The database file, a file SQLite keeps beside it, or a pre-migration
+    /// snapshot could not be created or made owner-only.
+    #[error("could not make {path} readable by its owner only: {source}")]
+    FileMode {
+        /// The file (or the directory listed to find snapshots).
+        path: String,
+        /// What the file operation failed with.
+        source: std::io::Error,
+    },
 }
 
 /// Convenience result alias for this crate.

@@ -1,5 +1,6 @@
-//! Capturing `warn`-level tracing output so a test can assert that a failure
-//! the code deliberately carries on past is still logged.
+//! Capturing tracing output so a test can assert that a failure the code
+//! deliberately carries on past is still logged, or what a line at a given
+//! level records.
 
 use std::io::Write;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -8,7 +9,7 @@ use tracing::subscriber::{DefaultGuard, NoSubscriber};
 use tracing::Dispatch;
 use tracing_subscriber::fmt;
 
-/// The buffer a [`capture_warnings`] subscriber writes into.
+/// The buffer a [`capture_logs`] subscriber writes into.
 #[derive(Clone, Default)]
 pub(crate) struct LogCapture(Arc<Mutex<Vec<u8>>>);
 
@@ -36,7 +37,12 @@ impl<'a> fmt::MakeWriter<'a> for LogCapture {
     }
 }
 
-/// Install a thread-local subscriber that records `warn` and above until the
+/// [`capture_logs`] at [`tracing::Level::WARN`].
+pub(crate) fn capture_warnings() -> (LogCapture, DefaultGuard) {
+    capture_logs(tracing::Level::WARN)
+}
+
+/// Install a thread-local subscriber that records `level` and above until the
 /// returned guard drops, and hand back the buffer it writes to.
 ///
 /// The subscriber is the thread's default only (`set_default`), so it does not
@@ -46,12 +52,12 @@ impl<'a> fmt::MakeWriter<'a> for LogCapture {
 /// Before installing it, [`anchor_dispatcher`] makes sure the callsite cache
 /// takes every live thread-local subscriber into account; without that, a
 /// capture could silently miss an event another test hit first.
-pub(crate) fn capture_warnings() -> (LogCapture, DefaultGuard) {
+pub(crate) fn capture_logs(level: tracing::Level) -> (LogCapture, DefaultGuard) {
     anchor_dispatcher();
     let capture = LogCapture::default();
     let subscriber = fmt()
         .with_writer(capture.clone())
-        .with_max_level(tracing::Level::WARN)
+        .with_max_level(level)
         .without_time()
         .with_ansi(false)
         .finish();

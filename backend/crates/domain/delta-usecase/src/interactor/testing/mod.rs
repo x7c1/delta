@@ -45,7 +45,7 @@ pub(crate) use fake_tmux::{FakeTmux, PaneInput, TmuxGate};
 pub(crate) use fake_transcript::FakeTranscript;
 pub(crate) use fake_workspace::FakeWorkspace;
 pub(crate) use hooks::{session_start, session_start_at, submit, submit_for, submit_in};
-pub(crate) use log_capture::capture_warnings;
+pub(crate) use log_capture::{capture_logs, capture_warnings};
 pub(crate) use spawning::spawning_session;
 pub(crate) use targets::{branch_off, to};
 pub(crate) use transcript_lines::{

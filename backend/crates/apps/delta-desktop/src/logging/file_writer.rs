@@ -1,13 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
-use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
-use super::{LogFileUnavailable, KEPT_FILES};
-
-/// The log files are named `delta-desktop.<YYYY-MM-DD>.log`.
-const FILE_PREFIX: &str = "delta-desktop";
-const FILE_SUFFIX: &str = "log";
+use super::{LogFileUnavailable, OwnerOnlyAppender};
 
 /// Where the log goes besides stdout.
 pub enum FileWriter {
@@ -24,19 +19,14 @@ pub enum FileWriter {
 }
 
 impl FileWriter {
-    /// Open the rotating log file in `dir`, creating the directory, behind a
-    /// non-blocking writer so a write never holds up the thread that logs.
+    /// Open the rotating, owner-only log file in `dir`, creating the directory,
+    /// behind a non-blocking writer so a write never holds up the thread that
+    /// logs.
     pub fn open(dir: Option<&Path>) -> Self {
         let Some(dir) = dir else {
             return Self::StdoutOnly(LogFileUnavailable::NoHomeDirectory);
         };
-        let appender = RollingFileAppender::builder()
-            .rotation(Rotation::DAILY)
-            .filename_prefix(FILE_PREFIX)
-            .filename_suffix(FILE_SUFFIX)
-            .max_log_files(KEPT_FILES)
-            .build(dir);
-        match appender {
+        match OwnerOnlyAppender::open(dir) {
             Ok(appender) => {
                 let (writer, guard) = tracing_appender::non_blocking(appender);
                 Self::Writing {
@@ -79,6 +69,17 @@ mod tests {
             .map(|entry| entry.unwrap().path())
             .collect();
         assert_eq!(files.len(), 1, "{files:?}");
+        let mode = std::os::unix::fs::PermissionsExt::mode(
+            &std::fs::metadata(&files[0]).unwrap().permissions(),
+        );
+        assert_eq!(
+            mode & 0o777,
+            super::super::owner_only_appender::LOG_FILE_MODE
+        );
+        let dir_mode = std::os::unix::fs::PermissionsExt::mode(
+            &std::fs::metadata(&dir).unwrap().permissions(),
+        );
+        assert_eq!(dir_mode & 0o777, 0o700);
         let name = files[0].file_name().unwrap().to_string_lossy().into_owned();
         assert!(
             name.starts_with("delta-desktop.") && name.ends_with(".log"),

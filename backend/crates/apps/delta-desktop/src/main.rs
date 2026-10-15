@@ -47,7 +47,8 @@
 //! the placeholder can be read from the log.
 //! Logging is set up before any of them, to stdout and to a file in the app
 //! log directory, at a level a file in the data directory can change
-//! ([`logging`]).
+//! ([`logging`]). Before logging, the data directory is created owner-only (or
+//! made so): on Linux the log directory and Tauri's webview data sit inside it.
 //!
 //! Links the page follows never take the window away from Delta; [`links`]
 //! says where they go instead.
@@ -114,7 +115,16 @@ const WINDOW_TITLE: &str = "Delta";
 fn main() {
     let context = tauri::generate_context!();
     let identifier = context.config().identifier.clone();
+    // Before anything writes into the data directory: on Linux the log
+    // directory and Tauri's webview data sit inside it, and would otherwise
+    // create it with the umask's default mode.
+    let data_dir_created = config::create_data_dir_for(&identifier);
     let log_guard = Arc::new(logging::init(&identifier));
+    if let Err(err) = data_dir_created {
+        // The server's start creates it again and reports a failure to the
+        // user; until then, say why it is missing.
+        tracing::warn!("{err}");
+    }
     #[cfg(target_os = "linux")]
     set_window_app_id(&identifier);
 

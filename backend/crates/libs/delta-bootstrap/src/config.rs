@@ -3,6 +3,7 @@
 use delta_usecase::{BuildOrigin, Launcher};
 
 use crate::data_layout::DataLayout;
+use crate::secret::Secret;
 use crate::settings::render_session_settings;
 
 /// The identifier Delta runs under when nothing names another one.
@@ -57,7 +58,7 @@ pub struct Config {
     /// one-time code for it and presents it on every request; the CLI server
     /// also keeps it in [`DataLayout::auth_token`] for local clients. Never
     /// rotated, and never in a page the server serves — see the auth guard.
-    pub auth_token: String,
+    pub auth_token: Secret,
     /// The hook secret carried back on every hook URL as `?hs=<secret>`,
     /// enforced by the server's hook auth guard, and rendered into the session
     /// settings by [`render_session_settings`] so genuine Claude Code callbacks
@@ -69,7 +70,7 @@ pub struct Config {
     /// `delta_server::config::adopt_persisted_hook_secret`, so a Claude Code
     /// session that survived a restart in tmux still presents the secret the
     /// new process accepts. `DELTA_HOOK_SECRET` overrides it.
-    pub hook_secret: String,
+    pub hook_secret: Secret,
     /// The directory a hook-reported `transcript_path` must resolve under to be
     /// persisted and read. Defaults to
     /// `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects` (where real Claude Code
@@ -173,9 +174,8 @@ impl Config {
 mod tests {
     use super::*;
 
-    #[test]
-    fn every_derived_path_sits_under_the_data_dir() {
-        let config = Config {
+    fn config() -> Config {
+        Config {
             identifier: DEFAULT_IDENTIFIER.into(),
             data_dir: "/data/delta".into(),
             worktree_base: "/home/u/.delta/worktrees".into(),
@@ -190,7 +190,25 @@ mod tests {
             release_feed_url: None,
             launcher: Launcher::Cli,
             build_origin: BuildOrigin::Local,
+        }
+    }
+
+    #[test]
+    fn debug_output_carries_neither_secret() {
+        let config = Config {
+            auth_token: "the-bearer-token-value".into(),
+            hook_secret: "the-hook-secret-value".into(),
+            ..config()
         };
+        let printed = format!("{config:?}");
+        assert!(!printed.contains("the-bearer-token-value"), "{printed}");
+        assert!(!printed.contains("the-hook-secret-value"), "{printed}");
+        assert!(printed.contains("auth_token: ***"), "{printed}");
+    }
+
+    #[test]
+    fn every_derived_path_sits_under_the_data_dir() {
+        let config = config();
         let layout = config.data_layout();
         let data_dir = std::path::Path::new("/data/delta");
 

@@ -8,6 +8,7 @@ use tracing::info;
 
 use super::{Step, StepKind};
 use crate::error::Result;
+use crate::owner_only;
 
 /// Apply every step that takes `from_version` up to `target_version`.
 ///
@@ -99,18 +100,21 @@ pub(crate) fn migrate(
 /// main file, while `VACUUM INTO` writes a consistent single-file snapshot
 /// through the same connection.
 ///
-/// **An existing target file is left alone and the migration proceeds.** SQLite
-/// refuses `VACUUM INTO` onto an existing path, and a retry after a failed
-/// migration would otherwise be unable to start at all; the file that is already
-/// there is the correct pre-migration snapshot, because the failed attempt rolled
-/// back. Backups are kept until the user deletes them from Settings → Storage
-/// (`DELETE /api/storage/snapshots`) — nothing removes them on its own, because
-/// their main value is the migration that appeared to succeed and is found to be
-/// wrong days later, which is exactly when an auto-cleanup would have removed
-/// the only copy. The one other thing that removes them is
-/// `scripts/dev.sh --reset` (`make reset`), which deletes them together with the
-/// database they were taken from — leaving them behind would make them look like
-/// snapshots of the database the reset created.
+/// The snapshot is made owner-only (`0600`), as the database is.
+///
+/// **An existing target file is kept (only its mode is tightened) and the
+/// migration proceeds.** SQLite refuses `VACUUM INTO` onto an existing path,
+/// and a retry after a failed migration would otherwise be unable to start at
+/// all; the file that is already there is the correct pre-migration snapshot,
+/// because the failed attempt rolled back. Backups are kept until the user
+/// deletes them from Settings → Storage (`DELETE /api/storage/snapshots`) —
+/// nothing removes them on its own, because their main value is the migration
+/// that appeared to succeed and is found to be wrong days later, which is
+/// exactly when an auto-cleanup would have removed the only copy. The one other
+/// thing that removes them is `scripts/dev.sh --reset` (`make reset`), which
+/// deletes them together with the database they were taken from — leaving them
+/// behind would make them look like snapshots of the database the reset
+/// created.
 fn back_up(conn: &Connection, db_path: Option<&str>, from_version: u32) -> Result<()> {
     if from_version == 0 {
         info!("skipping pre-migration backup: replaying the ladder onto a fresh database");
@@ -125,6 +129,7 @@ fn back_up(conn: &Connection, db_path: Option<&str>, from_version: u32) -> Resul
     };
     let backup_path = format!("{db_path}.bak-v{from_version}");
     if Path::new(&backup_path).exists() {
+        owner_only::restrict(Path::new(&backup_path))?;
         info!(
             path = %backup_path,
             "pre-migration backup already exists, keeping it and continuing"
@@ -135,6 +140,9 @@ fn back_up(conn: &Connection, db_path: Option<&str>, from_version: u32) -> Resul
     // inlined with SQL's own escaping (a single quote doubled).
     let quoted = backup_path.replace('\'', "''");
     conn.execute_batch(&format!("VACUUM INTO '{quoted}'"))?;
+    // SQLite creates the snapshot with the process's default mode; it holds
+    // everything the database does.
+    owner_only::restrict(Path::new(&backup_path))?;
     info!(
         path = %backup_path,
         "wrote pre-migration backup before applying a destructive schema migration"

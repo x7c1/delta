@@ -52,6 +52,9 @@ It holds:
   that rewrites data (see [Updating](#updating)). Snapshots are kept until you
   delete them from Settings → Storage.
 - `delta-hook-state.json`, the hook state file (see below).
+- `logs/`, on Ubuntu only, the app's log files (on macOS they are in
+  `~/Library/Logs/io.github.x7c1.delta/`; see
+  [logging](../development/logging.md#the-desktop-apps-log-file)).
 - `sessions/`, the working directories of sessions started without a
   repository or a chosen folder.
 - `settings/<port>.json`, the settings a session is launched with. There is one
@@ -62,9 +65,13 @@ It holds:
   app removes it at startup once it runs that version or a newer one.
   Settings → Storage shows its size.
 
-The directory is readable by you only (mode `0700`) when the app creates it. A
-directory an earlier version created keeps its mode; the hook state file and the
-settings files are readable by you only either way.
+The directory is readable by you only (mode `0700`): the app creates it that
+way before anything else writes there, and at startup restricts one an earlier
+version left readable, together with its `logs/`, `sessions/` and `updates/`.
+The database, the files SQLite keeps beside it, its snapshots, the log files,
+the hook state file and the settings files are readable by you only (mode
+`0600`) as well. A directory named with `DELTA_DATA_DIR` keeps the mode it has;
+the files in it are restricted all the same.
 
 Conversation transcripts are not in it: they stay where Claude Code and Codex
 write them.

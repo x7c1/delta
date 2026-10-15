@@ -384,6 +384,9 @@ fn a_destructive_pending_set_snapshots_the_database_first() {
         std::path::Path::new(&backup).exists(),
         "a destructive upgrade writes `<db>.bak-v<source version>`",
     );
+    let mode =
+        std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&backup).unwrap().permissions());
+    assert_eq!(mode & 0o777, 0o600, "the snapshot is owner-only: {mode:o}");
     // The snapshot is a usable database holding the *pre*-migration shape.
     let snapshot = Connection::open(&backup).unwrap();
     assert_eq!(user_version(&snapshot), 3);

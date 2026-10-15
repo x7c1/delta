@@ -40,7 +40,10 @@ mod release_update;
 pub use release_update::release_update;
 
 mod data_layout;
-pub use data_layout::DataLayout;
+pub use data_layout::{DataDirOrigin, DataLayout};
+
+mod secret;
+pub use secret::Secret;
 
 mod data_dir_error;
 pub use data_dir_error::DataDirError;
