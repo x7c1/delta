@@ -81,6 +81,6 @@ transcript ingestion so the new bounds are stated.
 
 ### Before merge (verified outside the check command)
 
-- [ ] `make dev`: a normal session (send, stream, terminal pane, paste of a
+- [x] `make dev`: a normal session (send, stream, terminal pane, paste of a
       few KB) behaves as before. The merging session runs it and records the
       result in the PR.
