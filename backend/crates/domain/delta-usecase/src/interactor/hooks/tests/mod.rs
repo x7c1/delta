@@ -1,5 +1,6 @@
 //! Claude Code hook handler tests.
 
+mod a_rewritten_prompt_is_logged_without_its_text;
 mod answering_a_question_injects_keys_into_the_pane;
 mod ask_user_question_drives_a_question_notice;
 mod ask_user_question_never_outlives_its_turn;

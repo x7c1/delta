@@ -71,11 +71,19 @@ impl ServerStopped {
 /// Install the global `tracing` subscriber of the `delta-server` binary:
 /// stdout only, filtered by `RUST_LOG` when set, `info` otherwise. The desktop
 /// app installs its own, which also writes a log file and reads a filter file.
+///
+/// A filter that traces everything is warned about once installed
+/// ([`crate::warn_if_tracing_everything`]).
 pub fn init_tracing() {
-    install_tracing(server_subscriber(
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        std::io::stdout,
-    ));
+    let (filter, directives) = match EnvFilter::try_from_default_env() {
+        Ok(filter) => (
+            filter,
+            std::env::var(EnvFilter::DEFAULT_ENV).unwrap_or_default(),
+        ),
+        Err(_) => (EnvFilter::new("info"), "info".to_owned()),
+    };
+    install_tracing(server_subscriber(filter, std::io::stdout));
+    crate::warn_if_tracing_everything(&directives);
 }
 
 /// The `delta-server` binary's subscriber: plain lines to `writer`, filtered

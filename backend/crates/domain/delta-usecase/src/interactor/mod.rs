@@ -38,6 +38,7 @@ mod settle_pending_permissions;
 mod storage;
 mod sweep_running_subagents;
 mod sync;
+mod text_digest;
 mod turn_input;
 mod workdir;
 

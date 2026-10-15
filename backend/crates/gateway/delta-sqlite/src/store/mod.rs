@@ -23,6 +23,8 @@ mod threads;
 #[cfg(test)]
 mod tests;
 
+use std::path::Path;
+
 use rusqlite::{params, Connection, OptionalExtension};
 use tokio::sync::Mutex;
 use tracing::info;
@@ -31,6 +33,7 @@ use delta_model::{SessionId, ThreadId};
 
 use crate::error::{Error, Result};
 use crate::migrations::{self, SCHEMA_VERSION};
+use crate::owner_only;
 
 /// The trunk thread title. The first registered session always has one.
 const MAIN_THREAD_TITLE: &str = delta_model::Thread::MAIN_TITLE;
@@ -42,9 +45,18 @@ pub struct SqliteStore {
 
 impl SqliteStore {
     /// Open (or create) a store at `path`, bringing its schema up to date.
+    ///
+    /// The database file, the `-wal`/`-shm` files beside it and its
+    /// pre-migration snapshots are owner-only (`0600`) once it is open, an
+    /// existing file included (see the `owner_only` module).
     pub fn open(path: &str) -> Result<Self> {
+        let file = Path::new(path);
+        owner_only::create_database_file(file)?;
+        owner_only::restrict(file)?;
         let conn = Connection::open(path)?;
-        Self::init(conn, Some(path))
+        let store = Self::init(conn, Some(path))?;
+        owner_only::restrict_database_files(file)?;
+        Ok(store)
     }
 
     /// Open an in-memory store (used by tests). Its schema is built by replaying

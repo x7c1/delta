@@ -221,6 +221,40 @@ a settings directory Delta does not own, which Delta does not do today.
 Both files are still rewritten on every run — the settings file must be, so that
 the hook URLs carry the current run's secret.
 
+### The rest of the data directory, and the logs
+
+The data directory also holds the database (every prompt and reply Delta has
+seen), its `-wal`/`-shm` files and its pre-migration snapshots, and on Linux the
+desktop app's log directory sits in it too. None of them may be readable by
+another local user, and the umask's default mode (typically `0644` for a file,
+`0755` for a directory) would make them so:
+
+- **The directory.** The desktop shell creates the data directory **0700** as
+  the very first thing it does, before logging and Tauri start: both write into
+  it on Linux (`logs/`, the webview's data) and would otherwise create it with
+  the default mode. At every start the server makes an existing data directory
+  it names itself, and its `logs/`, owner-only, which repairs a directory an
+  earlier version left open. A directory named with `DELTA_DATA_DIR` keeps its
+  mode, since it may be shared on purpose; `sessions/` and `updates/`, which
+  Delta creates by name, are made owner-only wherever they are. A symlink in
+  place of any of them is left alone, target included.
+- **The database.** The database file is created **0600** before SQLite opens
+  it, so the `-wal`/`-shm` files SQLite creates take the same mode, and after
+  the open the database, both of those and every snapshot are set to **0600**,
+  which also tightens files an earlier version left readable. A snapshot is set
+  to 0600 as soon as it is written.
+- **The logs.** The desktop app's log directory is **0700** and each daily file
+  **0600**, made so before the logger writes to it.
+
+What the logs leave out is in [log hygiene](#log-hygiene).
+
+`~/.claude.json` is Claude Code's file, not Delta's, but Delta rewrites it to
+seed trust ([above](#the-claude-code-trust-seeding-trade-off)). Each rewrite
+writes a new temp file beside it — created exclusively, without following a
+symlink, under an unpredictable name — with the file's current mode (**0600**
+when Delta creates the file), then renames it into place, so a rewrite never
+loosens the file's mode.
+
 One more directory holds something that ends up mattering to root:
 **`updates/`**, where the desktop app downloads a newer release and verifies
 it against the sha256 digest GitHub states for it and against the release's
@@ -478,13 +512,28 @@ hook response used to break that rule — it logged the `additionalContext` stri
 it returns to Claude Code, a verbatim excerpt of the conversation. It now logs
 only whether context was injected and how long it was.
 
-Two diagnostics in `delta-usecase` still print prompt text deliberately, and they
-are the known exceptions: the prompt/send mismatch line in
-`on_user_prompt_submit` (`expected` / `got`) and the transcript-echo mismatch
-warning in `sync_transcript` (`sent` / `recorded`). Both fire only when Claude
-Code rewrote a text Delta itself dispatched, where naming both spellings *is* the
-diagnostic. New logging around hook, prompt, or transcript handling follows the
-rule rather than those exceptions.
+Two diagnostics in `delta-usecase` compare prompt texts: the prompt/send
+mismatch line in `on_user_prompt_submit` (`info`, `expected` / `got`) and the
+transcript-echo mismatch warning in `sync_transcript` (`warn`, `sent` /
+`recorded`). Both fire only when Claude Code rewrote a text Delta itself
+dispatched. At those levels they log each text's length and the first eight hex
+digits of its SHA-256 — enough to tell whether and how much the texts differ —
+and a `debug` line beside each carries the texts themselves, for a session that
+needs the spellings. New logging around hook, prompt, or transcript handling
+follows the same rule.
+
+The configuration's secrets — the bearer token and the hook secret — are held in
+a type whose `Debug` prints `***` and which has no `Display`, so logging the
+configuration (`?config`) cannot print them.
+
+`trace` is outside this rule by nature: at `trace` the log records what is typed
+into a terminal and what it prints, and the payload of every frame on the live
+channels (the WebSocket library logs frame contents at `trace`). Both binaries
+log a `warn` line at startup when their filter enables `trace` for everything,
+and such a log must not be shared as it is ([logging](development/logging.md#trace)).
+
+The desktop app's log files are owner-only
+([above](#the-rest-of-the-data-directory-and-the-logs)).
 
 ## Safety-bypassing launch options
 

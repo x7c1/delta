@@ -31,7 +31,10 @@ async fn erasable_state(root: &Path) -> AppState {
         tmux_socket: socket,
         ..test_config()
     };
-    config.data_layout().create_dirs().unwrap();
+    config
+        .data_layout()
+        .create_dirs(delta_bootstrap::DataDirOrigin::Explicit)
+        .unwrap();
     let state = AppState::build(&config).await.unwrap();
     for name in PLANTED {
         let path = data_dir.join(name);

@@ -34,7 +34,9 @@ impl FsWorkspace {
 /// `DirBuilder::mode` is what makes the new directories 0700: a bare
 /// `create_dir_all` asks for 0777 and lets the process umask decide, which on a
 /// typical host lands at 0755 — group- and world-readable. The explicit mode is
-/// applied by `mkdir(2)` itself and is not subject to the umask.
+/// still filtered by the umask (`mkdir(2)` creates `mode & ~umask`), but a
+/// umask only ever removes bits, so the result is never wider than 0700, and
+/// is exactly 0700 under any umask that leaves the owner's bits alone.
 ///
 /// An *existing* directory is left exactly as it is (its mode included): it
 /// may be one Delta does not own (a data directory pointed somewhere shared).

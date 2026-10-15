@@ -2,6 +2,7 @@ use delta_attribution::claude_format;
 
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
+use crate::interactor::text_digest::TextDigest;
 use crate::ports::{
     GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, UserPromptSubmitHook,
     Workspace,
@@ -159,16 +160,26 @@ where
         // send is outstanding but held.
         match (&consumed, &outstanding) {
             (Some(consumed), _) if attributed.is_none() => {
+                // The texts are the user's own words: only their digests at
+                // `info`, the texts themselves at `debug`.
+                let (expected, got) = (consumed.text.trim(), hook.prompt.trim());
                 tracing::info!(
                     session_id = %hook.session_id,
                     send_id = consumed.id,
-                    expected = %consumed.text.trim(),
-                    got = %hook.prompt.trim(),
+                    expected = %TextDigest::of(expected),
+                    got = %TextDigest::of(got),
                     "UserPromptSubmit does not equal the outstanding send's text \
                      (Claude Code rewrote the prompt, most likely): the send is the \
                      only thing that could have submitted here, so its turn starts \
                      and it is NOT re-typed; its lines are still attributed to the \
                      send's thread when the transcript catches up"
+                );
+                tracing::debug!(
+                    session_id = %hook.session_id,
+                    send_id = consumed.id,
+                    expected,
+                    got,
+                    "the texts of the rewritten prompt"
                 );
             }
             (None, Some(outstanding)) => {

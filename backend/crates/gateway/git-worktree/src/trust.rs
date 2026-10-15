@@ -41,11 +41,15 @@
 //! an uncoordinated writer of the same file; that residual delta-vs-claude race
 //! is accepted (we cannot lock against another process here and deliberately do
 //! not introduce file locking). The write is atomic (temp file + rename), so a
-//! reader never sees a partially-written file.
+//! reader never sees a partially-written file, and it keeps the file's mode
+//! (owner-only for a file Delta creates).
 
+use std::fs::Permissions;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
+use tokio::io::AsyncWriteExt as _;
 
 use crate::error::Error;
 
@@ -171,7 +175,7 @@ async fn seed_keys(config_path: &Path, dir: &str, keys: &[&str]) -> Result<(), E
         path: config_path.display().to_string(),
         source,
     })?;
-    write_atomic(config_path, dir, &serialized).await
+    write_atomic(config_path, &serialized).await
 }
 
 /// Remove `dir`'s `projects.<dir>` entry from the config file at
@@ -199,7 +203,7 @@ pub(crate) async fn forget_dir_trusted(config_path: &Path, dir: &str) -> Result<
         path: config_path.display().to_string(),
         source,
     })?;
-    write_atomic(config_path, dir, &serialized).await
+    write_atomic(config_path, &serialized).await
 }
 
 /// Parse the existing config bytes, mapping a parse failure to [`Error::TrustParse`]
@@ -211,48 +215,82 @@ fn parse_config(config_path: &Path, bytes: &[u8]) -> Result<Value, Error> {
     })
 }
 
-/// Write `bytes` to `config_path` atomically: serialize to a temp file in the
-/// same directory, then `rename` over the target (atomic on the same
-/// filesystem). The temp file is removed on a write/rename error so a failure
-/// leaves no stray file behind.
-async fn write_atomic(config_path: &Path, dir: &str, bytes: &[u8]) -> Result<(), Error> {
-    let tmp = temp_path(config_path, dir);
-    if let Err(source) = tokio::fs::write(&tmp, bytes).await {
-        // Best-effort cleanup; report the original write error.
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(io_error(&tmp, source));
+/// The mode a config file Delta creates gets: Claude Code's global config
+/// holds the user's account details and per-project history, so it is the
+/// owner's alone.
+const NEW_CONFIG_MODE: u32 = 0o600;
+
+/// Write `bytes` to `config_path` atomically: write a new temp file in the same
+/// directory, then `rename` it over the target (atomic on the same
+/// filesystem).
+///
+/// The temp file gets the target's current mode (or [`NEW_CONFIG_MODE`] when
+/// there is no target yet), so a rewrite never loosens the file to the
+/// umask's default — the rename puts the temp file's mode in the target's
+/// place.
+async fn write_atomic(config_path: &Path, bytes: &[u8]) -> Result<(), Error> {
+    let mode = match tokio::fs::metadata(config_path).await {
+        Ok(meta) => meta.permissions().mode() & 0o777,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => NEW_CONFIG_MODE,
+        Err(source) => return Err(io_error(config_path, source)),
+    };
+    write_atomic_via(&temp_path(config_path), config_path, bytes, mode).await
+}
+
+/// [`write_atomic`] through the temp file at `tmp`, created with `mode`.
+///
+/// The temp file must be new: it is created with `O_CREAT | O_EXCL` and
+/// `O_NOFOLLOW`, so a file or symlink already at `tmp` fails the write
+/// instead of being written through, and is left alone. A temp file this call
+/// created is removed again on a write or rename error, so a failure leaves no
+/// stray file behind.
+async fn write_atomic_via(
+    tmp: &Path,
+    config_path: &Path,
+    bytes: &[u8],
+    mode: u32,
+) -> Result<(), Error> {
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(mode)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(tmp)
+        .await
+        .map_err(|source| io_error(tmp, source))?;
+    let written = async {
+        // The umask may have narrowed the mode `open` created the file with.
+        file.set_permissions(Permissions::from_mode(mode)).await?;
+        file.write_all(bytes).await?;
+        file.sync_all().await
     }
-    if let Err(source) = tokio::fs::rename(&tmp, config_path).await {
-        let _ = tokio::fs::remove_file(&tmp).await;
+    .await;
+    drop(file);
+    if let Err(source) = written {
+        // Best-effort cleanup; report the original write error.
+        let _ = tokio::fs::remove_file(tmp).await;
+        return Err(io_error(tmp, source));
+    }
+    if let Err(source) = tokio::fs::rename(tmp, config_path).await {
+        let _ = tokio::fs::remove_file(tmp).await;
         return Err(io_error(config_path, source));
     }
     Ok(())
 }
 
-/// A temp-file path in the same directory as the config, suffixed with a nonce
-/// derived from `dir` (not a clock or RNG) so concurrent seeds of *different*
-/// dirs do not collide on the temp name while staying deterministic.
-fn temp_path(config_path: &Path, dir: &str) -> PathBuf {
-    let nonce = djb2(dir);
+/// A temp-file path in the same directory as the config, named with a random
+/// nonce: another local user cannot predict it, so cannot plant a file or
+/// symlink there ahead of the write, and concurrent writes never collide.
+fn temp_path(config_path: &Path) -> PathBuf {
     let mut name = config_path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| ".claude.json".to_owned());
-    name.push_str(&format!(".delta-{nonce:x}.tmp"));
+    name.push_str(&format!(".delta-{}.tmp", uuid::Uuid::new_v4().simple()));
     match config_path.parent() {
         Some(parent) => parent.join(name),
         None => PathBuf::from(name),
     }
-}
-
-/// A tiny non-cryptographic hash (djb2) of `s`, used only to derive a stable
-/// per-dir temp-file nonce. Avoids pulling in time/RNG just to name a temp file.
-fn djb2(s: &str) -> u64 {
-    let mut hash: u64 = 5381;
-    for b in s.bytes() {
-        hash = hash.wrapping_mul(33).wrapping_add(u64::from(b));
-    }
-    hash
 }
 
 /// Build an [`Error::TrustIo`] carrying the offending path.
@@ -547,6 +585,70 @@ mod tests {
             "only the workspace-trust key is recorded for a repository"
         );
         assert!(is_dir_trusted(&config, "/repo").await.unwrap());
+    }
+
+    fn mode(path: &Path) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[tokio::test]
+    async fn a_rewrite_keeps_the_config_file_s_mode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(".claude.json");
+        for existing in [0o600, 0o640] {
+            tokio::fs::write(&config, b"{}").await.unwrap();
+            std::fs::set_permissions(&config, Permissions::from_mode(existing)).unwrap();
+
+            ensure_dir_trusted(&config, &format!("/repo-{existing:o}"))
+                .await
+                .unwrap();
+
+            assert_eq!(mode(&config), existing, "{existing:o}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_missing_config_file_is_created_owner_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(".claude.json");
+
+        ensure_dir_trusted(&config, "/repo").await.unwrap();
+
+        assert_eq!(mode(&config), NEW_CONFIG_MODE);
+    }
+
+    #[tokio::test]
+    async fn a_symlink_at_the_temp_path_is_not_followed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(".claude.json");
+        tokio::fs::write(&config, b"{}").await.unwrap();
+        let victim = tmp.path().join("victim");
+        tokio::fs::write(&victim, b"untouched").await.unwrap();
+        let planted = temp_path(&config);
+        std::os::unix::fs::symlink(&victim, &planted).unwrap();
+
+        let err = write_atomic_via(&planted, &config, b"{\"x\":1}", NEW_CONFIG_MODE)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, Error::TrustIo { .. }), "{err:?}");
+        assert_eq!(tokio::fs::read(&victim).await.unwrap(), b"untouched");
+        assert_eq!(tokio::fs::read(&config).await.unwrap(), b"{}");
+        assert!(
+            std::fs::symlink_metadata(&planted)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "what was planted is not Delta's to remove"
+        );
+    }
+
+    #[test]
+    fn temp_paths_are_unpredictable_and_beside_the_config() {
+        let config = Path::new("/home/u/.claude.json");
+        let (first, second) = (temp_path(config), temp_path(config));
+        assert_ne!(first, second);
+        assert_eq!(first.parent(), config.parent());
     }
 
     #[tokio::test]

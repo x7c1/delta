@@ -13,6 +13,7 @@
 mod content_record;
 mod error;
 mod migrations;
+mod owner_only;
 mod store;
 mod time;
 

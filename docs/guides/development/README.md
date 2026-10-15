@@ -148,9 +148,9 @@ variables, all with local-friendly defaults:
 | `DELTA_TMUX_SOCKET` | the identifier | dedicated tmux socket (`tmux -L <socket>`) for Delta's sessions, isolated from your default tmux server |
 | `DELTA_RELEASE_FEED_URL` | `https://api.github.com/repos/x7c1/delta/releases/latest` | where the server asks, in the background, for the newest published release, to tell the browser footer about a newer one (schedule and failure handling in [`GET /api/latest-release`](../api/settings.md#get-apilatest-release)); set to the empty string, the check is off and the server never asks (the fake-mode e2e harness does so, so CI never reaches GitHub). Another URL must be `https://`, and only a `local` build ([build origin](#build-origin)) honours it: a `release` build, and any build given a URL that is not `https://`, ignores it with a warning and asks the default |
 
-The server creates the data directory (owner-only) at startup and derives every
-path it writes from it, in one place
-(`delta_bootstrap::DataLayout`):
+The server creates the data directory (owner-only) at startup — or makes the
+default one owner-only when it already exists — and derives every path it
+writes from it, in one place (`delta_bootstrap::DataLayout`):
 
 ```text
 <data dir>/

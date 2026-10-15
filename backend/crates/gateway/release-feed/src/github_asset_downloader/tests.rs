@@ -149,6 +149,13 @@ async fn a_signed_asset_matching_its_digest_leaves_exactly_it_and_its_signature(
         SIGNED
     );
     assert_eq!(files_in(&dir), [NAME, SIGNATURE]);
+    let mode =
+        std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&dir).unwrap().permissions());
+    assert_eq!(
+        mode & 0o077,
+        0,
+        "the download directory is owner-only: {mode:o}"
+    );
     let total = Some(BODY.len() as u64);
     assert_eq!(
         reports.first(),

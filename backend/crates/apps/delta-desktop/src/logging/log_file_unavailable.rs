@@ -1,8 +1,6 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use tracing_appender::rolling::InitError;
-
 /// Why the log goes to stdout only. Its `Display` is the warning logged once
 /// logging is up.
 #[derive(Debug)]
@@ -11,8 +9,11 @@ pub enum LogFileUnavailable {
     /// resolve it from.
     NoHomeDirectory,
     /// The log file could not be opened in `dir`: the directory could not be
-    /// created or written.
-    Unwritable { dir: PathBuf, cause: InitError },
+    /// created, made owner-only or written.
+    Unwritable {
+        dir: PathBuf,
+        cause: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 impl fmt::Display for LogFileUnavailable {

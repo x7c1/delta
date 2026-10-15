@@ -25,7 +25,8 @@
 use std::ffi::OsString;
 
 use delta_bootstrap::{
-    BuildOrigin, Config, DataDirError, Launcher, DEFAULT_IDENTIFIER, DEFAULT_RELEASE_FEED_URL,
+    BuildOrigin, Config, DataDirError, DataDirOrigin, DataLayout, Launcher, DEFAULT_IDENTIFIER,
+    DEFAULT_RELEASE_FEED_URL,
 };
 
 pub mod hook_state;
@@ -127,9 +128,34 @@ fn data_dir_from_vars(var: impl Fn(&str) -> Option<OsString>, identifier: &str) 
         .unwrap_or_else(|| default_data_dir(identifier))
 }
 
+/// Create the data directory [`data_dir_from_env_for`] names for a shell
+/// running under `identifier`, as the configuration will
+/// ([`DataLayout::create_dirs`]).
+///
+/// For the desktop shell, which calls it first thing, before logging and
+/// Tauri write into the directory: otherwise they would create it with the
+/// umask's default mode, and the server's own call would find it already there.
+pub fn create_data_dir_for(identifier: &str) -> Result<(), DataDirError> {
+    let data_dir = data_dir_from_env_for(identifier);
+    DataLayout::new(&data_dir).create_dirs(data_dir_origin(&data_dir, identifier))
+}
+
+/// [`DataDirOrigin::Default`] when `data_dir` is the directory Delta names for
+/// `identifier`, [`DataDirOrigin::Explicit`] when `DELTA_DATA_DIR` named
+/// another one.
+fn data_dir_origin(data_dir: &str, identifier: &str) -> DataDirOrigin {
+    if data_dir == default_data_dir(identifier) {
+        DataDirOrigin::Default
+    } else {
+        DataDirOrigin::Explicit
+    }
+}
+
 /// `config` once its data directory exists.
 fn prepared(config: Config) -> Result<Config, DataDirError> {
-    config.data_layout().create_dirs()?;
+    config
+        .data_layout()
+        .create_dirs(data_dir_origin(&config.data_dir, &config.identifier))?;
     Ok(config)
 }
 
@@ -160,8 +186,8 @@ fn config_from_vars_for(
             .unwrap_or_else(|| default_worktree_base(home.clone())),
         tmux_socket: non_empty("DELTA_TMUX_SOCKET").unwrap_or_else(|| identifier.clone()),
         identifier,
-        auth_token: auth_token(text(AUTH_TOKEN_VAR)),
-        hook_secret: hook_secret(text("DELTA_HOOK_SECRET")),
+        auth_token: auth_token(text(AUTH_TOKEN_VAR)).into(),
+        hook_secret: hook_secret(text("DELTA_HOOK_SECRET")).into(),
         transcript_root: transcript_root(
             text("DELTA_TRANSCRIPT_ROOT"),
             text("CLAUDE_CONFIG_DIR"),
@@ -250,7 +276,7 @@ fn adopt_hook_secret(
 ) -> Result<HookStateFile, HookStateError> {
     let mut state = HookStateFile::open(config.data_layout().hook_state())?;
     let settled = state.settle_hook_secret(explicit)?;
-    config.hook_secret = settled.secret;
+    config.hook_secret = settled.secret.into();
     config.hook_endpoint_changed |= settled.changed;
     Ok(state)
 }

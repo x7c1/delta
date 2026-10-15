@@ -30,6 +30,7 @@ pub mod serve;
 mod state;
 mod storage_inventory;
 pub mod token_file;
+mod trace_warning;
 mod version;
 mod ws;
 
@@ -39,4 +40,5 @@ pub use comms_log::{CommsLogHub, CommsSubscription, COMMS_RING_CAPACITY};
 pub use one_time_codes::CODE_LIFETIME;
 pub use state::AppState;
 pub use storage_inventory::StorageInventory;
+pub use trace_warning::warn_if_tracing_everything;
 pub use version::display_version;

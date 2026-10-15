@@ -17,6 +17,8 @@ requests the server receives.
   `rustls-platform-verifier`, warning about a system certificate it cannot
   read) go through the same filter to the same outputs, under their module
   path as the target.
+- `trace` records terminal input and output and live-channel payloads, so a
+  trace log must not be shared as it is ([trace](#trace)).
 
 ## The desktop app's log file
 
@@ -34,11 +36,14 @@ started each day and only the last seven are kept. Every line also goes to
 stdout, so the Linux desktop session's journal and the terminal running
 `make desktop-dev` still show it.
 
-The file is written by a background worker, so a request never waits on the
-disk; what the worker still holds is written out when the app quits. When the
-directory cannot be created or the file cannot be opened, the app logs a
-warning to stdout and carries on with stdout only. Erasing everything from
-Settings → Storage removes the directory with the app's other files.
+The directory is readable by you only (mode `0700`) and so is each file
+(`0600`): the lines name paths and sessions, and a `debug` or `trace` filter
+records far more. The file is written by a background worker, so a request
+never waits on the disk; what the worker still holds is written out when the
+app quits. When the directory cannot be created or the file cannot be
+opened, the app logs a warning to stdout and carries on with stdout only.
+Erasing everything from Settings → Storage removes the directory with the
+app's other files.
 
 ## Changing the level
 
@@ -67,6 +72,24 @@ from (`filter_source`: `RUST_LOG`, the file's path, or `default`) and the log
 directory, in a `delta-desktop logging` line.
 
 [`EnvFilter`]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html
+
+## Trace
+
+`trace` records what the server handles, not only what it decides: what is
+typed into a terminal and what it prints, and the payload of every frame on the
+live channels — the WebSocket library Delta's sockets use logs frame contents at
+`trace`. A trace log therefore holds prompts, the agents' replies and whatever a
+terminal showed, and must not be shared as it is.
+
+When the filter in use enables `trace` for every target (a directive with no
+target, such as `trace` or `info,trace`), both the desktop app and the
+`delta-server` binary log one `warn` line saying so at startup. A filter that
+traces one target (`delta_server=trace`) is not warned about, but what that
+target records at `trace` still needs the same care.
+
+At the default level, the log carries no prompt text: the lines that report a
+prompt Claude Code rewrote log each text's length and a short hash, and the
+texts only at `debug` ([security](../security.md#log-hygiene)).
 
 ## The request log
 

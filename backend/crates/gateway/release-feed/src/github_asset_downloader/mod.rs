@@ -16,6 +16,9 @@ use crate::{ClientBuildError, DOWNLOAD_CONNECT_TIMEOUT, DOWNLOAD_STALL_TIMEOUT};
 mod local_file;
 use local_file::{exists, read_regular_file, remove_logged, remove_others, sha256_of_regular_file};
 
+/// The mode the download directory is created with when it is missing.
+const UPDATES_DIR_MODE: u32 = 0o700;
+
 #[cfg(test)]
 mod tests;
 
@@ -198,7 +201,12 @@ impl AssetDownloader for GithubAssetDownloader {
     ) -> Result<PathBuf, AssetDownloadError> {
         let expected = checked_asset(signed)?;
         let name = &signed.asset.name;
-        tokio::fs::create_dir_all(dir)
+        // Owner-only, like the data directory it sits in: a mode left to the
+        // umask would let another local user list what was downloaded.
+        tokio::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(UPDATES_DIR_MODE)
+            .create(dir)
             .await
             .map_err(|source| AssetDownloadError::Io {
                 path: dir.to_path_buf(),

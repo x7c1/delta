@@ -10,6 +10,8 @@
 //!   delta.db                  the SQLite overlay (SQLite adds `-wal`/`-shm`
 //!                             beside it, the migration runner `.bak-v<N>`)
 //!   delta-hook-state.json     the hook secret and the desktop app's port
+//!   logs/                     the desktop app's log files, on Linux only
+//!                             (written by the shell, not the server)
 //!   sessions/<token>/         per-spawn working directories
 //!   settings/<port>.json      the Claude Code session settings (hook URLs)
 //!   tmux.conf                 the configuration Delta's tmux server loads
@@ -27,7 +29,8 @@
 //!
 //! [`Config`]: crate::Config
 
-use std::os::unix::fs::DirBuilderExt as _;
+use std::io;
+use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 
 use crate::DataDirError;
@@ -53,9 +56,26 @@ const TMUX_CONF_FILE: &str = "tmux.conf";
 /// The directory a newer release's asset is downloaded into.
 const UPDATES_DIR: &str = "updates";
 
+/// The desktop app's log directory when it sits in the data directory: Tauri's
+/// app log directory is `<platform data dir>/<identifier>/logs` on Linux (on
+/// macOS it is `~/Library/Logs/<identifier>`, outside the data directory).
+const LOGS_DIR: &str = "logs";
+
 /// Owner-only: the data directory holds the hook secret (in the hook state
 /// file and in every session settings file) and the bearer token file.
 const DATA_DIR_MODE: u32 = 0o700;
+
+/// Where a data directory's path came from, which decides whether Delta may
+/// tighten the mode of one that already exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataDirOrigin {
+    /// The directory Delta names itself (`<platform data dir>/<identifier>`).
+    /// Delta owns it, so an existing one is made owner-only.
+    Default,
+    /// A directory the user named (`DELTA_DATA_DIR`). It may be one the user
+    /// owns and shares on purpose, so an existing one keeps its mode.
+    Explicit,
+}
 
 /// The paths Delta writes, all under one data directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,14 +150,30 @@ impl DataLayout {
     }
 
     /// Create the data directory (owner-only) and `sessions/` in it, before
-    /// anything is opened or written there.
+    /// anything is opened or written there, and make the directories Delta
+    /// owns owner-only when they already exist.
     ///
-    /// A directory that already exists is left as it is, mode included: an
-    /// explicit `DELTA_DATA_DIR` may name a directory the user owns and shares
-    /// on purpose. The files carrying the hook secret are owner-only on their
-    /// own (the hook state file, and `settings/`, which the workspace gateway
-    /// creates owner-only).
-    pub fn create_dirs(&self) -> Result<(), DataDirError> {
+    /// The data directory holds the hook secret, the bearer token file, the
+    /// database (every prompt and reply), its snapshots and, on Linux, the
+    /// desktop app's logs. A directory created with the umask's default mode
+    /// (an older Delta, or Tauri creating its webview data directory there
+    /// first) would leave all of that readable by other local users, so:
+    ///
+    /// - a missing directory is created `0700`;
+    /// - an existing `sessions/` and `updates/` are tightened to `0700`, since
+    ///   Delta created them by name wherever the data directory is;
+    /// - an existing data directory and its `logs/` are tightened to `0700`
+    ///   only for [`DataDirOrigin::Default`]: an explicit `DELTA_DATA_DIR` may
+    ///   name a directory the user owns and shares on purpose, and its mode is
+    ///   the user's choice. The files carrying the hook secret are owner-only on
+    ///   their own (the hook state file, and `settings/`, which the workspace
+    ///   gateway creates owner-only), and so is the database.
+    ///
+    /// Only real directories are tightened: a symlink in their place is the
+    /// user's own arrangement and is left as it is, target included. A
+    /// directory whose mode cannot be changed (one another user owns) is
+    /// logged at `warn` and the start goes on.
+    pub fn create_dirs(&self, origin: DataDirOrigin) -> Result<(), DataDirError> {
         for dir in [self.dir.clone(), self.sessions()] {
             std::fs::DirBuilder::new()
                 .recursive(true)
@@ -145,28 +181,116 @@ impl DataLayout {
                 .create(&dir)
                 .map_err(|source| DataDirError { path: dir, source })?;
         }
+        let mut owned = vec![self.sessions(), self.updates()];
+        if origin == DataDirOrigin::Default {
+            owned.extend([self.dir.clone(), self.dir.join(LOGS_DIR)]);
+        }
+        for dir in owned {
+            if let Err(err) = make_owner_only(&dir) {
+                tracing::warn!(
+                    path = %dir.display(),
+                    "could not make a directory of Delta's owner-only: {err}"
+                );
+            }
+        }
         Ok(())
     }
 }
 
+/// Set `dir`'s mode to [`DATA_DIR_MODE`] when it is a real directory whose mode
+/// differs; a missing path or a symlink is left alone.
+fn make_owner_only(dir: &Path) -> io::Result<()> {
+    let meta = match std::fs::symlink_metadata(dir) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err),
+    };
+    if !meta.is_dir() || meta.permissions().mode() & 0o777 == DATA_DIR_MODE {
+        return Ok(());
+    }
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(DATA_DIR_MODE))
+}
+
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt as _;
-
     use super::*;
+
+    fn mode(dir: &Path) -> u32 {
+        std::fs::metadata(dir).unwrap().permissions().mode() & 0o777
+    }
+
+    /// `dir` created with `0755` set explicitly, whatever the umask.
+    fn open_dir(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
 
     #[test]
     fn create_dirs_makes_an_owner_only_data_dir_with_its_sessions_dir() {
         let root = tempfile::tempdir().unwrap();
         let layout = DataLayout::new(root.path().join("nested").join("data"));
 
-        layout.create_dirs().unwrap();
+        layout.create_dirs(DataDirOrigin::Default).unwrap();
         // Idempotent: a second start finds both in place.
-        layout.create_dirs().unwrap();
+        layout.create_dirs(DataDirOrigin::Default).unwrap();
 
         for dir in [layout.dir().to_path_buf(), layout.sessions()] {
-            let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, DATA_DIR_MODE, "{}", dir.display());
+            assert_eq!(mode(&dir), DATA_DIR_MODE, "{}", dir.display());
         }
+    }
+
+    #[test]
+    fn create_dirs_tightens_an_existing_default_data_dir_and_its_own_dirs() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::new(root.path().join("data"));
+        let logs = layout.dir().join(LOGS_DIR);
+        for dir in [layout.dir(), &layout.sessions(), &layout.updates(), &logs] {
+            open_dir(dir);
+        }
+
+        layout.create_dirs(DataDirOrigin::Default).unwrap();
+
+        for dir in [layout.dir(), &layout.sessions(), &layout.updates(), &logs] {
+            assert_eq!(mode(dir), DATA_DIR_MODE, "{}", dir.display());
+        }
+    }
+
+    #[test]
+    fn create_dirs_leaves_an_explicit_data_dir_s_own_mode_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let layout = DataLayout::new(root.path().join("shared"));
+        let parent_mode = mode(root.path());
+        let logs = layout.dir().join(LOGS_DIR);
+        for dir in [layout.dir(), &layout.sessions(), &layout.updates(), &logs] {
+            open_dir(dir);
+        }
+
+        layout.create_dirs(DataDirOrigin::Explicit).unwrap();
+
+        assert_eq!(
+            mode(layout.dir()),
+            0o755,
+            "the user's directory keeps its mode"
+        );
+        assert_eq!(mode(&logs), 0o755, "a `logs/` there is not Delta's");
+        assert_eq!(mode(root.path()), parent_mode, "nor is its parent");
+        for dir in [layout.sessions(), layout.updates()] {
+            assert_eq!(mode(&dir), DATA_DIR_MODE, "{}", dir.display());
+        }
+    }
+
+    #[test]
+    fn create_dirs_does_not_follow_a_symlinked_data_dir() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("elsewhere");
+        open_dir(&target);
+        let link = root.path().join("data");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        DataLayout::new(&link)
+            .create_dirs(DataDirOrigin::Default)
+            .unwrap();
+
+        assert_eq!(mode(&target), 0o755, "a symlink's target is the user's");
     }
 }

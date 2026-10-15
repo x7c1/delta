@@ -27,6 +27,9 @@ semver = { workspace = true }
 # refused (`AssetDownloadError::SignatureRejected`); the check itself runs in
 # the downloader.
 release-signature = { workspace = true }
+# The short hash a log line at `info` or above shows of a prompt in place of
+# its text (`interactor::text_digest`).
+sha2 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

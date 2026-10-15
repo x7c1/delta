@@ -6,6 +6,7 @@ use crate::error::Result;
 use crate::interactor::agent_permission::reduce_permission_event;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::RunningSubagent;
+use crate::interactor::text_digest::TextDigest;
 use crate::interactor::PermissionDecision;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
@@ -230,15 +231,30 @@ where
                             .iter()
                             .find(|message| message.uuid == matched_uuid)
                             .and_then(|message| message.content_text.as_deref());
+                        // The texts are the user's own words: only their
+                        // digests at `warn`, the texts themselves at `debug`.
+                        let sent = sent.as_ref().map(|s| s.text.trim());
+                        let recorded = recorded.unwrap_or("").trim();
+                        let sent_digest = sent.map_or_else(
+                            || "<send row gone>".to_owned(),
+                            |text| TextDigest::of(text).to_string(),
+                        );
                         tracing::warn!(
                             session_id = %session_id,
                             send_id,
                             matched_uuid = %matched_uuid.as_str(),
-                            sent = %sent.as_ref().map(|s| s.text.trim()).unwrap_or("<send row gone>"),
-                            recorded = %recorded.unwrap_or("").trim(),
+                            sent = %sent_digest,
+                            recorded = %TextDigest::of(recorded),
                             "the transcript line consuming this send does not spell the \
                              send's own text (Claude Code rewrote it, most likely); the \
                              line is still attributed to the send's thread"
+                        );
+                        tracing::debug!(
+                            session_id = %session_id,
+                            send_id,
+                            sent = sent.unwrap_or("<send row gone>"),
+                            recorded,
+                            "the texts of the rewritten transcript line"
                         );
                     }
                     self.store.mark_send_matched(send_id, &matched_uuid).await?;

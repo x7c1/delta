@@ -852,11 +852,13 @@ name = "delta-desktop"
 version = "0.6.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "delta-bootstrap",
  "delta-server",
  "dirs",
  "glib",
  "gtk",
+ "libc",
  "log",
  "objc2",
  "objc2-app-kit",
@@ -975,6 +977,7 @@ dependencies = [
  "release-signature",
  "semver",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -1699,10 +1702,12 @@ version = "0.6.0"
 dependencies = [
  "async-trait",
  "delta-usecase",
+ "libc",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

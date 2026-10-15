@@ -8,9 +8,12 @@
 //!   (the Linux desktop session's journal keeps them, and `make desktop-dev`
 //!   shows them), and to `delta-desktop.<date>.log` in the app log directory
 //!   ([`app_log_dir()`]). A new file is started each day and only the last
-//!   [`KEPT_FILES`] are kept. The file is written by a background worker, so a
-//!   request never waits on the disk. A directory that cannot be created or
-//!   written is logged at `warn`, and the app carries on with stdout only.
+//!   [`KEPT_FILES`] are kept. The directory is `0700` and each file `0600`
+//!   ([`OwnerOnlyAppender`]): the lines record paths and session ids, and a
+//!   `debug` or `trace` filter records prompt texts and terminal traffic. The
+//!   file is written by a background worker, so a request never waits on the
+//!   disk. A directory that cannot be created or written is logged at `warn`,
+//!   and the app carries on with stdout only.
 //! - **What.** `RUST_LOG` when set; otherwise the `EnvFilter` directives in
 //!   [`FILTER_FILE_NAME`] in the data directory (`DELTA_DATA_DIR`, or
 //!   `<platform data dir>/<identifier>`); otherwise `info`
@@ -39,6 +42,9 @@ pub use init::init;
 
 mod log_file_unavailable;
 use log_file_unavailable::LogFileUnavailable;
+
+mod owner_only_appender;
+use owner_only_appender::OwnerOnlyAppender;
 
 mod log_guard;
 pub use log_guard::LogGuard;
