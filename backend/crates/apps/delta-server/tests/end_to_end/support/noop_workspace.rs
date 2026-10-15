@@ -36,6 +36,12 @@ impl Workspace for NoopWorkspace {
         })
     }
 
+    async fn modified_at(&self, path: &str) -> delta_usecase::Result<std::time::SystemTime> {
+        Err(delta_usecase::Error::Workspace(format!(
+            "{path}: no filesystem behind this workspace"
+        )))
+    }
+
     async fn remove_dir_tree(&self, _path: &str) -> delta_usecase::Result<()> {
         Ok(())
     }

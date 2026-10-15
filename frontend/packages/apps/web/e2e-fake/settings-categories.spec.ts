@@ -91,6 +91,7 @@ test('Settings registers a prompt template and lists it by label', async ({
     'Appearance',
     'Default provider',
     'Storage',
+    'Erase everything',
   ]);
 
   await dialog.getByTestId('settings-category-prompt-templates').click();
@@ -140,7 +141,7 @@ test('Settings registers a prompt template and lists it by label', async ({
 });
 
 /**
- * The dialog's box must not depend on which category is showing. The five
+ * The dialog's box must not depend on which category is showing. The
  * categories differ wildly in natural height — a two-option radio group versus
  * a form plus an unbounded list — so a content-sized panel resized on every
  * click, and because the backdrop centers it, both edges moved: the rail button
@@ -171,6 +172,7 @@ test('Settings dialog keeps a fixed frame across category switches', async ({
     { id: 'appearance', section: 'appearance-section' },
     { id: 'default-provider', section: 'default-provider-section' },
     { id: 'storage', section: 'storage-section' },
+    { id: 'erase-everything', section: 'storage-erase' },
   ];
 
   // The rail is inside the panel, so a moving panel drags the rail with it.

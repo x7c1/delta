@@ -11,6 +11,8 @@ mod create_dir;
 mod remove_dir;
 mod settings;
 
+use std::time::SystemTime;
+
 use async_trait::async_trait;
 
 use delta_usecase::{DirListing, Workspace};
@@ -53,6 +55,13 @@ impl Workspace for FsWorkspace {
         include_hidden: bool,
     ) -> std::result::Result<DirListing, delta_usecase::Error> {
         Ok(self.list(path, include_hidden).await?)
+    }
+
+    async fn modified_at(
+        &self,
+        path: &str,
+    ) -> std::result::Result<SystemTime, delta_usecase::Error> {
+        Ok(self.modified(path).await?)
     }
 
     async fn remove_dir_tree(&self, path: &str) -> std::result::Result<(), delta_usecase::Error> {

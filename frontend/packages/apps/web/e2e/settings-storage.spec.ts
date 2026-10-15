@@ -118,7 +118,13 @@ test('Escape cancels an open confirmation first, then closes Settings', async ({
 
 test('erasing everything asks for the word, then leaves only the report', async ({ page }) => {
   const section = await openStorage(page);
-  const block = section.getByTestId('storage-erase');
+  // Storage's own panel lists the worktrees but no longer holds the erase
+  // block: it is Storage's child category in the rail.
+  await expect(section.getByTestId('storage-worktree')).toHaveCount(mockStorageWorktrees.length);
+  await expect(section.getByTestId('storage-erase')).toHaveCount(0);
+  const dialog = page.getByRole('dialog');
+  await dialog.getByTestId('settings-category-erase-everything').click();
+  const block = dialog.getByTestId('storage-erase');
   const kept = mockStorageWorktrees.filter(
     (worktree) => worktree.dirty === true || worktree.repo_root === null,
   );

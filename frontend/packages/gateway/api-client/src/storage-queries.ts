@@ -43,8 +43,9 @@ export function useStorageQuery(
 
 /**
  * The directories under the worktree base (`GET /api/storage/worktrees`), for
- * the Storage category's Worktrees block. `enabled` gates the fetch to while
- * the category is shown. Each answer runs `git` once per directory, so it is
+ * the Storage category's Worktrees block and the Erase everything category.
+ * `enabled` gates the fetch to while either is shown. Each answer runs `git`
+ * once per directory, so it is
  * kept fresh as long as the storage inventory is; a removal invalidates it.
  */
 export function useStorageWorktreesQuery(

@@ -131,6 +131,7 @@ describe('SettingsView', () => {
         'Appearance',
         'Default provider',
         'Storage',
+        'Erase everything',
       ]);
       expect(
         screen.getByTestId('settings-category-launch-options'),
@@ -149,5 +150,77 @@ describe('SettingsView', () => {
       ).toHaveAttribute('aria-selected', 'false');
     });
 
+    describe('Erase everything, the child of Storage', () => {
+      it('follows Storage in the rail, indented as its child', () => {
+        renderSettings();
+        const tabs = within(screen.getByRole('tablist')).getAllByRole('tab');
+        const storage = screen.getByTestId('settings-category-storage');
+        const erase = screen.getByTestId('settings-category-erase-everything');
+        expect(tabs.indexOf(erase)).toBe(tabs.indexOf(storage) + 1);
+        expect(erase).toHaveAttribute('data-parent', 'storage');
+        expect(erase).toHaveClass('pl-6');
+        expect(storage).not.toHaveAttribute('data-parent');
+        expect(storage).toHaveClass('pl-3');
+      });
+
+      it('shows the erase panel when selected, and Storage no longer does', async () => {
+        renderSettings();
+        fireEvent.click(screen.getByTestId('settings-category-storage'));
+        expect(await screen.findByTestId('storage-section')).toBeInTheDocument();
+        expect(screen.queryByTestId('storage-erase')).toBeNull();
+
+        fireEvent.click(screen.getByTestId('settings-category-erase-everything'));
+
+        const panel = screen.getByTestId('settings-panel-erase-everything');
+        expect(within(panel).getByTestId('storage-erase')).toBeInTheDocument();
+        expect(
+          within(panel).getByRole('button', { name: 'Erase everything…' }),
+        ).toBeInTheDocument();
+        expect(screen.queryByTestId('storage-section')).toBeNull();
+      });
+
+      it('is reached from Storage with the arrow keys, and back', () => {
+        useSettingsStore.setState({ activeCategory: 'storage' });
+        renderSettings();
+        const storage = screen.getByTestId('settings-category-storage');
+        const erase = screen.getByTestId('settings-category-erase-everything');
+
+        fireEvent.keyDown(storage, { key: 'ArrowDown' });
+        expect(useSettingsStore.getState().activeCategory).toBe('erase-everything');
+        expect(erase).toHaveFocus();
+        expect(erase).toHaveAttribute('aria-selected', 'true');
+
+        fireEvent.keyDown(erase, { key: 'ArrowUp' });
+        expect(useSettingsStore.getState().activeCategory).toBe('storage');
+        expect(storage).toHaveFocus();
+      });
+
+      it('is restored from a persisted active category', async () => {
+        localStorage.setItem(
+          SETTINGS_STORAGE_KEY,
+          JSON.stringify({ state: { activeCategory: 'erase-everything' }, version: 0 }),
+        );
+        await useSettingsStore.persist.rehydrate();
+        renderSettings();
+        expect(
+          screen.getByTestId('settings-category-erase-everything'),
+        ).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByTestId('storage-erase')).toBeInTheDocument();
+      });
+
+      it('falls back to the default when the persisted category is unknown', async () => {
+        useSettingsStore.setState({ activeCategory: 'storage' });
+        localStorage.setItem(
+          SETTINGS_STORAGE_KEY,
+          JSON.stringify({ state: { activeCategory: 'erase-all' }, version: 0 }),
+        );
+        await useSettingsStore.persist.rehydrate();
+        renderSettings();
+        expect(
+          screen.getByTestId('settings-category-launch-options'),
+        ).toHaveAttribute('aria-selected', 'true');
+        expect(screen.queryByTestId('storage-erase')).toBeNull();
+      });
+    });
   });
 });

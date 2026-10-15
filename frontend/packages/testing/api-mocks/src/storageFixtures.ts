@@ -13,7 +13,9 @@ const MOCK_WORKTREE_REPO = '/home/u/src/delta';
  * Worktrees block renders: a clean leftover, a leftover with uncommitted
  * changes, a leftover git no longer knows, and one a listed session still
  * works in, on the unmerged branch Delta created for it — so the erase
- * confirmation has a branch to name for each reason it keeps one.
+ * confirmation has a branch to name for each reason it keeps one. Their
+ * modification times do not follow the name order, so the block's
+ * newest-first sort shows.
  */
 export const mockStorageWorktrees: StorageWorktree[] = [
   {
@@ -23,6 +25,7 @@ export const mockStorageWorktrees: StorageWorktree[] = [
     dirty: false,
     branch: { name: 'delta-leftover-clean', created_for_session: false, merged: null },
     launch_branch: null,
+    modified_at: '2026-09-01T09:00:00Z',
   },
   {
     path: `${MOCK_WORKTREE_BASE}/x7c1-delta-leftover-dirty`,
@@ -31,6 +34,7 @@ export const mockStorageWorktrees: StorageWorktree[] = [
     dirty: true,
     branch: { name: 'delta-leftover-dirty', created_for_session: false, merged: null },
     launch_branch: null,
+    modified_at: '2026-10-10T09:00:00Z',
   },
   {
     path: `${MOCK_WORKTREE_BASE}/x7c1-delta-leftover-unregistered`,
@@ -39,6 +43,7 @@ export const mockStorageWorktrees: StorageWorktree[] = [
     dirty: null,
     branch: null,
     launch_branch: null,
+    modified_at: '2026-06-15T09:00:00Z',
   },
   {
     path: `${MOCK_WORKTREE_BASE}/x7c1-delta-session-1`,
@@ -47,6 +52,7 @@ export const mockStorageWorktrees: StorageWorktree[] = [
     dirty: false,
     branch: { name: 'delta-session-1', created_for_session: true, merged: false },
     launch_branch: null,
+    modified_at: '2026-10-15T09:00:00Z',
   },
 ];
 
