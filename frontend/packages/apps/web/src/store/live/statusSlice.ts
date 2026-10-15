@@ -17,11 +17,12 @@ export interface StatusSlice {
   /**
    * The latest context-usage percentage per session, keyed by session id.
    * Replace-latest, not append: usage snapshots fire frequently, so only the
-   * most recent one of each session is kept. Drives the composer's top-edge
-   * context bar for the focused session. A session with no percentage yet has
-   * no entry, so the bar is hidden rather than shown at 0%: either no snapshot
-   * has arrived, or the percentage was `null` — right after `/compact`, or from
-   * a provider that reports no context-window size and so cannot compute one.
+   * most recent one of each session is kept. Drives the context-usage meter on
+   * the composer rail for the focused session. A session with no percentage
+   * yet has no entry, so the meter is hidden rather than shown at 0%: either
+   * no snapshot has arrived, or the percentage was `null` — right after
+   * `/compact`, or from a provider that reports no context-window size and so
+   * cannot compute one.
    */
   contextUsage: Record<SessionId, number>;
   /**
@@ -63,7 +64,7 @@ export interface StatusSlice {
 }
 
 // Seed the status slices from the last persisted snapshot (each datum
-// expiry-checked on its own terms), so a reload restores the context bar /
+// expiry-checked on its own terms), so a reload restores the context meter /
 // rate-limit footer instead of going blank until the next usage event. The
 // load instant is kept so the staleness decision below is taken against the
 // same clock reading the expiry checks used.
