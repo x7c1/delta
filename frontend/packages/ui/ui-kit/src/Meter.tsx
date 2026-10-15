@@ -18,9 +18,15 @@ export interface MeterProps {
   className?: string;
   /**
    * Accessible name for the meter, since the numeric label is a caller-supplied
-   * sibling rather than part of this element.
+   * sibling rather than part of this element. Also shown as the native tooltip.
    */
   title?: string;
+  /**
+   * Accessible name WITHOUT the native tooltip, for a caller that draws its own
+   * tooltip and would otherwise show two. Takes precedence over `title` as the
+   * accessible name.
+   */
+  label?: string;
 }
 
 /** Clamp a percentage into the inclusive 0–100 range. */
@@ -37,7 +43,8 @@ function clampPercentage(value: number): number {
  * one), so it scales and themes cleanly. Exposes `role="meter"` with
  * `aria-valuenow`/`min`/`max` reporting the clamped value. The numeric label is
  * the caller's concern — render it as a sibling, not baked in here — so the same
- * primitive serves both the labelled footer rows and the bare context fill.
+ * primitive serves both the footer rate-limit rows and the composer rail's
+ * context-usage meter.
  */
 export function Meter({
   value,
@@ -51,6 +58,7 @@ export function Meter({
   trackClassName = 'bg-surface-sunken',
   className,
   title,
+  label,
 }: MeterProps) {
   const clamped = clampPercentage(value);
   return (
@@ -59,7 +67,7 @@ export function Meter({
       aria-valuenow={clamped}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-label={title}
+      aria-label={label ?? title}
       title={title}
       className={cn(
         'h-1.5 w-full overflow-hidden rounded-full',

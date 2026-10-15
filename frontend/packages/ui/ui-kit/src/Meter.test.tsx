@@ -40,4 +40,11 @@ describe('Meter', () => {
     expect(meter).toHaveAttribute('aria-valuenow', '0');
     expect((meter.firstElementChild as HTMLElement).style.width).toBe('0%');
   });
+
+  it('takes an accessible name without a native tooltip via label', () => {
+    render(<Meter value={10} label="quiet" />);
+
+    const meter = screen.getByRole('meter', { name: 'quiet' });
+    expect(meter).not.toHaveAttribute('title');
+  });
 });

@@ -11,13 +11,13 @@ import type {
  * per-provider account rate limits) across page reloads.
  *
  * The snapshot is ephemeral: the server only broadcasts it live and the store
- * resets on reload, so without this the context bar and rate-limit footer go
+ * resets on reload, so without this the context meter and rate-limit footer go
  * blank until the next usage event fires. We keep the last one in
  * `localStorage` and restore it on load.
  *
  * Freshness is decided **per datum**, never per snapshot. A blanket
  * wall-clock TTL over the whole payload is the wrong guard: it blanks the
- * footer and the context bar exactly when they are most wanted — the morning
+ * footer and the context meter exactly when they are most wanted — the morning
  * after an evening session, when "how much of the 7d window is left?" is the
  * first question asked. Instead:
  *

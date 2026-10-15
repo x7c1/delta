@@ -90,9 +90,8 @@ export function ProviderTabs() {
       // selected tab "opens" into the card by drawing no bottom border there,
       // while the unselected tabs redraw the border line themselves, so the
       // open/closed distinction is structural rather than a subtle fill
-      // difference. Safe only because the tabs exist in new-session mode alone,
-      // where the context-usage fill (which rides that same border in a thread)
-      // can never be present.
+      // difference. The card's border carries nothing else, so covering a 1px
+      // stretch of it here costs nothing.
       className={cn(
         COMPOSER_RAIL_ITEM_CLASS,
         'relative z-10 -mb-px flex overflow-hidden',
