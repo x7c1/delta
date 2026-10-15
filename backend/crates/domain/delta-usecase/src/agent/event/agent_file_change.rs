@@ -11,6 +11,9 @@ pub struct AgentFileChange {
     /// does not model — the path and the diff are still worth showing, so an
     /// unknown kind loses the label rather than the whole entry.
     pub kind: Option<AgentFileChangeKind>,
-    /// The unified diff of the proposed change, as the provider produced it.
+    /// The diff of the proposed change: the unified diff a provider produced,
+    /// or one rendered from a request whose input carries the change (a Claude
+    /// `Write`'s content as `+` lines, an `Edit`'s `old_string` / `new_string`
+    /// as `-` / `+` lines under a header naming the edit).
     pub diff: String,
 }

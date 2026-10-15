@@ -47,7 +47,7 @@ async fn the_dialog_is_reported_from_the_hook_and_survives_an_abandoned_wait() {
     // The transport's decision deadline fires: the waiter is abandoned, but
     // the TUI prompt now owns the question — still genuinely pending, so the
     // queryable state must keep reporting it.
-    ix.abandon_permission_decision(wait.request_id).await;
+    ix.abandon_permission_decision(wait.request_id);
     assert!(
         ix.live_state_for(&session)
             .await

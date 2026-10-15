@@ -153,5 +153,5 @@ async fn permission_request_for_ask_user_question_passes_through() {
     );
 
     // Abandoning the (waiter-less) request is a safe no-op.
-    ix.abandon_permission_decision(wait.request_id).await;
+    ix.abandon_permission_decision(wait.request_id);
 }

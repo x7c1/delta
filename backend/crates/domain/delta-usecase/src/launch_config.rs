@@ -15,10 +15,12 @@ pub const DEFAULT_SESSION_COMMAND: &str = "claude";
 /// browser decision before falling back to the interactive TUI prompt.
 ///
 /// Generous, like the launch deadlines: the user may be reading the notice, so
-/// the wait must comfortably outlast a human think. It is kept under Claude
-/// Code's own hook timeout (60s by default) so the fallback is always Delta's
-/// deliberate empty passthrough — the TUI prompt appears exactly as it would
-/// have without the hook — rather than Claude abandoning the hook mid-wait.
+/// the wait must comfortably outlast a human think. The session settings give
+/// the `PermissionRequest` hook a timeout derived from this wait plus a margin
+/// (see `delta-bootstrap`'s settings rendering), so the fallback is always
+/// Delta's deliberate empty passthrough — the TUI prompt appears exactly as it
+/// would have without the hook — rather than Claude abandoning the hook
+/// mid-wait.
 pub const PERMISSION_DECISION_DEADLINE: Duration = Duration::from_secs(50);
 
 /// How long the whole launch preparation of a freshly-accepted session may run

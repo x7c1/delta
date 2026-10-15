@@ -154,6 +154,12 @@ pub async fn message_display(
 ///   falls back to the interactive TUI prompt exactly as it would without
 ///   this hook. The row stays `pending` and the eventual `tool_result`
 ///   resolves it.
+///
+/// Whichever way the handler ends — including Claude Code dropping the
+/// connection mid-wait, which drops this future without running any of the
+/// branches below — an [`AbandonOnDrop`] guard abandons the waiter, so a wait
+/// nobody is listening to any more does not linger until the deadline with the
+/// browser card still offering an answer that would reach nothing.
 pub async fn permission_request(
     State(state): State<AppState>,
     Json(payload): Json<PermissionRequestPayload>,
@@ -174,6 +180,10 @@ pub async fn permission_request(
         Err(err) => return internal_error(err).into_response(),
     };
     state.broadcast(wait.events);
+    let _abandon = AbandonOnDrop {
+        state: state.clone(),
+        request_id: wait.request_id,
+    };
 
     let deadline = state.interactor().permission_decision_deadline();
     match tokio::time::timeout(deadline, wait.decision).await {
@@ -192,12 +202,9 @@ pub async fn permission_request(
         }
         // Timed out, or the waiter was dropped: no decision to report. The
         // empty 200 is the deliberate passthrough — Claude Code continues
-        // through its normal interactive permission flow.
+        // through its normal interactive permission flow. The guard abandons
+        // the waiter as the handler returns.
         Ok(Err(_)) | Err(_) => {
-            state
-                .interactor()
-                .abandon_permission_decision(wait.request_id)
-                .await;
             tracing::info!(
                 request_id = wait.request_id,
                 "PermissionRequest: no browser decision before the deadline; \
@@ -205,6 +212,25 @@ pub async fn permission_request(
             );
             StatusCode::OK.into_response()
         }
+    }
+}
+
+/// Abandons a `PermissionRequest` hook's decision waiter when the handler ends.
+///
+/// Dropping is the one exit every path shares, including the handler future
+/// being dropped by the transport when Claude Code disconnects. Abandoning is
+/// a no-op once a decision has claimed the request, so the guard needs no
+/// disarming on the decided path.
+struct AbandonOnDrop {
+    state: AppState,
+    request_id: i64,
+}
+
+impl Drop for AbandonOnDrop {
+    fn drop(&mut self) {
+        self.state
+            .interactor()
+            .abandon_permission_decision(self.request_id);
     }
 }
 

@@ -154,7 +154,11 @@ impl Config {
     /// The Claude Code session settings JSON rendered for this configuration, so
     /// the hook URLs always match the running port.
     pub fn session_settings_json(&self) -> String {
-        render_session_settings(self.port, &self.hook_secret)
+        render_session_settings(
+            self.port,
+            &self.hook_secret,
+            self.launch.permission_decision_deadline,
+        )
     }
 
     /// Delta-owned path the rendered settings JSON is written to and handed to

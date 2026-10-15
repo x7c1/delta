@@ -66,12 +66,17 @@ where
         outcome
     }
 
-    /// Abandon the waiter for a permission request whose hook wait timed out.
+    /// Abandon the waiter for a permission request whose hook wait ended
+    /// without a decision: it timed out, or the hook request was dropped.
     ///
-    /// The row stays `pending`: the hook responds with an empty passthrough,
-    /// Claude Code shows its interactive TUI prompt, and the eventual
-    /// `tool_result` resolves the row (see `sync_transcript`).
-    pub async fn abandon_permission_decision(&self, request_id: i64) {
+    /// The row stays `pending`: the hook responds with an empty passthrough (or
+    /// nobody is listening any more), Claude Code shows its interactive TUI
+    /// prompt, and the eventual `tool_result` resolves the row (see
+    /// `sync_transcript`). A no-op for a request a decision already claimed.
+    ///
+    /// Synchronous so a drop guard can call it: it only takes the index entry
+    /// and posts to the session's actor, neither of which waits.
+    pub fn abandon_permission_decision(&self, request_id: i64) {
         let session_id = self
             .permission_index
             .lock()

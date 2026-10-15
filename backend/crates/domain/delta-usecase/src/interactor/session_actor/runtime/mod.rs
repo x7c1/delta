@@ -150,6 +150,13 @@ pub struct SessionRuntime {
     /// the correlated `tool_result` resolves its request row or the turn ends.
     /// At most one exists — `claude` shows one question at a time.
     pending_question: Option<PendingQuestion>,
+    /// The request id of the question the browser has already answered or
+    /// cancelled by injecting keys, so a repeated POST cannot type into the
+    /// pane a second time. Keyed by id rather than a flag on the question, so a
+    /// newer question is answerable at once and a stale id needs no clearing
+    /// (row ids are never reused). NOT part of [`Self::is_empty`]: it means
+    /// nothing without the pending question it names.
+    answered_question: Option<i64>,
     /// The provisional live preview of the in-flight turn's assistant message,
     /// accumulated from the `MessageDisplay` hook. `None` between turns. Never
     /// persisted: cleared when the turn ends (so the persisted message takes

@@ -65,7 +65,7 @@ fn command_execution_approval(r: &ServerRequest) -> AgentPermissionRequest {
 /// leaves [`AgentPermissionRequest::file_change`] unset and the adapter completes
 /// it through [`with_file_change_detail`] when it knows the item. An approval
 /// whose item was never seen keeps the `None` — the deliberate fallback to the
-/// input summary.
+/// arguments alone.
 ///
 /// `grantRoot` is the exception that is read here and not correlated: it belongs
 /// to the approval itself, not to the item, so it is lifted onto

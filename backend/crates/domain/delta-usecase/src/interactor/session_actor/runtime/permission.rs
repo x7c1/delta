@@ -37,7 +37,7 @@ pub struct PendingPermission {
     /// stated it. Mirrored here — not only broadcast — because the envelope is
     /// what re-seeds the card after a reconnect: a client that missed the event
     /// must get the same detail from the refetch, or the card it rebuilds would
-    /// silently degrade to the input summary.
+    /// silently lose the change view.
     pub file_change: Option<AgentFileChangeDetail>,
     /// A directory the request also asks to be allowed to write under for the
     /// rest of the session, when the provider asked for one. Mirrored for the
@@ -91,6 +91,11 @@ impl SessionRuntime {
             return;
         }
         self.pending_permissions.push(pending);
+    }
+
+    /// Whether any permission dialog is awaiting an answer.
+    pub fn has_pending_permission(&self) -> bool {
+        !self.pending_permissions.is_empty()
     }
 
     /// Drop every queued dialog at once, returning the request ids that were

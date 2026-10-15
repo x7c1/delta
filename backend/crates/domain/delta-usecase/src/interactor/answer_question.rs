@@ -38,6 +38,14 @@ where
     ///   or a newer question replaced it) → [`Error::QuestionNotPending`]
     ///   (`409`), a graceful no-op the browser surfaces as the
     ///   answer-in-the-terminal fallback.
+    /// - Keys were already injected for this question (a repeated POST, or a
+    ///   cancel that came first) → [`Error::QuestionNotPending`]: the TUI has
+    ///   already been driven once, and typing the sequence again would land on
+    ///   whatever the pane shows next.
+    /// - A permission dialog is pending in the same session →
+    ///   [`Error::QuestionBlockedByPermission`] (`409`): the dialog is drawn over
+    ///   the question, so the keys would answer it instead. Nothing is injected
+    ///   and the question stays answerable once the dialog is settled.
     /// - A malformed selection, or a sub-case the generator refuses to drive
     ///   (multi-select within a multi-question call) → [`Error::InvalidQuestionAnswer`]
     ///   (`400`).
@@ -45,8 +53,11 @@ where
     ///   there is no TUI to answer, so the UI falls back exactly as for a stale
     ///   question.
     ///
-    /// On success the keys are injected and `Ok(())` returned. The pending
-    /// question is **not** cleared here: the authoritative clear is the
+    /// On success the keys are injected and `Ok(())` returned. The question is
+    /// marked answered just before the keys are sent and stays marked even if
+    /// the dispatch fails, since some keys may already have reached the pane;
+    /// the retry for a failure is the terminal. The pending question is **not**
+    /// cleared here: the authoritative clear is the
     /// `tool_result` ingest resolving the request row (the same path a
     /// terminal-answered question takes), keeping one clear path. A dispatch
     /// failure propagates so the caller can report it and the user can retry in
@@ -62,8 +73,11 @@ where
         let Some(pending) = self.state.pending_question() else {
             return Err(Error::QuestionNotPending(request_id));
         };
-        if pending.request_id != request_id {
+        if pending.request_id != request_id || self.state.is_question_answered(request_id) {
             return Err(Error::QuestionNotPending(request_id));
+        }
+        if self.state.has_pending_permission() {
+            return Err(Error::QuestionBlockedByPermission(request_id));
         }
 
         let shapes = parse_question_shapes(&pending.tool_input_json).ok_or_else(|| {
@@ -82,6 +96,7 @@ where
         };
 
         let names: Vec<&str> = keys.iter().map(|key| key.tmux_name()).collect();
+        self.state.mark_question_answered(request_id);
         self.tmux.send_keys(&pane, &names).await?;
         Ok(())
     }

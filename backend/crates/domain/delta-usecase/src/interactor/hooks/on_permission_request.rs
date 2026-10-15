@@ -3,6 +3,7 @@ use tokio::sync::oneshot;
 use crate::agent::{AgentEvent, AgentPermissionRequest};
 use crate::error::Result;
 use crate::interactor::agent_permission::reduce_permission_event;
+use crate::interactor::hooks::claude_file_change::claude_file_change;
 use crate::interactor::hooks::{HookTranscript, ASK_USER_QUESTION};
 use crate::interactor::permission_decision::PermissionDecision;
 use crate::interactor::session_actor::actor::SessionContext;
@@ -42,8 +43,9 @@ where
     /// - A browser decision (`decide_permission`) resolves the row and the
     ///   hook answers Claude Code with `hookSpecificOutput.decision`.
     /// - On timeout the transport abandons the waiter
-    ///   (`abandon_permission_decision`) and responds with an empty
-    ///   passthrough: Claude Code falls back to its interactive TUI prompt
+    ///   (`abandon_permission_decision`, from a drop guard that also runs when
+    ///   Claude Code drops the hook request mid-wait) and responds with an
+    ///   empty passthrough: Claude Code falls back to its interactive TUI prompt
     ///   exactly as before, the row stays `pending`, and the eventual
     ///   `tool_result` resolves it (see `sync_transcript`).
     /// - A close or a vanished pane settles the request before either happens:
@@ -112,17 +114,19 @@ where
         // Express the request as the provider-neutral fact and let the
         // permission reducer raise the queryable mirror and produce the notice
         // broadcast. The `tool_use_id` is `None`: the `PermissionRequest` hook
-        // payload carries none (the row records none too). `file_change` and
-        // `grant_root` are `None` for the same reason — the hook states the tool
-        // and its input and nothing about a proposed patch or a write root, so
-        // the notice renders from the input alone, exactly as it always has.
+        // payload carries none (the row records none too). A file tool's input
+        // carries its whole change (the new content, or the old/new string
+        // pairs), so `file_change` is read from it and the card shows the same
+        // change view a Codex patch gets. `grant_root` is `None`: Claude's hook
+        // never asks for a standing write root.
+        let input_json = parse_tool_input(tool_input_json);
         let event = AgentEvent::PermissionRequested {
             request: AgentPermissionRequest {
                 request_id: request.id.to_string(),
                 tool_name: tool_name.to_owned(),
-                input_json: parse_tool_input(tool_input_json),
+                file_change: claude_file_change(tool_name, &input_json),
+                input_json,
                 tool_use_id: None,
-                file_change: None,
                 grant_root: None,
             },
         };

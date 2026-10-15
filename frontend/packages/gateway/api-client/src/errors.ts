@@ -50,6 +50,12 @@
  * also makes the browser refetch the session list, so a tab that missed the
  * close learns of it.
  *
+ * `question_blocked_by_permission` means an `AskUserQuestion` answer or cancel
+ * was refused because a permission request is pending in the same session:
+ * its dialog sits over the question in the terminal, so no keys were sent.
+ * The question is still pending, so callers keep their controls for a retry
+ * once the permission is answered.
+ *
  * `send_not_cancellable` means a send can no longer be cancelled: it never
  * existed, is already terminal (matched a transcript line, or already
  * cancelled), or is dispatched but its echo already arrived so the in-flight
@@ -116,6 +122,7 @@ export type ApiErrorCode =
   | 'permission_not_pending'
   | 'permission_decision_unsupported'
   | 'question_not_pending'
+  | 'question_blocked_by_permission'
   | 'send_not_cancellable'
   | 'send_not_releasable'
   | 'clone_root_duplicate'

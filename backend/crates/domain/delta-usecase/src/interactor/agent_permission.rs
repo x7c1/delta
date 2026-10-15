@@ -269,7 +269,7 @@ mod tests {
     /// A request that also asks for a write root carries that to both surfaces
     /// **without** a detail to ride on. This is the case the field's placement
     /// exists for: the change set could not be correlated, so the card has only
-    /// the input summary — and the broadest thing the dialog grants must still
+    /// the arguments — and the broadest thing the dialog grants must still
     /// reach it, or the user allows a whole tree while reading about one item.
     #[test]
     fn a_grant_root_reaches_both_surfaces_without_a_file_change_detail() {

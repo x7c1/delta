@@ -188,7 +188,7 @@ describe('TranscriptPane', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows the permission notice with Allow/Deny and the input summary', async () => {
+  it('shows the permission notice with Allow/Deny and the arguments', async () => {
     // The notice is driven by the `PermissionRequest` hook, which fires only when
     // an interactive dialog actually appears, so it is surfaced directly with no
     // debounce.
@@ -212,7 +212,7 @@ describe('TranscriptPane', () => {
 
     const notice = await screen.findByTestId('permission-notice');
     expect(notice).toHaveTextContent('Permission requested: Bash');
-    // The input summary shows WHAT the tool wants to do, not raw JSON.
+    // The arguments show WHAT the tool wants to do, not raw JSON.
     expect(notice).toHaveTextContent('rm -rf scratch');
     expect(within(notice).getByRole('button', { name: 'Allow' })).toBeEnabled();
     expect(within(notice).getByRole('button', { name: 'Deny' })).toBeEnabled();
