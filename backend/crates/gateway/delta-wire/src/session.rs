@@ -75,6 +75,14 @@ pub struct WireSession {
     /// screen renders it as the explanation, falling back to saying Delta never
     /// heard why.
     pub failure_reason: Option<String>,
+    /// Why Delta closed this session on its own, when it did — for instance
+    /// "Delta moved to a new port; resume to reconnect" when the desktop app
+    /// could not get its previous port back and ended the sessions whose
+    /// agents still called it. The closed session's screen shows it in place
+    /// of the plain "closed" notice. `null` for a session the user closed, one
+    /// whose agent exited, every open session (binding a pane clears it), and
+    /// rows that predate this field.
+    pub closed_reason: Option<String>,
 }
 
 impl From<Session> for WireSession {
@@ -94,6 +102,7 @@ impl From<Session> for WireSession {
             provider_thread_id: session.provider_thread_id,
             pull_request_number: session.pull_request_number,
             failure_reason: session.failure_reason,
+            closed_reason: session.closed_reason,
         }
     }
 }
@@ -124,6 +133,7 @@ mod tests {
             provider_thread_id: None,
             pull_request_number: Some(138),
             failure_reason: None,
+            closed_reason: None,
         };
         assert_eq!(
             serde_json::to_value(WireSession::from(session)).unwrap(),
@@ -142,6 +152,7 @@ mod tests {
                 "provider_thread_id": null,
                 "pull_request_number": 138,
                 "failure_reason": null,
+                "closed_reason": null,
             }),
         );
     }
@@ -164,6 +175,7 @@ mod tests {
             provider_thread_id: Some("thr_abc".into()),
             pull_request_number: None,
             failure_reason: None,
+            closed_reason: None,
         };
         let value = serde_json::to_value(WireSession::from(session)).unwrap();
         assert_eq!(value["provider"], serde_json::json!("codex"));

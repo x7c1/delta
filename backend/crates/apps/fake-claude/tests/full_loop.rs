@@ -94,9 +94,10 @@ async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
         tmux_socket: tmux_socket.clone(),
         auth_token: AUTH_TOKEN.into(),
         hook_secret: HOOK_SECRET.into(),
+        hook_secret_from_env: false,
         transcript_root: transcript_dir.to_string_lossy().into_owned(),
         port,
-        hook_endpoint_changed: false,
+        hook_endpoint_change: delta_bootstrap::HookEndpointChange::Unchanged,
         launch: LaunchConfig {
             claude_bin: claude_bin.to_string_lossy().into_owned(),
             ..LaunchConfig::default()

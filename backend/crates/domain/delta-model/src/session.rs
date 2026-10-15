@@ -126,4 +126,14 @@ pub struct Session {
     /// exited, a spawn that never bound before its deadline), and for rows that
     /// predate the column.
     pub failure_reason: Option<String>,
+    /// Why Delta closed this session on its own, when it did — for instance
+    /// because it moved to a new port while the session's agent kept running
+    /// with hooks aimed at the old one. Shown on the closed session's screen,
+    /// so the user knows why it closed and that sending resumes it.
+    ///
+    /// Written by the close that ended the session, and cleared as soon as the
+    /// session is bound to a pane again. `None` for a session the user closed,
+    /// one whose agent exited, every open session, and rows that predate the
+    /// column.
+    pub closed_reason: Option<String>,
 }

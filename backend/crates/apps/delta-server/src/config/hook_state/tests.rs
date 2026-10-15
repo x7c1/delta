@@ -43,14 +43,17 @@ fn a_missing_file_mints_and_records_a_secret_read_back_on_the_next_start() {
     );
 }
 
+/// A well-formed secret other than any Delta minted here.
+const OVERRIDE: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
 #[test]
 fn an_explicit_secret_wins_and_is_not_recorded() {
     let dir = TempDir::new().unwrap();
     let recorded = open_in(&dir).settle_hook_secret(None).unwrap().secret;
 
     let mut state = open_in(&dir);
-    let settled = state.settle_hook_secret(Some("override".into())).unwrap();
-    assert_eq!(settled.secret, "override");
+    let settled = state.settle_hook_secret(Some(OVERRIDE.into())).unwrap();
+    assert_eq!(settled.secret, OVERRIDE);
     assert!(settled.changed, "differs from the recorded secret");
     assert_eq!(
         recorded_in(&state_path(&dir)).hook_secret,
@@ -93,13 +96,17 @@ fn the_file_is_created_owner_only() {
 fn a_file_readable_by_others_is_tightened_and_still_read() {
     let dir = TempDir::new().unwrap();
     let path = state_path(&dir);
-    fs::write(&path, r#"{ "hook_secret": "abc123", "port": 4321 }"#).unwrap();
+    fs::write(
+        &path,
+        format!(r#"{{ "hook_secret": "{OVERRIDE}", "port": 4321 }}"#),
+    )
+    .unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
 
     let mut state = open_in(&dir);
     assert_eq!(mode_of(&path), 0o600);
     assert_eq!(state.port(), Some(4321));
-    assert_eq!(state.settle_hook_secret(None).unwrap().secret, "abc123");
+    assert_eq!(state.settle_hook_secret(None).unwrap().secret, OVERRIDE);
 }
 
 #[test]
@@ -136,15 +143,68 @@ fn a_file_that_is_not_json_is_replaced_with_a_fresh_secret() {
 }
 
 #[test]
-fn a_secret_that_cannot_ride_a_url_and_port_zero_are_dropped() {
+fn port_zero_is_dropped() {
     let dir = TempDir::new().unwrap();
-    fs::write(state_path(&dir), r#"{ "hook_secret": "a&b=c", "port": 0 }"#).unwrap();
+    fs::write(
+        state_path(&dir),
+        format!(r#"{{ "hook_secret": "{OVERRIDE}", "port": 0 }}"#),
+    )
+    .unwrap();
 
-    let mut state = open_in(&dir);
-    assert_eq!(state.port(), None);
-    let settled = state.settle_hook_secret(None).unwrap();
-    assert_ne!(settled.secret, "a&b=c");
-    assert!(settled.changed);
+    assert_eq!(open_in(&dir).port(), None);
+}
+
+/// Secrets of a form Delta never mints: too short, too long, upper case, not
+/// hexadecimal, or carrying characters a URL or a `curl` configuration would
+/// read as syntax.
+fn malformed_secrets() -> Vec<String> {
+    vec![
+        "abc123".to_owned(),
+        format!("{OVERRIDE}0"),
+        OVERRIDE.to_uppercase(),
+        OVERRIDE.replace('a', "g"),
+        format!("{}&b=c", &OVERRIDE[..60]),
+        format!("{}\"x", &OVERRIDE[..62]),
+    ]
+}
+
+#[test]
+fn a_malformed_recorded_secret_is_refused_naming_the_file() {
+    for secret in malformed_secrets() {
+        let dir = TempDir::new().unwrap();
+        let recorded = serde_json::json!({ "hook_secret": secret }).to_string();
+        fs::write(state_path(&dir), &recorded).unwrap();
+
+        let err = open_in(&dir).settle_hook_secret(None).unwrap_err();
+
+        assert!(
+            matches!(err, HookStateError::MalformedRecordedSecret { ref path } if *path == state_path(&dir)),
+            "{secret:?}: {err:?}"
+        );
+        assert!(err.to_string().contains("delta-hook-state.json"), "{err}");
+        assert_eq!(
+            fs::read_to_string(state_path(&dir)).unwrap(),
+            recorded,
+            "the file is left for the user to inspect or delete"
+        );
+    }
+}
+
+#[test]
+fn a_malformed_explicit_secret_is_refused_naming_the_variable() {
+    for secret in malformed_secrets() {
+        let dir = TempDir::new().unwrap();
+
+        let err = open_in(&dir)
+            .settle_hook_secret(Some(secret.clone()))
+            .unwrap_err();
+
+        assert!(
+            matches!(err, HookStateError::MalformedExplicitSecret),
+            "{secret:?}: {err:?}"
+        );
+        assert!(err.to_string().contains("DELTA_HOOK_SECRET"), "{err}");
+    }
 }
 
 #[test]

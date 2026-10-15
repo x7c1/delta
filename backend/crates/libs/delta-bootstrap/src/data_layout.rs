@@ -131,6 +131,17 @@ impl DataLayout {
         self.settings_dir().join(format!("{port}.json"))
     }
 
+    /// The `curl` configuration a command entry of the session settings for a
+    /// server on `port` reads to call `/hooks/<endpoint>`, next to
+    /// [`Self::session_settings`].
+    ///
+    /// The URL it holds carries the hook secret, which must not appear on the
+    /// command line (see `render_session_settings`), so it lives in this
+    /// owner-only file instead.
+    pub fn hook_curl_config(&self, port: u16, endpoint: &str) -> PathBuf {
+        self.settings_dir().join(format!("{port}-{endpoint}.curl"))
+    }
+
     /// The directory holding one session settings file per port.
     pub fn settings_dir(&self) -> PathBuf {
         self.dir.join(SETTINGS_DIR)

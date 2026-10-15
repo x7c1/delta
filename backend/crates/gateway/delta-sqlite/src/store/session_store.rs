@@ -65,6 +65,14 @@ impl SessionRecordStore for SqliteStore {
         self.mark_session_failed(id, reason).await
     }
 
+    async fn record_closed_reason(
+        &self,
+        id: &SessionId,
+        reason: &str,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        self.record_closed_reason(id, reason).await
+    }
+
     async fn relocate_transcript(
         &self,
         id: &SessionId,

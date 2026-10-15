@@ -30,6 +30,7 @@ struct SessionParts {
     provider_thread_id: Option<String>,
     pull_request_number: Option<i64>,
     failure_reason: Option<String>,
+    closed_reason: Option<String>,
 }
 
 fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
@@ -49,6 +50,7 @@ fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
         provider_thread_id: row.get(12)?,
         pull_request_number: row.get(13)?,
         failure_reason: row.get(14)?,
+        closed_reason: row.get(15)?,
     })
 }
 
@@ -69,6 +71,7 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
         provider_thread_id: parts.provider_thread_id,
         pull_request_number: parts.pull_request_number,
         failure_reason: parts.failure_reason,
+        closed_reason: parts.closed_reason,
     })
 }
 
@@ -79,9 +82,9 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
 fn page_row_from_row(row: &Row<'_>) -> Result<SessionPageRow> {
     let session = session_from_parts(map_session(row)?)?;
     // `last_activity_at` follows the `SESSION_COLS` block, so its positional
-    // index is the column count of `SESSION_COLS` (15) — the first column after
+    // index is the column count of `SESSION_COLS` (16) — the first column after
     // the session fields.
-    let last_activity_at: Option<String> = row.get(15)?;
+    let last_activity_at: Option<String> = row.get(16)?;
     Ok((session, last_activity_at))
 }
 
@@ -104,7 +107,7 @@ fn query_session_by_id(conn: &Connection, id: &SessionId) -> Result<Option<Sessi
 const SESSION_COLS: &str = "id, cwd, transcript_path, title, status, created_at, \
      branch_at_launch, repo_root, requested_workdir, repository_display_name, \
      provider, provider_session_id, provider_thread_id, pull_request_number, \
-     failure_reason";
+     failure_reason, closed_reason";
 
 impl SqliteStore {
     pub(super) async fn register_session(
@@ -208,6 +211,7 @@ impl SqliteStore {
                 provider_thread_id: None,
                 pull_request_number,
                 failure_reason: None,
+                closed_reason: None,
             },
             main_id,
         ))
@@ -303,6 +307,20 @@ impl SqliteStore {
         conn.execute(
             "UPDATE session SET status = 'failed', failure_reason = ?2 \
              WHERE id = ?1 AND status = 'spawning'",
+            params![id.as_str(), reason],
+        )
+        .map_err(Error::from)?;
+        Ok(())
+    }
+
+    pub(super) async fn record_closed_reason(
+        &self,
+        id: &SessionId,
+        reason: &str,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE session SET closed_reason = ?2 WHERE id = ?1",
             params![id.as_str(), reason],
         )
         .map_err(Error::from)?;

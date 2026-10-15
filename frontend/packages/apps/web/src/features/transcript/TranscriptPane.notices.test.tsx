@@ -1,6 +1,6 @@
 /**
- * The notices around the conversation: cannot-resume, external input, parked
- * send, running subagents, and the permission notice.
+ * The notices around the conversation: closed, cannot-resume, external input,
+ * parked send, running subagents, and the permission notice.
  *
  * Shared fixtures live in TranscriptPane.testkit.tsx.
  */
@@ -40,6 +40,28 @@ afterAll(() => server.close());
 
 describe('TranscriptPane', () => {
   beforeEach(resetTranscriptPaneState);
+
+  it('says a closed session is closed and that sending resumes it', async () => {
+    renderPane(mockThreads, MAIN_THREAD_ID, { readOnly: true });
+
+    expect(await screen.findByTestId('readonly-notice')).toHaveTextContent(
+      'This session is closed. Sending a message resumes it.',
+    );
+  });
+
+  it('shows why Delta closed a session in the closed notice', async () => {
+    // A session Delta closed on its own carries the reason on its row; the
+    // notice says it in place of the plain wording, so the user knows why the
+    // session closed and that a send brings it back.
+    renderPane(mockThreads, MAIN_THREAD_ID, {
+      readOnly: true,
+      closedReason: 'Delta moved to a new port; resume to reconnect',
+    });
+
+    expect(await screen.findByTestId('readonly-notice')).toHaveTextContent(
+      'Delta moved to a new port; resume to reconnect. Sending a message resumes it.',
+    );
+  });
 
   it('drops the composer and shows the cannot-resume notice for a resume-unavailable session', async () => {
     // A session whose transcript is gone can never be resumed, so every send or

@@ -126,7 +126,8 @@ Response:
 ### `POST /api/open-cwd`
 
 Launch an external tool at a directory Delta already knows. Only VS Code is
-registered today, spawned as `code <path>`.
+registered today, spawned as `code -- <path>`: the `--` ends option parsing, so
+the path is never read as one of the tool's flags.
 
 Request:
 
@@ -134,7 +135,8 @@ Request:
 { "path": "/work/delta", "handler": "vscode" }
 ```
 
-- `path` (required) — the absolute path to open. It MUST be a path Delta has
+- `path` (required) — the absolute path to open; a relative one is refused as
+  not allowed. It MUST be a path Delta has
   already surfaced to the browser (a `session.cwd`, `session.requested_workdir`,
   or `message.cwd`). The server checks that allowlist before invoking the
   opener, so a hand-crafted request cannot point the editor at an arbitrary
@@ -147,7 +149,7 @@ Response:
 
 - **204 No Content** — the tool was spawned.
 - **400** — a blank `path`; `code: "open_cwd_path_not_allowed"` when the path is
-  not in the allowlist, or `code: "open_cwd_unknown_handler"` for an
+  not absolute or not in the allowlist, or `code: "open_cwd_unknown_handler"` for an
   unregistered `handler` id.
 - **500** — `code: "open_cwd_command_not_found"` when the tool's binary is not
   installed on the server host (the browser renders a specific "VS Code is not

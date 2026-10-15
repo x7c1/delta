@@ -33,7 +33,7 @@ parsing and hook handling. It is two layers, cheapest first:
 1. **Rust contract canaries**
    (`backend/crates/apps/delta-server/tests/real_claude_canary.rs`): drive the
    real `claude` in tmux directly, with Delta's exact spawn shape (rendered
-   `--settings`, `--session-id`, positional prompt), capturing the raw hook
+   `--settings`, `--session-id`, `--` and the positional prompt), capturing the raw hook
    POSTs and the raw transcript JSONL — no server, no browser. On top of that
    shape the canary pins `--permission-mode default`, which Delta's own spawn
    leaves to the host, so a host's `defaultMode` cannot decide whether the

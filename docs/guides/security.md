@@ -47,6 +47,16 @@ the local machine, four guards defend the surface:
   is kept across restarts — in `delta-hook-state.json` in the data directory,
   owner-only (`0600`) — because a Claude Code session outlives Delta in tmux and
   keeps calling the URLs it was launched with. Deleting the file rotates it.
+  The secret never appears on a command line: the `SessionStart` hook and the
+  status line are shell commands that run `curl`, and a command line is
+  visible to every local process (the status line runs one on every refresh),
+  so each reads its URL from an owner-only `curl` configuration file next to
+  the settings file (`curl -K <file>`), and every value Delta puts in those
+  commands is shell-quoted. Only a secret of the form Delta mints (64 lowercase
+  hexadecimal characters) is adopted, from the file or `DELTA_HOOK_SECRET`;
+  anything else stops the start with an error naming its source. Like
+  `DELTA_AUTH_TOKEN`, `DELTA_HOOK_SECRET` is removed from the environment once
+  read, so no agent or command Delta starts can read it.
 - **Scoped trust seeding** — the subject of the next section: Delta pre-accepts
   Claude Code's workspace-trust dialog only for worktrees it created itself,
   and only when you already trust what is in them or confirm it.
@@ -192,6 +202,9 @@ need more than an ordinary file:
   settings Claude Code is launched with. It embeds the hook secret in every hook
   URL, and its `statusLine` / `SessionStart` entries are commands Claude Code
   executes. So it is a secret-read surface *and* a command-injection surface.
+  The `curl` configuration files those commands read
+  (`settings/<port>-<endpoint>.curl`) hold the secret too, and are written the
+  same way, every time the settings file is.
 - **The tmux config** — `<data dir>/tmux.conf`, handed to tmux with `-f`. It
   holds no secret, but tmux executes every directive in it, so it is a
   directive-injection surface.

@@ -118,6 +118,13 @@ export interface TranscriptPaneProps {
    * which resumes it with fresh settings.
    */
   hooksUnreachable?: boolean;
+  /**
+   * Why Delta closed the focused session on its own — the session row's
+   * `closed_reason` (for instance, it moved to a new port while the session's
+   * agent still called the old one). Shown in the closed notice in place of
+   * the plain wording; `null` or absent for every other session.
+   */
+  closedReason?: string | null;
 }
 
 /**
@@ -140,6 +147,7 @@ export function TranscriptPane({
   providerHasTerminal,
   providerHasAllowForSession,
   hooksUnreachable = false,
+  closedReason = null,
 }: TranscriptPaneProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
@@ -608,6 +616,7 @@ export function TranscriptPane({
         readOnly={readOnly}
         spawning={spawning}
         hooksUnreachable={hooksUnreachable}
+        closedReason={closedReason}
         composerMode={composerMode}
         pendingEntries={pendingEntries}
       />

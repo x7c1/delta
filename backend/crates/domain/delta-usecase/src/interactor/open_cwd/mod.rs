@@ -2,11 +2,13 @@
 //!
 //! The endpoint takes a path plus an optional handler id and:
 //!
-//! 1. Rejects the path if it is not in the known-cwd allowlist (defence in
-//!    depth so a hand-crafted request cannot open an arbitrary directory).
+//! 1. Rejects the path if it is not absolute or not in the known-cwd
+//!    allowlist (defence in depth so a hand-crafted request cannot open an
+//!    arbitrary directory).
 //! 2. Resolves the handler from the internal registry (defaults to VS Code).
-//! 3. Spawns the handler's command with the path as a single argument via the
-//!    [`ExternalOpener`](crate::ExternalOpener) port.
+//! 3. Spawns the handler's command with `--` and then the path via the
+//!    [`ExternalOpener`](crate::ExternalOpener) port, so the path is never
+//!    parsed as one of the handler's options.
 //!
 //! Only one handler ships initially — VS Code — but the shape is a registry
 //! rather than a hard-coded call so a future entry (IntelliJ, Zed, …) only
@@ -37,7 +39,8 @@ pub type ExternalHandlerId = &'static str;
 /// The initial registry contains one entry (VS Code); adding another handler
 /// is a single `REGISTRY` row. Argument rendering is intentionally minimal
 /// — every current handler takes the target path as a single trailing
-/// argument, so a `Vec<String>` built from `[path]` covers it. If a future
+/// argument after the `--` end-of-options marker, so a `Vec<String>` built
+/// from `["--", path]` covers it. If a future
 /// handler needs more shape (a `--project` flag, multiple positional args),
 /// the registry entry can grow a rendering closure without disturbing the
 /// call site.
@@ -49,7 +52,8 @@ pub struct ExternalHandler {
     /// Human-facing name for menus and error messages (`Visual Studio Code`).
     pub display_name: &'static str,
     /// The command Delta invokes (e.g. `code`). Passed to
-    /// [`ExternalOpener::open`](crate::ExternalOpener::open) as-is; the path is appended as the sole arg.
+    /// [`ExternalOpener::open`](crate::ExternalOpener::open) as-is; `--` and
+    /// the path are its only arguments.
     pub command: &'static str,
 }
 
@@ -64,6 +68,10 @@ const REGISTRY: &[ExternalHandler] = &[ExternalHandler {
     display_name: "Visual Studio Code",
     command: "code",
 }];
+
+/// The end-of-options marker passed before the path, so a path the handler
+/// would otherwise read as one of its own flags is taken literally.
+const END_OF_OPTIONS: &str = "--";
 
 /// Look up a handler by id, returning `None` when the id is not registered.
 fn find_handler(id: &str) -> Option<ExternalHandler> {
@@ -82,7 +90,7 @@ where
     /// default handler (VS Code) is used; otherwise it must resolve to a
     /// registered handler or [`Error::OpenCwdUnknownHandler`] is returned.
     ///
-    /// `path` must appear in the known-cwd allowlist — the set of paths
+    /// `path` must be absolute and must appear in the known-cwd allowlist — the set of paths
     /// Delta has actually shown the browser (`session.cwd`,
     /// `session.requested_workdir`, or `message.cwd`). A path not in the set
     /// is [`Error::OpenCwdPathNotAllowed`], not silently spawned: the click
@@ -96,11 +104,17 @@ where
             None => find_handler(VSCODE_HANDLER_ID)
                 .expect("the default VS Code handler is always registered"),
         };
-        if !self.store.cwd_exists(path).await? {
+        // Every path Delta records is absolute, so a relative one can only come
+        // from a hand-crafted request; refuse it before the allowlist, whose
+        // answer for it would depend on what happens to be stored.
+        if !std::path::Path::new(path).is_absolute() || !self.store.cwd_exists(path).await? {
             return Err(Error::OpenCwdPathNotAllowed(path.to_owned()));
         }
         self.external_opener
-            .open(handler.command, vec![path.to_owned()])
+            .open(
+                handler.command,
+                vec![END_OF_OPTIONS.to_owned(), path.to_owned()],
+            )
             .await
     }
 }

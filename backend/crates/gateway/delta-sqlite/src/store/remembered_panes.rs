@@ -48,8 +48,8 @@ impl SqliteStore {
         let tx = conn.transaction().map_err(Error::from)?;
         let written = tx
             .execute(
-                "UPDATE session SET tmux_session = ?2, tmux_pane = ?3, hooks_unreachable = ?4 \
-                 WHERE id = ?1",
+                "UPDATE session SET tmux_session = ?2, tmux_pane = ?3, hooks_unreachable = ?4, \
+                 closed_reason = NULL WHERE id = ?1",
                 params![
                     id.as_str(),
                     pane.tmux_session,

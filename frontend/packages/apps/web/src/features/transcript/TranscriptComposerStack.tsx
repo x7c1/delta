@@ -30,6 +30,8 @@ interface TranscriptComposerStackProps {
   spawning: boolean;
   /** True when the focused session's pane lost hook contact. */
   hooksUnreachable: boolean;
+  /** Why Delta closed the focused session on its own, if it did. */
+  closedReason: string | null;
   /** What the composer sends to. */
   composerMode: ComposerMode;
   /** The pending-send rows shown above the composer. */
@@ -47,6 +49,7 @@ export function TranscriptComposerStack({
   readOnly,
   spawning,
   hooksUnreachable,
+  closedReason,
   composerMode,
   pendingEntries,
 }: TranscriptComposerStackProps) {
@@ -132,7 +135,9 @@ export function TranscriptComposerStack({
             >
               <Badge tone="neutral">closed</Badge>
               <span>
-                This session is closed. Sending a message resumes it.
+                {closedReason !== null
+                  ? `${closedReason}. Sending a message resumes it.`
+                  : 'This session is closed. Sending a message resumes it.'}
               </span>
             </div>
           )}

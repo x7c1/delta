@@ -8,7 +8,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use delta_usecase::{EraseReport, UpdateRestart};
+use delta_usecase::{EraseReport, HookEndpointChange, UpdateRestart};
 use tokio::net::TcpListener;
 use tracing::level_filters::LevelFilter;
 use tracing::Subscriber;
@@ -135,7 +135,9 @@ pub async fn bind_loopback(port: u16) -> std::io::Result<TcpListener> {
 /// still reach the new process. When the recorded port is taken (or none was
 /// recorded) it binds a fresh ephemeral port and records that instead; losing a
 /// recorded port is logged at `warn` and sets
-/// [`Config::hook_endpoint_changed`](delta_bootstrap::Config::hook_endpoint_changed).
+/// [`Config::hook_endpoint_change`](delta_bootstrap::Config::hook_endpoint_change)
+/// to [`HookEndpointChange::PortMoved`], so the sessions still calling the old
+/// port are ended rather than re-adopted.
 ///
 /// An `explicit` port (`DELTA_PORT`) is bound as-is — failing if it is taken,
 /// as before — and is neither compared with nor recorded over the recorded one,
@@ -161,14 +163,14 @@ pub async fn bind_app_listener(
                 port,
                 "could not bind the port recorded by the previous launch ({err}); \
                  taking a fresh one. Sessions that survived the restart still call \
-                 the old port and cannot reach Delta"
+                 the old port, so they are ended; sending to one resumes it"
             ),
         }
     }
     let listener = bind_loopback(0).await?;
     config.port = listener.local_addr()?.port();
     if recorded.is_some() {
-        config.hook_endpoint_changed = true;
+        config.hook_endpoint_change = HookEndpointChange::PortMoved;
     }
     state.record_port(config.port)?;
     Ok(listener)
@@ -320,8 +322,9 @@ mod tests {
 
         let port = listener.local_addr().unwrap().port();
         assert_eq!(config.port, port);
-        assert!(
-            !config.hook_endpoint_changed,
+        assert_eq!(
+            config.hook_endpoint_change,
+            HookEndpointChange::Unchanged,
             "no recorded port, so nothing to lose"
         );
         assert_eq!(state_in(&config).port(), Some(port));
@@ -341,7 +344,7 @@ mod tests {
 
         assert_eq!(listener.local_addr().unwrap().port(), recorded);
         assert_eq!(config.port, recorded);
-        assert!(!config.hook_endpoint_changed);
+        assert_eq!(config.hook_endpoint_change, HookEndpointChange::Unchanged);
     }
 
     #[tokio::test]
@@ -360,7 +363,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         assert_ne!(port, taken);
         assert_eq!(config.port, port);
-        assert!(config.hook_endpoint_changed);
+        assert_eq!(config.hook_endpoint_change, HookEndpointChange::PortMoved);
         assert_eq!(
             state_in(&config).port(),
             Some(port),
@@ -384,7 +387,7 @@ mod tests {
 
         assert_eq!(listener.local_addr().unwrap().port(), explicit);
         assert_eq!(config.port, explicit);
-        assert!(!config.hook_endpoint_changed);
+        assert_eq!(config.hook_endpoint_change, HookEndpointChange::Unchanged);
         assert_eq!(
             state_in(&config).port(),
             Some(recorded),

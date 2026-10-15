@@ -2,6 +2,7 @@
 //! closed, and its record is cleared so no later step goes looking for it.
 
 use crate::interactor::testing::*;
+use crate::HookEndpointChange;
 
 use super::readoption_support::{left_behind, SURVIVING_TOKEN};
 
@@ -11,7 +12,10 @@ async fn boot_clears_the_record_of_a_pane_that_did_not_survive() {
     let id = left_behind(&ix, "sess-A", SURVIVING_TOKEN).await;
     // `SURVIVING_TOKEN` is not running: the pane ended while Delta was down.
 
-    let summary = ix.readopt_surviving_sessions(false).await.unwrap();
+    let summary = ix
+        .readopt_surviving_sessions(HookEndpointChange::Unchanged)
+        .await
+        .unwrap();
 
     assert_eq!(summary.gone, 1);
     assert_eq!(summary.adopted, 0);

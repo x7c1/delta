@@ -24,7 +24,8 @@ async fn seed_known_cwd(
         .unwrap();
 }
 
-/// A known cwd + the default handler spawns `code <path>` and reports OK.
+/// A known cwd + the default handler spawns `code -- <path>` and reports OK;
+/// the `--` keeps the path from ever being read as one of `code`'s options.
 #[tokio::test]
 async fn open_cwd_default_handler_spawns_code() {
     let opener = Arc::new(FakeExternalOpener::default());
@@ -36,7 +37,10 @@ async fn open_cwd_default_handler_spawns_code() {
     let calls = opener.calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].command, "code");
-    assert_eq!(calls[0].args, vec!["/projects/known".to_string()]);
+    assert_eq!(
+        calls[0].args,
+        vec!["--".to_string(), "/projects/known".to_string()]
+    );
 }
 
 /// An explicit `vscode` handler id resolves to the same command.
@@ -73,6 +77,39 @@ async fn open_cwd_rejects_a_path_not_in_the_allowlist() {
     assert!(
         opener.calls().is_empty(),
         "a rejected path must never reach the opener"
+    );
+}
+
+/// A relative path is refused even when a session records exactly that cwd,
+/// and the opener is never invoked.
+#[tokio::test]
+async fn open_cwd_refuses_a_relative_path() {
+    let opener = Arc::new(FakeExternalOpener::default());
+    let ix = interactor().with_external_opener(Arc::clone(&opener) as Arc<dyn ExternalOpener>);
+    ix.store()
+        .register_session(NewSession {
+            id: SessionId::from("s-rel"),
+            cwd: "--new-window".into(),
+            transcript_path: "/tmp/r.jsonl".into(),
+            branch_at_launch: None,
+            repo_root: None,
+            repository_display_name: None,
+        })
+        .await
+        .unwrap();
+
+    let err = ix
+        .open_cwd("--new-window", None)
+        .await
+        .expect_err("a relative path is refused");
+
+    match err {
+        Error::OpenCwdPathNotAllowed(path) => assert_eq!(path, "--new-window"),
+        other => panic!("expected OpenCwdPathNotAllowed, got {other:?}"),
+    }
+    assert!(
+        opener.calls().is_empty(),
+        "a refused path must never reach the opener"
     );
 }
 

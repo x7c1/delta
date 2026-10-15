@@ -3,9 +3,10 @@
 //! Delta renders a settings JSON whose `hooks` section points each event back
 //! at the server, and passes it via `claude --settings <file>`. Most events
 //! are native `http` hooks (`{"type":"http","url":...}`); `SessionStart` is a
-//! `command` hook whose shell command `curl`s the same endpoint. The fake
-//! reads the URL from either shape: it does not care *how* the real `claude`
-//! would have delivered the event, only *where* the server listens for it.
+//! `command` hook whose shell command `curl`s the same endpoint, reading the
+//! URL from the `curl` configuration file it names with `-K`. The fake reads
+//! the URL from either shape: it does not care *how* the real `claude` would
+//! have delivered the event, only *where* the server listens for it.
 
 use serde_json::Value;
 
@@ -38,27 +39,58 @@ impl HookEndpoints {
 
 /// The URL of the first hook configured for `event`.
 ///
-/// An `http` hook carries it in `url`; a `command` hook embeds it in the
-/// `curl` command line, where it is the first `http://…` token.
+/// An `http` hook carries it in `url`; a `command` hook's `curl` reads it from
+/// the configuration file named after `-K`.
 fn hook_url(settings: &Value, event: &str) -> Result<String, String> {
     let hook = settings["hooks"][event][0]["hooks"][0].clone();
     if let Some(url) = hook["url"].as_str() {
         return Ok(url.to_owned());
     }
     if let Some(command) = hook["command"].as_str() {
-        if let Some(url) = first_http_token(command) {
-            return Ok(url);
-        }
+        let config = curl_config_path(command)
+            .ok_or_else(|| format!("the {event} command names no `curl -K` file"))?;
+        let text = std::fs::read_to_string(&config)
+            .map_err(|e| format!("read the {event} curl configuration {config}: {e}"))?;
+        return curl_config_url(&text)
+            .ok_or_else(|| format!("the {event} curl configuration {config} holds no url"));
     }
     Err(format!("settings carry no resolvable {event} hook URL"))
 }
 
-/// The first whitespace-delimited `http://…` token of a command line.
-fn first_http_token(command: &str) -> Option<String> {
-    command
-        .split_whitespace()
-        .find(|token| token.starts_with("http://"))
-        .map(|token| token.to_owned())
+/// The shell word after ` -K ` in `command`, with its quoting removed: a
+/// single-quoted run is taken literally and a backslash escapes the next
+/// character, which covers the `'…'\''…'` form Delta quotes paths in.
+fn curl_config_path(command: &str) -> Option<String> {
+    let (_, rest) = command.split_once(" -K ")?;
+    let mut word = String::new();
+    let mut chars = rest.trim_start().chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => word.extend(chars.by_ref().take_while(|&c| c != '\'')),
+            '\\' => word.extend(chars.next()),
+            c if c.is_whitespace() => break,
+            c => word.push(c),
+        }
+    }
+    (!word.is_empty()).then_some(word)
+}
+
+/// The `url = "…"` value of a `curl` configuration file, unescaped.
+fn curl_config_url(text: &str) -> Option<String> {
+    let value = text.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        (key.trim() == "url").then(|| value.trim())
+    })?;
+    let quoted = value.strip_prefix('"')?.strip_suffix('"')?;
+    let mut url = String::new();
+    let mut chars = quoted.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => url.extend(chars.next()),
+            c => url.push(c),
+        }
+    }
+    Some(url)
 }
 
 #[cfg(test)]
@@ -66,7 +98,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn settings() -> Value {
+    fn settings(session_start_config: &str) -> Value {
         json!({
             "hooks": {
                 "UserPromptSubmit": [
@@ -88,15 +120,37 @@ mod tests {
                     { "hooks": [ { "type": "http", "url": "http://127.0.0.1:7878/hooks/permission-request" } ] }
                 ],
                 "SessionStart": [
-                    { "hooks": [ { "type": "command", "command": "curl -sS -m 5 -o /dev/null -X POST http://127.0.0.1:7878/hooks/session-start -H 'content-type: application/json' --data-binary @-" } ] }
+                    { "hooks": [ { "type": "command", "command": format!(
+                        "curl -sS -m 5 -o /dev/null -X POST -K {session_start_config} \
+                         -H 'content-type: application/json' --data-binary @-"
+                    ) } ] }
                 ]
             }
         })
     }
 
+    /// A `curl` configuration for the SessionStart endpoint in a directory
+    /// whose name needs quoting, and the settings whose command names it the
+    /// way Delta quotes it.
+    fn settings_with_config() -> (tempfile::TempDir, Value) {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join("Delta's data");
+        std::fs::create_dir(&config_dir).unwrap();
+        let config = config_dir.join("7878-session-start.curl");
+        std::fs::write(
+            &config,
+            "url = \"http://127.0.0.1:7878/hooks/session-start?hs=abc\"\n",
+        )
+        .unwrap();
+        let quoted = format!("'{}'", config.to_str().unwrap().replace('\'', r"'\''"));
+        let settings = settings(&quoted);
+        (dir, settings)
+    }
+
     #[test]
     fn resolves_http_hooks_from_their_url() {
-        let endpoints = HookEndpoints::from_settings(&settings()).unwrap();
+        let (_dir, settings) = settings_with_config();
+        let endpoints = HookEndpoints::from_settings(&settings).unwrap();
         assert_eq!(
             endpoints.user_prompt_submit,
             "http://127.0.0.1:7878/hooks/user-prompt-submit"
@@ -105,11 +159,12 @@ mod tests {
     }
 
     #[test]
-    fn resolves_the_command_hook_from_its_curl_command() {
-        let endpoints = HookEndpoints::from_settings(&settings()).unwrap();
+    fn resolves_the_command_hook_from_its_curl_config() {
+        let (_dir, settings) = settings_with_config();
+        let endpoints = HookEndpoints::from_settings(&settings).unwrap();
         assert_eq!(
             endpoints.session_start,
-            "http://127.0.0.1:7878/hooks/session-start"
+            "http://127.0.0.1:7878/hooks/session-start?hs=abc"
         );
     }
 

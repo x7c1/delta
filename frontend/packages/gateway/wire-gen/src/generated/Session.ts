@@ -85,4 +85,14 @@ pull_request_number: number | null,
  * screen renders it as the explanation, falling back to saying Delta never
  * heard why.
  */
-failure_reason: string | null, };
+failure_reason: string | null, 
+/**
+ * Why Delta closed this session on its own, when it did — for instance
+ * "Delta moved to a new port; resume to reconnect" when the desktop app
+ * could not get its previous port back and ended the sessions whose
+ * agents still called it. The closed session's screen shows it in place
+ * of the plain "closed" notice. `null` for a session the user closed, one
+ * whose agent exited, every open session (binding a pane clears it), and
+ * rows that predate this field.
+ */
+closed_reason: string | null, };

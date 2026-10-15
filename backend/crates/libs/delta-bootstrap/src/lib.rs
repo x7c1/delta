@@ -18,7 +18,7 @@ mod error;
 pub use error::{Error, Result};
 
 mod settings;
-pub use settings::render_session_settings;
+pub use settings::{render_session_settings, SessionSettings};
 
 mod launch_option_vocabulary;
 pub use launch_option_vocabulary::{
@@ -69,6 +69,10 @@ pub use delta_usecase::LaunchConfig;
 // built (`Config::launcher`, `Config::build_origin`) without depending on the
 // use-case crate directly.
 pub use delta_usecase::{BuildOrigin, Launcher};
+
+// Re-exported so a shell can read and set `Config::hook_endpoint_change`
+// without depending on the use-case crate directly.
+pub use delta_usecase::HookEndpointChange;
 
 // Re-exported so the desktop shell can start the app an update was installed
 // as (`ServerStopped::Restart`) without depending on the use-case crate

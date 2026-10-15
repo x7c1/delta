@@ -58,7 +58,10 @@ It holds:
 - `sessions/`, the working directories of sessions started without a
   repository or a chosen folder.
 - `settings/<port>.json`, the settings a session is launched with. There is one
-  file for every port the app has used.
+  file for every port the app has used, and beside each, the
+  `settings/<port>-<endpoint>.curl` files the settings' status line and
+  `SessionStart` hook read their hook URL from, so the hook secret stays off
+  their command lines.
 - `tmux.conf`, the configuration of Delta's tmux server.
 - `updates/`, a newer release the desktop app downloaded and verified, with
   its signature (`<file>.minisig`) beside it, kept until it is installed; a download of another version replaces it, and the
@@ -103,7 +106,8 @@ that those calls still reach Delta and are accepted, the app keeps both in
 - `hook_secret` — minted on the first launch and reused on every launch after.
 - `port` — the port the app took. The next launch tries it first; if another
   program holds it by then, the app takes a fresh port, records that one, and
-  logs a warning that sessions which survived the restart cannot reach it
+  logs a warning; sessions which survived the restart still call the old port,
+  so the app ends them
   (see [Quitting, relaunching and upgrading](#quitting-relaunching-and-upgrading)
   for what those sessions look like).
 
@@ -137,14 +141,18 @@ the way out. What happens to the sessions that were open depends on the agent:
   next send resumes the conversation where it left off.
 
 A surviving Claude Code session reports back to Delta through the hook URLs it
-was launched with. If the next launch could not take the same port, or the
-hook secret changed (see the hook state file above), those calls no longer
-reach Delta. Such a session is still re-adopted — its output and terminal work
-— but prompt echoes, turn ends and permission dialogs do not arrive, and the
-session shows the notice *"Delta lost contact with this session"*. Use its
-terminal, or choose Close in the session's menu and send again: Close ends the
-old process, and the send resumes the conversation with current settings, which
-restores everything.
+was launched with. If the next launch could not take the same port, those calls
+go to the old port, where some other program may now be listening, so Delta
+does not keep such a session: it ends its Claude Code process and lists it as
+closed, with the notice *"Delta moved to a new port; resume to reconnect"*.
+Sending to it resumes the conversation with hooks aimed at the new port. If
+only the hook secret changed (see the hook state file above), the calls still
+reach Delta but are refused. Such a session is re-adopted — its output and
+terminal work — but prompt echoes, turn ends and permission dialogs do not
+arrive, and the session shows the notice *"Delta lost contact with this
+session"*. Use its terminal, or choose Close in the session's menu and send
+again: Close ends the old process, and the send resumes the conversation with
+current settings, which restores everything.
 
 Upgrading works the same way: install the new version over the old one (see
 [Updating](#updating)) while sessions are running, and the new version

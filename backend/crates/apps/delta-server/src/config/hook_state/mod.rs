@@ -25,8 +25,11 @@
 //! warning, rather than refused: the secret it holds may already have been
 //! readable, but refusing to start would not un-read it, and deleting the file
 //! is how to rotate the secret. A missing file is a first run; a file that is
-//! not valid JSON, or holds a secret that cannot ride a URL, is ignored with a
-//! warning and overwritten with a fresh secret.
+//! not valid JSON is ignored with a warning and overwritten with a fresh
+//! secret. A recorded secret that is not 64 lowercase hexadecimal characters —
+//! the form Delta mints — is refused instead, and so is such a
+//! `DELTA_HOOK_SECRET`: the start fails with an error naming the source rather
+//! than adopting a value Delta would never have written.
 
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write as _};
@@ -35,7 +38,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::secrets::mint_secret;
+use super::secrets::{is_well_formed_hook_secret, mint_secret};
 
 mod hook_state_error;
 pub use hook_state_error::HookStateError;
@@ -83,7 +86,7 @@ impl HookStateFile {
             });
         };
         let recorded = match serde_json::from_str::<Recorded>(&text) {
-            Ok(recorded) => sanitize(recorded, &path),
+            Ok(recorded) => sanitize(recorded),
             Err(err) => {
                 tracing::warn!(
                     path = %path.display(),
@@ -110,16 +113,26 @@ impl HookStateFile {
     ///
     /// A non-empty `explicit` secret (`DELTA_HOOK_SECRET`) wins and is not
     /// recorded. Otherwise the recorded secret is reused, or, when there is
-    /// none, a fresh one is minted and recorded.
+    /// none, a fresh one is minted and recorded. Whichever secret is adopted
+    /// must have the form Delta mints; one that does not is an error naming
+    /// where it came from.
     pub fn settle_hook_secret(
         &mut self,
         explicit: Option<String>,
     ) -> Result<SettledSecret, HookStateError> {
         if let Some(secret) = explicit.filter(|secret| !secret.is_empty()) {
+            if !is_well_formed_hook_secret(&secret) {
+                return Err(HookStateError::MalformedExplicitSecret);
+            }
             let changed = self.recorded.hook_secret.as_deref() != Some(secret.as_str());
             return Ok(SettledSecret { secret, changed });
         }
         if let Some(secret) = &self.recorded.hook_secret {
+            if !is_well_formed_hook_secret(secret) {
+                return Err(HookStateError::MalformedRecordedSecret {
+                    path: self.path.clone(),
+                });
+            }
             return Ok(SettledSecret {
                 secret: secret.clone(),
                 changed: false,
@@ -203,18 +216,10 @@ fn read_private(path: &Path) -> Result<Option<String>, HookStateError> {
     fs::read_to_string(path).map(Some).map_err(read_error)
 }
 
-/// Drop recorded values this run cannot use, warning about each: a secret that
-/// is empty or would not survive unescaped in a URL query, and port 0.
-fn sanitize(mut recorded: Recorded, path: &Path) -> Recorded {
-    if let Some(secret) = &recorded.hook_secret {
-        if secret.is_empty() || !secret.chars().all(|c| c.is_ascii_alphanumeric()) {
-            tracing::warn!(
-                path = %path.display(),
-                "the hook state file holds an unusable hook secret; minting a new one"
-            );
-            recorded.hook_secret = None;
-        }
-    }
+/// Drop recorded values this run cannot use: port 0. A malformed secret is
+/// kept, so adopting it ([`HookStateFile::settle_hook_secret`]) refuses it by
+/// name rather than quietly rotating it.
+fn sanitize(mut recorded: Recorded) -> Recorded {
     if recorded.port == Some(0) {
         recorded.port = None;
     }

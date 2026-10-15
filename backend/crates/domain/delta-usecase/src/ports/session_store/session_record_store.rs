@@ -78,6 +78,16 @@ pub trait SessionRecordStore: Send + Sync {
     /// [`SessionStatus::Failed`].
     async fn mark_session_failed(&self, id: &SessionId, reason: Option<&str>) -> Result<()>;
 
+    /// Record why Delta closed a session on its own, for the closed session's
+    /// screen ([`Session::closed_reason`]). A missing row is a no-op.
+    ///
+    /// The reason stays until the session is bound to a pane again:
+    /// [`RememberedPaneStore::remember_pane`] clears it in the same write.
+    ///
+    /// [`Session::closed_reason`]: delta_model::Session::closed_reason
+    /// [`RememberedPaneStore::remember_pane`]: super::RememberedPaneStore::remember_pane
+    async fn record_closed_reason(&self, id: &SessionId, reason: &str) -> Result<()>;
+
     /// Point a session at the transcript Claude Code moved it to, in any
     /// status.
     ///
@@ -186,6 +196,10 @@ impl SessionRecordStore for Box<dyn SessionStore> {
 
     async fn mark_session_failed(&self, id: &SessionId, reason: Option<&str>) -> Result<()> {
         (**self).mark_session_failed(id, reason).await
+    }
+
+    async fn record_closed_reason(&self, id: &SessionId, reason: &str) -> Result<()> {
+        (**self).record_closed_reason(id, reason).await
     }
 
     async fn relocate_transcript(

@@ -203,9 +203,7 @@ where
         if pane.seed_trust {
             self.pre_accept_launch_trust(launching).await?;
         }
-        self.workspace
-            .write_session_settings(&self.session_settings_path, &self.session_settings_json)
-            .await?;
+        self.write_session_settings().await?;
         if await_recorded_spawn(self_sender, launching).await == LaunchApproval::Abandon {
             return Ok(());
         }

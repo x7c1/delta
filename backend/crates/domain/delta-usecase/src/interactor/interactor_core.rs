@@ -80,6 +80,11 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// directory so spawning/resuming in a real project never overwrites that
     /// project's own `.claude/settings.json`.
     pub(in crate::interactor) session_settings_path: String,
+    /// The files written next to [`Self::session_settings_path`] every time it
+    /// is written — the `curl` configurations the settings' command entries
+    /// read their URLs from. Empty unless wired through
+    /// [`Interactor::with_session_settings_files`].
+    pub(in crate::interactor) session_settings_files: Vec<crate::SessionSettingsFile>,
     /// How sessions are launched (which binary) and how long the watchdog
     /// waits on a launch. Production defaults via [`LaunchConfig::default`];
     /// overridden through [`Interactor::with_launch_config`].

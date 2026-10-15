@@ -3,6 +3,7 @@
 //! Delta was down is ingested from the stored cursor on.
 
 use crate::interactor::testing::*;
+use crate::HookEndpointChange;
 
 use super::readoption_support::{left_behind, pane_for, survives, SURVIVING_TOKEN};
 
@@ -17,7 +18,10 @@ async fn boot_readopts_a_surviving_pane_without_launching_and_catches_up_its_tra
         user_line("written-while-down", "hello"),
     );
 
-    let summary = ix.readopt_surviving_sessions(false).await.unwrap();
+    let summary = ix
+        .readopt_surviving_sessions(HookEndpointChange::Unchanged)
+        .await
+        .unwrap();
 
     assert_eq!(summary.adopted, 1);
     assert_eq!(summary.hooks_unreachable, 0);

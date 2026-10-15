@@ -119,6 +119,7 @@ export function sendHandlers({
             status: 'spawning',
             created_at: createdAt,
             failure_reason: null,
+            closed_reason: null,
             // `branch_at_launch`/`repo_root`/`repository_display_name` are
             // captured server-side at the spawn moment. The mock has no real
             // git, so seed all three `null` — mirroring "spawning, no hook

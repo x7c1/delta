@@ -26,6 +26,10 @@ pub trait Workspace: Send + Sync {
     /// Write `settings_json` to `settings_path`, creating parent directories if
     /// absent and overwriting any existing file so the hook URLs always reflect
     /// the current port.
+    ///
+    /// Also called for each file that goes next to the settings file (see
+    /// [`crate::SessionSettingsFile`]): every file it writes is owner-only,
+    /// since each may carry the hook secret.
     async fn write_session_settings(&self, settings_path: &str, settings_json: &str) -> Result<()>;
 
     /// Create the directory `path` (and any missing ancestors) owner-only,

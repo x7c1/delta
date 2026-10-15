@@ -143,7 +143,7 @@ variables, all with local-friendly defaults:
 | `DELTA_PORT` | `7878` | TCP port |
 | `DELTA_IDENTIFIER` | `io.github.x7c1.delta` | the name the server runs under: it names the default data directory and the default tmux socket (`make dev` sets `io.github.x7c1.delta.dev`; the desktop app uses its bundle identifier and ignores this variable) |
 | `DELTA_DATA_DIR` | `<platform data dir>/<identifier>` | the directory every file the server writes lives in (layout below); the platform data dir is `~/Library/Application Support` on macOS and `$XDG_DATA_HOME` or `~/.local/share` on Linux |
-| `DELTA_HOOK_SECRET` | recorded in the hook state file | the secret every hook URL carries; overrides the recorded one without replacing it |
+| `DELTA_HOOK_SECRET` | recorded in the hook state file | the secret every hook URL carries; overrides the recorded one without replacing it. Must be 64 lowercase hexadecimal characters (the form Delta mints), or the server refuses to start; removed from the environment the server's children inherit once read |
 | `DELTA_WORKTREE_BASE` | `$HOME/.delta/worktrees` (`scripts/dev.sh`: `$HOME/.delta-dev/worktrees`) | base directory for per-session git worktrees (`<base>/<repo>-<session-id>`), deliberately outside any repo tree so the worktree does not inherit a surrounding `CLAUDE.md`/settings |
 | `DELTA_TMUX_SOCKET` | the identifier | dedicated tmux socket (`tmux -L <socket>`) for Delta's sessions, isolated from your default tmux server |
 | `DELTA_RELEASE_FEED_URL` | `https://api.github.com/repos/x7c1/delta/releases/latest` | where the server asks, in the background, for the newest published release, to tell the browser footer about a newer one (schedule and failure handling in [`GET /api/latest-release`](../api/settings.md#get-apilatest-release)); set to the empty string, the check is off and the server never asks (the fake-mode e2e harness does so, so CI never reaches GitHub). Another URL must be `https://`, and only a `local` build ([build origin](#build-origin)) honours it: a `release` build, and any build given a URL that is not `https://`, ignores it with a warning and asks the default |
@@ -159,6 +159,7 @@ writes from it, in one place (`delta_bootstrap::DataLayout`):
   delta-hook-state.json    the hook secret and the desktop app's port, kept across restarts
   sessions/<token>/        per-spawn working directory of a session started without a repository
   settings/<port>.json     the Claude Code settings handed to `claude --settings`
+  settings/<port>-<endpoint>.curl  the hook URL a command entry of those settings reads with `curl -K`, owner-only (it carries the hook secret)
   tmux.conf                the configuration Delta's tmux server starts with
   updates/                 the newer release the desktop app downloaded and verified (created by the download; emptied of releases not newer than the running one at startup)
 ```

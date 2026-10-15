@@ -23,6 +23,20 @@ where
     /// from a run with different values, left until the next spawn or resume
     /// happens to overwrite it.
     pub async fn refresh_session_settings(&self) -> Result<()> {
+        self.write_session_settings().await
+    }
+
+    /// Write the session settings file and the files written next to it (see
+    /// [`crate::SessionSettingsFile`]).
+    ///
+    /// The companions go first: the settings' command entries read them, so a
+    /// settings file is never on disk ahead of the files it points at.
+    pub(in crate::interactor) async fn write_session_settings(&self) -> Result<()> {
+        for file in &self.session_settings_files {
+            self.workspace
+                .write_session_settings(&file.path, &file.contents)
+                .await?;
+        }
         self.workspace
             .write_session_settings(&self.session_settings_path, &self.session_settings_json)
             .await

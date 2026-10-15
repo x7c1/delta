@@ -110,12 +110,18 @@
 //!   bound and reset (NULL, NULL, 0) when the session is torn down. NULL for a
 //!   closed session, a launch that never bound, an adapter-backed session
 //!   (which has no pane), and every row that predates the columns.
+//! - `closed_reason` is why Delta closed a session on its own — for instance
+//!   because the desktop app moved to a new port while the session's agent
+//!   kept calling the old one — shown on the closed session's screen. Written
+//!   by that close and cleared whenever a pane is bound again (in the same
+//!   write as the remembered pane). NULL for every other session, and for
+//!   rows written before the column existed.
 
 use super::Step;
 
 /// The `session` table's history: the v3 baseline table, its recency index, the
-/// v7 pull-request snapshot column, the v9 failure reason, and the v10
-/// remembered pane.
+/// v7 pull-request snapshot column, the v9 failure reason, the v10
+/// remembered pane, and the v11 close reason.
 pub(super) const STEPS: &[Step] = &[
     Step::additive(
         3,
@@ -170,4 +176,8 @@ ALTER TABLE session ADD COLUMN tmux_pane TEXT;
 ALTER TABLE session ADD COLUMN hooks_unreachable INTEGER NOT NULL DEFAULT 0
   CHECK (hooks_unreachable IN (0, 1));",
     ),
+    // v11: why Delta closed a session on its own. Nullable with no default, so
+    // every existing row reads NULL — "not closed by Delta", which is true of
+    // every row before this binary.
+    Step::additive(11, "ALTER TABLE session ADD COLUMN closed_reason TEXT;"),
 ];

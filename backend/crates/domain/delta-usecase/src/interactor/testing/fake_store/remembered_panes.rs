@@ -18,6 +18,10 @@ impl FakeStore {
             g.remembered_panes
                 .retain(|other, p| other == id || p.tmux_session != pane.tmux_session);
             g.remembered_panes.insert(id.clone(), pane.clone());
+            // …and, like it, clears the reason a previous close recorded.
+            if let Some(session) = g.sessions.iter_mut().find(|s| &s.id == id) {
+                session.closed_reason = None;
+            }
         }
         Ok(())
     }

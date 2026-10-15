@@ -313,7 +313,9 @@ as `+` lines under a header naming the edit mode and the cell.
 Not a hook: this is the `statusLine` command Delta injects into the session
 settings, which Claude Code invokes on every status-line refresh and pipes this
 JSON to on stdin; the command `curl`s it back here, which is why it posts the
-same way the hooks do.
+same way the hooks do. Like the `SessionStart` command hook, it reads the URL
+(and so the hook secret) from an owner-only `curl` configuration file
+(`curl -K`), so the secret is never on the command line the refresh runs.
 
 The payload is the only source for the data it carries — the selected model,
 context-window usage, rate limits and cost are nowhere in the transcript JSONL.

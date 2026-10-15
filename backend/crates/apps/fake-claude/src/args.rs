@@ -1,6 +1,6 @@
 //! The slice of `claude`'s CLI surface that Delta uses.
 //!
-//! Delta launches `claude --settings <file> --session-id <uuid> [prompt]` for
+//! Delta launches `claude --settings <file> --session-id <uuid> [-- prompt]` for
 //! a fresh spawn and `claude --settings <file> --resume <id>` for a resume.
 //! Anything else on the command line is tolerated and ignored, mirroring how
 //! a newer Delta could pass a flag this fake does not know about without
@@ -25,11 +25,19 @@ impl Args {
     ///
     /// Unknown `--flags` are skipped; a non-flag argument is the positional
     /// prompt (the last one wins, like a CLI that takes a single positional).
+    /// A `--` ends option parsing: every argument after it is positional, even
+    /// one that starts with `-`.
     pub fn parse(argv: impl IntoIterator<Item = String>) -> Self {
         let mut args = Self::default();
         let mut iter = argv.into_iter();
         while let Some(arg) = iter.next() {
             match arg.as_str() {
+                "--" => {
+                    if let Some(prompt) = iter.last() {
+                        args.prompt = Some(prompt);
+                    }
+                    break;
+                }
                 "--session-id" => args.session_id = iter.next(),
                 "--settings" => args.settings = iter.next(),
                 "--resume" => args.resume = iter.next(),
@@ -81,6 +89,13 @@ mod tests {
         assert_eq!(args.resume.as_deref(), Some("abc"));
         assert_eq!(args.prompt, None);
         assert_eq!(args.effective_session_id(), Some("abc"));
+    }
+
+    #[test]
+    fn a_dash_prefixed_prompt_after_the_end_of_options_marker_is_the_prompt() {
+        let args = parse(&["--session-id", "id", "--", "- fix the build"]);
+        assert_eq!(args.session_id.as_deref(), Some("id"));
+        assert_eq!(args.prompt.as_deref(), Some("- fix the build"));
     }
 
     #[test]

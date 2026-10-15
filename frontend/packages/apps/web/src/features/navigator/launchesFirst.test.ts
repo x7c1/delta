@@ -23,6 +23,7 @@ function item(
       provider_thread_id: null,
       pull_request_number: null,
       failure_reason: null,
+      closed_reason: null,
     },
     open,
     pane_starting: false,

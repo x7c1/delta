@@ -362,7 +362,7 @@ fn start_server(
     ))?;
     tracing::info!(
         state_file = %hook_state.path().display(),
-        hook_endpoint_changed = config.hook_endpoint_changed,
+        hook_endpoint_change = ?config.hook_endpoint_change,
         "delta-desktop hook endpoint settled"
     );
 
