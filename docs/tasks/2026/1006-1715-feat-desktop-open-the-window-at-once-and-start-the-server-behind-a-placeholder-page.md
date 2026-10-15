@@ -99,4 +99,11 @@ a sentence there describes the wait.
       the first is still on the placeholder brings that window forward. A
       session left open across the restart is re-adopted.
 - [ ] On Ubuntu (GNOME): the same, from the application grid.
+      Ubuntu 26.04 (GNOME Wayland), 2026-10-15, dev desktop from the
+      application grid: the window appears on the placeholder and
+      switches to the app; sessions left open across a quit are
+      re-adopted. A second launch does not bring the window forward:
+      GNOME shows a "ready" notification instead (focus-stealing
+      prevention). The slow-`SHELL` and hidden-`tmux` cases were not
+      run.
 
