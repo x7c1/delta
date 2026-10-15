@@ -11,6 +11,9 @@ import type { StorageWorktreeBranch } from "./StorageWorktreeBranch";
  * for such a directory or a detached `HEAD`. `launch_branch` is the
  * `delta-<id>` branch Delta cut for the session that created it, when that
  * session has since checked out another branch there and the branch still
- * exists; `null` otherwise.
+ * exists; `null` otherwise. `modified_at` is when the directory was last
+ * modified (ISO-8601 UTC; it moves when an entry directly in it changes, not
+ * when a file deeper down is edited), `null` when its metadata cannot be
+ * read.
  */
-export type StorageWorktree = { path: string, in_use: boolean, repo_root: string | null, dirty: boolean | null, branch: StorageWorktreeBranch | null, launch_branch: StorageWorktreeBranch | null, };
+export type StorageWorktree = { path: string, in_use: boolean, repo_root: string | null, dirty: boolean | null, branch: StorageWorktreeBranch | null, launch_branch: StorageWorktreeBranch | null, modified_at: string | null, };

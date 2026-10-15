@@ -3,7 +3,6 @@ import { useStorageQuery } from '@delta/api-client';
 import type { StorageResponse } from '@delta/wire-gen';
 import { Button, Spinner } from '@delta/ui-kit';
 import { useApiClient } from '../../../data/apiContext';
-import { EraseBlock } from './EraseBlock';
 import { PruneSessionsBlock } from './PruneSessionsBlock';
 import { SnapshotList } from './SnapshotList';
 import { CopyButton, PathText, Size } from './StorageParts';
@@ -18,7 +17,8 @@ import { WorktreesBlock } from './WorktreesBlock';
  * One row per location, each with a copy control; the database's migration
  * snapshots can be deleted from under its row. Below the inventory, the
  * cleanup blocks: removing old sessions in bulk, and the worktrees left under
- * the worktree base; last, set apart, erasing everything and stopping Delta.
+ * the worktree base. Erasing everything is its own category, Storage's child
+ * in the Settings menu (see `EraseBlock`).
  * `active` gates every fetch to while the category is shown; the queries
  * refetch on a later visit once their answers are stale, so the sizes follow
  * the files on disk.
@@ -58,7 +58,6 @@ export function StorageSection({ active }: { active: boolean }) {
 
       <PruneSessionsBlock active={active} />
       <WorktreesBlock active={active} />
-      <EraseBlock active={active} />
     </section>
   );
 }

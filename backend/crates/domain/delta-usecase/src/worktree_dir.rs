@@ -29,4 +29,8 @@ pub struct WorktreeDir {
     /// `created_for_session`), so it is a branch that can stay too. `None`
     /// otherwise, including when git does not know the directory.
     pub launch_branch: Option<WorktreeBranch>,
+    /// When the directory was last modified, as an ISO-8601 UTC timestamp
+    /// (see [`crate::Workspace::modified_at`] for what moves it), or `None`
+    /// when its metadata cannot be read.
+    pub modified_at: Option<String>,
 }
