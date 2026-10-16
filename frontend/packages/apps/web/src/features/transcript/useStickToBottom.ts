@@ -17,7 +17,7 @@ interface StickToBottomArgs {
   newSession: boolean;
   /** The thread's rendered-kind messages; their growth re-sticks. */
   messages: Message[];
-  /** The pending-send count; an increase forces stick. */
+  /** The send-activity row count; an increase forces stick. */
   pendingCount: number;
   /** The live assistant preview; its growth re-sticks. */
   streaming: StreamingMessage | null;

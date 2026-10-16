@@ -151,9 +151,9 @@ export interface ExternalInputNotice {
  * for an explicit release — rather than re-typing it on every idle forever.
  *
  * The message itself is server state (the held row is in the open-send list,
- * where the pending strip renders it with Send and Cancel), so this notice
- * carries no copy of the text: its whole job is to explain *why* that row is
- * waiting, which nothing else in the UI can say.
+ * where the send-activity strip renders it with Send and Cancel), so this
+ * notice carries no copy of the text: its whole job is to explain *why* that
+ * row is waiting, which nothing else in the UI can say.
  *
  * Session-scoped, not thread-scoped: an undelivered message matters wherever
  * the user is looking. Survives turn ends (see the lifecycle table below);
@@ -354,7 +354,7 @@ export function clearNoticesOn(
  * - `applySessionEvent` refetches the sends on `permission_resolved`, so a
  *   request in flight is superseded and the next envelope reflects the
  *   resolution.
- * - `usePendingSends` seeds only from a settled fetch, so the envelope on hand
+ * - `useSendActivity` seeds only from a settled fetch, so the envelope on hand
  *   while that refetch runs (which may predate the resolution) seeds nothing.
  * - This check refuses a resolved id whatever the fetch timing, including a
  *   stale response the refetch did not supersede. The other two only narrow

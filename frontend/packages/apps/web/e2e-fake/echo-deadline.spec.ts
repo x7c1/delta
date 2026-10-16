@@ -15,9 +15,9 @@ import { fetchSends, latestSession } from './support/rest';
  *
  * Parking is what ends that wait, and it keeps the message: the row goes back
  * to `queued` with `held_at` set — the same held state the boot restore
- * produces — so it stays in the pending strip with explicit Send and Cancel
- * controls and never auto-dispatches. The `send_parked` notice only explains
- * why it is waiting.
+ * produces — so it stays in the send-activity strip with explicit Send and
+ * Cancel controls and never auto-dispatches. The `send_parked` notice only
+ * explains why it is waiting.
  *
  * Scenario `echo-deadline`: the fake answers the positional first prompt
  * (`reply` + `stop`), then `swallow_prompt` TWICE. The first swallow eats the

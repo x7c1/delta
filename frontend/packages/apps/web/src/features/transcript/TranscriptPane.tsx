@@ -17,9 +17,9 @@ import { useComposerStore } from '../../store/composerStore';
 import { noticeOf, useLiveStore } from '../../store/liveStore';
 import type { ComposerMode } from '../composer/Composer';
 import {
-  usePendingSends,
-  type PendingSurface,
-} from '../composer/usePendingSends';
+  useSendActivity,
+  type SendActivitySurface,
+} from '../composer/useSendActivity';
 import { WorkdirDialog } from '../composer/WorkdirDialog';
 import { NewSessionPanel } from '../new-session/NewSessionPanel';
 import { NewSessionTabBar } from '../new-session/NewSessionTabBar';
@@ -130,8 +130,8 @@ export interface TranscriptPaneProps {
 /**
  * The right pane. For an existing session it shows the active thread's trunk as
  * a linear list (breadcrumb, branch chips, external-input marker) in the
- * scrolling body, with a pinned footer that stacks the optimistic pending-send
- * strip directly above the composer. A closed session is read-only for viewing,
+ * scrolling body, with a pinned footer that stacks the send-activity strip
+ * directly above the composer. A closed session is read-only for viewing,
  * but the composer stays available: a plain Send resumes it, and a
  * branch-from-quote both resumes it and drills into the new sub-thread. For the
  * new-session state it shows a blank prompt and a new-session composer.
@@ -216,11 +216,11 @@ export function TranscriptPane({
     null,
   );
 
-  // The surface the pending strip renders for in this view: the new-session
-  // screen, or the active thread. The merged rows (server open sends plus the
-  // thin client complements) drive both the strip and the count used by
-  // stick-to-bottom / the empty-state gate.
-  const pendingSurface: PendingSurface | null = newSession
+  // The surface the send-activity strip renders for in this view: the
+  // new-session screen, or the active thread. The merged rows (server open
+  // sends plus the thin client complements) drive both the strip and the count
+  // used by stick-to-bottom / the empty-state gate.
+  const sendActivitySurface: SendActivitySurface | null = newSession
     ? { kind: 'new-session' }
     : activeThread
       ? {
@@ -229,8 +229,8 @@ export function TranscriptPane({
           threadId: activeThread.id,
         }
       : null;
-  const pendingEntries = usePendingSends(pendingSurface);
-  const pendingCount = pendingEntries.length;
+  const sendActivity = useSendActivity(sendActivitySurface);
+  const pendingCount = sendActivity.length;
 
   const messagesQuery = useThreadMessagesQuery(
     client,
@@ -503,8 +503,8 @@ export function TranscriptPane({
     }
     // Search only message bodies, not the surrounding UI: the chips render as
     // siblings of the message article, so scoping to the articles keeps a
-    // chip's own title text (and banners, the pending queue, etc.) out of the
-    // highlight.
+    // chip's own title text (and banners, the send-activity strip, etc.) out of
+    // the highlight.
     const articles = Array.from(
       body.querySelectorAll('[data-testid="message-item"]'),
     );
@@ -589,7 +589,7 @@ export function TranscriptPane({
   // bottom padding (below) so resting content clears it.
 
   // The bottom layer: the composer plus the notices that must stay next to the
-  // input — the closed/external-input banners and, crucially, the pending-send
+  // input — the closed/external-input banners and, crucially, the send-activity
   // strip, which the user reads to decide whether to hold a send. For a
   // resume-impossible session it is just the "cannot resume" notice, replacing
   // the input entirely — there is nothing useful to type.
@@ -618,7 +618,7 @@ export function TranscriptPane({
         hooksUnreachable={hooksUnreachable}
         closedReason={closedReason}
         composerMode={composerMode}
-        pendingEntries={pendingEntries}
+        sendActivity={sendActivity}
       />
     );
   }

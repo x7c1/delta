@@ -34,7 +34,8 @@ test('a failed spawn shows its failure in place, with Retry and Remove', async (
   await page.getByRole('button', { name: 'Send' }).click();
 
   // The workspace focuses the accepted session at once: the new-session screen
-  // is gone and the starting session's first prompt is in its pending strip.
+  // is gone and the starting session's first prompt is in its send-activity
+  // strip.
   await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
   const pending = page.getByTestId('pending-item');
   await expect(pending).toHaveCount(1);

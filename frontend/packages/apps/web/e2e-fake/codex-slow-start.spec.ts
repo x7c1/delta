@@ -22,7 +22,7 @@ import {
  * session is live" wide enough to observe. Inside it the workspace must already
  * be ON the new session — the row is listed as `spawning`, so its card reads
  * `Starting`, its composer says a message sent now waits for the session, and
- * its first prompt sits in the pending strip. When `thread/start` finally
+ * its first prompt sits in the send-activity strip. When `thread/start` finally
  * answers the same session becomes `Open` and the scripted reply arrives: one
  * continuous session, no hand-off the user can see.
  *

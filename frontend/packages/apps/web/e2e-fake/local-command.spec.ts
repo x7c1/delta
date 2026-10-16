@@ -21,7 +21,7 @@ import { fetchSends, latestSession } from "./support/rest";
  * `/cost` keystrokes, fires nothing, and drops everything typed until an
  * Escape dismisses its dialog. The next `await_prompt` answers whatever is
  * typed after that; if the command were typed again it would take that step,
- * and the follow-up would be left stuck in the pending strip. Without the
+ * and the follow-up would be left stuck in the send-activity strip. Without the
  * settle's `Escape` the dialog would eat the follow-up, which would only
  * arrive through the suite's 60 s echo-deadline re-type — far past this spec's
  * waits.

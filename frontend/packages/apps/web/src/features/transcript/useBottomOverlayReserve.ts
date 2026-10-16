@@ -66,13 +66,14 @@ export function useBottomOverlayReserve({
   bodyRef,
   stickRef,
 }: BottomOverlayReserveArgs) {
-  // The bottom overlay (composer + pending strip + bottom notices) floats over
-  // the scrolling body and grows with the composer's content. Reserve bottom
-  // padding equal to its MEASURED height (plus the overlay inset as a gap) so
-  // the last turn always rests just above it and stays readable as it grows —
-  // replacing the old fixed `pb-composer-reserve`, which a grown composer would
-  // cover. `null` until measured: the body falls back to the fixed reserve so a
-  // first paint (or a body without an overlay) never under-reserves.
+  // The bottom overlay (composer + send-activity strip + bottom notices) floats
+  // over the scrolling body and grows with the composer's content. Reserve
+  // bottom padding equal to its MEASURED height (plus the overlay inset as a
+  // gap) so the last turn always rests just above it and stays readable as it
+  // grows — replacing the old fixed `pb-composer-reserve`, which a grown
+  // composer would cover. `null` until measured: the body falls back to the
+  // fixed reserve so a first paint (or a body without an overlay) never
+  // under-reserves.
   const bottomOverlayRef = useRef<HTMLDivElement | null>(null);
   const [bottomReserve, setBottomReserve] = useState<number | null>(null);
   // The bound overlay's measure-and-apply, so the per-commit re-measure can reuse

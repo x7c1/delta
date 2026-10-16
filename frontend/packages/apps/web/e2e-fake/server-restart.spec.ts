@@ -111,7 +111,8 @@ test('a dispatched send survives a server restart as a restored row and is relea
   await expect(page.getByTestId('session-running')).toHaveCount(0);
 
   // Press Send: the release types the prompt into the re-adopted pane, and the
-  // surviving fake answers it. The pending strip drains and the turn completes.
+  // surviving fake answers it. The send-activity strip drains and the turn
+  // completes.
   await sendButton.click();
 
   await expect(pending).toHaveCount(0, { timeout: 30_000 });

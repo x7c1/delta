@@ -60,13 +60,13 @@
  * existed, is already terminal (matched a transcript line, or already
  * cancelled), or is dispatched but its echo already arrived so the in-flight
  * turn owns it. Callers may surface the refusal to the user (e.g.
- * `PendingQueue` routes it through `onError` to the notification store) and
- * let the pending strip reconcile from the next refetch.
+ * `SendActivityStrip` routes it through `onError` to the notification store)
+ * and let the send-activity strip reconcile from the next refetch.
  *
  * `send_not_releasable` means a send is not awaiting a release: it never
  * existed, never carried the `held_at` marker, was already released, or has
  * since been cancelled. Callers surface the refusal like a refused cancel and
- * let the pending strip reconcile from the next refetch.
+ * let the send-activity strip reconcile from the next refetch.
  *
  * `clone_root_duplicate` means a clone root was registered twice with the same
  * path. The Settings dialog shows an inline "already registered" hint on this

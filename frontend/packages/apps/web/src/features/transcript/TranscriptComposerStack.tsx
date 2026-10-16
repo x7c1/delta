@@ -13,8 +13,8 @@ import { ContextUsageMeter } from '../composer/ContextUsageMeter';
 import { PromptTemplateButton } from '../composer/PromptTemplateButton';
 import { ProviderTabs } from '../composer/ProviderTabs';
 import { ProviderUnavailableNotice } from '../composer/ProviderUnavailableNotice';
-import { PendingQueue } from '../composer/PendingQueue';
-import type { PendingEntry } from '../composer/usePendingSends';
+import { SendActivityStrip } from '../composer/SendActivityStrip';
+import type { SendActivityEntry } from '../composer/useSendActivity';
 import { WorkdirChip } from '../composer/WorkdirDialog';
 import { WorktreeOptions } from '../composer/WorktreeOptions';
 import { LaunchOptionsPicker } from '../composer/LaunchOptionsPicker';
@@ -35,14 +35,14 @@ interface TranscriptComposerStackProps {
   closedReason: string | null;
   /** What the composer sends to. */
   composerMode: ComposerMode;
-  /** The pending-send rows shown above the composer. */
-  pendingEntries: PendingEntry[];
+  /** The send-activity rows shown above the composer. */
+  sendActivity: SendActivityEntry[];
 }
 
 /**
  * The bottom overlay's composer stack: the notices card (closed, lost contact,
- * external input, parked send, pending strip) above the composer card and its
- * rail.
+ * external input, parked send, send-activity strip) above the composer card and
+ * its rail.
  */
 export function TranscriptComposerStack({
   newSession,
@@ -52,7 +52,7 @@ export function TranscriptComposerStack({
   hooksUnreachable,
   closedReason,
   composerMode,
-  pendingEntries,
+  sendActivity,
 }: TranscriptComposerStackProps) {
   const openWorkdirDialog = useComposerStore(
     (state) => state.openWorkdirDialog,
@@ -106,18 +106,18 @@ export function TranscriptComposerStack({
   // Whether the upper (notices) card has anything to show. Each of these
   // conditions matches exactly one child it gates — `showClosedNotice` the
   // closed notice, `showExternalInput` the external-input notice, and a non-empty
-  // `pendingEntries` the pending strip (`PendingQueue` itself renders null when
-  // empty) — so the card is omitted entirely rather than rendering an empty
-  // box when none of them are present.
+  // `sendActivity` the send-activity strip (`SendActivityStrip` itself renders
+  // null when empty) — so the card is omitted entirely rather than rendering an
+  // empty box when none of them are present.
   const hasNotices =
     showClosedNotice ||
     showHooksUnreachable ||
     (showExternalInput && activeThread !== null) ||
     (showSendParked && activeThread !== null) ||
-    pendingEntries.length > 0;
+    sendActivity.length > 0;
   return (
     <>
-      {/* Upper card: status notices + the pending-send strip, kept visually
+      {/* Upper card: status notices + the send-activity strip, kept visually
           separate from the composer so the (now borderless) textarea has a
           clean boundary of its own. The question and permission cards are NOT
           in this stack: they render inline at the conversation tail in the
@@ -192,9 +192,9 @@ export function TranscriptComposerStack({
               </Badge>
               {/* The message itself is no longer only here: the server put
                   the send back in the queue, held for an explicit release,
-                  so the `PendingQueue` row rendered just below shows the text
-                  and carries the Send and Cancel actions. This notice only
-                  has to explain WHY it is waiting — hence no copy of the
+                  so the `SendActivityStrip` row rendered just below shows the
+                  text and carries the Send and Cancel actions. This notice
+                  only has to explain WHY it is waiting — hence no copy of the
                   text, and no "copy it and try again". */}
               <span className="min-w-0 flex-1 break-words text-fg-muted">
                 A message never reached the session — the terminal swallowed
@@ -213,8 +213,8 @@ export function TranscriptComposerStack({
             </div>
           )}
 
-          <PendingQueue
-            entries={pendingEntries}
+          <SendActivityStrip
+            entries={sendActivity}
             sessionSpawning={spawning}
           />
         </div>

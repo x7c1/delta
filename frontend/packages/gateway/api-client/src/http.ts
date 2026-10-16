@@ -273,7 +273,7 @@ export class ApiClient {
    * echo deadline parking a send nothing was ever heard about. It never
    * auto-dispatches — it waits for an explicit {@link releaseSend} or
    * {@link cancelSend}.
-   * The server-side truth behind the pending-send strip. An unknown id is a
+   * The server-side truth behind the send-activity strip. An unknown id is a
    * `404` (e.g. a removed session), surfaced as {@link ApiError}.
    */
   getSessionSends(sessionId: SessionId): Promise<SendsResponse> {
@@ -353,7 +353,7 @@ export class ApiClient {
    * since been cancelled; a failed resume surfaces its own error (e.g.
    * `409` `resume_unavailable`) with the marker untouched, so the release
    * can be retried — each surfaced as {@link ApiError} for the caller to
-   * show before the pending strip reconciles from a refetch.
+   * show before the send-activity strip reconciles from a refetch.
    */
   releaseSend(sendId: number): Promise<void> {
     return this.requestNoContent(`/api/sends/${sendId}/release`, {

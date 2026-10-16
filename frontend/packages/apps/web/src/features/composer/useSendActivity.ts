@@ -10,17 +10,17 @@ import {
 } from '../../store/liveStore';
 
 /**
- * The surface a pending strip renders for: an existing thread, or the
+ * The surface the send-activity strip renders for: an existing thread, or the
  * new-session composer screen (which shows only its own submits: the POST
  * still in flight, or the launch the server rejected). `null` renders
  * nothing.
  */
-export type PendingSurface =
+export type SendActivitySurface =
   | { kind: 'thread'; sessionId: SessionId; threadId: ThreadId }
   | { kind: 'new-session' };
 
-/** One row of the pending strip, tagged by where its truth lives. */
-export type PendingEntry =
+/** One row of the send-activity strip, tagged by where its truth lives. */
+export type SendActivityEntry =
   /** A send the server holds open: `queued` or `dispatched`. */
   | { kind: 'server'; key: string; send: Send }
   /**
@@ -34,16 +34,26 @@ export type PendingEntry =
   | { kind: 'sending'; key: string; item: SendingItem };
 
 /**
- * Merge the pending strip's sources for one surface, in submit order:
- * server-accepted sends (open list ∪ tracked local sends, id-ordered,
- * de-duplicated by send id — the server row wins while it exists), then
- * in-flight/failed submits.
+ * Collect the sends the user is still waiting on for one surface. The rows
+ * are of three kinds:
  *
- * Shared by `PendingQueue` (the rows) and `TranscriptPane` (the count that
- * drives stick-to-bottom and the empty-state gate), so the two can never
- * disagree about what is pending.
+ * - a send the server still holds open (`queued` or `dispatched`);
+ * - a send the server already matched to its transcript line whose turn has
+ *   not ended yet;
+ * - a submit whose POST is still in flight or was rejected.
+ *
+ * Only the first kind is the server's open-send list; the other two are
+ * client-side complements. Rows come in submit order: server-accepted sends
+ * (open list ∪ tracked local sends, id-ordered, de-duplicated by send id —
+ * the server row wins while it exists), then in-flight/failed submits.
+ *
+ * Shared by `SendActivityStrip` (the rows) and `TranscriptPane` (the count
+ * that drives stick-to-bottom and the empty-state gate), so the two can never
+ * disagree about which sends are still in progress.
  */
-export function usePendingSends(surface: PendingSurface | null): PendingEntry[] {
+export function useSendActivity(
+  surface: SendActivitySurface | null,
+): SendActivityEntry[] {
   const client = useApiClient();
   const sending = useLiveStore((state) => state.sending);
   const localSends = useLiveStore((state) => state.localSends);
@@ -128,12 +138,12 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
     }
 
     if (surface.kind === 'thread') {
-      const entries: PendingEntry[] = [];
+      const entries: SendActivityEntry[] = [];
       const onThread = (serverSends ?? []).filter(
         (send) => send.thread_id === surface.threadId,
       );
       const serverIds = new Set(onThread.map((send) => send.id));
-      const accepted: { id: number; entry: PendingEntry }[] = onThread.map(
+      const accepted: { id: number; entry: SendActivityEntry }[] = onThread.map(
         (send) => ({
           id: send.id,
           entry: { kind: 'server', key: `server-${send.id}`, send },
@@ -182,7 +192,7 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
     // A launch that was accepted and then FAILED is absent for the same
     // reason: its session row is kept and marked failed, so its prompt, its
     // reason and its Retry / Remove actions are on that session's own screen.
-    const entries: PendingEntry[] = [];
+    const entries: SendActivityEntry[] = [];
     for (const item of sending) {
       if (item.target.kind === 'new-session') {
         entries.push({ kind: 'sending', key: item.id, item });

@@ -10,7 +10,7 @@ import { composerInput, focusedSessionNode, startNewSession } from './support/ap
  * registered" wide enough to observe. Inside that window the workspace must
  * already be ON the new session — the row is listed as `spawning`, so its card
  * reads `Starting`, its composer says a message sent now waits for the session,
- * and its first prompt sits in the pending strip.
+ * and its first prompt sits in the send-activity strip.
  *
  * And a message composed inside that window really is accepted: Send stays
  * live, the server records the message as a `queued` row (the strip says so),
