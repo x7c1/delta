@@ -12,9 +12,6 @@ pub use context_injection_capability::ContextInjectionCapability;
 mod event_capability;
 pub use event_capability::EventCapability;
 
-mod fork_capability;
-pub use fork_capability::ForkCapability;
-
 mod interrupt_capability;
 pub use interrupt_capability::InterruptCapability;
 
@@ -32,9 +29,6 @@ pub use session_identity_capability::SessionIdentityCapability;
 
 mod session_scoped_allow_capability;
 pub use session_scoped_allow_capability::SessionScopedAllowCapability;
-
-mod steer_capability;
-pub use steer_capability::SteerCapability;
 
 mod terminal_capability;
 pub use terminal_capability::TerminalCapability;
@@ -58,10 +52,6 @@ pub struct AgentCapabilities {
     pub context_injection: ContextInjectionCapability,
     pub interrupt: InterruptCapability,
     pub terminal: TerminalCapability,
-    /// Unused in v1 (always [`ForkCapability::None`]); carried for the future.
-    pub fork: ForkCapability,
-    /// Unused in v1 (always [`SteerCapability::None`]); carried for the future.
-    pub steer: SteerCapability,
 }
 
 impl AgentCapabilities {
@@ -117,8 +107,6 @@ mod tests {
             context_injection: ContextInjectionCapability::HiddenPerTurn,
             interrupt: InterruptCapability::PaneKeystroke,
             terminal: TerminalCapability::AttachablePty,
-            fork: ForkCapability::None,
-            steer: SteerCapability::None,
         };
         assert!(!base.is_adapter_backed());
         let adapter_backed = AgentCapabilities {

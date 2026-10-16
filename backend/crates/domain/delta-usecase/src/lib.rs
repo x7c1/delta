@@ -41,12 +41,12 @@ pub use agent::{
     AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentContentSource, AgentEvent,
     AgentEventStream, AgentFileChange, AgentFileChangeDetail, AgentFileChangeKind,
     AgentPermissionRequest, AgentProvider, AgentSessionHandle, AgentTokenUsage,
-    ContentSourceRequest, ContextInjectionCapability, EventCapability, ForkCapability,
-    InterruptCapability, LaunchCapability, LaunchOptionCardinality, LaunchOptionSpec,
-    LaunchOptionVocabulary, LaunchRequest, NullContentSource, NullLaunchOptionVocabulary,
-    PermissionCapability, PtyHandle, ResumeCapability, ResumeRequest, SendReceipt, SendRequest,
-    SessionEndReason, SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability,
-    TerminalCapability, TranscriptCapability, TurnStatus,
+    ContentSourceRequest, ContextInjectionCapability, EventCapability, InterruptCapability,
+    LaunchCapability, LaunchOptionCardinality, LaunchOptionSpec, LaunchOptionVocabulary,
+    LaunchRequest, NullContentSource, NullLaunchOptionVocabulary, PermissionCapability, PtyHandle,
+    ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionEndReason,
+    SessionIdentityCapability, SessionScopedAllowCapability, TerminalCapability,
+    TranscriptCapability, TurnStatus,
 };
 pub use clone::Clone;
 pub use erase_report::EraseReport;
