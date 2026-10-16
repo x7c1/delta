@@ -65,11 +65,11 @@ when presenting the window:
 
 ### Before merge (verified outside the check command)
 
-- [ ] On GNOME (Wayland), with Delta running and its window behind another
+- [x] On GNOME (Wayland), with Delta running and its window behind another
       window, launching Delta again from the app grid brings the existing
       window to the front with focus, and no "is ready" notification appears.
       Needs a person: whether the window actually came to the front is judged
       by eye on the desktop session.
-- [ ] Launching again from a terminal (`delta-desktop` or the dev binary)
+- [x] Launching again from a terminal (`delta-desktop` or the dev binary)
       still focuses or at least does not break the running instance. Needs a
       person, as above.
