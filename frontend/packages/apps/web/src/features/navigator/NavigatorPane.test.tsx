@@ -23,7 +23,7 @@ import { useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { makeItem, renderPane, server } from './NavigatorPane.testkit';
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
@@ -193,7 +193,7 @@ describe('NavigatorPane launched-session placement', () => {
       threadId: 999,
       text: 'first message',
       firstSendId: 1,
-      workdir: null,
+      workdir: '/projects/app',
       launchOptionIds: [],
       provider: 'claude' as const,
       worktree: null,

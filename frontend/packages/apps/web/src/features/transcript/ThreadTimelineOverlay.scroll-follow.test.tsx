@@ -15,6 +15,7 @@ import {
   describe,
   expect,
   it,
+  onTestFinished,
   vi,
 } from 'vitest';
 import { LANE_LEFT_PAD_PX } from './TimelineLaneRow';
@@ -622,10 +623,11 @@ describe('ThreadTimelineOverlay vertical scroll-follow', () => {
     laneHeightPx = 18,
   ): void {
     const original = HTMLElement.prototype.getBoundingClientRect;
-    vi.spyOn(
-      HTMLElement.prototype,
-      'getBoundingClientRect',
-    ).mockImplementation(function (this: HTMLElement) {
+    // Restored when the test finishes, as in `stubAxisRect`: a leaked spy
+    // would be reused by the next `vi.spyOn` and `original` would recurse.
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect');
+    onTestFinished(() => spy.mockRestore());
+    spy.mockImplementation(function (this: HTMLElement) {
       const base = {
         left: 0,
         right: 240,

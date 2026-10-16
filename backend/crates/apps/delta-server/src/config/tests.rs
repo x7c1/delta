@@ -69,7 +69,11 @@ fn a_shell_identifier_wins_over_the_variable() {
     let vars: HashMap<&str, OsString> = [("DELTA_IDENTIFIER", OsString::from("io.example.env"))]
         .into_iter()
         .collect();
-    let config = desktop_config_from_vars(|name| vars.get(name).cloned(), "io.example.app");
+    let config = desktop_config_from_vars(
+        |name| vars.get(name).cloned(),
+        "io.example.app",
+        Secrets::default(),
+    );
     assert_eq!(config.identifier, "io.example.app");
     assert_eq!(config.tmux_socket, "io.example.app");
     assert!(config.data_dir.ends_with("io.example.app"));
@@ -87,6 +91,36 @@ fn unset_home_falls_back_to_the_temp_dir() {
         config.transcript_root,
         temp.join(".claude/projects").to_string_lossy()
     );
+}
+
+#[test]
+fn the_desktop_holds_the_secrets_it_is_handed_not_the_variables() {
+    // The desktop shell took the variables out of the environment before any
+    // thread started, so what `var` says about them is ignored.
+    let vars: HashMap<&str, OsString> = [
+        ("DELTA_AUTH_TOKEN", OsString::from("from-the-variable")),
+        ("DELTA_HOOK_SECRET", OsString::from("from-the-variable")),
+    ]
+    .into_iter()
+    .collect();
+    let secrets = Secrets {
+        auth_token: Some("handed-token".to_owned()),
+        hook_secret: Some("handed-hook-secret".to_owned()),
+    };
+    let config =
+        desktop_config_from_vars(|name| vars.get(name).cloned(), "io.example.app", secrets);
+    assert_eq!(config.auth_token, "handed-token");
+    assert_eq!(config.hook_secret, "handed-hook-secret");
+    assert!(config.hook_secret_from_env);
+
+    let config = desktop_config_from_vars(
+        |name| vars.get(name).cloned(),
+        "io.example.app",
+        Secrets::default(),
+    );
+    assert_ne!(config.auth_token, "from-the-variable");
+    assert_ne!(config.hook_secret, "from-the-variable");
+    assert!(!config.hook_secret_from_env, "no secret was handed in");
 }
 
 #[test]
@@ -302,7 +336,7 @@ fn only_the_default_worktree_base_names_its_parent_for_erasing() {
 fn only_the_desktop_shells_configuration_names_the_desktop_launcher() {
     assert_eq!(config(&[]).launcher, Launcher::Cli);
     assert_eq!(
-        desktop_config_from_vars(|_| None, DEFAULT_IDENTIFIER).launcher,
+        desktop_config_from_vars(|_| None, DEFAULT_IDENTIFIER, Secrets::default()).launcher,
         Launcher::Desktop
     );
 }

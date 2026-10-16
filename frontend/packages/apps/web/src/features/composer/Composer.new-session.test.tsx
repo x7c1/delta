@@ -23,7 +23,7 @@ import { useComposerStore } from '../../store/composerStore';
 import { Composer } from './Composer';
 import { resetComposerState, server } from './Composer.testkit';
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
@@ -107,10 +107,9 @@ describe('Composer', () => {
 
   it('Cmd+Enter is a no-op for a new session when no workdir is selected', async () => {
     // Regression: the Send button gates a new session on `newSessionWorkdir`,
-    // but the keyboard shortcut used to bypass that gate. Without a workdir
-    // the backend would spawn in its default scratch dir and the watchdog
-    // would later report "session failed to start", so Cmd+Enter must obey
-    // the same disabled rule as the button.
+    // but the keyboard shortcut used to bypass that gate. The backend refuses
+    // a new session without a workdir, so Cmd+Enter must obey the same
+    // disabled rule as the button.
     render(
       <QueryClientProvider
         client={

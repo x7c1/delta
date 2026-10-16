@@ -6,8 +6,9 @@ import { AGENT_PROVIDERS, DEFAULT_PROVIDER } from '../providers';
 /**
  * The Settings dialog category ids — each one corresponds to a left-rail entry
  * and a right-pane content view in the VS Code-style 2-pane layout. Adding a
- * new top-level category is a single entry in both this union and the
- * registry that drives the rail (see {@link SettingsView}).
+ * new category is a single entry in both this union and the registry that
+ * drives the rail (see `SettingsView`), where a child category names its
+ * parent.
  */
 export type SettingsCategoryId =
   | 'launch-options'
@@ -15,7 +16,8 @@ export type SettingsCategoryId =
   | 'clone-roots'
   | 'appearance'
   | 'default-provider'
-  | 'storage';
+  | 'storage'
+  | 'erase-everything';
 
 /**
  * The default category on a fresh install: Launch options. It is the oldest and
@@ -37,6 +39,7 @@ const SETTINGS_CATEGORY_IDS: readonly SettingsCategoryId[] = [
   'appearance',
   'default-provider',
   'storage',
+  'erase-everything',
 ];
 
 /**

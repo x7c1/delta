@@ -46,7 +46,7 @@ async fn codex_worktree_session_reports_its_launch_directory_to_the_content_sour
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: AgentProvider::Codex,
-                workdir: Some("/projects/app".to_owned()),
+                workdir: "/projects/app".to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: Some(WorktreeSpec::new(WorktreeStartPoint::UseRemoteBranch(
                     "pr-head".to_owned(),

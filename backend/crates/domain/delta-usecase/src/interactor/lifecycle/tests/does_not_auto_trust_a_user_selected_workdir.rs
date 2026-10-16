@@ -25,7 +25,7 @@ async fn does_not_auto_trust_a_user_selected_workdir() {
         SendTarget::NewSession {
             pull_request_number: None,
             provider: crate::AgentProvider::Claude,
-            workdir: Some("/projects/app".to_owned()),
+            workdir: "/projects/app".to_owned(),
             launch_option_ids: Vec::new(),
             worktree: None,
         },

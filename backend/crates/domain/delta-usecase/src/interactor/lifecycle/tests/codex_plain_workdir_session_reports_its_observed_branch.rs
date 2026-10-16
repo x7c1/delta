@@ -35,7 +35,7 @@ async fn codex_plain_workdir_session_reports_its_observed_branch() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: AgentProvider::Codex,
-                workdir: Some("/projects/app".to_owned()),
+                workdir: "/projects/app".to_owned(),
                 launch_option_ids: Vec::new(),
                 // No worktree: the plain-directory case.
                 worktree: None,
@@ -88,7 +88,7 @@ async fn a_session_outside_a_git_working_tree_reports_no_branch() {
         SendTarget::NewSession {
             pull_request_number: None,
             provider: AgentProvider::Codex,
-            workdir: None,
+            workdir: TEST_WORKDIR.to_owned(),
             launch_option_ids: Vec::new(),
             worktree: None,
         },
@@ -96,7 +96,7 @@ async fn a_session_outside_a_git_working_tree_reports_no_branch() {
         None,
     )
     .await
-    .expect("a Codex session starts in the default scratch dir");
+    .expect("a Codex session starts in a directory outside any repository");
     ix.await_launch().await;
 
     let request = {
@@ -136,7 +136,7 @@ async fn a_failing_git_degrades_the_branch_instead_of_failing_the_spawn() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: AgentProvider::Codex,
-                workdir: Some("/projects/app".to_owned()),
+                workdir: "/projects/app".to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },

@@ -16,7 +16,6 @@ import type {
   LaunchTrustRequest,
   LaunchTrustResponse,
   MessagesResponse,
-  NewSessionResponse,
   OpenCwdRequest,
   PermissionDecision,
   PermissionDecisionRequest,
@@ -76,7 +75,8 @@ export interface ApiClientOptions {
    * Called when the server answers `401`: the token is missing, or belongs to
    * an earlier run of the server (it mints a new one each start). The request
    * still fails with an {@link ApiError}; this only lets the app swap its UI
-   * for the screen that asks for a new link.
+   * for the screen that asks for a new link. A refused WebSocket upgrade never
+   * reaches it directly (see {@link ApiClient.recheckAuth}).
    */
   onUnauthorized?: () => void;
 }
@@ -86,6 +86,8 @@ export class ApiClient {
   private readonly fetchFn: typeof fetch;
   private readonly token: string;
   private readonly onUnauthorized: () => void;
+  /** The re-check in flight, shared by every socket that closed meanwhile. */
+  private authRecheck: Promise<void> | null = null;
 
   constructor(options: ApiClientOptions = {}) {
     // Normalise away any trailing slash so we can concatenate paths directly.
@@ -143,6 +145,39 @@ export class ApiClient {
   }
 
   /**
+   * Ask the server whether it still accepts the token, after a live socket
+   * (`/ws`, `/comms`, `/pty`) closed without the app closing it.
+   *
+   * Those sockets present the token on the upgrade, and a server that refuses
+   * it answers the upgrade with `401` — but a browser never tells the page why
+   * an upgrade failed, so the socket just closes. One cheap authenticated
+   * request (`GET /api/version`) tells a refused token apart: its `401` reaches
+   * `onUnauthorized` like any other. Any other outcome — the token is fine, the
+   * network is down, the server is restarting — resolves quietly, leaving the
+   * socket's own reconnecting to deal with it.
+   *
+   * Sockets that close together (a server restart drops all of them) share
+   * the one request in flight. Never rejects.
+   */
+  recheckAuth(): Promise<void> {
+    this.authRecheck ??= this.send('/api/version')
+      .then(
+        () => undefined,
+        (error: unknown) => {
+          // A `401` was already reported by `send`; anything else is for the
+          // socket's reconnecting to ride out, not for the gate.
+          if (!(error instanceof ApiError && error.status === 401)) {
+            console.debug('the auth re-check did not get through', error);
+          }
+        },
+      )
+      .finally(() => {
+        this.authRecheck = null;
+      });
+    return this.authRecheck;
+  }
+
+  /**
    * `POST /api/auth/exchange` — trade the one-time code the page was opened
    * with for the server's per-run bearer token. Sent without a token (the page
    * has none yet) and without reporting a `401` to `onUnauthorized`: a used,
@@ -187,19 +222,6 @@ export class ApiClient {
     }
     const suffix = query.length > 0 ? `?${query.join('&')}` : '';
     return this.request<SessionsResponse>(`/api/sessions${suffix}`);
-  }
-
-  /**
-   * `POST /api/sessions` — eagerly spawn a brand-new session.
-   *
-   * The session is listed by `GET /api/sessions` right away with
-   * `status: "spawning"`; its first hook flips it to `active` (announced via
-   * `session_registered`).
-   */
-  newSession(): Promise<NewSessionResponse> {
-    return this.request<NewSessionResponse>('/api/sessions', {
-      method: 'POST',
-    });
   }
 
   /** `POST /api/sessions/{id}/open` — resume a closed session (204). */

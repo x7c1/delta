@@ -29,7 +29,7 @@ async fn session_start_during_the_pane_launch_binds_the_spawn() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },

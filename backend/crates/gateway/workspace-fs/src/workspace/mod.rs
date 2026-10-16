@@ -1,23 +1,24 @@
 //! [`FsWorkspace`]: the filesystem-backed [`Workspace`].
 //!
 //! Split by responsibility: this module holds the struct and the [`Workspace`]
-//! trait wiring, `create_dir` the owner-only directory creation (a scratch
-//! working directory, and the settings file's directory), `settings` the
-//! hardened settings-file write, `browse` the read-only directory queries the
-//! picker needs, and `remove_dir` the deletion of a leftover worktree
-//! directory.
+//! trait wiring, `create_dir` the owner-only directory creation (the settings
+//! file's directory), `settings` the hardened settings-file write, `browse` the
+//! read-only directory queries the picker needs, and `remove_dir` the deletion
+//! of a leftover worktree directory.
 
 mod browse;
 mod create_dir;
 mod remove_dir;
 mod settings;
 
+use std::time::SystemTime;
+
 use async_trait::async_trait;
 
 use delta_usecase::{DirListing, Workspace};
 
-/// Writes the Claude Code session settings file, creates the scratch working
-/// directories sessions launch in, and browses local directories.
+/// Writes the Claude Code session settings file and browses local
+/// directories.
 #[derive(Debug, Default, Clone)]
 pub struct FsWorkspace;
 
@@ -40,15 +41,6 @@ impl Workspace for FsWorkspace {
             .map_err(delta_usecase::Error::from)
     }
 
-    async fn create_private_dir(
-        &self,
-        path: &str,
-    ) -> std::result::Result<(), delta_usecase::Error> {
-        self.create_dir(path)
-            .await
-            .map_err(delta_usecase::Error::from)
-    }
-
     async fn resolve_existing_dir(
         &self,
         path: &str,
@@ -63,6 +55,13 @@ impl Workspace for FsWorkspace {
         include_hidden: bool,
     ) -> std::result::Result<DirListing, delta_usecase::Error> {
         Ok(self.list(path, include_hidden).await?)
+    }
+
+    async fn modified_at(
+        &self,
+        path: &str,
+    ) -> std::result::Result<SystemTime, delta_usecase::Error> {
+        Ok(self.modified(path).await?)
     }
 
     async fn remove_dir_tree(&self, path: &str) -> std::result::Result<(), delta_usecase::Error> {

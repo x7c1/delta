@@ -18,6 +18,10 @@ use tower::ServiceExt;
 
 static FIXTURE: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/tests/fixtures/web-dist");
 
+/// The `'sha256-…'` source of the fixture page's one inline script
+/// (`printf %s '<its text>' | openssl dgst -sha256 -binary | base64`).
+const FIXTURE_BOOTSTRAP_HASH: &str = "'sha256-8sd7gaUQpl/Wix4sdPxGszfH4u2wQeq2HrKgY5TT1JU='";
+
 /// What a browser navigation sends as `Accept`.
 const NAVIGATION_ACCEPT: &str = "text/html,application/xhtml+xml,*/*;q=0.8";
 
@@ -59,9 +63,14 @@ async fn assert_is_index(response: Response) {
         "text/html; charset=utf-8"
     );
     assert_eq!(header_of(&response, header::CACHE_CONTROL), "no-cache");
+    let policy = header_of(&response, header::CONTENT_SECURITY_POLICY);
     assert!(
-        header_of(&response, header::CONTENT_SECURITY_POLICY).contains("frame-ancestors 'none'"),
-        "the page carries the CSP header",
+        policy.contains("frame-ancestors 'none'"),
+        "the page carries the CSP header: {policy}",
+    );
+    assert!(
+        policy.contains(&format!("script-src 'self' {FIXTURE_BOOTSTRAP_HASH};")),
+        "the CSP allows the page's inline script by its hash, and nothing else inline: {policy}",
     );
     let body = body_text(response).await;
     assert!(body.contains("<title>Delta fixture</title>"), "{body}");

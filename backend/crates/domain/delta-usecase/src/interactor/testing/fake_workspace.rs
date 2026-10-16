@@ -2,38 +2,53 @@
 //! set of "existing" directories for the workdir-validation path.
 
 use std::sync::Mutex;
+use std::time::SystemTime;
 
 use async_trait::async_trait;
 
 use crate::error::Result;
 use crate::ports::Workspace;
 
+use super::TEST_WORKDIR;
+
 /// Records the session settings written, so tests can assert the path and the
-/// rendered JSON the server passed in, and the directories it was asked to
-/// create. Also models a small set of "existing"
+/// rendered JSON the server passed in. Also models a small set of "existing"
 /// directories so the workdir-validation path can be exercised: a resolvable
 /// path is returned canonicalized (here, prefixed with `/canon` so a test can
 /// tell the canonical form apart from the input), anything else is an
 /// `InvalidWorkdir`.
-#[derive(Default)]
 pub(crate) struct FakeWorkspace {
     pub(crate) written: Mutex<Vec<(String, String)>>,
-    /// The directories `create_private_dir` was asked to create, in order.
-    pub(crate) created_dirs: Mutex<Vec<String>>,
-    /// When set, `create_private_dir` fails instead of recording the
-    /// directory, simulating a scratch directory that cannot be created.
-    pub(crate) fail_create_dir: Mutex<bool>,
     /// Paths that "exist" as directories; `resolve_existing_dir` accepts these.
+    /// Starts with [`TEST_WORKDIR`], the directory tests that need no
+    /// particular one start their sessions in.
     pub(crate) existing_dirs: Mutex<Vec<String>>,
     /// Scripted `list_dirs` children, keyed by the listed path: the bare names
     /// of its subdirectories. A path absent from the map lists no children.
     pub(crate) children: Mutex<Vec<(String, Vec<String>)>>,
+    /// Scripted `modified_at` answers, keyed by path. A path absent from it
+    /// fails, as a directory whose metadata cannot be read does.
+    pub(crate) modified: Mutex<Vec<(String, SystemTime)>>,
     /// The paths `remove_dir_tree` was asked to delete, in order.
     pub(crate) removed_trees: Mutex<Vec<String>>,
     /// Directories `remove_empty_dir` finds non-empty (it leaves them).
     pub(crate) non_empty_dirs: Mutex<Vec<String>>,
     /// The directories `remove_empty_dir` removed, in order.
     pub(crate) removed_empty_dirs: Mutex<Vec<String>>,
+}
+
+impl Default for FakeWorkspace {
+    fn default() -> Self {
+        Self {
+            written: Mutex::default(),
+            existing_dirs: Mutex::new(vec![TEST_WORKDIR.to_owned()]),
+            children: Mutex::default(),
+            modified: Mutex::default(),
+            removed_trees: Mutex::default(),
+            non_empty_dirs: Mutex::default(),
+            removed_empty_dirs: Mutex::default(),
+        }
+    }
 }
 
 impl FakeWorkspace {
@@ -51,6 +66,12 @@ impl FakeWorkspace {
         ));
         self
     }
+
+    /// Script `modified_at(path)` to report `at`.
+    pub(crate) fn with_modified(self, path: &str, at: SystemTime) -> Self {
+        self.modified.lock().unwrap().push((path.to_owned(), at));
+        self
+    }
 }
 
 #[async_trait]
@@ -60,16 +81,6 @@ impl Workspace for FakeWorkspace {
             .lock()
             .unwrap()
             .push((settings_path.to_owned(), settings_json.to_owned()));
-        Ok(())
-    }
-
-    async fn create_private_dir(&self, path: &str) -> Result<()> {
-        if *self.fail_create_dir.lock().unwrap() {
-            return Err(crate::error::Error::Workspace(format!(
-                "{path}: could not create the directory"
-            )));
-        }
-        self.created_dirs.lock().unwrap().push(path.to_owned());
         Ok(())
     }
 
@@ -114,6 +125,16 @@ impl Workspace for FakeWorkspace {
             parent: None,
             entries,
         })
+    }
+
+    async fn modified_at(&self, path: &str) -> Result<SystemTime> {
+        self.modified
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(dir, _)| dir == path)
+            .map(|(_, at)| *at)
+            .ok_or_else(|| crate::error::Error::Workspace(format!("{path}: no metadata scripted")))
     }
 
     async fn remove_dir_tree(&self, path: &str) -> Result<()> {

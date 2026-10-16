@@ -5,7 +5,7 @@ use crate::interactor::testing::*;
 #[tokio::test]
 async fn user_prompt_binds_pending_spawn_by_session_id() {
     let ix = interactor();
-    // Cold-start spawn (no first prompt).
+    // Prompt-less spawn.
     ix.new_session().await.unwrap();
 
     // Delta pinned the conversation's session id at spawn time; read it back.

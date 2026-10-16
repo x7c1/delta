@@ -388,15 +388,10 @@ async fn a_session_can_be_started_while_a_clone_is_in_flight() {
     ix.clone_repository("x7c1", "delta", &root).await.unwrap();
     wait_until(|| gh.clone_calls().len() == 1).await;
 
-    let lifecycle = tokio::time::timeout(WAIT, ix.ensure_session())
+    tokio::time::timeout(WAIT, ix.new_session())
         .await
         .expect("starting a session does not wait on the clone registry")
-        .expect("the session spawns");
-    assert_eq!(
-        lifecycle,
-        crate::ports::SessionLifecycle::Starting,
-        "a real session was spawned while the clone was still running",
-    );
+        .expect("a real session was spawned while the clone was still running");
 
     // And the clone is still in flight — the session spawn did not disturb it.
     assert_eq!(gh.clone_calls().len(), 1);

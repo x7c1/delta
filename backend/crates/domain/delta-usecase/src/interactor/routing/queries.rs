@@ -102,9 +102,8 @@ where
     /// definition, so the result is bounded by the number of live panes rather
     /// than by the size of the store.
     ///
-    /// Two callers depend on that definition: the cold start (which reuses a
-    /// live session instead of spawning a rival one) and the session list
-    /// (whose open-first ordering leads with exactly this set).
+    /// The session list depends on that definition: its open-first ordering
+    /// leads with exactly this set.
     pub(crate) async fn live_session_ids(&self) -> Vec<SessionId> {
         let mut live = Vec::new();
         for id in self.sessions.ids() {

@@ -34,7 +34,7 @@ async fn a_failed_codex_launch_marks_the_row_failed_and_reports_spawn_failed() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: AgentProvider::Codex,
-                workdir: None,
+                workdir: TEST_WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: None,
             },

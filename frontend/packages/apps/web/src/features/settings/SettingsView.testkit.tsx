@@ -29,6 +29,7 @@ import {
   useSettingsStore,
 } from '../../store/settingsStore';
 import { SettingsView } from './SettingsView';
+import { ErasedGate } from './storage/ErasedGate';
 
 export const server = setupServer(...createHandlers());
 
@@ -43,7 +44,10 @@ export function renderSettings(): RenderResult {
         {/* The real app mounts ThemeProvider at the root (see App.tsx) so the
             settings picker and other consumers read the same theme state. */}
         <ThemeProvider>
-          <SettingsView />
+          {/* As in App.tsx: the Erase everything category reports through it. */}
+          <ErasedGate>
+            <SettingsView />
+          </ErasedGate>
         </ThemeProvider>
       </ApiProvider>
     </QueryClientProvider>,

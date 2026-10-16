@@ -25,7 +25,7 @@ async fn auto_trusts_a_delta_worktree() {
         SendTarget::NewSession {
             pull_request_number: None,
             provider: crate::AgentProvider::Claude,
-            workdir: Some("/projects/app".to_owned()),
+            workdir: "/projects/app".to_owned(),
             launch_option_ids: Vec::new(),
             worktree: Some(WorktreeSpec::new(WorktreeStartPoint::Head)),
         },

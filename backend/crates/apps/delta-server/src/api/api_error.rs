@@ -400,11 +400,8 @@ impl IntoResponse for ApiError {
                     // from "bad path", so report `403` rather than `400`.
                     Error::WorkdirPermission(_) => (StatusCode::FORBIDDEN, None),
                     // A worktree was requested for a directory that is not a git
-                    // repo, or with no directory at all: the caller's request
-                    // shape is invalid, so `400`.
-                    Error::WorktreeNotAGitRepo(_) | Error::WorktreeRequiresWorkdir => {
-                        (StatusCode::BAD_REQUEST, None)
-                    }
+                    // repo: the caller's request shape is invalid, so `400`.
+                    Error::WorktreeNotAGitRepo(_) => (StatusCode::BAD_REQUEST, None),
                     // A path the server has never shown the browser is a
                     // client error (the click site never sends one), but it is
                     // surfaced with a stable code so the browser can

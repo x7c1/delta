@@ -867,6 +867,11 @@ what Delta and git know of each:
   another branch there (so it is not `branch`) and the branch still exists;
   `null` otherwise. Removing the session settles it as it would `branch`, so it
   has the same fields, with `created_for_session` always `true`.
+- `modified_at` — when the directory was last modified (ISO-8601 UTC, second
+  resolution), from its own metadata: it moves when an entry directly in it is
+  added, removed or renamed, not when a file deeper down is edited, so it dates
+  the worktree only roughly. `null` when the metadata cannot be read (the
+  directory is still listed).
 
 The directories nothing works in are the leftovers: worktrees kept because they
 held work when their session was removed, or left by versions that did not
@@ -887,7 +892,8 @@ clean up. A worktree base that does not exist yet lists nothing.
           "created_for_session": false,
           "merged": null
         },
-        "launch_branch": null
+        "launch_branch": null,
+        "modified_at": "2026-09-01T09:00:00Z"
       },
       {
         "path": "/home/u/.delta/worktrees/x7c1-delta-0198c0e0-…",
@@ -899,7 +905,8 @@ clean up. A worktree base that does not exist yet lists nothing.
           "created_for_session": true,
           "merged": false
         },
-        "launch_branch": null
+        "launch_branch": null,
+        "modified_at": "2026-10-15T09:00:00Z"
       }
     ]
   }
@@ -986,8 +993,8 @@ In order:
    `~/.delta/worktrees`.
 5. The `~/.claude.json` trust entry goes with each removed worktree; the file
    itself is Claude Code's and is never deleted.
-6. In the data directory, `sessions/`, `settings/`, `tmux.conf`, `updates/`
-   and the migration snapshots are deleted.
+6. In the data directory, `settings/`, `tmux.conf`, `updates/`, the migration
+   snapshots and any `sessions/` an older version left are deleted.
 7. The response is sent, and the server stops serving (the `/ws` stream closes).
 8. Once the store is closed, `delta.db`, `delta.db-wal`, `delta.db-shm`, the hook
    state file and the data directory itself are deleted — the directory only

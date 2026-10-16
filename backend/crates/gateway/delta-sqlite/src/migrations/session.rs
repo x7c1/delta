@@ -52,8 +52,8 @@
 //!   worktree resolution. For a worktree-on spawn `cwd` holds the auto-generated
 //!   worktree path (under `$DELTA_WORKTREE_BASE`) while this holds the dir the
 //!   user actually picked (which is also the worktree's `repo_root`); for a plain
-//!   spawn it equals `cwd`. NULL when no workdir was selected (the default
-//!   per-token scratch dir) and for sessions that predate the column. The Recent
+//!   spawn it equals `cwd`. NULL for sessions an older version started without
+//!   a selected workdir and for sessions that predate the column. The Recent
 //!   dirs query groups on `COALESCE(requested_workdir, cwd)` so worktree-managed
 //!   paths drop out and legacy rows still appear by their `cwd`.
 //! - `repository_display_name` is a spawn-time short repository identity label

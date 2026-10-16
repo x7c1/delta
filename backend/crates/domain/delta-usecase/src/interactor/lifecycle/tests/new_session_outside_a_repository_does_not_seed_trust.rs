@@ -1,19 +1,18 @@
 use crate::interactor::testing::*;
 use crate::SendTarget;
 
-/// A fresh session with no user workdir and no worktree launches in the default
-/// `<base>/<token>` scratch directory, which is empty and never triggers Claude
-/// Code's trust dialog — so trust is NOT seeded (avoids bloating the user config
-/// for ordinary sessions).
+/// A fresh session in a selected directory outside any git repository, with no
+/// worktree, is not a trust candidate — so trust is NOT seeded (avoids bloating
+/// the user config for ordinary sessions).
 #[tokio::test]
-async fn new_session_with_default_workdir_does_not_seed_trust() {
+async fn new_session_outside_a_repository_does_not_seed_trust() {
     let ix = interactor();
 
     ix.enqueue_send(
         SendTarget::NewSession {
             pull_request_number: None,
             provider: crate::AgentProvider::Claude,
-            workdir: None,
+            workdir: TEST_WORKDIR.to_owned(),
             launch_option_ids: Vec::new(),
             worktree: None,
         },
@@ -27,6 +26,6 @@ async fn new_session_with_default_workdir_does_not_seed_trust() {
 
     assert!(
         ix.git_worktree_fake().trusted.lock().unwrap().is_empty(),
-        "the default scratch dir is not seeded for trust"
+        "a directory outside any repository is not seeded for trust"
     );
 }

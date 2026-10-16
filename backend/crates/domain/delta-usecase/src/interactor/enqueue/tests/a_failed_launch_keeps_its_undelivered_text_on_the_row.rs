@@ -34,7 +34,7 @@ async fn a_failed_launch_keeps_its_undelivered_text_on_the_row() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: Some("/projects/app".to_owned()),
+                workdir: "/projects/app".to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: Some(WorktreeSpec::new(WorktreeStartPoint::Head)),
             },

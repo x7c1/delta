@@ -21,7 +21,7 @@ async fn new_session_with_worktree_on_a_non_git_dir_is_rejected() {
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: Some("/projects/plain".to_owned()),
+                workdir: "/projects/plain".to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: Some(WorktreeSpec::new(WorktreeStartPoint::Head)),
             },

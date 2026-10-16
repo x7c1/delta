@@ -105,7 +105,7 @@ async fn codex_resume_across_restart_continues_the_persisted_conversation() {
         let (status, body) = post_json(
             &app,
             "/api/sends",
-            json!({ "new_session": true, "provider": "codex", "text": "first message" }),
+            json!({ "new_session": true, "workdir": scenario1.workdir(), "provider": "codex", "text": "first message" }),
         )
         .await;
         assert_eq!(

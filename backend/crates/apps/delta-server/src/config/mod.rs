@@ -14,9 +14,9 @@
 //! `DELTA_IDENTIFIER` — and the test harnesses point `DELTA_DATA_DIR` at their
 //! run directory.
 //!
-//! The server boots fine when no tmux session exists yet: the session is created
-//! lazily on the first `POST /api/sessions`, so none of these need a live session
-//! at startup.
+//! The server boots fine when no tmux session exists yet: a session is created
+//! lazily by the first new-session `POST /api/sends`, so none of these need a
+//! live session at startup.
 //!
 //! One value is not from the environment alone: the hook secret is kept in a
 //! state file in the data directory so it survives restarts, which
@@ -40,7 +40,8 @@ use launch::launch_from_vars;
 
 mod secrets;
 pub(crate) use secrets::mint_secret;
-use secrets::{auth_token, hook_secret, AUTH_TOKEN_VAR, HOOK_SECRET_VAR};
+pub use secrets::Secrets;
+use secrets::{auth_token, hook_secret};
 
 #[cfg(test)]
 mod tests;
@@ -68,10 +69,12 @@ pub fn build_origin() -> BuildOrigin {
 /// [`Launcher::Cli`].
 ///
 /// Takes `DELTA_AUTH_TOKEN` and `DELTA_HOOK_SECRET` out of the process
-/// environment once they are read (`withhold_secrets_from_children`).
+/// environment as it reads them ([`Secrets::take_from_env`]), so it must be
+/// called before the process starts any other thread; the `delta-server`
+/// binary calls it before its runtime starts.
 pub fn config_from_env() -> Result<Config, DataDirError> {
-    let config = config_from_vars(|name| std::env::var_os(name));
-    withhold_secrets_from_children();
+    let secrets = Secrets::take_from_env();
+    let config = config_from_vars_for(|name| std::env::var_os(name), None, Launcher::Cli, secrets);
     prepared(config)
 }
 
@@ -85,35 +88,26 @@ pub fn config_from_env() -> Result<Config, DataDirError> {
 ///
 /// Only the desktop shell builds its configuration here, so this is the one
 /// path whose [`Config::launcher`] is [`Launcher::Desktop`].
-pub fn config_from_env_for(identifier: &str) -> Result<Config, DataDirError> {
-    let config = desktop_config_from_vars(|name| std::env::var_os(name), identifier);
-    withhold_secrets_from_children();
+///
+/// The secrets are not read from the environment here: the desktop shell runs
+/// this on a background thread, while the window's event loop and the threads
+/// Tauri and the webview started are running, where removing a variable would
+/// be undefined behaviour. The shell takes them out of the environment as the
+/// first statement of its `main` ([`Secrets::take_from_env`]) and passes them
+/// in as `secrets`.
+pub fn config_from_env_for(identifier: &str, secrets: Secrets) -> Result<Config, DataDirError> {
+    let config = desktop_config_from_vars(|name| std::env::var_os(name), identifier, secrets);
     prepared(config)
 }
 
-/// Remove `DELTA_AUTH_TOKEN` and `DELTA_HOOK_SECRET` from this process's
-/// environment.
-///
-/// Every command the server starts — tmux, and through it each agent, git, gh,
-/// the editor opener — inherits the process environment. Both secrets are held
-/// in the configuration once they are read ([`Config::hook_secret_from_env`]
-/// records whether the hook secret came from the variable), so nothing the
-/// server starts needs them, and none of them should be able to read them: an
-/// agent runs whatever its session asks, and its environment is visible to
-/// anything it runs in turn. The hook secret is what lets a local process post
-/// as one of Delta's sessions, so it is withheld like the token.
-/// Called by the two `config_from_env*` entry points, which each shell calls
-/// once, before the server starts any command: the `delta-server` binary
-/// before its runtime starts a thread, the desktop shell on its startup thread
-/// while the window's event loop already runs.
-fn withhold_secrets_from_children() {
-    std::env::remove_var(AUTH_TOKEN_VAR);
-    std::env::remove_var(HOOK_SECRET_VAR);
-}
-
-/// [`config_from_vars`] for the desktop shell running under `identifier`.
-fn desktop_config_from_vars(var: impl Fn(&str) -> Option<OsString>, identifier: &str) -> Config {
-    config_from_vars_for(var, Some(identifier.to_owned()), Launcher::Desktop)
+/// [`config_from_vars`] for the desktop shell running under `identifier`,
+/// holding `secrets`. `var` is not asked for the secrets.
+fn desktop_config_from_vars(
+    var: impl Fn(&str) -> Option<OsString>,
+    identifier: &str,
+    secrets: Secrets,
+) -> Config {
+    config_from_vars_for(var, Some(identifier.to_owned()), Launcher::Desktop, secrets)
 }
 
 /// The data directory [`config_from_env_for`] gives a shell running under
@@ -168,16 +162,21 @@ fn prepared(config: Config) -> Result<Config, DataDirError> {
 ///
 /// `var` answers like [`std::env::var_os`]. A value that is not valid Unicode is
 /// treated as unset, exactly as [`std::env::var`] would; only `HOME` is read as a
-/// raw OS string. Creates nothing on disk. The configuration is the CLI
-/// server's ([`Launcher::Cli`]).
+/// raw OS string. Creates nothing on disk and removes nothing from the
+/// environment: the secrets are read through `var` like every other value.
+/// The configuration is the CLI server's ([`Launcher::Cli`]).
 pub fn config_from_vars(var: impl Fn(&str) -> Option<OsString>) -> Config {
-    config_from_vars_for(var, None, Launcher::Cli)
+    let secrets = Secrets::from_vars(&var);
+    config_from_vars_for(var, None, Launcher::Cli, secrets)
 }
 
+/// The configuration `var` names, holding `secrets`, which `var` is not
+/// asked for.
 fn config_from_vars_for(
     var: impl Fn(&str) -> Option<OsString>,
     identifier: Option<String>,
     launcher: Launcher,
+    secrets: Secrets,
 ) -> Config {
     let text = |name: &str| var(name).and_then(|value| value.into_string().ok());
     let non_empty = |name: &str| text(name).filter(|value| !value.is_empty());
@@ -191,9 +190,12 @@ fn config_from_vars_for(
             .unwrap_or_else(|| default_worktree_base(home.clone())),
         tmux_socket: non_empty("DELTA_TMUX_SOCKET").unwrap_or_else(|| identifier.clone()),
         identifier,
-        auth_token: auth_token(text(AUTH_TOKEN_VAR)).into(),
-        hook_secret: hook_secret(text(HOOK_SECRET_VAR)).into(),
-        hook_secret_from_env: non_empty(HOOK_SECRET_VAR).is_some(),
+        hook_secret_from_env: secrets
+            .hook_secret
+            .as_ref()
+            .is_some_and(|secret| !secret.is_empty()),
+        auth_token: auth_token(secrets.auth_token).into(),
+        hook_secret: hook_secret(secrets.hook_secret).into(),
         transcript_root: transcript_root(
             text("DELTA_TRANSCRIPT_ROOT"),
             text("CLAUDE_CONFIG_DIR"),

@@ -10,7 +10,7 @@ import { renderWithApi } from './testSupport';
 
 const server = setupServer(...createHandlers());
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => server.resetHandlers(...createHandlers()));
 afterAll(() => server.close());
 
@@ -38,6 +38,7 @@ function worktree(
     dirty: state.dirty ?? false,
     branch,
     launch_branch: launchBranch,
+    modified_at: null,
   };
 }
 
@@ -198,6 +199,23 @@ describe('EraseBlock', () => {
     );
     expect(screen.queryByTestId('storage-erase-kept')).toBeNull();
     expect(screen.queryByTestId('storage-erase-kept-branches')).toBeNull();
+  });
+
+  it('lists what will stay once a failed listing is retried', async () => {
+    server.use(
+      http.get(
+        '*/api/storage/worktrees',
+        () => HttpResponse.json({ error: 'boom', code: 'internal' }, { status: 500 }),
+        { once: true },
+      ),
+    );
+    renderWithApi(<EraseBlock active />);
+
+    await screen.findByTestId('storage-erase-kept-error');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByTestId('storage-erase-kept')).toBeInTheDocument();
+    expect(screen.queryByTestId('storage-erase-kept-error')).toBeNull();
   });
 
   it('still shows the report when the block was left while the erase ran', async () => {

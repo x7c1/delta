@@ -48,7 +48,7 @@ async fn new_session_with_launch_options_applies_flags_in_order() {
         SendTarget::NewSession {
             pull_request_number: None,
             provider: crate::AgentProvider::Claude,
-            workdir: None,
+            workdir: TEST_WORKDIR.to_owned(),
             launch_option_ids: vec![verbose.id, permission_mode.id, 9999],
             worktree: None,
         },

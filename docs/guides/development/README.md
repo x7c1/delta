@@ -157,7 +157,6 @@ writes from it, in one place (`delta_bootstrap::DataLayout`):
   auth-token               the running delta-server's bearer token, owner-only, removed on a clean stop (not written by the desktop app)
   delta.db                 SQLite overlay (with its -wal/-shm and .bak-v<N> siblings)
   delta-hook-state.json    the hook secret and the desktop app's port, kept across restarts
-  sessions/<token>/        per-spawn working directory of a session started without a repository
   settings/<port>.json     the Claude Code settings handed to `claude --settings`
   settings/<port>-<endpoint>.curl  the hook URL a command entry of those settings reads with `curl -K`, owner-only (it carries the hook secret)
   tmux.conf                the configuration Delta's tmux server starts with
@@ -171,10 +170,10 @@ see, which git metadata and Claude Code's trust configuration record.
 
 The server owns the `claude` session lifecycle: it boots fine with no tmux
 session present and spawns nothing on startup or page load. A session is spawned
-lazily when first needed — the composer's first Send, a New action, or
-`POST /api/sessions`. Each spawn gets its own tmux session, named after a
-Delta-minted token (`delta-<n>`), running `claude` in its own working directory
-(`<data dir>/sessions/<token>` unless a directory or repository was chosen) with Claude Code hooks pointed back at this server. Naming the
+lazily by the composer's first Send. Each spawn gets its own tmux session, named
+after a Delta-minted token (`delta-<n>`), running `claude` in the directory or
+repository the user chose (a session cannot start without one) with Claude Code
+hooks pointed back at this server. Naming the
 tmux session after a Delta-owned token (never Claude's `session_id`) is what lets
 a closed conversation be resumed (`claude --resume <id>`) under a fresh tmux
 session without a name collision. Open/closed is in-memory, except that a

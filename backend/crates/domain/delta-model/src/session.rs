@@ -57,9 +57,9 @@ pub struct Session {
     /// For a worktree-on spawn this holds the dir the user picked (the
     /// worktree's repo root) while [`Self::cwd`] holds the auto-generated
     /// worktree path. For a plain spawn with a user-selected workdir this
-    /// equals [`Self::cwd`]. `None` when no workdir was selected (the default
-    /// per-token scratch dir is used) and for sessions that predate this
-    /// field. The Recent dirs picker prefers this value, falling back to
+    /// equals [`Self::cwd`]. `None` for sessions an older version started
+    /// without a selected workdir and for sessions that predate this field.
+    /// The Recent dirs picker prefers this value, falling back to
     /// [`Self::cwd`] for legacy rows.
     pub requested_workdir: Option<String>,
     /// Short repository identity label captured at spawn time, sourced from

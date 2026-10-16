@@ -201,7 +201,11 @@ async fn removing_a_still_starting_session_is_refused_with_its_stable_code() {
     let (status, body) = post_json(
         &app,
         "/api/sends",
-        json!({ "new_session": true, "text": "kick off a new conversation" }),
+        json!({
+            "new_session": true,
+            "text": "kick off a new conversation",
+            "workdir": "/tmp/delta-e2e-workdir",
+        }),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);

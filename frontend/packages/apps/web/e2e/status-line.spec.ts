@@ -68,7 +68,7 @@ async function scrollUntilVisible(page: Page, row: Locator): Promise<void> {
   }).toPass();
 }
 
-test('the footer meters and composer context bar reflect a status snapshot', async ({
+test('the footer meters and composer context meter reflect a status snapshot', async ({
   page,
 }) => {
   await useManualEventControl(page);
@@ -77,9 +77,9 @@ test('the footer meters and composer context bar reflect a status snapshot', asy
   // The open session ("sess-mock-1") is auto-focused, so its composer is shown.
   await expect(page.getByTestId('composer-card')).toBeVisible();
 
-  // No snapshot yet: neither the rate-limit rows nor the context bar exist.
+  // No snapshot yet: neither the rate-limit rows nor the context meter exist.
   await expect(page.getByTestId('rate-limits')).toHaveCount(0);
-  await expect(page.getByTestId('composer-context-bar')).toHaveCount(0);
+  await expect(page.getByTestId('composer-context-meter')).toHaveCount(0);
 
   const now = Math.floor(Date.now() / 1000);
   // The countdown floors to its smallest shown unit (minutes for the 5h
@@ -114,10 +114,14 @@ test('the footer meters and composer context bar reflect a status snapshot', asy
   await expect(page.getByTestId('rate-limit-7d-pct')).toHaveText('8%');
   await expect(page.getByTestId('rate-limit-7d-reset')).toHaveText('↻ 05d04h');
 
-  // Composer: the top-edge context bar fills to the focused session's usage.
-  const fill = page.getByTestId('composer-context-fill');
-  await expect(fill).toHaveAttribute('aria-valuenow', '47');
-  await expect(page.getByTestId('composer-context-bar')).toContainText('47%');
+  // Composer: the meter at the rail's right end fills to the focused session's
+  // usage.
+  const contextMeter = page.getByTestId('composer-context-meter');
+  await expect(contextMeter.getByRole('meter')).toHaveAttribute(
+    'aria-valuenow',
+    '47',
+  );
+  await expect(page.getByTestId('composer-context-pct')).toHaveText('47%');
 
   // A later snapshot reporting NO windows hides both footer rows (no empty
   // bars). An empty list is a statement — "this account has none" — unlike the
@@ -191,7 +195,7 @@ test('rate limits follow the focused session provider, with no cross-provider le
   await expect(page.getByTestId('rate-limit-30m-pct')).toHaveText('12%');
   await expect(page.getByTestId('rate-limit-5h')).toHaveCount(0);
 
-  // The Codex token-usage frame: it fills this session's context bar and says
+  // The Codex token-usage frame: it fills this session's context meter and says
   // NOTHING about rate limits, so the account's rows must survive it. A
   // provider that reports the two separately would otherwise wipe its own
   // footer on every turn.
@@ -200,10 +204,9 @@ test('rate limits follow the focused session provider, with no cross-provider le
     session_id: SESSION_ID_4,
     snapshot: snapshot({ provider: 'codex', context_used_percentage: 25 }),
   });
-  await expect(page.getByTestId('composer-context-fill')).toHaveAttribute(
-    'aria-valuenow',
-    '25',
-  );
+  await expect(
+    page.getByTestId('composer-context-meter').getByRole('meter'),
+  ).toHaveAttribute('aria-valuenow', '25');
   await expect(page.getByTestId('rate-limit-1d-pct')).toHaveText('61%');
 });
 

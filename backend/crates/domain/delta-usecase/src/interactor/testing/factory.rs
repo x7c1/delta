@@ -12,13 +12,15 @@ use super::{
     FakeWorkspace,
 };
 
-/// The base working directory the test interactor spawns sessions under.
-pub(crate) const TEST_WORKDIR_BASE: &str = "/work";
+/// The user-selected directory tests start a session in when they need no
+/// particular one. The default [`FakeWorkspace`] knows it as an existing
+/// directory and reports it canonicalized ([`FakeWorkspace::canonical`]).
+pub(crate) const TEST_WORKDIR: &str = "/work";
 
 /// The neutral base directory the test interactor places per-session git
-/// worktrees under. Deliberately distinct from [`TEST_WORKDIR_BASE`] so a test
-/// can assert a worktree lands under `worktree_base` while a default spawn still
-/// lands under `session_workdir_base`.
+/// worktrees under. Deliberately distinct from [`TEST_WORKDIR`] so a test can
+/// assert a worktree lands under `worktree_base`, not in the selected
+/// directory.
 pub(crate) const TEST_WORKTREE_BASE: &str = "/worktrees";
 
 /// The settings JSON the test interactor writes for each launch.
@@ -69,7 +71,6 @@ pub(crate) fn interactor_with_git_and_worktree_base(
         FakeStore::default(),
         FakeWorkspace::default(),
         git_worktree,
-        TEST_WORKDIR_BASE,
         worktree_base,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
@@ -89,7 +90,6 @@ pub(crate) fn interactor_with_workspace_and_git(
         FakeStore::default(),
         workspace,
         git_worktree,
-        TEST_WORKDIR_BASE,
         TEST_WORKTREE_BASE,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
@@ -111,7 +111,6 @@ pub(crate) fn interactor_with_tmux_workspace_and_git(
         FakeStore::default(),
         workspace,
         git_worktree,
-        TEST_WORKDIR_BASE,
         TEST_WORKTREE_BASE,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
@@ -224,7 +223,6 @@ pub(crate) fn interactor_with_tmux(tmux: FakeTmux) -> TestInteractor {
         FakeStore::default(),
         FakeWorkspace::default(),
         FakeGitWorktree::default(),
-        TEST_WORKDIR_BASE,
         TEST_WORKTREE_BASE,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
@@ -296,6 +294,11 @@ pub(crate) const SEED_TRANSCRIPT_PATH: &str = "/tmp/t.jsonl";
 
 // Helper accessors used only in tests to reach into the fakes the interactor owns.
 impl TestInteractor {
+    /// Spawn a fresh, prompt-less Claude session in [`TEST_WORKDIR`].
+    pub(crate) async fn new_session(&self) -> crate::error::Result<()> {
+        self.new_session_in(TEST_WORKDIR.to_owned()).await
+    }
+
     /// Register `sess-1` as an open, ready, idle session.
     ///
     /// Fires the first `UserPromptSubmit` (which registers the session) and then

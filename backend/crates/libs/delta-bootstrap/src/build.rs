@@ -35,8 +35,7 @@ pub(crate) mod testing;
 /// Every path comes from the configuration's [`DataLayout`](crate::DataLayout),
 /// whose directories the caller has already created
 /// ([`DataLayout::create_dirs`](crate::DataLayout::create_dirs)): the database
-/// opened here, the per-spawn working-directory base, the session settings
-/// file and the tmux configuration.
+/// opened here, the session settings file and the tmux configuration.
 ///
 /// Opening the store applies the schema migration. The transcript path is not
 /// needed here — it is learned from the first `UserPromptSubmit` hook. The
@@ -134,7 +133,6 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
         Box::new(store) as Box<dyn delta_usecase::SessionStore>,
         Box::new(workspace) as Box<dyn delta_usecase::Workspace>,
         Box::new(git_worktree) as Box<dyn delta_usecase::GitWorktree>,
-        layout.sessions().to_string_lossy().into_owned(),
         config.worktree_base.clone(),
         session_settings.json,
         config.session_settings_path(),

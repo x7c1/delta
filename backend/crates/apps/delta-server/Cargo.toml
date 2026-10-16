@@ -10,7 +10,7 @@ repository.workspace = true
 # `make web-dist`) into the binary and serve it from the server's own origin.
 # Off by default so a checkout that never ran the frontend build still builds;
 # see `src/app/static_web/`.
-embed-web = ["dep:include_dir", "dep:tower"]
+embed-web = ["dep:include_dir", "dep:tower", "dep:sha2", "dep:base64"]
 
 [dependencies]
 delta-usecase = { workspace = true }
@@ -19,11 +19,13 @@ delta-wire = { workspace = true }
 anyhow = { workspace = true }
 dirs = { workspace = true }
 axum = { workspace = true }
+base64 = { workspace = true, optional = true }
 futures-util = { workspace = true }
 include_dir = { workspace = true, optional = true }
 portable-pty = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true, optional = true }
@@ -43,11 +45,15 @@ delta-transcript = { workspace = true }
 # The static-web route tests embed a fixture directory through the same code
 # path the `embed-web` feature uses, so they run without the feature.
 include_dir = { workspace = true }
+base64 = { workspace = true }
+sha2 = { workspace = true }
 # A refused signature, for the update tests' downloader.
 release-signature = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tmux-driver = { workspace = true }
 tokio = { workspace = true }
+# The live-socket tests (`src/app/tests/sockets.rs`) connect over a real socket.
+tokio-tungstenite = { workspace = true }
 tower = { workspace = true }
 uuid = { workspace = true }

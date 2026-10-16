@@ -38,6 +38,5 @@ mod support;
 mod async_events;
 mod new_session_sends;
 mod send_and_turn_correlation;
-mod session_creation;
 mod session_list;
 mod session_removal;

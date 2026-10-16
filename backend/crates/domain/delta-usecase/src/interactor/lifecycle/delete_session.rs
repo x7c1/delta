@@ -125,9 +125,9 @@ where
     /// - The session's `cwd` is a worktree Delta created **iff** it lies under
     ///   `worktree_base` and `repo_root` (the repository the worktree was cut
     ///   from) is set and lies outside it. Anything else — the user's own
-    ///   directory, a scratch directory, an existing worktree the user picked
-    ///   as a plain working directory — is not Delta's, and git is not asked
-    ///   anything.
+    ///   directory, a per-spawn directory an older version created, an
+    ///   existing worktree the user picked as a plain working directory — is
+    ///   not Delta's, and git is not asked anything.
     /// - A worktree another listed session still works in is kept: removing
     ///   it would pull the working copy out from under that session.
     /// - The worktree is removed only when it is clean (`git worktree remove`

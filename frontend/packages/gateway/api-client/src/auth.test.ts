@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiClient } from './http';
 import { ApiError } from './errors';
 
@@ -58,5 +58,52 @@ describe('ApiClient onUnauthorized', () => {
 
     await expect(client.getVersion()).rejects.toBeInstanceOf(ApiError);
     expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+});
+
+describe('ApiClient recheckAuth', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('reports a refused token to onUnauthorized and resolves', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 401 }));
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient({ fetchFn, token: 'stale', onUnauthorized });
+
+    await expect(client.recheckAuth()).resolves.toBeUndefined();
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves quietly when the server is unreachable or failing', async () => {
+    vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const fetchFn = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(jsonResponse({ error: 'starting' }, 503));
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient({ fetchFn, token: 't', onUnauthorized });
+
+    await expect(client.recheckAuth()).resolves.toBeUndefined();
+    await expect(client.recheckAuth()).resolves.toBeUndefined();
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('shares one request between re-checks that overlap', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockImplementation(async () => new Response(null, { status: 401 }));
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient({ fetchFn, token: 'stale', onUnauthorized });
+
+    await Promise.all([client.recheckAuth(), client.recheckAuth()]);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+
+    // A later close is checked afresh.
+    await client.recheckAuth();
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 });

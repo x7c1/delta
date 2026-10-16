@@ -16,7 +16,7 @@ use crate::rest::{
     WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
     WireDeleteSnapshotRequest, WireEraseResponse, WireGitBranchesResponse, WireGitRepoResponse,
     WireLatestReleaseResponse, WireLaunchOption, WireLaunchOptionsResponse, WireLaunchTrustRequest,
-    WireLaunchTrustResponse, WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
+    WireLaunchTrustResponse, WireMessagesResponse, WireOpenCwdRequest,
     WirePermissionDecisionRequest, WirePromptTemplate, WirePromptTemplatesResponse,
     WireProvidersResponse, WirePrunePreviewResponse, WirePruneSessionsRequest,
     WirePruneSessionsResponse, WirePullRequestsResponse, WireQuestionAnswerRequest,
@@ -98,9 +98,6 @@ declare_endpoints! {
     /// The session list, open-first then newest first, paged by an opaque
     /// cursor.
     ListSessions: GET "/api/sessions", response = WireSessionsResponse;
-
-    /// Starts a new session and reports how to reach it.
-    CreateSession: POST "/api/sessions", response = WireNewSessionResponse;
 
     /// Opens a registered session's pane.
     OpenSession: POST "/api/sessions/{id}/open";

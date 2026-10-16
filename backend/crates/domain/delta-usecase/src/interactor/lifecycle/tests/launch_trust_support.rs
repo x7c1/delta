@@ -57,7 +57,7 @@ pub(super) async fn launch(
             SendTarget::NewSession {
                 pull_request_number: None,
                 provider: crate::AgentProvider::Claude,
-                workdir: Some(WORKDIR.to_owned()),
+                workdir: WORKDIR.to_owned(),
                 launch_option_ids: Vec::new(),
                 worktree: Some(WorktreeSpec {
                     start_point,

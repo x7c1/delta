@@ -1,6 +1,6 @@
 /**
  * The composer stack: the rail above the composer card and the context-usage
- * bar along its top edge.
+ * meter at the rail's right end.
  *
  * Shared fixtures live in TranscriptPane.testkit.tsx.
  */
@@ -37,7 +37,7 @@ import { useComposerStore } from '../../store/composerStore';
 import { TranscriptPane } from './TranscriptPane';
 import { renderPane, server } from './TranscriptPane.testkit';
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
@@ -199,11 +199,9 @@ describe('TranscriptPane composer rail', () => {
     renderRailPane({ newSession: true });
 
     // A rail item draws no bottom border of its own, so the card's top border
-    // — and, in a thread, the context-usage fill riding it — stays uncovered.
-    // The provider tabs are the one sanctioned exception: that item reaches
-    // 1px down (`-mb-px`) so its selected tab can open into the card, which is
-    // safe because tabs only exist in new-session mode, where no fill rides
-    // the border. Every other item keeps clear of the line.
+    // runs uninterrupted beneath it. The provider tabs are the one sanctioned
+    // exception: that item reaches 1px down (`-mb-px`) so its selected tab can
+    // open into the card. Every other item keeps clear of the line.
     const rail = await screen.findByTestId('composer-rail');
     const items = Array.from(rail.children);
     expect(items.length).toBeGreaterThan(0);
@@ -217,9 +215,22 @@ describe('TranscriptPane composer rail', () => {
       }
     }
   });
+
+  it('shows no context meter in new-session mode, beside the provider tabs', async () => {
+    // Even with usage recorded for the previously focused session, a session
+    // that does not exist yet has nothing to report.
+    useLiveStore.setState({ contextUsage: { [SESSION_ID]: 62 } });
+    renderRailPane({ newSession: true });
+
+    const rail = await screen.findByTestId('composer-rail');
+    expect(within(rail).getByTestId('provider-selector')).toBeInTheDocument();
+    expect(screen.queryByTestId('composer-context-meter')).toBeNull();
+    expect(screen.queryByTestId('composer-rail-end')).toBeNull();
+    expect(screen.queryByRole('meter')).toBeNull();
+  });
 });
 
-describe('TranscriptPane composer context bar', () => {
+describe('TranscriptPane composer context meter', () => {
   beforeEach(() => {
     useNavStore.setState({
       activeThreadId: MAIN_THREAD_ID,
@@ -244,8 +255,8 @@ describe('TranscriptPane composer context bar', () => {
     });
   });
 
-  it('fills the context bar proportional to the focused session used_percentage', async () => {
-    // Seed a second, unfocused session too: the bar must read the FOCUSED
+  it('shows the focused session usage as a meter at the rail right end', async () => {
+    // Seed a second, unfocused session too: the meter must read the FOCUSED
     // session's key (62), not just whatever entry is present, so an off-by-key
     // selector bug would surface here rather than passing on a single entry.
     useLiveStore.setState({
@@ -254,61 +265,99 @@ describe('TranscriptPane composer context bar', () => {
 
     renderPane();
 
-    const card = await screen.findByTestId('composer-card');
-    const fill = within(card).getByTestId('composer-context-fill');
-    expect(fill).toHaveStyle({ width: '62%' });
-    expect(fill).toHaveAttribute('aria-valuenow', '62');
-    // The fill is right-anchored along the card's top edge (it grows leftward
-    // from the right so its tip stays next to the `%` readout).
-    expect(fill.className).toContain('right-0');
-    expect(fill.className).toContain('rounded-tr-md');
-    expect(within(card).getByTestId('composer-context-bar')).toHaveTextContent(
+    const rail = await screen.findByTestId('composer-rail');
+    const end = within(rail).getByTestId('composer-rail-end');
+    // The end slot follows the template button and is pushed right by the flex
+    // layout, not positioned out of flow.
+    expect(rail.lastElementChild).toBe(end);
+    expect(end.className).toContain('ml-auto');
+    expect(end.className).not.toMatch(/(^|\s)(absolute|fixed)(\s|$)/);
+
+    const item = within(end).getByTestId('composer-context-meter');
+    const meter = within(item).getByRole('meter', {
+      name: 'Context window usage',
+    });
+    expect(meter).toHaveAttribute('aria-valuenow', '62');
+    expect((meter.firstElementChild as HTMLElement).style.width).toBe('62%');
+    // Right-anchored like the footer rate-limit rows, so the bar grows
+    // leftward from the readout.
+    expect(meter.className).toContain('justify-end');
+    expect(within(item).getByTestId('composer-context-pct')).toHaveTextContent(
       '62%',
     );
+
+    // It is a rail item like the template button: resting on the card border
+    // (no bottom border, no negative margin) at the button's 22px height
+    // (`py-1` around a 14px row).
+    expect(item.className).toContain('border-b-0');
+    expect(item.className).not.toMatch(/(^|\s|:)-m[btxy]?-/);
+    const row = item.firstElementChild as HTMLElement;
+    expect(row.className).toContain('py-1');
+    expect((row.firstElementChild as HTMLElement).className).toContain('h-3.5');
+
+    // Nothing is drawn on the card any more.
+    const card = screen.getByTestId('composer-card');
+    expect(within(card).queryByRole('meter')).toBeNull();
   });
 
-  it('exposes a focusable label with an always-present help popover', async () => {
+  it.each([
+    { usage: -12, now: '0', pct: '0%' },
+    { usage: 137.4, now: '100', pct: '100%' },
+    { usage: 41.6, now: '41.6', pct: '42%' },
+  ])(
+    'clamps and rounds a usage of $usage to $pct',
+    async ({ usage, now, pct }) => {
+      useLiveStore.setState({ contextUsage: { [SESSION_ID]: usage } });
+
+      renderPane();
+
+      const item = await screen.findByTestId('composer-context-meter');
+      expect(within(item).getByRole('meter')).toHaveAttribute(
+        'aria-valuenow',
+        now,
+      );
+      expect(
+        within(item).getByTestId('composer-context-pct'),
+      ).toHaveTextContent(pct);
+    },
+  );
+
+  it('offers an upward help popover from a focusable item', async () => {
     useLiveStore.setState({ contextUsage: { [SESSION_ID]: 62 } });
 
     renderPane();
 
-    const card = await screen.findByTestId('composer-card');
-    // The `%` readout is a focusable, help-cursored span (it reveals the
-    // popover on hover/focus rather than via a native `title` tooltip).
-    const label = within(card).getByTestId('composer-context-label');
-    expect(label).toHaveTextContent('62%');
-    expect(label).toHaveAttribute('tabindex', '0');
-    expect(label.className).toContain('cursor-help');
-    // The old native title tooltip is gone.
-    expect(label).not.toHaveAttribute('title');
+    const item = await screen.findByTestId('composer-context-meter');
+    // The custom popover replaces a native `title` tooltip, which would show
+    // the same words a second time.
+    const meter = within(item).getByRole('meter');
+    expect(meter).not.toHaveAttribute('title');
+    expect(item.querySelector('[tabindex="0"]')).not.toBeNull();
 
-    // The custom popover is always in the DOM (CSS-toggled on hover/focus), so
-    // it is structurally assertable without simulating a hover.
-    const popover = within(card).getByTestId('composer-context-popover');
+    // The popover is always in the DOM (CSS-toggled on hover/focus), so it is
+    // structurally assertable without simulating a hover. It opens upward,
+    // away from the card.
+    const popover = within(item).getByTestId('composer-context-popover');
     expect(popover).toHaveAttribute('role', 'note');
     expect(popover).toHaveTextContent('Context window usage');
+    expect(popover.className).toContain('bottom-full');
   });
 
-  it('omits the fill when the focused session has no context usage', async () => {
+  it('omits the meter when the focused session has no context usage', async () => {
     // No `contextUsage` entry for the focused session (e.g. no snapshot yet, or
-    // null right after /compact).
+    // null right after /compact): hidden, not shown at 0%.
     renderPane();
 
-    const card = await screen.findByTestId('composer-card');
+    const rail = await screen.findByTestId('composer-rail');
+    expect(screen.queryByTestId('composer-context-meter')).toBeNull();
+    expect(screen.queryByRole('meter')).toBeNull();
+    // The end slot is dropped with it, so the template button alone still
+    // gives the rail its height — exactly as with no meter feature at all.
+    expect(within(rail).queryByTestId('composer-rail-end')).toBeNull();
+    expect(rail.children).toHaveLength(1);
     expect(
-      within(card).queryByTestId('composer-context-fill'),
-    ).not.toBeInTheDocument();
-    expect(
-      within(card).queryByTestId('composer-context-bar'),
-    ).not.toBeInTheDocument();
-    // With no usage the whole bar is omitted, so neither the label nor its
-    // popover is in the DOM.
-    expect(
-      within(card).queryByTestId('composer-context-label'),
-    ).not.toBeInTheDocument();
-    expect(
-      within(card).queryByTestId('composer-context-popover'),
-    ).not.toBeInTheDocument();
+      within(rail).getByTestId('prompt-templates-button'),
+    ).toBeInTheDocument();
   });
 
   // A timeline-initiated cross-lane jump records a navigation intent

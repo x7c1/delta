@@ -29,7 +29,7 @@ import { ProviderUnavailableNotice } from './ProviderUnavailableNotice';
 
 const server = setupServer(...createHandlers());
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
@@ -123,9 +123,7 @@ describe('ProviderTabs', () => {
     // A rail item rests ON the card's top border: top/left/right borders and
     // rounded top corners, no bottom border of its own. This item is the one
     // that reaches 1px down onto that border (`-mb-px`, painted above the card
-    // with `relative z-10`) so its selected tab can open into the card — which
-    // only works because provider tabs exist in new-session mode alone, where
-    // the context-usage fill never rides the border.
+    // with `relative z-10`) so its selected tab can open into the card.
     expect(tabs.className).toContain('border-b-0');
     expect(tabs.className).toContain('rounded-t-md');
     expect(tabs.className).toContain('-mb-px');

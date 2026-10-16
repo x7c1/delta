@@ -96,7 +96,7 @@ export function beginNewSessionSending(overrides: { id?: string } = {}) {
     id: overrides.id ?? 'local-new-1',
     target: {
       kind: 'new-session',
-      workdir: null,
+      workdir: '/projects/app',
       launchOptionIds: [],
       provider: 'claude',
       worktree: null,

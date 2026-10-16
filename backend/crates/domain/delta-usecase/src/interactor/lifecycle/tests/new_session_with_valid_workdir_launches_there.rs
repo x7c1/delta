@@ -2,8 +2,7 @@ use crate::interactor::testing::*;
 use crate::SendTarget;
 
 /// A composer-first send carrying a validated user-selected workdir launches
-/// the fresh session in that directory's *canonical* path, not the default
-/// `<base>/<token>`.
+/// the fresh session in that directory's *canonical* path.
 #[tokio::test]
 async fn new_session_with_valid_workdir_launches_there() {
     let ix = interactor();
@@ -18,7 +17,7 @@ async fn new_session_with_valid_workdir_launches_there() {
         SendTarget::NewSession {
             pull_request_number: None,
             provider: crate::AgentProvider::Claude,
-            workdir: Some("/projects/app".to_owned()),
+            workdir: "/projects/app".to_owned(),
             launch_option_ids: Vec::new(),
             worktree: None,
         },
@@ -35,6 +34,6 @@ async fn new_session_with_valid_workdir_launches_there() {
     assert_eq!(
         created[0].workdir,
         FakeWorkspace::canonical("/projects/app"),
-        "the launch dir is the canonical user-selected path, not <base>/<token>"
+        "the launch dir is the canonical user-selected path"
     );
 }

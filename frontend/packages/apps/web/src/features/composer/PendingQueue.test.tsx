@@ -22,7 +22,7 @@ import { usePendingSends, type PendingSurface } from './usePendingSends';
 
 const server = setupServer(...createHandlers());
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
@@ -150,7 +150,7 @@ describe('PendingQueue server sends', () => {
           id: 'l1',
           target: {
             kind: 'new-session',
-            workdir: null,
+            workdir: '/projects/app',
             launchOptionIds: [],
             provider: 'claude',
             worktree: null,
@@ -833,7 +833,7 @@ describe('PendingQueue failed submit', () => {
           id: 'l1',
           target: {
             kind: 'new-session',
-            workdir: null,
+            workdir: '/projects/app',
             launchOptionIds: [7],
             provider: 'claude',
             worktree: null,
@@ -865,7 +865,7 @@ describe('PendingQueue failed submit', () => {
           id: 'l1',
           target: {
             kind: 'new-session',
-            workdir: null,
+            workdir: '/projects/app',
             launchOptionIds: [7],
             provider: 'claude',
             worktree: null,
