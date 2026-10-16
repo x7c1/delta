@@ -133,22 +133,24 @@ async fn streaming_preview_in_a_just_dispatched_branch_turn_lands_on_the_branch_
         .unwrap();
 
     match events.as_slice() {
-        [SessionEvent::AssistantStreaming { thread_id, .. }] => {
+        [SessionEvent::AssistantStreaming {
+            thread_id,
+            message_id,
+            index,
+            final_,
+            delta,
+            ..
+        }] => {
             assert_eq!(
                 *thread_id, child,
                 "the streaming preview lands on the new branch thread"
             );
             assert_ne!(*thread_id, main);
+            assert_eq!(message_id, "msg-branch");
+            assert_eq!(*index, 0);
+            assert!(!*final_);
+            assert_eq!(delta, "partial");
         }
         other => panic!("expected a single AssistantStreaming, got {other:?}"),
     }
-
-    // The buffered preview carries the same branch attribution.
-    let preview_thread = ix
-        .with_runtime(&session, |state| {
-            state.streaming_message().map(|s| s.thread_id)
-        })
-        .await
-        .expect("a message is streaming");
-    assert_eq!(preview_thread, child);
 }

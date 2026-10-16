@@ -125,10 +125,9 @@ impl SessionRuntime {
             // returns to idle, so it is kept here and removed only when its
             // completion `<task-notification>` is folded.
             self.running_subagents.retain(|s| s.background);
-            // The provisional live preview belongs to the turn that just ended;
-            // the persisted assistant message (ingested by the transcript sync)
-            // now renders instead, so drop the preview to avoid a duplicate.
-            self.streaming_message = None;
+            // The streaming cursor belongs to the turn that just ended; the
+            // next turn's first un-indexed fragment starts at index 0.
+            self.streaming_cursor = None;
         }
         result
     }
@@ -152,7 +151,7 @@ impl SessionRuntime {
         self.pending_question = None;
         self.running_subagents.clear();
         self.pending_post_tool_use_agent_ids.clear();
-        self.streaming_message = None;
+        self.streaming_cursor = None;
         self.requeues_per_send.clear();
     }
 

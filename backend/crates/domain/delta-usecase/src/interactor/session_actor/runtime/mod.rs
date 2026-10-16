@@ -15,11 +15,12 @@
 //! live-state family — the open pane / agent session (`open`, `agent`), the
 //! accept→launch window (`launching_spawn`, carrying the worktree that launch
 //! still has to build, `planned_worktree`), the bind/resume launch state
-//! (`spawn`), the turn machine (`turn`), the streaming preview (`streaming`),
-//! permission waiters (`permission`), the pending question (`question`),
-//! subagent tracking (`subagents`), and the auto-compact debounce
-//! (`auto_compact`) — keeps its `impl SessionRuntime` block in its own file,
-//! and each public type those families carry has a module named after it.
+//! (`spawn`), the turn machine (`turn`), the streaming chunk-index cursor
+//! (`streaming`), permission waiters (`permission`), the pending question
+//! (`question`), subagent tracking (`subagents`), and the auto-compact
+//! debounce (`auto_compact`) — keeps its `impl SessionRuntime` block in its
+//! own file, and each public type those families carry has a module named
+//! after it.
 
 mod agent;
 mod auto_compact;
@@ -69,8 +70,9 @@ pub use spawn::{PENDING_SPAWN_DEADLINE, RESUME_READY_DEADLINE};
 // re-export would be flagged unused on a non-test build.
 #[cfg(test)]
 pub use spawn::RESUME_DISPATCH_SETTLE;
-pub use streaming::StreamingMessage;
 pub use subagents::RunningSubagent;
+
+use streaming::StreamingCursor;
 pub use turn::{ECHO_DEADLINE, SLASH_COMMAND_ECHO_DEADLINE};
 
 use std::collections::HashMap;
@@ -157,12 +159,12 @@ pub struct SessionRuntime {
     /// (row ids are never reused). NOT part of [`Self::is_empty`]: it means
     /// nothing without the pending question it names.
     answered_question: Option<i64>,
-    /// The provisional live preview of the in-flight turn's assistant message,
-    /// accumulated from the `MessageDisplay` hook. `None` between turns. Never
-    /// persisted: cleared when the turn ends (so the persisted message takes
-    /// over), and therefore not part of [`Self::is_empty`] — a turn returning
-    /// to idle drops it via [`Self::apply_turn`].
-    streaming_message: Option<StreamingMessage>,
+    /// The chunk-index cursor for the in-flight turn's un-indexed streaming
+    /// fragments (Codex deltas). `None` between turns: cleared when the turn
+    /// ends so the next turn starts at index 0, and therefore not part of
+    /// [`Self::is_empty`] — a turn returning to idle drops it via
+    /// [`Self::apply_turn`].
+    streaming_cursor: Option<StreamingCursor>,
     /// The subagents (`Agent`/`Task` tool calls) currently running in this
     /// session's turn, keyed by `tool_use_id` and kept in start order. Each is
     /// added by the `PreToolUse(Agent)` hook. A FOREGROUND entry is removed by

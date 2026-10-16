@@ -154,10 +154,10 @@ Request:
 
 Fires repeatedly while an assistant message is being generated — before the
 transcript JSONL is flushed and before any blocking tool prompt appears. Each
-fire carries one chunk of the visible assistant text, and Delta buffers it as a
-provisional live preview of the in-flight turn, broadcasting `assistant_streaming`
-to the browser. The hook is deliberately passive (an empty 200), so it never
-mutates the TUI.
+fire carries one chunk of the visible assistant text, and Delta re-broadcasts it
+as `assistant_streaming` so the browser can assemble a provisional live preview
+of the in-flight turn. The hook is deliberately passive (an empty 200), so it
+never mutates the TUI.
 
 Request:
 

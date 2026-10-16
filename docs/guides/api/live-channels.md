@@ -419,8 +419,8 @@ which frames arrive, and a client must handle each event whenever it lands.
   (Claude's `MessageDisplay` hook; a headless provider's streaming deltas).
   `delta` is the increment, not the running text: chunks sharing one `message_id`
   are assembled in `index` order rather than in arrival order, and a repeated
-  `index` replaces that slot (the latest delivery wins) — exactly how the
-  server's own buffer holds them. A chunk carrying a different `message_id`
+  `index` replaces that slot (the latest delivery wins); the server keeps no
+  copy of the text. A chunk carrying a different `message_id`
   starts a fresh preview, superseding the previous one. `final` is `true` on the
   last chunk of a message — Codex never sends one, because its completed message
   arrives as a persisted transcript message instead. The preview is **not**
