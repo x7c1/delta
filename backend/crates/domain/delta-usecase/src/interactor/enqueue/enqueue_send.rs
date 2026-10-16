@@ -129,13 +129,14 @@ where
             let adapter = agent.adapter.clone();
             let handle = agent.handle.clone();
 
-            // Branch-from-selected-text is enabled by hidden-context injection,
-            // NOT by native provider fork (`ForkCapability` is `None` for every
-            // v1 provider). Gate a branch send on `ContextInjectionCapability`:
-            // a provider that cannot inject hidden context (`None`) genuinely
-            // cannot branch, so reject it cleanly rather than silently dropping
-            // the branch intent. Codex is `HiddenPerTurn` (via
-            // `thread/inject_items`), so it passes and branches like Claude.
+            // A branch-from-selected-text send is an ordinary send on the
+            // branch thread, preceded by the selected passage injected as
+            // hidden context. Gate a branch send on
+            // `ContextInjectionCapability`: a provider that cannot inject
+            // hidden context (`None`) genuinely cannot branch, so reject it
+            // cleanly rather than silently dropping the branch intent. Codex is
+            // `HiddenPerTurn` (via `thread/inject_items`), so it passes and
+            // branches like Claude.
             if branch_from.is_some()
                 && adapter.capabilities().context_injection == ContextInjectionCapability::None
             {

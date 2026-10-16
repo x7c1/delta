@@ -68,8 +68,8 @@
 //!
 //! A plain turn's messages land on the session's `main` thread the source is
 //! constructed with; a *branch* turn (Delta's
-//! branch-from-selected-text, delivered as hidden-context injection rather than a
-//! native provider fork — Codex is still [`ForkCapability::None`]) is routed onto
+//! branch-from-selected-text, delivered as hidden-context injection followed by an
+//! ordinary send on the branch thread) is routed onto
 //! its branch child thread by [`AgentContentSource::begin_turn`] before its frames
 //! arrive, and its root user message carries the branched-from message as its
 //! semantic parent — matching the `send` row's own lane + parent, so branch
@@ -98,7 +98,6 @@
 //! [`AgentEvent::ThinkingMessage`]: delta_usecase::AgentEvent::ThinkingMessage
 //! [`AgentEvent::TurnStarted`]: delta_usecase::AgentEvent::TurnStarted
 //! [`AgentEvent::UserPromptAccepted`]: delta_usecase::AgentEvent::UserPromptAccepted
-//! [`ForkCapability::None`]: delta_usecase::ForkCapability
 //! [`Message`]: delta_model::Message
 
 mod agent_content_source;

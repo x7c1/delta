@@ -115,8 +115,8 @@ async fn codex_second_send_dispatches_over_the_adapter() {
 /// passage as hidden context over the adapter's `inject_context` BEFORE the
 /// turn dispatches, and (c) dispatch the branch turn over the same adapter send
 /// path as any other Codex turn. This is the regression proof that Codex branch
-/// send routes through inject-context + shared branch bookkeeping rather than
-/// the removed `ForkCapability::None` rejection.
+/// send routes through inject-context + shared branch bookkeeping and is accepted
+/// as an ordinary send on the branch thread.
 #[tokio::test]
 async fn codex_branch_send_injects_context_and_reuses_branch_bookkeeping() {
     let factory = FakeAgentFactory::new("thr_branch", Some("turn_2"));
@@ -151,7 +151,7 @@ async fn codex_branch_send_injects_context_and_reuses_branch_bookkeeping() {
     let (branch, events) = ix
         .enqueue_send(branch_off(main_thread, &parent), "branch text", Some(quote))
         .await
-        .expect("the Codex branch send is accepted (no ForkCapability rejection)");
+        .expect("the Codex branch send is accepted as an ordinary send on the branch thread");
 
     // (a) Same delta-side branch structure Claude builds: a new thread lane with
     // the branched-from message as its semantic parent, parented to the source
