@@ -132,7 +132,7 @@ test('focusing a closed session shows its transcript read-only', async ({
   ).toBeVisible();
 });
 
-test('a closed session resumes after a Send via the pending queue', async ({
+test('a closed session resumes after a Send via the send-activity strip', async ({
   page,
 }) => {
   await useManualEventControl(page);
@@ -145,7 +145,7 @@ test('a closed session resumes after a Send via the pending queue', async ({
   await expect(page.getByTestId('readonly-notice')).toBeVisible();
 
   // Sending to a closed session resumes it; the send is surfaced optimistically
-  // in the pending queue rather than via a navigator badge.
+  // in the send-activity strip rather than via a navigator badge.
   await page.getByRole('textbox').fill('pick this back up');
   await page.getByRole('button', { name: 'Send' }).click();
 
@@ -215,8 +215,8 @@ test('starting a new session focuses it before any hook registers it', async ({
     .filter({ has: page.getByRole('status', { name: 'Starting', exact: true }) });
   await expect(starting).toHaveCount(1);
 
-  // Its first prompt rides along in the pending strip, exactly once, and the
-  // composer says what a message sent now would do — wait for the session,
+  // Its first prompt rides along in the send-activity strip, exactly once, and
+  // the composer says what a message sent now would do — wait for the session,
   // rather than go out immediately.
   const pending = page.getByTestId('pending-item');
   await expect(pending).toHaveCount(1);

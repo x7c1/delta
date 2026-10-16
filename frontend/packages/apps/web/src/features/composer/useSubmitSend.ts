@@ -16,7 +16,7 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
  * `POST /api/sends`:
  *
  * 1. record a `sending` chip for the surface the user submitted on, so the
- *    pending strip reacts instantly (the server knows nothing yet);
+ *    send-activity strip reacts instantly (the server knows nothing yet);
  * 2. fire the POST (the mutation's onSuccess patches the accepted send into
  *    the session's open-send cache, so the chip is server-backed without a
  *    fetch gap);

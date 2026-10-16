@@ -17,8 +17,8 @@ import type { Send } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { useNotificationStore } from '../../store/notificationStore';
-import { PendingQueue } from './PendingQueue';
-import { usePendingSends, type PendingSurface } from './usePendingSends';
+import { SendActivityStrip } from './SendActivityStrip';
+import { useSendActivity, type SendActivitySurface } from './useSendActivity';
 
 const server = setupServer(...createHandlers());
 
@@ -31,15 +31,17 @@ function Strip({
   surface,
   sessionSpawning,
 }: {
-  surface: PendingSurface;
+  surface: SendActivitySurface;
   sessionSpawning?: boolean;
 }) {
-  const entries = usePendingSends(surface);
-  return <PendingQueue entries={entries} sessionSpawning={sessionSpawning} />;
+  const entries = useSendActivity(surface);
+  return (
+    <SendActivityStrip entries={entries} sessionSpawning={sessionSpawning} />
+  );
 }
 
 function renderStrip(
-  surface: PendingSurface,
+  surface: SendActivitySurface,
   seed?: (queryClient: QueryClient) => void,
   // As the transcript pane relays it: the focused session is still starting.
   sessionSpawning?: boolean,
@@ -85,7 +87,7 @@ function serverSend(overrides: Partial<Send> = {}): Send {
   };
 }
 
-describe('PendingQueue server sends', () => {
+describe('SendActivityStrip server sends', () => {
   beforeEach(reset);
 
   it('labels a queued send as deliberate waiting, distinct from a dispatched one', () => {
@@ -823,7 +825,7 @@ describe('PendingQueue server sends', () => {
   });
 });
 
-describe('PendingQueue failed submit', () => {
+describe('SendActivityStrip failed submit', () => {
   beforeEach(reset);
 
   it('shows the generic line alone when the server named nothing', () => {

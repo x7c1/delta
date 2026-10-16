@@ -22,7 +22,8 @@ import { useNotificationStore } from '../store/notificationStore';
  *   invalidating the affected `messages`/`session-threads` queries, which
  *   refetches the freshly-ingested transcript lines. Send-affecting events
  *   (the turn lifecycle, transcript growth, a close) also invalidate the
- *   session's open-send list — the server-side truth behind the pending strip.
+ *   session's open-send list — the server-side truth behind the send-activity
+ *   strip.
  *   Lifecycle events (`session_registered`/`session_opened`/`session_closed`,
  *   `spawn_failed` for a launch that never bound, and `session_removed` for a
  *   session the user removed) invalidate the session list so a starting,
@@ -104,7 +105,8 @@ export function applySessionEvent(
     case 'turn_interrupted':
       // The send queue moved (a send matched, or the turn that drains it
       // ended); refetch the session's open-send list regardless of focus so a
-      // background session's pending strip is correct the moment it is viewed.
+      // background session's send-activity strip is correct the moment it is
+      // viewed.
       invalidateSessionSends(queryClient, event.session_id);
       // A turn finishing on a thread the user is not currently viewing produced
       // something unseen, so bump THAT thread's unread — the navigator shows it
@@ -285,7 +287,7 @@ export function applySessionEvent(
     case 'permission_resolved':
       // The store cleared the card above, but the resolution also moved the
       // session's QUERYABLE live state: the open-sends envelope carries the
-      // pending `permission` / `question`, and `usePendingSends` seeds the
+      // pending `permission` / `question`, and `useSendActivity` seeds the
       // cards from it. An envelope the server assembled BEFORE the resolution,
       // still in flight when this event lands, would bring the card back —
       // the same race the `subagent_*` cases below close, and closed the same
@@ -299,7 +301,7 @@ export function applySessionEvent(
     case 'subagent_finished':
       // The store recorded it above, but this also moved the session's
       // QUERYABLE live state: the open-sends envelope carries
-      // `running_subagents`, and `usePendingSends` re-seeds the store from it
+      // `running_subagents`, and `useSendActivity` re-seeds the store from it
       // authoritatively — an empty list there clears whatever the store holds,
       // which is exactly what lets that envelope heal a reconnect.
       //

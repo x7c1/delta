@@ -152,7 +152,7 @@ export function useListedSessionThreads(
 
 /**
  * A single session's open (non-terminal) sends — the server-side truth behind
- * the pending-send strip. Disabled until a real session id is supplied.
+ * the send-activity strip. Disabled until a real session id is supplied.
  *
  * Freshness is event-driven: send-affecting session events (turn lifecycle,
  * transcript growth, spawn failure, close) invalidate this key, and a
@@ -281,8 +281,8 @@ export function useDeleteSessionMutation(
  * still invalidates: the send already left the queue, so the refetch reconciles
  * the strip either way. Error *presentation* is the call site's job: this
  * gateway hook does not know about the app's notification store, so callers
- * pass an `onError` to `mutate` (see `PendingQueue`) — a refused cancel must
- * surface as an explained refusal, not a dead button.
+ * pass an `onError` to `mutate` (see `SendActivityStrip`) — a refused cancel
+ * must surface as an explained refusal, not a dead button.
  */
 export function useCancelSendMutation(
   client: ApiClient,
@@ -312,8 +312,8 @@ export function useCancelSendMutation(
  * cancelled), so the refetch reconciles the strip either way. Error
  * *presentation* is the call site's job, exactly as with
  * {@link useCancelSendMutation}: callers pass an `onError` to `mutate` (see
- * `PendingQueue`) — a refused release must surface as an explained refusal,
- * not a dead button.
+ * `SendActivityStrip`) — a refused release must surface as an explained
+ * refusal, not a dead button.
  */
 export function useReleaseSendMutation(
   client: ApiClient,

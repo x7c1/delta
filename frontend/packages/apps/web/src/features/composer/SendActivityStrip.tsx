@@ -11,11 +11,11 @@ import { useApiClient } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { useNewSessionSend } from './useNewSessionSend';
-import type { PendingEntry } from './usePendingSends';
+import type { SendActivityEntry } from './useSendActivity';
 
-export interface PendingQueueProps {
-  /** The merged pending rows for the active surface (see `usePendingSends`). */
-  entries: PendingEntry[];
+export interface SendActivityStripProps {
+  /** The send-activity rows for the active surface (see `useSendActivity`). */
+  entries: SendActivityEntry[];
   /**
    * True while the surface's session is still starting (`status: 'spawning'`),
    * relayed by the transcript pane which already resolves it. It only changes
@@ -63,8 +63,9 @@ const pendingTextClass =
 const clampedTextClass = 'min-w-0 flex-1 line-clamp-1 break-words text-fg';
 
 /**
- * The pending-send strip above the composer, a view over the server's
- * open-send list plus the thin client-side complements (see `usePendingSends`):
+ * The send-activity strip above the composer: the sends the user is still
+ * waiting on. The server's open-send list feeds only some of the rows; the
+ * rest are thin client-side complements (see `useSendActivity`):
  *
  * - a `queued` send is parked server-side and dispatches when the session goes
  *   idle — labelled so it reads as deliberate waiting, not a failure (queued
@@ -104,10 +105,10 @@ const clampedTextClass = 'min-w-0 flex-1 line-clamp-1 break-words text-fg';
  * cancel" label and an explicit Send action (the release endpoint) alongside
  * the usual Cancel.
  */
-export function PendingQueue({
+export function SendActivityStrip({
   entries,
   sessionSpawning = false,
-}: PendingQueueProps) {
+}: SendActivityStripProps) {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const removeSending = useLiveStore((state) => state.removeSending);

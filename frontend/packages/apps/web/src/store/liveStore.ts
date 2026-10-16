@@ -27,7 +27,7 @@ import { createEventsSlice } from './live/eventReducers';
  * slices and re-exports the public surface, so consumers keep importing
  * everything from `store/liveStore`.
  *
- * The pending-send strip is server-authoritative: its rows come from
+ * The send-activity strip is server-authoritative: its rows come from
  * `GET /api/sessions/{id}/sends` via the query cache. This store keeps only
  * the three client-side complements the server cannot provide yet:
  *

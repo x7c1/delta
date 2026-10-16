@@ -264,7 +264,7 @@ export function WorkspaceScreen() {
   // A focused session whose launch has not registered yet. It is listed (and
   // focused) from the moment its first send was accepted, so this is a state
   // the user now sees: the conversation is empty, the first prompt sits in the
-  // pending strip, and the composer waits until the launch comes up.
+  // send-activity strip, and the composer waits until the launch comes up.
   const focusedSpawning = focusedItem?.session.status === 'spawning';
   // A focused session whose launch ended without ever binding. Its row is kept,
   // so it is an ordinary thing to focus — and it has no conversation, so it

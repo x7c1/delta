@@ -38,7 +38,7 @@ describe('applySessionEvent', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['session-threads', FOCUSED],
     });
-    // A matched send left the open list; the pending strip refetches.
+    // A matched send left the open list; the send-activity strip refetches.
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['session-sends', FOCUSED],
     });
@@ -70,7 +70,7 @@ describe('applySessionEvent', () => {
     );
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 7] });
-    // The pending strip refetches regardless of focus (already covered by
+    // The send-activity strip refetches regardless of focus (already covered by
     // earlier tests) — assert it here too so a future refactor that drops
     // either invalidate is caught.
     expect(invalidate).toHaveBeenCalledWith({
@@ -216,7 +216,7 @@ describe('applySessionEvent', () => {
     // names its own thread (8), so that thread's messages still refetch (a
     // no-op when no observer for it is mounted, which is the common case for
     // a background session). The session's open-send list also refetches so
-    // its pending strip is right when the user views it.
+    // its send-activity strip is right when the user views it.
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['messages', 5] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 8] });
     expect(invalidate).toHaveBeenCalledWith({

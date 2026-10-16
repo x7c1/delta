@@ -146,8 +146,8 @@ describe('TranscriptPane', () => {
     renderPane();
 
     const notice = await screen.findByTestId('send-parked-notice');
-    // The message itself is back in the queue (the pending strip renders it
-    // with Send and Cancel), so the notice only says why it is waiting — it
+    // The message itself is back in the queue (the send-activity strip renders
+    // it with Send and Cancel), so the notice only says why it is waiting — it
     // must not tell the user to copy a text it no longer holds.
     expect(notice).toHaveTextContent('never reached the session');
     expect(notice).toHaveTextContent('waiting in the queue');

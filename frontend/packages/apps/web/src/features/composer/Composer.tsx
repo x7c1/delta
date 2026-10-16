@@ -98,7 +98,7 @@ function SendIcon({ className }: { className?: string }) {
 /**
  * The bottom composer: text input bound to a per-thread draft and submit wired
  * to `POST /api/sends` (via the shared submission path, which keeps the
- * pending strip honest). The send target depends on {@link ComposerMode}.
+ * send-activity strip honest). The send target depends on {@link ComposerMode}.
  */
 export function Composer({ mode }: ComposerProps) {
   const submitSend = useSubmitSend();

@@ -21,10 +21,10 @@ import {
   type SendingItem,
 } from '../../store/liveStore';
 import {
-  usePendingSends,
-  type PendingEntry,
-  type PendingSurface,
-} from './usePendingSends';
+  useSendActivity,
+  type SendActivityEntry,
+  type SendActivitySurface,
+} from './useSendActivity';
 
 const server = setupServer(...createHandlers());
 
@@ -33,13 +33,13 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 /** A bare driver that only runs the hook's seeding effects. */
-function Driver({ surface }: { surface: PendingSurface }) {
-  usePendingSends(surface);
+function Driver({ surface }: { surface: SendActivitySurface }) {
+  useSendActivity(surface);
   return null;
 }
 
 function mount(
-  surface: PendingSurface,
+  surface: SendActivitySurface,
   seed?: (queryClient: QueryClient) => void,
 ) {
   const queryClient = new QueryClient({
@@ -61,10 +61,12 @@ function mount(
  * test can assert on the merged rows themselves rather than on whatever a
  * component happens to render from them.
  */
-function captureEntries(surface: PendingSurface): { current: PendingEntry[] } {
-  const box: { current: PendingEntry[] } = { current: [] };
+function captureEntries(surface: SendActivitySurface): {
+  current: SendActivityEntry[];
+} {
+  const box: { current: SendActivityEntry[] } = { current: [] };
   function Capture() {
-    box.current = usePendingSends(surface);
+    box.current = useSendActivity(surface);
     return null;
   }
   const queryClient = new QueryClient({
@@ -90,7 +92,7 @@ function reset() {
   });
 }
 
-const THREAD_SURFACE: PendingSurface = {
+const THREAD_SURFACE: SendActivitySurface = {
   kind: 'thread',
   sessionId: SESSION_ID,
   threadId: 1,
@@ -105,7 +107,7 @@ const inFlightEnvelope: SendsResponse = {
   running_subagents: [],
 };
 
-describe('usePendingSends active-turn seeding', () => {
+describe('useSendActivity active-turn seeding', () => {
   beforeEach(reset);
 
   it('does not leave the running flag stuck on after a turn completes off-focus', async () => {
@@ -153,7 +155,7 @@ describe('usePendingSends active-turn seeding', () => {
   });
 });
 
-describe('usePendingSends question/permission seeding', () => {
+describe('useSendActivity question/permission seeding', () => {
   beforeEach(() => {
     reset();
     useLiveStore.setState({ notices: {}, resolvedRequests: {} });
@@ -249,7 +251,7 @@ describe('usePendingSends question/permission seeding', () => {
   });
 });
 
-describe('usePendingSends on a starting session', () => {
+describe('useSendActivity on a starting session', () => {
   beforeEach(reset);
 
   it('renders the first prompt once, not twice', async () => {
@@ -301,10 +303,10 @@ describe('usePendingSends on a starting session', () => {
   });
 });
 
-describe('usePendingSends on the new-session surface', () => {
+describe('useSendActivity on the new-session surface', () => {
   beforeEach(reset);
 
-  const NEW_SESSION_SURFACE: PendingSurface = { kind: 'new-session' };
+  const NEW_SESSION_SURFACE: SendActivitySurface = { kind: 'new-session' };
 
   const LAUNCH = {
     workdir: '/projects/app',
