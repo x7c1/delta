@@ -3,7 +3,7 @@
 //!
 //! Each case is written generically over `&impl AgentAdapter` and reads the
 //! adapter's declared [`AgentCapabilities`](delta_usecase::AgentCapabilities) to decide what to assert, so the
-//! *same* case body runs against the Claude adapter and the Codex adapter (and
+//! *same* case body runs against every adapter (today the Codex adapter, and
 //! any future provider) unchanged. A concrete adapter's test module supplies the
 //! fixture and calls the case; this crate owns the assertions.
 //!
@@ -12,8 +12,8 @@
 //! Only the cases drivable purely through the [`AgentAdapter`] trait live here —
 //! launch/send/interrupt/close and the events those operations emit directly.
 //! Cases that need a provider-specific *stimulus* to reach the interesting state
-//! (Claude's hook/transcript ingestion seam; Codex's scripted app-server
-//! notifications and its `resolve_permission` reply path) are driven from that
+//! (Codex's scripted app-server notifications and its `resolve_permission`
+//! reply path) are driven from that
 //! adapter's own test module, because the way the stimulus is delivered is
 //! itself provider-specific. Those adapter-side cases still assert the same
 //! neutral [`AgentEvent`]s this crate's cases do.

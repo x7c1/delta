@@ -51,7 +51,7 @@ impl AgentAdapter for CodexAppServerAdapter {
             .map_err(to_usecase_err)?;
         let handle = self.register_session(req.session_id, started);
         // A first prompt from the composer's opening Send starts a turn straight
-        // away, mirroring how the Claude adapter auto-submits its launch prompt.
+        // away, mirroring how Claude's spawn path auto-submits its launch prompt.
         if let Some(prompt) = req.first_prompt {
             self.start_turn(&handle, prompt).await?;
         }
@@ -165,12 +165,11 @@ impl AgentAdapter for CodexAppServerAdapter {
     /// deny → `decline`), and emit
     /// [`AgentEvent::PermissionResolved`].
     ///
-    /// This is the Codex counterpart to the Claude adapter's ingestion seam: the
-    /// entry point — reachable through `Arc<dyn AgentAdapter>` — through which a
-    /// browser decision reaches the provider. `request_id` is the adapter-scoped
-    /// token surfaced on the matching `PermissionRequested`, which keys the open
-    /// approval's verbatim wire id. Errors when the session or the request id is
-    /// unknown (already answered, or never open).
+    /// This is the entry point — reachable through `Arc<dyn AgentAdapter>` —
+    /// through which a browser decision reaches the provider. `request_id` is
+    /// the adapter-scoped token surfaced on the matching `PermissionRequested`,
+    /// which keys the open approval's verbatim wire id. Errors when the session
+    /// or the request id is unknown (already answered, or never open).
     async fn resolve_permission(
         &self,
         handle: &AgentSessionHandle,

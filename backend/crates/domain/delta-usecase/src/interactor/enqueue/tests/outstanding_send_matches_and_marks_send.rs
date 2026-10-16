@@ -34,6 +34,19 @@ async fn outstanding_send_matches_and_marks_send() {
         .await
         .unwrap();
     assert_eq!(send.status, SendStatus::Dispatched);
+    // Only the visible prompt is typed into the pane: the quote's context rides
+    // the `UserPromptSubmit` hook's `additionalContext` below, never the pane.
+    assert_eq!(
+        ix.tmux_fake()
+            .sent
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, text)| text.as_str())
+            .collect::<Vec<_>>(),
+        ["hello world"],
+        "the pane receives the visible prompt alone"
+    );
 
     // The transcript now contains the matching user line.
     ix.transcript_fake()
