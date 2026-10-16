@@ -1,18 +1,23 @@
-//! The single Claude Code TUI session Delta wraps.
+//! An agent session Delta started.
 
 use crate::agent_provider::AgentProvider;
 use crate::session_id::SessionId;
 use crate::session_status::SessionStatus;
 
-/// The single Claude Code TUI session Delta wraps.
+/// One conversation with an AI agent that Delta started (or, for Claude, an
+/// externally launched `claude` that registered through hooks), driven by a
+/// single [`AgentProvider`] for its whole life.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
     pub id: SessionId,
     pub cwd: String,
-    /// Path of the session's JSONL transcript. `None` while the session is
-    /// still [`SessionStatus::Spawning`]: the path is owned by Claude Code and
-    /// only learned from the first hook, which fills it as it activates the
-    /// session.
+    /// Path of a Claude Code session's JSONL transcript. Always `None` for a
+    /// Codex session, which has no transcript file: its conversation arrives
+    /// over the app-server connection. For a Claude session it is `None` while
+    /// the session is still [`SessionStatus::Spawning`] (and stays so on a
+    /// [`SessionStatus::Failed`] one that never bound): the path is owned by
+    /// Claude Code and only learned from the first hook, which fills it as it
+    /// activates the session.
     pub transcript_path: Option<String>,
     pub title: Option<String>,
     pub status: SessionStatus,

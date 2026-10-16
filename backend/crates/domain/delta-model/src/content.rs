@@ -1,10 +1,10 @@
 //! Message content blocks.
 //!
-//! A Claude Code message carries an ordered list of typed content blocks. Delta
-//! models the kinds it cares about and keeps an explicit [`ContentBlock::Other`]
-//! variant so unknown block kinds are representable in the domain; the
-//! tolerance itself (parsing an unknown kind into `Other`) is implemented by
-//! the wire/record twins in the gateway crates.
+//! A message carries an ordered list of typed content blocks, whichever
+//! provider produced it. Delta models the kinds it cares about and keeps an
+//! explicit [`ContentBlock::Other`] variant so unknown block kinds are
+//! representable in the domain; the tolerance itself (parsing an unknown kind
+//! into `Other`) is implemented by the wire/record twins in the gateway crates.
 
 /// One content block within a message.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,9 +1,9 @@
 //! Helper for declaring transparent string newtypes.
 //!
-//! Several identifiers are thin wrappers over Claude Code's string ids and
-//! share the same conversions. Each id is defined alongside the model it
-//! identifies (e.g. `SessionId` in `session`, `MessageUuid` in `message`); this
-//! macro keeps the shared boilerplate in one place rather than repeating it.
+//! Several identifiers are thin wrappers over string ids and share the same
+//! conversions. Each id is defined alongside the model it identifies (e.g.
+//! `SessionId` in `session`, `MessageUuid` in `message`); this macro keeps the
+//! shared boilerplate in one place rather than repeating it.
 
 /// Declares a transparent string newtype with the common conversions and
 /// `Display`.

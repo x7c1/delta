@@ -5,15 +5,20 @@ use crate::error::{Error, Result};
 /// Correlation status of a recorded send.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendStatus {
-    /// Recorded but not yet typed into the pane: it was composed while a turn
-    /// was in flight, so its keystrokes are held back. Delta dispatches it
-    /// (flipping it to `Dispatched`) once the session goes idle, so it submits
-    /// as an ordinary prompt — the `UserPromptSubmit` hook fires and any locator
-    /// quote is injected normally, rather than Claude Code queueing it mid-turn.
+    /// Recorded but not yet handed to the agent. For either provider it was
+    /// accepted while a new session was still starting, before there was a
+    /// pane or a provider thread to hand it to. For Claude it may also have
+    /// been composed while a turn was in flight, so its keystrokes are held
+    /// back until the session goes idle and it submits as an ordinary prompt —
+    /// the `UserPromptSubmit` hook fires and any locator quote is injected
+    /// normally, rather than Claude Code queueing it mid-turn. Delta dispatches
+    /// it (flipping it to `Dispatched`) once the agent can take it.
     Queued,
-    /// Typed into the pane, awaiting a matching `UserPromptSubmit`.
+    /// Handed to the agent, awaiting correlation: for Claude, typed into the
+    /// pane and awaiting a matching `UserPromptSubmit`; for Codex, sent as a
+    /// `turn/start` request and awaiting its acknowledgement.
     Dispatched,
-    /// Matched to a transcript message uuid.
+    /// Correlated with the conversation (see `Send::matched_uuid`).
     Matched,
     /// Abandoned (e.g. superseded or timed out).
     Cancelled,

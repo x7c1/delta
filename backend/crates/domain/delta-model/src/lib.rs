@@ -1,14 +1,16 @@
 //! Pure domain types for Delta.
 //!
-//! Delta drives a single Claude Code TUI session and reconstructs a thread
-//! graph over its transcript. This crate holds the value types that model that
-//! domain: identifiers, messages, threads, the outgoing-send queue, and
+//! Delta starts agent sessions, each driven by one provider (Claude Code or
+//! Codex), and reconstructs a thread graph over each session's conversation.
+//! This crate holds the provider-neutral value types that model that domain:
+//! identifiers, sessions, messages, threads, the outgoing-send queue, and
 //! permission requests. It performs no I/O, owns no async runtime, and knows
 //! nothing about how the data is stored or transported.
 //!
-//! There is no serde here and no database mapping: how these types appear in
-//! the JSONL transcript, in SQLite, or on the browser wire is owned by the
-//! gateway crates' wire/record twins (`delta-transcript`, `delta-sqlite`,
+//! There is no serde here and no database mapping: how these types appear in a
+//! provider's own format (Claude Code's JSONL transcript, the Codex app-server
+//! protocol), in SQLite, or on the browser wire is owned by the gateway crates'
+//! wire/record twins (`delta-transcript`, `codex-agent`, `delta-sqlite`,
 //! `delta-wire`).
 
 mod agent_provider;
