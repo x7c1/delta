@@ -5,8 +5,6 @@ import type {
 } from '@tanstack/react-query';
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
-  Message,
-  MessagesResponse,
   Send,
   SendsResponse,
   SessionsResponse,
@@ -82,31 +80,6 @@ function invalidateDiscardingInFlight(
  */
 export function invalidateAll(queryClient: QueryClient): void {
   invalidateDiscardingInFlight(queryClient, []);
-}
-
-/**
- * Append a message to a thread's cached transcript, de-duplicating by uuid and
- * keeping the list ordered by `seq`. Used to apply incremental transcript
- * growth that arrives via the live channel. No-op if the thread is not cached.
- */
-export function appendMessage(
-  queryClient: QueryClient,
-  threadId: ThreadId,
-  message: Message,
-): void {
-  queryClient.setQueryData<MessagesResponse>(
-    queryKeys.messages(threadId),
-    (previous) => {
-      if (!previous) {
-        return previous;
-      }
-      const withoutDup = previous.messages.filter(
-        (existing) => existing.uuid !== message.uuid,
-      );
-      const messages = [...withoutDup, message].sort((a, b) => a.seq - b.seq);
-      return { messages };
-    },
-  );
 }
 
 /**

@@ -1,21 +1,10 @@
 import {
-  MAIN_THREAD_DISPLAY_NAME,
   threadDisplayName,
   threadTooltip,
   type ThreadId,
 } from '@delta/model';
 import type { Message, Thread } from '@delta/wire-gen';
 import { isTaskNotificationMessage } from './claudeFormat';
-
-/**
- * Special label for the main thread's lane.
- *
- * Re-exported from the shared {@link MAIN_THREAD_DISPLAY_NAME} so the
- * conventional name lives in one place. The timeline used to publish its own
- * constant under this name — kept as a back-compat alias for existing tests
- * and imports while the rename settles.
- */
-export const MAIN_LANE_LABEL = MAIN_THREAD_DISPLAY_NAME;
 
 /**
  * Classification of a message's author for the timeline mark's color.
@@ -358,7 +347,7 @@ export const MIN_IDLE_GAP_CAP_MS = 60_000;
  * {@link threadDisplayName} / {@link threadTooltip} helpers — the same
  * helpers Navigator uses — so a subthread cannot ever show two different
  * names in two different panes. The main thread is labelled with the
- * conventional {@link MAIN_THREAD_DISPLAY_NAME}.
+ * conventional `MAIN_THREAD_DISPLAY_NAME` from `@delta/model`.
  *
  * Marks within a lane are the thread's messages placed on a SHARED time axis
  * spanning the earliest..latest `created_at` across every (sub)thread. Each
@@ -584,60 +573,27 @@ export interface GlobalXMap {
 /**
  * Compute the per-message x positions for the shared lane axis.
  *
- * Each message's ideal position is derived from the cumulative sum of
- * adjacent inter-message dts, with each dt clamped to a per-session cap.
- * The cap is `max(MIN_IDLE_GAP_CAP_MS, P75(dts) * IDLE_GAP_CAP_FACTOR_K)` —
- * the 75th-percentile adjacent gap times a factor, floored at a minute so a
- * uniformly tight session does not over-flatten. A single long idle gap
- * (e.g. the user stepped away for an hour, then came back) would otherwise
- * dominate the axis and squeeze the actually-conversational messages into a
- * tight cluster; clamping the gap restores the legibility of the
- * conversational rhythm while keeping the time ordering of every message.
+ * Positions follow elapsed time, but each gap between adjacent messages is
+ * capped per session: a single long idle gap (the user stepped away for an
+ * hour, then came back) would otherwise dominate the axis and crush the
+ * conversational messages into a tight cluster. Capping keeps the time
+ * order of every message intact.
  *
- * The cumulative-effective-dt approach degrades cleanly on the edge cases
- * the linear projection used to handle:
- * - zero messages → empty map at `minWidth`,
- * - one message → x = 0 at `minWidth`,
- * - every message at the same timestamp → all effective dts are 0, so every
- *   ideal collapses to 0 and the greedy push (below) spreads them by mark
- *   radius. No divide-by-zero is reachable.
+ * Neighbouring marks never overlap: a message that would land on its left
+ * neighbour is pushed right by the sum of their radii, so the right edge can
+ * drift past `baseWidth` in a dense session. `axisWidth` reflects that drift
+ * and never drops below `minWidth`, so a single-dot session still has a
+ * scrubbable axis.
  *
- * After the ideal positions are computed, a left-to-right greedy pass
- * nudges any neighbour that would overlap to the right so adjacent marks
- * always clear each other by at least the sum of their radii. The minimum
- * spacing between two adjacent messages is the average of their mark
- * diameters — i.e. the sum of their radii — so two large marks land 6 px
- * apart, two small marks 4 px apart, and a large/small neighbour pair 5 px
- * apart. That is the tightest spacing that still guarantees the two circles
- * do not paint into each other; any tighter and dense clusters smear back
- * into the illegible blur the soft alpha + ring workaround was patching over.
- *
- * The greedy push is one-directional (left → right): the leftmost message
- * always sits on its ideal x, while the right edge can drift past `baseWidth`
- * when the session is dense. `axisWidth` reflects that drift so the renderer
- * extends the lane to fit — never below `minWidth`, so a single-dot session
- * still has a scrubbable axis.
- *
- * Sharing one map across every lane is load-bearing: a message at a given
- * timestamp must land at the same x in every lane so cross-lane playhead
- * jumps line up with the marks the user sees.
- *
- * `range` is kept in the signature for symmetry with the lane-builder and
- * for callers that might want to derive their own axis metadata, but it is
- * NOT consulted by the layout: clamping looks at adjacent dts directly so
- * the algorithm stays robust to the same-timestamp edge case.
+ * Every lane shares this one map: a message must land at the same x in every
+ * lane so cross-lane playhead jumps line up with the marks the user sees.
  */
 export function buildGlobalXMap(
   sortedMessages: SortedMessage[],
-  range: TimelineTimeRange | null,
   baseWidth: number,
   markDiameter: (size: TimelineDotSize) => number,
   minWidth: number,
 ): GlobalXMap {
-  // `range` is intentionally unused. See the JSDoc note above: the algorithm
-  // works off adjacent dts, so the raw min/max range is not needed. Keep the
-  // parameter for signature stability with existing callers and tests.
-  void range;
   const pxByUuid = new Map<string, number>();
   if (sortedMessages.length === 0) {
     return { pxByUuid, axisWidth: minWidth };
@@ -679,11 +635,7 @@ export function buildGlobalXMap(
  * Compute the cumulative effective inter-message dts that drive
  * {@link buildGlobalXMap}'s ideal positions. Returns one entry per message;
  * entry 0 is always 0 (the leftmost message is the anchor), and entry `i`
- * (for `i >= 1`) is the sum of the clamped dts from index 0..i. Each
- * adjacent dt is clamped to the per-session cap so a single long idle gap
- * cannot dominate the axis.
- *
- * Exported for tests; not part of the public API.
+ * (for `i >= 1`) is the sum of the clamped dts from index 0..i.
  */
 function computeCumulativeEffectiveDt(
   sortedMessages: SortedMessage[],
@@ -711,12 +663,7 @@ function computeCumulativeEffectiveDt(
 /**
  * Compute the per-session idle-gap cap, in milliseconds, from the adjacent
  * dts. Uses nearest-rank (lower) at the 75th percentile so the cap is
- * deterministic and library-free: `sortedDts[floor(0.75 * (n - 1))]`. The
- * cap is the larger of `P75 * IDLE_GAP_CAP_FACTOR_K` and
- * `MIN_IDLE_GAP_CAP_MS`, so a tight session keeps every gap intact while a
- * sparse session has its outlier gap clamped at `P75 * K`.
- *
- * Exported for tests; not part of the public API.
+ * deterministic and library-free.
  */
 function computeIdleGapCapMs(dts: number[]): number {
   if (dts.length === 0) {
