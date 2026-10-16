@@ -221,7 +221,9 @@ also takes the result to where you use it. `make desktop-dev` runs the debug
 binary from `backend/target/` — nothing is installed. `make desktop` installs
 the bundle: on Linux it runs `sudo apt install --reinstall` on the new `.deb`
 (reinstall, because a local build keeps the release's version number, which
-`apt` would otherwise treat as already installed); on macOS it replaces
+`apt` would otherwise treat as already installed), installing from a copy in a
+private temporary directory that `apt`'s unprivileged `_apt` user can read; on
+macOS it replaces
 `/Applications/Delta.app`. A running Delta keeps the old build until you quit it
 and start it again.
 
