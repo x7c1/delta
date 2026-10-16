@@ -3,6 +3,8 @@
 use crate::newtype::string_newtype;
 
 string_newtype! {
-    /// A transcript line uuid; the internal handle for a message.
+    /// The internal handle for a message: a Claude transcript line's uuid, or
+    /// one derived from the Codex item id (synthesized when Codex names
+    /// none).
     MessageUuid
 }

@@ -1,13 +1,14 @@
-//! Lifecycle status of a Claude Code session.
+//! Lifecycle status of a session.
 
 use crate::error::{Error, Result};
 
-/// Lifecycle status of a Claude Code session.
+/// Lifecycle status of a session, shared by every provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionStatus {
-    /// The session row was created when Delta minted the id and launched
-    /// `claude`, but no hook has bound the spawn yet (the transcript path is
-    /// still unknown).
+    /// The session row was created when Delta minted the id and started the
+    /// launch, but the agent has not bound to it yet: for Claude, no hook has
+    /// arrived (the transcript path is still unknown); for Codex, `thread/start`
+    /// has not returned the provider ids.
     Spawning,
     Active,
     Ended,
