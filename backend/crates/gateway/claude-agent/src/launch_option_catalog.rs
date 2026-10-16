@@ -2,16 +2,15 @@
 //! guard that keeps it shippable.
 //!
 //! Its own module because the catalog grows an entry at a time, while the rest
-//! of this crate is about driving a live `claude` session.
+//! of this crate is a fixed profile.
 
 use delta_usecase::{AgentProvider, LaunchOptionPreset};
 
 /// The launch options Delta ships for Claude.
 ///
-/// Declared in the adapter that owns Claude, beside [`CLAUDE_CAPABILITIES`] —
-/// whose `launch_option_style` is what says a Claude option's `name` is a CLI
-/// flag — for the same reason the capability profile lives there: the adapter
-/// that owns the behaviour owns the vocabulary. The composition root reads this
+/// Declared beside [`CLAUDE_CAPABILITIES`] — whose `launch_option_style` is what
+/// says a Claude option's `name` is a CLI flag — so Claude's provider
+/// vocabulary lives in one crate. The composition root reads this
 /// through one per-provider accessor and materializes every entry into the
 /// launch-option registry at startup, so each is an ordinary registry row the
 /// user can tick.
@@ -36,10 +35,11 @@ use delta_usecase::{AgentProvider, LaunchOptionPreset};
 /// before anything starts rather than putting `--model` into argv twice.
 ///
 /// No entry may name a flag Delta sets itself — `--settings`, `--session-id`,
-/// `--resume`, the consts the parent module declares beside the launch path. The
-/// guard test below pins that, because unlike Codex the Claude adapter has no
-/// rejection path of its own: such an entry would ride into argv beside Delta's own
-/// copy and break every session started with it, silently.
+/// `--resume`, which the Interactor's spawn and resume paths put on the
+/// `claude` command line. The guard test below pins that, because unlike Codex
+/// Claude's launch has no rejection path of its own: such an entry would ride
+/// into argv beside Delta's own copy and break every session started with it,
+/// silently.
 ///
 /// [`CLAUDE_CAPABILITIES`]: super::CLAUDE_CAPABILITIES
 /// [`launch_option_cardinality`]: fn@super::launch_option_cardinality
@@ -78,7 +78,9 @@ pub const CLAUDE_LAUNCH_OPTION_CATALOG: &[LaunchOptionPreset] = &[
 mod tests {
     use super::*;
 
-    use crate::{RESUME_FLAG, SESSION_ID_FLAG, SETTINGS_FLAG};
+    /// The flags the Interactor's spawn and resume paths set on the `claude`
+    /// command line themselves (`delta-usecase`'s lifecycle module).
+    const DELTA_OWNED_FLAGS: [&str; 3] = ["--settings", "--session-id", "--resume"];
 
     /// No shipped option may name a flag Delta fills in itself.
     ///
@@ -91,7 +93,7 @@ mod tests {
     #[test]
     fn no_shipped_option_names_a_delta_owned_flag() {
         for preset in CLAUDE_LAUNCH_OPTION_CATALOG {
-            for owned in [SETTINGS_FLAG, SESSION_ID_FLAG, RESUME_FLAG] {
+            for owned in DELTA_OWNED_FLAGS {
                 assert_ne!(
                     preset.name, owned,
                     "built-in `{}` names `{owned}`, which Delta sets itself",

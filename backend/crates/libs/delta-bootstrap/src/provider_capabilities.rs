@@ -7,11 +7,12 @@ use delta_usecase::{AgentCapabilities, AgentProvider};
 /// The static capability profile for a provider, resolved *without* a live
 /// adapter instance.
 ///
-/// Each provider's profile is declared once in its gateway adapter (the
-/// `*_CAPABILITIES` const its [`AgentAdapter::capabilities`] returns) and read
-/// back here through the same const, so the value the REST layer surfaces can
-/// never drift from what a running adapter reports. The composition root is the
-/// natural home: it is the one layer that already knows every gateway adapter,
+/// Each provider's profile is declared once in its gateway crate as a
+/// `*_CAPABILITIES` const and read back here through that const; Codex's
+/// [`AgentAdapter::capabilities`] returns the same const, so the value the
+/// REST layer surfaces can never drift from what a running Codex adapter
+/// reports. The composition root is the natural home: it is the one layer
+/// that already knows every gateway crate,
 /// and callers (e.g. `GET /api/providers`) need a provider's profile before —
 /// or entirely without — an adapter being spawned.
 ///
@@ -49,10 +50,11 @@ mod tests {
         );
     }
 
-    /// The accessor returns exactly what each adapter's `capabilities()` returns
-    /// — the guarantee that the REST-surfaced profile can never drift from a
-    /// running adapter's. Asserted against the adapter consts directly (both are
-    /// the single source of truth the accessor reads).
+    /// The accessor returns each provider's `*_CAPABILITIES` const unchanged —
+    /// the const Codex's `capabilities()` also returns, so the REST-surfaced
+    /// profile can never drift from a running Codex adapter's. Asserted against
+    /// the consts directly (each is the single source of truth the accessor
+    /// reads).
     #[test]
     fn provider_capabilities_match_the_adapter_source_of_truth() {
         assert_eq!(
