@@ -197,8 +197,8 @@ hook port the running copy holds.
 At startup the shell reads `PATH`, `LANG` and `LC_*` from the user's login
 shell (`src/login_env/`) and hands them to the server as values, in the
 configuration's `child_env`; the composition root passes them to every gateway
-that starts a process, which sets them on each command. Nothing writes the
-process environment. `delta-server` on its own leaves `child_env` empty, so its
+that starts a process, which sets them on each command. Nothing writes them
+into the process environment. `delta-server` on its own leaves `child_env` empty, so its
 commands inherit the terminal's environment. See
 [the desktop app's `PATH` and locale](local-run.md#the-desktop-app) for what the
 user sees.
