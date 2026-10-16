@@ -238,24 +238,6 @@ export function useThreadsMessagesQueries(
 }
 
 /**
- * Resume a closed session (`POST /api/sessions/{id}/open`).
- *
- * Library surface for an explicit Resume: the current UI resumes a closed
- * session by sending to its main thread (the backend auto-resumes).
- */
-export function useOpenSessionMutation(
-  client: ApiClient,
-): UseMutationResult<void, Error, SessionId> {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (sessionId: SessionId) => client.openSession(sessionId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-    },
-  });
-}
-
-/**
  * Close a session, or cancel a still-starting session's launch
  * (`POST /api/sessions/{id}/close`).
  */

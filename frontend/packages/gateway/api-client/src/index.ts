@@ -31,7 +31,6 @@ export {
   useSessionThreadsQuery,
   useListedSessionThreads,
   useSessionSendsQuery,
-  useOpenSessionMutation,
   useCloseSessionMutation,
   useDeleteSessionMutation,
   useCreateSendMutation,
@@ -87,7 +86,6 @@ export {
 } from './storage-queries';
 export { useProvidersQuery } from './provider-queries';
 export {
-  appendMessage,
   appendSessionSend,
   firstOtherSessionId,
   invalidateAll,

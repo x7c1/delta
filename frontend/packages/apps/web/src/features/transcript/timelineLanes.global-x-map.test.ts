@@ -10,7 +10,6 @@ import {
   buildGlobalXMap,
   buildSortedMessages,
   buildTimelineLanes,
-  computeTimeRange,
   type TimelineDotSize,
 } from './timelineLanes';
 import { message, thread } from './timelineLanes.testkit';
@@ -61,9 +60,8 @@ describe('buildGlobalXMap', () => {
         ],
       ],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
-    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, diameter, 240);
+    const { pxByUuid } = buildGlobalXMap(sorted, 240, diameter, 240);
     // a at ts 0 → ideal 0 px → actual 0 px (first message keeps its ideal).
     expect(pxByUuid.get('a')).toBe(0);
     // b at ts 120s of 120s range → ideal 240 px → first to land at that
@@ -101,11 +99,9 @@ describe('buildGlobalXMap', () => {
         ],
       ],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
     const { pxByUuid, axisWidth } = buildGlobalXMap(
       sorted,
-      range,
       240,
       diameter,
       240,
@@ -141,9 +137,8 @@ describe('buildGlobalXMap', () => {
         ],
       ],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
-    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, diameter, 240);
+    const { pxByUuid } = buildGlobalXMap(sorted, 240, diameter, 240);
     expect(pxByUuid.get('L')).toBe(0);
     expect(pxByUuid.get('s')).toBe(5);
   });
@@ -167,9 +162,8 @@ describe('buildGlobalXMap', () => {
         ],
       ],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
-    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, diameter, 240);
+    const { pxByUuid } = buildGlobalXMap(sorted, 240, diameter, 240);
     expect(pxByUuid.get('s1')).toBe(0);
     expect(pxByUuid.get('s2')).toBe(4);
   });
@@ -190,13 +184,11 @@ describe('buildGlobalXMap', () => {
         ],
       ],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
     // Every message here is a user-role no-content → small (4 px). Spacing
     // between two smalls is 4 px.
     const { pxByUuid, axisWidth } = buildGlobalXMap(
       sorted,
-      range,
       240,
       diameter,
       240,
@@ -209,7 +201,7 @@ describe('buildGlobalXMap', () => {
   });
 
   it('keeps axisWidth at the minimum when no message exists yet', () => {
-    const { pxByUuid, axisWidth } = buildGlobalXMap([], null, 240, diameter, 240);
+    const { pxByUuid, axisWidth } = buildGlobalXMap([], 240, diameter, 240);
     expect(pxByUuid.size).toBe(0);
     expect(axisWidth).toBe(240);
   });
@@ -241,12 +233,10 @@ describe('buildGlobalXMap', () => {
         ),
       ],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
     const baseWidth = 240;
     const { pxByUuid, axisWidth } = buildGlobalXMap(
       sorted,
-      range,
       baseWidth,
       diameter,
       baseWidth,
@@ -287,9 +277,8 @@ describe('buildGlobalXMap', () => {
         ),
       ],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
-    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, diameter, 240);
+    const { pxByUuid } = buildGlobalXMap(sorted, 240, diameter, 240);
     expect(pxByUuid.get('m0')).toBe(0);
     expect(pxByUuid.get('m1')).toBe(80);
     expect(pxByUuid.get('m2')).toBe(160);
@@ -297,7 +286,6 @@ describe('buildGlobalXMap', () => {
   });
 
   it('returns a 1-entry map at x=0 with axisWidth=minWidth for a single message', () => {
-    const range = { minMs: 1000, maxMs: 1000 };
     const single: ReturnType<typeof buildSortedMessages> = [
       {
         uuid: 'only',
@@ -308,7 +296,7 @@ describe('buildGlobalXMap', () => {
         size: 'large',
       },
     ];
-    const { pxByUuid, axisWidth } = buildGlobalXMap(single, range, 240, diameter, 240);
+    const { pxByUuid, axisWidth } = buildGlobalXMap(single, 240, diameter, 240);
     expect(pxByUuid.size).toBe(1);
     expect(pxByUuid.get('only')).toBe(0);
     expect(axisWidth).toBe(240);
@@ -328,9 +316,8 @@ describe('buildGlobalXMap', () => {
         ],
       ],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
-    const { pxByUuid, axisWidth } = buildGlobalXMap(sorted, range, 240, diameter, 240);
+    const { pxByUuid, axisWidth } = buildGlobalXMap(sorted, 240, diameter, 240);
     const ax = pxByUuid.get('a')!;
     const bx = pxByUuid.get('b')!;
     const cx = pxByUuid.get('c')!;
@@ -358,9 +345,8 @@ describe('buildGlobalXMap', () => {
         ],
       ],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
-    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, diameter, 240);
+    const { pxByUuid } = buildGlobalXMap(sorted, 240, diameter, 240);
     expect(pxByUuid.get('a')).toBe(0);
     expect(pxByUuid.get('b')).toBe(240);
   });
@@ -383,9 +369,8 @@ describe('buildGlobalXMap', () => {
         ),
       ],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
-    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, diameter, 240);
+    const { pxByUuid } = buildGlobalXMap(sorted, 240, diameter, 240);
     // Linear: x_i = i / 4 * 240 = 0, 60, 120, 180, 240.
     expect(pxByUuid.get('m0')).toBe(0);
     expect(pxByUuid.get('m1')).toBe(60);
@@ -419,9 +404,8 @@ describe('buildGlobalXMap', () => {
         ),
       ],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
-    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, diameter, 240);
+    const { pxByUuid } = buildGlobalXMap(sorted, 240, diameter, 240);
     // effective dts = [10s, 10s, 10s, 60s]; cumDt = [0, 10s, 20s, 30s, 90s];
     // total = 90s; scale = 240/90s. ideals = [0, 26.67, 53.33, 80, 240].
     expect(pxByUuid.get('m0')).toBe(0);

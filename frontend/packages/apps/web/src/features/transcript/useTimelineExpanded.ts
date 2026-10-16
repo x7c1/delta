@@ -102,20 +102,11 @@ function setTimelineExpanded(sessionId: SessionId, next: boolean): void {
 
 /**
  * Drop the in-memory cache so a test that clears `localStorage` between cases
- * starts from a fresh read rather than the previous case's last write. With
- * no argument, clears every session's cached value (the common test reset);
- * with a specific id, clears just that one. Production code does not need
- * this — the cache lives for the page session.
+ * starts from a fresh read rather than the previous case's last write.
+ * Production code does not need this — the cache lives for the page session.
  */
-export function resetTimelineExpandedForTests(sessionId?: SessionId): void {
-  if (sessionId === undefined) {
-    timelineExpandedCache.clear();
-    return;
-  }
-  const entry = timelineExpandedCache.get(sessionId);
-  if (entry !== undefined) {
-    entry.value = null;
-  }
+export function resetTimelineExpandedForTests(): void {
+  timelineExpandedCache.clear();
 }
 
 /**
