@@ -16,7 +16,6 @@ import {
   buildLargeSortedMessages,
   buildSortedMessages,
   buildTimelineLanes,
-  computeTimeRange,
   findNearestMessageIndex,
 } from './timelineLanes';
 import {
@@ -212,20 +211,15 @@ export function ThreadTimelineOverlay({
   // dense clusters readable without any alpha/ring workaround, expanding
   // the axis past `MIN_LANE_AXIS_PX` when overlapping ideal positions get
   // pushed right.
-  const timeRange = useMemo(
-    () => computeTimeRange(messagesByThread),
-    [messagesByThread],
-  );
   const { pxByUuid: messagePxByUuid, axisWidth: laneAxisWidth } = useMemo(
     () =>
       buildGlobalXMap(
         sortedMessages,
-        timeRange,
         MIN_LANE_AXIS_PX,
         markDiameterPx,
         MIN_LANE_AXIS_PX,
       ),
-    [sortedMessages, timeRange],
+    [sortedMessages],
   );
 
   const {

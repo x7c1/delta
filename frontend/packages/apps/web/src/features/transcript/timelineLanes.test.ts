@@ -4,9 +4,9 @@
  * Shared builders live in timelineLanes.testkit.ts.
  */
 import { describe, expect, it } from 'vitest';
+import { MAIN_THREAD_DISPLAY_NAME } from '@delta/model';
 import type { Message } from '@delta/wire-gen';
 import {
-  MAIN_LANE_LABEL,
   buildGlobalXMap,
   buildLaneRenderItems,
   buildLargeSortedMessages,
@@ -291,7 +291,7 @@ describe('buildTimelineLanes', () => {
     expect(lanes.map((l) => l.threadId)).toEqual([1, 2]);
   });
 
-  it(`labels the main thread "${MAIN_LANE_LABEL}" regardless of the wire title`, () => {
+  it(`labels the main thread "${MAIN_THREAD_DISPLAY_NAME}" regardless of the wire title`, () => {
     const threads = [
       thread(1, { title: 'a long session prompt the server stored here' }),
       thread(2, {
@@ -302,8 +302,8 @@ describe('buildTimelineLanes', () => {
     ];
     const lanes = buildTimelineLanes(threads, new Map());
     expect(lanes[0]).toMatchObject({
-      label: MAIN_LANE_LABEL,
-      tooltip: MAIN_LANE_LABEL,
+      label: MAIN_THREAD_DISPLAY_NAME,
+      tooltip: MAIN_THREAD_DISPLAY_NAME,
       isMain: true,
     });
     // Subthread label matches Navigator's source: the wire thread.title.
@@ -519,11 +519,10 @@ describe('findNearestMessageIndex', () => {
         ],
       ],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
     // Project onto a 240 px axis. With ideals 0, 120, 240 px and the
     // greedy spacing push, the actuals stay at 0, 120, 240 (no collisions).
-    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, () => 6, 240);
+    const { pxByUuid } = buildGlobalXMap(sorted, 240, () => 6, 240);
     expect(sorted[findNearestMessageIndex(sorted, pxByUuid, 10)].uuid).toBe('a');
     expect(sorted[findNearestMessageIndex(sorted, pxByUuid, 110)].uuid).toBe('b');
     expect(sorted[findNearestMessageIndex(sorted, pxByUuid, 220)].uuid).toBe('c');
@@ -543,9 +542,8 @@ describe('findNearestMessageIndex', () => {
       [1, [message(1, 0, 'a', { createdAt: '2026-01-01T00:00:00Z' })]],
       [2, [message(2, 0, 'b', { createdAt: '2026-01-01T00:01:00Z' })]],
     ]);
-    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
-    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, () => 6, 240);
+    const { pxByUuid } = buildGlobalXMap(sorted, 240, () => 6, 240);
     expect(sorted[findNearestMessageIndex(sorted, pxByUuid, 120)].uuid).toBe('a');
   });
 
