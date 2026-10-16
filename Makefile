@@ -79,7 +79,11 @@ desktop-dev-build: web-dist
 ## desktop: build the installed app (make desktop-build), then install it — Linux: `sudo apt install --reinstall` the new .deb; macOS: replace /Applications/Delta.app (restart a running Delta afterwards: with an unchanged version it keeps handing the old icon to the Dock and Cmd-Tab, which `killall Dock` does not fix)
 # --reinstall because a local build keeps the release's version number, which
 # apt would otherwise treat as already installed. The newest .deb is the one
-# just built; older ones may still sit in the bundle directory.
+# just built; older ones may still sit in the bundle directory. apt reads the
+# file as its unprivileged `_apt` user, which usually cannot reach a checkout
+# under the home directory, so the .deb is installed from a copy in a fresh
+# `mktemp -d` directory: owned by us and closed to other users' writes, so the
+# file root installs cannot be swapped, but 0755 so `_apt` can read it.
 DESKTOP_BUNDLE_DIR := backend/target/release/bundle
 .PHONY: desktop
 desktop:
@@ -90,7 +94,9 @@ desktop:
 	  echo "Installing $(DESKTOP_BUNDLE_DIR)/macos/Delta.app to /Applications"; \
 	  rm -rf /Applications/Delta.app && ditto "$(DESKTOP_BUNDLE_DIR)/macos/Delta.app" /Applications/Delta.app; \
 	else \
-	  sudo apt install --reinstall "$(CURDIR)/$$(ls -t $(DESKTOP_BUNDLE_DIR)/deb/delta-desktop_*.deb | head -n 1)"; \
+	  deb="$$(ls -t $(DESKTOP_BUNDLE_DIR)/deb/delta-desktop_*.deb | head -n 1)"; \
+	  dir="$$(mktemp -d)" && trap 'rm -rf "$$dir"' EXIT && chmod 755 "$$dir" && \
+	  cp "$$deb" "$$dir/" && sudo apt install --reinstall "$$dir/$$(basename "$$deb")"; \
 	fi
 	@echo "Installed. If Delta is running, quit it and start it again to use the new build."
 
