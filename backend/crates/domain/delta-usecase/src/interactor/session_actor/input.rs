@@ -185,8 +185,8 @@ pub(in crate::interactor) enum SessionInput {
         reply: Reply<Vec<SessionEvent>>,
     },
     /// `MessageDisplay`: one chunk of the in-flight turn's assistant message,
-    /// streamed live. Accumulated into the session's live preview buffer and
-    /// re-broadcast as an `AssistantStreaming` event for the browser.
+    /// streamed live. Re-broadcast as an `AssistantStreaming` event for the
+    /// browser, which accumulates the live preview.
     MessageDisplay {
         hook: MessageDisplayHook,
         reply: Reply<Vec<SessionEvent>>,

@@ -1,9 +1,10 @@
-//! `MessageDisplay` accumulates the in-flight turn's assistant text into a
-//! provisional live preview and emits `AssistantStreaming`, and the preview is
-//! cleared when the turn ends (Stop or interrupt) so the persisted message
-//! takes over without a duplicate.
+//! Each `MessageDisplay` chunk is forwarded as one `AssistantStreaming` event
+//! carrying the chunk's body, index and final flag, attributed to the in-flight
+//! turn's thread; the browser accumulates the preview. After the turn ends
+//! (Stop or interrupt) the next chunk is attributed to the new turn and indexed
+//! as a fresh message.
 
-use delta_model::SessionId;
+use delta_model::{SessionId, ThreadId};
 
 use crate::interactor::testing::*;
 use crate::ports::{MessageDisplayHook, SessionEvent, StopHook};
@@ -19,101 +20,90 @@ fn display(message_id: &str, index: u32, final_: bool, delta: &str) -> MessageDi
     }
 }
 
-#[tokio::test]
-async fn deltas_accumulate_into_the_live_preview_and_emit_assistant_streaming() {
-    let ix = interactor();
-    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
-    let session = SessionId::from("sess-1");
-    let main_thread = ix.store().main_thread_id(&session).await.unwrap();
+/// One emitted `AssistantStreaming`, flattened for comparison.
+#[derive(Debug, PartialEq, Eq)]
+struct Streamed {
+    thread_id: ThreadId,
+    message_id: String,
+    index: u32,
+    final_: bool,
+    delta: String,
+}
 
-    // The first chunk emits an AssistantStreaming carrying just that chunk,
-    // attributed to the in-flight turn's thread (the seed prompt's thread).
-    let events = ix
-        .on_message_display(display("msg-1", 0, false, "Hel"))
-        .await
-        .unwrap();
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        SessionEvent::AssistantStreaming {
+fn streamed(
+    thread_id: ThreadId,
+    message_id: &str,
+    index: u32,
+    final_: bool,
+    delta: &str,
+) -> Streamed {
+    Streamed {
+        thread_id,
+        message_id: message_id.to_owned(),
+        index,
+        final_,
+        delta: delta.to_owned(),
+    }
+}
+
+/// Feed one chunk and return the single `AssistantStreaming` it emits.
+async fn stream(ix: &TestInteractor, hook: MessageDisplayHook) -> Streamed {
+    let events = ix.on_message_display(hook).await.unwrap();
+    match events.as_slice() {
+        [SessionEvent::AssistantStreaming {
             session_id,
             thread_id,
             message_id,
             index,
             final_,
             delta,
-        } => {
-            assert_eq!(session_id, &session);
-            assert_eq!(*thread_id, main_thread);
-            assert_eq!(message_id, "msg-1");
-            assert_eq!(*index, 0);
-            assert!(!*final_);
-            assert_eq!(delta, "Hel");
+        }] => {
+            assert_eq!(session_id, &SessionId::from("sess-1"));
+            Streamed {
+                thread_id: *thread_id,
+                message_id: message_id.clone(),
+                index: *index,
+                final_: *final_,
+                delta: delta.clone(),
+            }
         }
-        other => panic!("expected AssistantStreaming, got {other:?}"),
+        other => panic!("expected a single AssistantStreaming, got {other:?}"),
     }
-
-    ix.on_message_display(display("msg-1", 1, false, "lo "))
-        .await
-        .unwrap();
-    ix.on_message_display(display("msg-1", 2, true, "world"))
-        .await
-        .unwrap();
-
-    // The buffer holds the full message, joined in index order, for the
-    // in-flight thread, marked final.
-    let preview = ix
-        .with_runtime(&session, |state| {
-            state
-                .streaming_message()
-                .map(|s| (s.message_id.clone(), s.thread_id, s.text(), s.final_))
-        })
-        .await
-        .expect("a message is streaming");
-    assert_eq!(preview.0, "msg-1");
-    assert_eq!(preview.1, main_thread);
-    assert_eq!(preview.2, "Hello world");
-    assert!(preview.3);
 }
 
 #[tokio::test]
-async fn out_of_order_chunks_are_joined_in_index_order() {
+async fn each_chunk_is_emitted_with_its_body_index_and_final_flag() {
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
 
-    ix.on_message_display(display("msg-1", 1, false, "B"))
-        .await
-        .unwrap();
-    ix.on_message_display(display("msg-1", 0, false, "A"))
-        .await
-        .unwrap();
-    ix.on_message_display(display("msg-1", 2, true, "C"))
-        .await
-        .unwrap();
+    let emitted = vec![
+        stream(&ix, display("msg-1", 0, false, "Hel")).await,
+        stream(&ix, display("msg-1", 1, false, "lo ")).await,
+        stream(&ix, display("msg-1", 2, true, "world")).await,
+    ];
 
-    let text = ix
-        .with_runtime(&session, |state| {
-            state.streaming_message().map(|s| s.text())
-        })
-        .await
-        .expect("a message is streaming");
-    assert_eq!(text, "ABC");
-}
-
-#[tokio::test]
-async fn turn_completed_clears_the_live_preview() {
-    let ix = interactor();
-    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
-    let session = SessionId::from("sess-1");
-
-    ix.on_message_display(display("msg-1", 0, false, "partial"))
-        .await
-        .unwrap();
-    assert!(
-        ix.with_runtime(&session, |state| state.streaming_message().is_some())
-            .await,
-        "the preview exists while the turn is in flight"
+    assert_eq!(
+        emitted,
+        vec![
+            streamed(main, "msg-1", 0, false, "Hel"),
+            streamed(main, "msg-1", 1, false, "lo "),
+            streamed(main, "msg-1", 2, true, "world"),
+        ],
+        "every chunk is forwarded as-is on the in-flight turn's thread"
     );
+}
+
+#[tokio::test]
+async fn a_chunk_after_stop_is_a_fresh_message_on_the_next_turn() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    stream(&ix, display("msg-1", 0, false, "first ")).await;
+    stream(&ix, display("msg-1", 1, true, "reply")).await;
 
     ix.on_stop(StopHook {
         session_id: session.clone(),
@@ -122,22 +112,22 @@ async fn turn_completed_clears_the_live_preview() {
     .await
     .unwrap();
 
-    assert!(
-        !ix.with_runtime(&session, |state| state.streaming_message().is_some())
-            .await,
-        "the turn ending drops the preview so the persisted message takes over"
+    ix.on_user_prompt_submit(submit("again")).await.unwrap();
+    assert_eq!(
+        stream(&ix, display("msg-2", 0, false, "second")).await,
+        streamed(main, "msg-2", 0, false, "second"),
+        "the next turn's first chunk starts a fresh message at index 0"
     );
 }
 
 #[tokio::test]
-async fn an_interrupt_clears_the_live_preview() {
+async fn a_chunk_after_an_interrupt_is_a_fresh_message_on_the_next_turn() {
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
 
-    ix.on_message_display(display("msg-1", 0, false, "partial"))
-        .await
-        .unwrap();
+    stream(&ix, display("msg-1", 0, false, "partial")).await;
 
     // An interrupt ends the turn the same way a Stop does (the transcript
     // sync feeds Interrupt into the turn machine); seed that transition.
@@ -145,9 +135,10 @@ async fn an_interrupt_clears_the_live_preview() {
         .await
         .unwrap();
 
-    assert!(
-        !ix.with_runtime(&session, |state| state.streaming_message().is_some())
-            .await,
-        "an interrupt drops the preview just like a completed turn"
+    ix.on_user_prompt_submit(submit("again")).await.unwrap();
+    assert_eq!(
+        stream(&ix, display("msg-2", 0, false, "retry")).await,
+        streamed(main, "msg-2", 0, false, "retry"),
+        "the next turn's first chunk starts a fresh message at index 0"
     );
 }

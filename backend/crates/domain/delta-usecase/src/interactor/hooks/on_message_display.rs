@@ -16,22 +16,23 @@ where
     /// assistant message, delivered live before the transcript is flushed.
     ///
     /// The hook is passive — it never mutates the TUI display — so the handler
-    /// only buffers the chunk as a provisional live preview and re-broadcasts
-    /// it as an [`SessionEvent::AssistantStreaming`] for the browser. The
-    /// transport answers an empty 200; nothing here is persisted.
+    /// only re-broadcasts the chunk as an [`SessionEvent::AssistantStreaming`]
+    /// for the browser, which accumulates the provisional live preview by
+    /// chunk index. The server keeps no copy of the text; the transport
+    /// answers an empty 200; nothing here is persisted.
     ///
     /// The preview is attributed to the in-progress turn's thread (see
     /// [`SessionStore::in_progress_turn_thread`]): the in-flight send's thread,
     /// else the latest persisted user message, else the session's main thread.
     /// The in-flight-send step keeps a mid-turn branch turn's stream on the new
     /// branch thread, whose user line is not yet ingested. The hook's
-    /// `message_id` does not match any transcript id, so the preview is
-    /// reconciled per turn (cleared when the turn ends) rather than id-joined to
-    /// the eventually-persisted message.
+    /// `message_id` does not match any transcript id, so the browser reconciles
+    /// the preview per turn rather than id-joining it to the eventually-persisted
+    /// message.
     ///
     /// An unknown session (no row yet, e.g. a chunk racing ahead of the first
     /// `UserPromptSubmit` bind) is a safe no-op: there is no thread to attribute
-    /// to, so nothing is buffered or broadcast.
+    /// to, so nothing is broadcast.
     pub(in crate::interactor) async fn on_message_display(
         &mut self,
         hook: MessageDisplayHook,
@@ -40,14 +41,6 @@ where
             return Ok(Vec::new());
         };
         let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
-
-        self.state.accumulate_streaming(
-            &hook.message_id,
-            thread_id,
-            hook.index,
-            hook.final_,
-            hook.delta.clone(),
-        );
 
         Ok(vec![SessionEvent::AssistantStreaming {
             session_id: hook.session_id,
