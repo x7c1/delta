@@ -36,9 +36,9 @@ mod tests {
 
     use delta_model::AgentProvider;
     use delta_usecase::{
-        ContextInjectionCapability, EventCapability, ForkCapability, InterruptCapability,
-        LaunchCapability, PermissionCapability, ResumeCapability, SessionIdentityCapability,
-        SessionScopedAllowCapability, SteerCapability, TerminalCapability, TranscriptCapability,
+        ContextInjectionCapability, EventCapability, InterruptCapability, LaunchCapability,
+        PermissionCapability, ResumeCapability, SessionIdentityCapability,
+        SessionScopedAllowCapability, TerminalCapability, TranscriptCapability,
     };
 
     /// A capability profile with the given terminal surface and launch
@@ -56,8 +56,6 @@ mod tests {
             context_injection: ContextInjectionCapability::HiddenPerTurn,
             interrupt: InterruptCapability::PaneKeystroke,
             terminal,
-            fork: ForkCapability::None,
-            steer: SteerCapability::None,
         }
     }
 

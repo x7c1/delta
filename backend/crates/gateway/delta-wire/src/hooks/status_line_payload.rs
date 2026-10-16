@@ -15,8 +15,8 @@
 //! without a Pro/Max subscription. `#[serde(default)]` on the whole struct's
 //! optional fields makes those absences deserialize cleanly, and serde's
 //! default of ignoring unknown fields keeps it forward-compatible as Claude
-//! Code adds fields across versions (`fast_mode` is one example not in the
-//! public schema).
+//! Code adds fields across versions. Only the fields the server reads are
+//! modeled.
 
 use serde::{Deserialize, Serialize};
 
@@ -42,8 +42,4 @@ pub struct StatusLinePayload {
     pub cost: Option<StatusLineCost>,
     #[serde(default)]
     pub workspace: Option<StatusLineWorkspace>,
-    /// Present in Claude Code v2.1.179 but absent from the public schema; an
-    /// example of a field Delta tolerates without modeling it everywhere.
-    #[serde(default)]
-    pub fast_mode: Option<bool>,
 }

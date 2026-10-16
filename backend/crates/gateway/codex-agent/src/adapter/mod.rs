@@ -123,9 +123,9 @@ use tokio::task::JoinHandle;
 use delta_usecase::{
     AgentCapabilities, AgentEvent, AgentProvider, AgentSessionHandle, CommsDirection, CommsEntry,
     CommsFrameKind, CommsLogSink, ContextInjectionCapability, Error as UsecaseError,
-    EventCapability, ForkCapability, InterruptCapability, LaunchCapability, PermissionCapability,
+    EventCapability, InterruptCapability, LaunchCapability, PermissionCapability,
     Result as UsecaseResult, ResumeCapability, SendReceipt, SessionIdentityCapability,
-    SessionScopedAllowCapability, SteerCapability, TerminalCapability, TranscriptCapability,
+    SessionScopedAllowCapability, TerminalCapability, TranscriptCapability,
 };
 
 use crate::file_change_items::FileChangeItems;
@@ -147,7 +147,7 @@ use worktree_git_grant::apply_worktree_git_grant;
 /// only the pushed stream, permission decisions answered over the wire —
 /// including one scoped to the whole session — hidden
 /// per-turn context via `thread/inject_items`, interrupt via `turn/interrupt`,
-/// and no terminal to attach. Fork/steer are unused in v1.
+/// and no terminal to attach.
 pub const CODEX_CAPABILITIES: AgentCapabilities = AgentCapabilities {
     launch: LaunchCapability::JsonRpcAppServer,
     session_identity: SessionIdentityCapability::ProviderReturnsId,
@@ -162,8 +162,6 @@ pub const CODEX_CAPABILITIES: AgentCapabilities = AgentCapabilities {
     context_injection: ContextInjectionCapability::HiddenPerTurn,
     interrupt: InterruptCapability::Rpc,
     terminal: TerminalCapability::NoTerminal,
-    fork: ForkCapability::None,
-    steer: SteerCapability::None,
 };
 
 mod account_loop;

@@ -16,11 +16,10 @@ use tokio::sync::{mpsc, Notify};
 use crate::agent::{
     AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentContentSource, AgentEvent,
     AgentEventStream, AgentProvider, AgentSessionHandle, ContentSourceRequest,
-    ContextInjectionCapability, EventCapability, ForkCapability, InterruptCapability,
-    LaunchCapability, LaunchOptionSpec, LaunchRequest, PermissionCapability, PtyHandle,
-    ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionIdentityCapability,
-    SessionScopedAllowCapability, SteerCapability, TerminalCapability, TranscriptCapability,
-    TurnStatus,
+    ContextInjectionCapability, EventCapability, InterruptCapability, LaunchCapability,
+    LaunchOptionSpec, LaunchRequest, PermissionCapability, PtyHandle, ResumeCapability,
+    ResumeRequest, SendReceipt, SendRequest, SessionIdentityCapability,
+    SessionScopedAllowCapability, TerminalCapability, TranscriptCapability, TurnStatus,
 };
 use crate::error::{Error, Result};
 use crate::interactor::PermissionDecision;
@@ -164,8 +163,6 @@ pub(crate) const FAKE_AGENT_CAPABILITIES: AgentCapabilities = AgentCapabilities 
     context_injection: ContextInjectionCapability::HiddenPerTurn,
     interrupt: InterruptCapability::Rpc,
     terminal: TerminalCapability::NoTerminal,
-    fork: ForkCapability::None,
-    steer: SteerCapability::None,
 };
 
 #[async_trait]

@@ -29,10 +29,9 @@ pub use adapter::{
     LaunchRequest, PtyHandle, ResumeRequest, SendReceipt, SendRequest,
 };
 pub use capabilities::{
-    AgentCapabilities, ContextInjectionCapability, EventCapability, ForkCapability,
-    InterruptCapability, LaunchCapability, PermissionCapability, ResumeCapability,
-    SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability, TerminalCapability,
-    TranscriptCapability,
+    AgentCapabilities, ContextInjectionCapability, EventCapability, InterruptCapability,
+    LaunchCapability, PermissionCapability, ResumeCapability, SessionIdentityCapability,
+    SessionScopedAllowCapability, TerminalCapability, TranscriptCapability,
 };
 pub use content_source::AgentContentSource;
 pub use event::{

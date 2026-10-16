@@ -48,7 +48,7 @@ fn branching_turns_scenario() -> ScenarioGuard {
 /// `thread_id` send carrying `semantic_parent_uuid` (the branched-from message)
 /// and `locator_quote` (the selected passage). The stack must:
 ///
-/// 1. Accept it (`201 CREATED`) — NOT the old `ForkCapability::None` rejection.
+/// 1. Accept it (`201 CREATED`) as an ordinary send on the branch thread.
 /// 2. Deliver the selected passage to the fake as `thread/inject_items` (hidden
 ///    context), which the fake records to its inject log for this assertion.
 /// 3. Create the same delta-side branch structure Claude builds — a NEW thread
@@ -103,7 +103,7 @@ async fn codex_branch_from_selected_text_injects_context_and_completes_over_the_
     assert_eq!(
         status,
         StatusCode::CREATED,
-        "the Codex branch send is accepted (no ForkCapability rejection): {body:?}"
+        "the Codex branch send is accepted as an ordinary send on the branch thread: {body:?}"
     );
     let branch_thread = body["send"]["thread_id"].as_i64().unwrap();
     assert_ne!(

@@ -18,10 +18,9 @@
 //! [`is_dangerous_launch_option`]: fn@is_dangerous_launch_option
 
 use delta_usecase::{
-    AgentCapabilities, ContextInjectionCapability, EventCapability, ForkCapability,
-    InterruptCapability, LaunchCapability, PermissionCapability, ResumeCapability,
-    SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability, TerminalCapability,
-    TranscriptCapability,
+    AgentCapabilities, ContextInjectionCapability, EventCapability, InterruptCapability,
+    LaunchCapability, PermissionCapability, ResumeCapability, SessionIdentityCapability,
+    SessionScopedAllowCapability, TerminalCapability, TranscriptCapability,
 };
 
 /// Claude's static capability profile, read by the composition root's
@@ -31,7 +30,7 @@ use delta_usecase::{
 /// via `--resume`, events reconstructed from hooks + the JSONL transcript,
 /// hook-carried permission decisions that answer one request each, hidden
 /// per-turn context via the `UserPromptSubmit` hook, interrupt by injecting the
-/// `Escape` keystroke, and an attachable pane. Fork/steer are unused in v1.
+/// `Escape` keystroke, and an attachable pane.
 pub const CLAUDE_CAPABILITIES: AgentCapabilities = AgentCapabilities {
     launch: LaunchCapability::PtyCommand,
     session_identity: SessionIdentityCapability::DeltaCanSetId,
@@ -47,8 +46,6 @@ pub const CLAUDE_CAPABILITIES: AgentCapabilities = AgentCapabilities {
     context_injection: ContextInjectionCapability::HiddenPerTurn,
     interrupt: InterruptCapability::PaneKeystroke,
     terminal: TerminalCapability::AttachablePty,
-    fork: ForkCapability::None,
-    steer: SteerCapability::None,
 };
 
 mod launch_option_catalog;
