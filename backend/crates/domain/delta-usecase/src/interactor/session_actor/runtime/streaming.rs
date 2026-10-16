@@ -1,124 +1,81 @@
-//! [`StreamingMessage`]: the live, provisional preview of the in-flight
-//! turn's assistant message, accumulated from streaming chunks.
-
-use delta_model::ThreadId;
+//! [`StreamingCursor`]: where the in-flight turn's un-indexed streaming
+//! fragments (Codex's `AssistantDelta`) are in their message, so each
+//! broadcast fragment gets the next chunk index.
 
 use super::SessionRuntime;
 
-/// The live, provisional preview of the in-flight turn's assistant message,
-/// accumulated from the `MessageDisplay` hook's chunks.
+/// The position of the in-flight turn's current streaming message: its id and
+/// how many fragments have been broadcast for it.
 ///
-/// Claude Code streams the visible assistant text in chunks (one display
-/// segment each) before the transcript JSONL is flushed. Delta buffers them
-/// here so the browser can show the reply forming at the conversation tail —
-/// including an assistant's pre-tool preamble, which appears before a blocking
-/// tool prompt blocks. It is never persisted: the chunks share one `message_id`
-/// that does not match any transcript id, so this is reconciled per turn — it
-/// is cleared when the turn ends (see [`SessionRuntime::apply_turn`]) and the
-/// persisted message, ingested by the normal transcript sync, renders instead.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StreamingMessage {
-    /// The hook's display-message id (not a transcript id). A chunk whose id
-    /// differs from the current buffer's starts a fresh message.
-    pub message_id: String,
-    /// The in-flight turn's thread, so the browser only shows the preview on
-    /// the thread it belongs to.
-    pub thread_id: ThreadId,
-    /// The chunks received so far, paired with their `index`. Kept sparse and
-    /// joined in index order on read, so out-of-order delivery is tolerated.
-    pub chunks: Vec<(u32, String)>,
-    /// Whether the final chunk has arrived.
-    pub final_: bool,
-}
-
-impl StreamingMessage {
-    /// The accumulated text so far, chunks joined in `index` order.
-    ///
-    /// The server broadcasts deltas incrementally (the client accumulates), so
-    /// the joined text is only read back by tests asserting accumulation.
-    #[cfg(test)]
-    pub fn text(&self) -> String {
-        let mut ordered: Vec<&(u32, String)> = self.chunks.iter().collect();
-        ordered.sort_by_key(|(index, _)| *index);
-        ordered
-            .into_iter()
-            .map(|(_, chunk)| chunk.as_str())
-            .collect()
-    }
+/// The server forwards each streaming fragment to the browser as an
+/// `AssistantStreaming` event and keeps no copy of the text; the browser
+/// accumulates the preview by chunk index. Claude's `MessageDisplay` hook
+/// numbers its own chunks, so it needs no state here. Codex deltas arrive
+/// un-indexed, so this cursor assigns them consecutive indexes per message id.
+/// It is cleared when the turn ends (see [`SessionRuntime::apply_turn`]), so
+/// a new turn's first fragment starts at index 0.
+#[derive(Debug)]
+pub(super) struct StreamingCursor {
+    /// The message id of the fragments being counted (Codex's provider item
+    /// id). A fragment whose id differs starts a fresh count.
+    message_id: String,
+    /// How many fragments have been broadcast for `message_id`, which is the
+    /// index the next one receives.
+    emitted: u32,
 }
 
 impl SessionRuntime {
-    /// Accumulate one `MessageDisplay` chunk into the live preview, returning
-    /// the buffer's running text so the caller can broadcast the increment.
-    ///
-    /// A chunk whose `message_id` differs from the current buffer's starts a
-    /// fresh preview (a new message began), as does the first chunk after a
-    /// turn end cleared the buffer. Chunks are stored sparsely by `index` and
-    /// joined in order on read, so out-of-order delivery is tolerated; a
-    /// repeated `index` overwrites (the latest delivery wins).
-    pub fn accumulate_streaming(
-        &mut self,
-        message_id: &str,
-        thread_id: ThreadId,
-        index: u32,
-        final_: bool,
-        delta: String,
-    ) {
-        let buffer = match self.streaming_message.as_mut() {
-            Some(existing) if existing.message_id == message_id => existing,
-            _ => {
-                self.streaming_message = Some(StreamingMessage {
-                    message_id: message_id.to_owned(),
-                    thread_id,
-                    chunks: Vec::new(),
-                    final_: false,
-                });
-                self.streaming_message
-                    .as_mut()
-                    .expect("just inserted the streaming buffer")
+    /// Assign the chunk index for the next un-indexed streaming fragment of
+    /// `message_id` and advance the cursor past it.
+    pub fn next_streaming_index(&mut self, message_id: &str) -> u32 {
+        match self.streaming_cursor.as_mut() {
+            Some(cursor) if cursor.message_id == message_id => {
+                let index = cursor.emitted;
+                cursor.emitted += 1;
+                index
             }
-        };
-        buffer.thread_id = thread_id;
-        if let Some(slot) = buffer.chunks.iter_mut().find(|(i, _)| *i == index) {
-            slot.1 = delta;
-        } else {
-            buffer.chunks.push((index, delta));
+            _ => {
+                self.streaming_cursor = Some(StreamingCursor {
+                    message_id: message_id.to_owned(),
+                    emitted: 1,
+                });
+                0
+            }
         }
-        buffer.final_ = buffer.final_ || final_;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::turn::{TurnInput, TurnState};
+
+    #[test]
+    fn fragments_of_one_message_get_consecutive_indexes() {
+        let mut state = SessionRuntime::default();
+        let indexes: Vec<u32> = (0..3)
+            .map(|_| state.next_streaming_index("item-1"))
+            .collect();
+        assert_eq!(indexes, vec![0, 1, 2]);
     }
 
-    /// Accumulate one streaming fragment whose transport carries no explicit
-    /// chunk index (Codex's `AssistantDelta`), auto-assigning the next index and
-    /// returning it so the caller can broadcast the increment.
-    ///
-    /// Where Claude's `MessageDisplay` hook numbers its chunks, Codex deltas
-    /// arrive un-indexed; the next index is the count of fragments already held
-    /// for this `message_id` (0 when a different message id starts a fresh
-    /// preview), so repeated deltas for one item append in arrival order rather
-    /// than overwriting. Delegates to [`Self::accumulate_streaming`] for the
-    /// actual buffering, so the per-turn reconciliation (cleared at turn end) is
-    /// identical to the hook path.
-    pub fn accumulate_streaming_delta(
-        &mut self,
-        message_id: &str,
-        thread_id: ThreadId,
-        final_: bool,
-        delta: String,
-    ) -> u32 {
-        let index = match &self.streaming_message {
-            Some(existing) if existing.message_id == message_id => existing.chunks.len() as u32,
-            _ => 0,
-        };
-        self.accumulate_streaming(message_id, thread_id, index, final_, delta);
-        index
+    #[test]
+    fn a_new_message_id_starts_at_zero() {
+        let mut state = SessionRuntime::default();
+        state.next_streaming_index("item-1");
+        state.next_streaming_index("item-1");
+        assert_eq!(state.next_streaming_index("item-2"), 0);
+        assert_eq!(state.next_streaming_index("item-2"), 1);
     }
 
-    /// The current live preview, if a message is streaming.
-    ///
-    /// The preview is broadcast as it accumulates rather than read back in
-    /// production, so this accessor exists for the streaming tests' assertions.
-    #[cfg(test)]
-    pub fn streaming_message(&self) -> Option<&StreamingMessage> {
-        self.streaming_message.as_ref()
+    #[test]
+    fn a_turn_end_resets_the_index_for_the_same_message_id() {
+        let mut state = SessionRuntime::default();
+        state.apply_turn(TurnInput::PromptSubmitted { send_id: None });
+        state.next_streaming_index("item-1");
+        state.next_streaming_index("item-1");
+        let result = state.apply_turn(TurnInput::Interrupt);
+        assert_eq!(result.next, TurnState::Idle);
+        assert_eq!(state.next_streaming_index("item-1"), 0);
     }
 }

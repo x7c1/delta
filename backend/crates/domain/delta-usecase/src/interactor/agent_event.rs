@@ -372,7 +372,8 @@ where
     /// preview, reconciled per turn (the persisted [`AgentEvent::AssistantMessage`]
     /// takes over when the turn ends) — the Codex counterpart of the Claude
     /// `MessageDisplay` hook. The delta's `provider_item_id` is the preview's
-    /// message id, so successive fragments of one item accumulate.
+    /// message id, and successive fragments of one item get consecutive chunk
+    /// indexes so the browser accumulates them in order.
     async fn stream_assistant_delta(&mut self, provider_item_id: String, text: String) {
         let thread_id = match self.store.in_progress_turn_thread(self.id).await {
             Ok(thread_id) => thread_id,
@@ -388,12 +389,7 @@ where
         // Codex deltas carry no chunk index and never carry the final fragment
         // (the completed message arrives as a persisted `AssistantMessage`, not a
         // delta), so the index is auto-assigned and `final_` is always false.
-        let index = self.state.accumulate_streaming_delta(
-            &provider_item_id,
-            thread_id,
-            false,
-            text.clone(),
-        );
+        let index = self.state.next_streaming_index(&provider_item_id);
         self.emit_async_event(SessionEvent::AssistantStreaming {
             session_id: self.id.clone(),
             thread_id,

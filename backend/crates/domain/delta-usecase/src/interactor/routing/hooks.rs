@@ -45,8 +45,8 @@ where
             .await
     }
 
-    /// Handle a `MessageDisplay` hook: buffer one chunk of the in-flight turn's
-    /// assistant message and return the `AssistantStreaming` event to broadcast.
+    /// Handle a `MessageDisplay` hook: return the `AssistantStreaming` event
+    /// that broadcasts one chunk of the in-flight turn's assistant message.
     pub async fn on_message_display(&self, hook: MessageDisplayHook) -> Result<Vec<SessionEvent>> {
         let id = hook.session_id.clone();
         self.request(&id, move |reply| SessionInput::MessageDisplay {
