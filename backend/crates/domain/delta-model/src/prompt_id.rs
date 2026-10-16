@@ -3,6 +3,7 @@
 use crate::newtype::string_newtype;
 
 string_newtype! {
-    /// Claude Code's `promptId`, shared by all lines of one turn.
+    /// The identifier shared by all messages of one turn: Claude Code's
+    /// `promptId`, or the Codex turn id.
     PromptId
 }

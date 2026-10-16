@@ -19,7 +19,7 @@ pub struct AgentPermissionRequest {
     /// The tool input, as structured JSON.
     pub input_json: Value,
     /// The provider's id for the tool call this request gates, when the
-    /// provider exposes one (Claude's `tool_use_id`; `None` when absent).
+    /// provider exposes one (Claude's `tool_use_id`, Codex's `itemId`; `None` when absent).
     pub tool_use_id: Option<String>,
     /// What the request would do to files on disk, when the provider stated it
     /// (see [`AgentFileChangeDetail`]). `None` for every request that is not a

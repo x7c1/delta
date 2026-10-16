@@ -1,16 +1,21 @@
 //! The outgoing-send queue.
 //!
-//! Every user input Delta sends into the tmux pane is first recorded as a
-//! `send` row. When a `UserPromptSubmit` hook fires, the server matches the
-//! incoming prompt against the head of this FIFO to confirm a turn start and
-//! correlate it with the resulting transcript message.
+//! Every user input Delta sends to a session's agent is first recorded as a
+//! `send` row in the session's correlation FIFO, and moves through `queued` →
+//! `dispatched` → `matched` (or `cancelled`) as it is handed to the agent and
+//! correlated with what the agent recorded; a send the agent can take at once
+//! is written `dispatched`. How each step happens is the
+//! provider adapter's business: a Claude send is typed into the tmux pane and
+//! matched when its echo arrives (the `UserPromptSubmit` hook and the
+//! transcript), while a Codex send rides a `turn/start` request and is matched
+//! to the turn that request returns.
 
 use crate::message_uuid::MessageUuid;
 use crate::send_status::SendStatus;
 use crate::session_id::SessionId;
 use crate::thread_id::ThreadId;
 
-/// A recorded user input awaiting correlation with the transcript.
+/// A recorded user input awaiting correlation with the conversation.
 ///
 /// Named `Send` after the `send` table it is stored in. The name shadows the
 /// `std::marker::Send` prelude trait when imported, so modules that both import
@@ -25,10 +30,15 @@ pub struct Send {
     /// When branching, the message this reply is `to:`.
     pub semantic_parent_uuid: Option<MessageUuid>,
     pub text: String,
-    /// Optional short quote injected as `additionalContext` to locate the reply.
+    /// Optional short quote injected as hidden context to locate the reply
+    /// (Claude: the hook's `additionalContext`; Codex: `thread/inject_items`).
     pub locator_quote: Option<String>,
     pub status: SendStatus,
-    /// The transcript message uuid once matched.
+    /// What the send was correlated with once matched: the uuid of the
+    /// transcript line that echoed it for Claude, the turn id `turn/start`
+    /// returned for Codex (the provider thread id when it returned none). It
+    /// stays `None` on a matched Claude send that was delivered but claimed by
+    /// no transcript line, so `None` never means "not delivered".
     pub matched_uuid: Option<MessageUuid>,
     /// ISO-8601 timestamp.
     pub created_at: String,
