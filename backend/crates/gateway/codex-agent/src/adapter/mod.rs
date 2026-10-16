@@ -1,10 +1,10 @@
 //! [`CodexAppServerAdapter`]: the [`AgentAdapter`] for OpenAI Codex, driven over
 //! a shared `codex app-server` connection.
 //!
-//! Where the Claude adapter reconstructs the neutral event stream from lossy
-//! hooks + a JSONL transcript, Codex pushes structured `turn/*` / `item/*`
-//! notifications and `*/requestApproval` server → client requests over the
-//! JSON-RPC connection. This adapter maps the neutral operations onto the
+//! Where Claude's activity is reconstructed from lossy hooks + a JSONL
+//! transcript by the Interactor's own paths, Codex pushes structured `turn/*` /
+//! `item/*` notifications and `*/requestApproval` server → client requests over
+//! the JSON-RPC connection. This adapter maps the neutral operations onto the
 //! app-server methods and translates the pushed frames back into
 //! [`AgentEvent`]s (translation lives in [`crate::translate`]).
 //!
@@ -53,9 +53,9 @@
 //! The remaining decision variants — execpolicy and network-policy amendments,
 //! and `cancel` — are still unused: each would need a neutral projection Delta
 //! does not have. That trait method — reachable through
-//! `Arc<dyn AgentAdapter>` — is the Codex analogue of the Claude adapter's
-//! ingestion seam: it is how a browser decision reaches the provider, routed by
-//! the core from the Delta permission-row id back to the adapter-scoped token.
+//! `Arc<dyn AgentAdapter>` — is how a browser decision reaches the provider,
+//! routed by the core from the Delta permission-row id back to the
+//! adapter-scoped token.
 //!
 //! `item/permissions/requestApproval` is deliberately **not** an approval here:
 //! its response is a `GrantedPermissionProfile`, not a decision Delta can

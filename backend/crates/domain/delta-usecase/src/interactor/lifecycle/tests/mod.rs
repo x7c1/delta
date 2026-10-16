@@ -106,6 +106,7 @@ mod reap_stale_spawns_reaps_an_expired_unbound_spawn;
 mod refresh_session_settings_writes_its_companion_files_first;
 mod refresh_session_settings_writes_the_configured_file;
 mod removal_support;
+mod resume_skips_tmux_session_names_already_in_use;
 mod resume_window_requeue_drops_the_held_first_prompt;
 mod same_workdir_spawns_bind_to_their_own_session_each;
 mod send_during_a_codex_launch_is_queued;

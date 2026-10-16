@@ -1,10 +1,10 @@
 //! Which Claude launch-option flags may repeat on one command line.
 //!
 //! Its own module, beside the declared catalog and the danger predicate, for the
-//! same reason they are here: the adapter that owns Claude owns Claude's
-//! vocabulary. The composition root reads this through one per-provider accessor
-//! and hands it to the domain as a [`LaunchOptionVocabulary`], which is what
-//! turns the registry rows of one single-valued flag into an exclusive choice
+//! same reason they are here: this crate owns Claude's vocabulary. The
+//! composition root reads this through one per-provider accessor and hands it
+//! to the domain as a [`LaunchOptionVocabulary`], which is what turns the
+//! registry rows of one single-valued flag into an exclusive choice
 //! group — a radio group in the picker, one default in the registry, and a
 //! refused launch when two of them are selected.
 //!

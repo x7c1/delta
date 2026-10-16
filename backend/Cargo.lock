@@ -563,12 +563,7 @@ dependencies = [
 name = "claude-agent"
 version = "0.6.0"
 dependencies = [
- "agent-contract",
- "async-trait",
  "delta-usecase",
- "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]

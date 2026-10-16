@@ -1,7 +1,7 @@
 //! Which Claude launch options switch Claude Code's own permission system off.
 //!
 //! Its own module, beside the declared catalog, for the same reason the catalog
-//! is here: the adapter that owns Claude owns Claude's vocabulary. The
+//! is here: this crate owns Claude's vocabulary. The
 //! composition root reads this through one per-provider accessor and hands it to
 //! the domain as a [`LaunchOptionVocabulary`], which is what makes the registry
 //! refuse to default-enable such an option and the browser mark it.

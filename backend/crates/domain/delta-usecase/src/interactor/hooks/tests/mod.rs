@@ -29,6 +29,7 @@ mod session_start_resume_marks_ready_without_dispatching;
 mod session_start_startup_binds_pending_spawn;
 mod session_start_then_user_prompt_bind_once;
 mod session_start_unknown_session_is_a_safe_noop;
+mod stop_completes_the_turn_once_on_its_thread;
 mod subagent_running_window;
 mod submit_registers_each_session_id_independently;
 mod task_notification_prompt_is_not_external_input;
