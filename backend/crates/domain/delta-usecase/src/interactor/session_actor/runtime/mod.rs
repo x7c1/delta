@@ -17,8 +17,9 @@
 //! still has to build, `planned_worktree`), the bind/resume launch state
 //! (`spawn`), the turn machine (`turn`), the streaming chunk-index cursor
 //! (`streaming`), permission waiters (`permission`), the pending question
-//! (`question`), subagent tracking (`subagents`), and the auto-compact
-//! debounce (`auto_compact`) — keeps its `impl SessionRuntime` block in its
+//! (`question`), subagent tracking (`subagents`), the auto-compact
+//! debounce (`auto_compact`), and the background tail's reported transcript
+//! refusal (`transcript_refusal`) — keeps its `impl SessionRuntime` block in its
 //! own file, and each public type those families carry has a module named
 //! after it.
 
@@ -36,6 +37,7 @@ mod resuming_session;
 mod spawn;
 mod streaming;
 mod subagents;
+mod transcript_refusal;
 mod turn;
 
 mod adapter_launch;
@@ -82,6 +84,7 @@ use tokio::sync::oneshot;
 
 use crate::agent::AgentContentSource;
 use crate::interactor::PermissionDecision;
+use crate::ports::TranscriptRefusal;
 use crate::turn::TurnState;
 
 /// All of one session's runtime state, owned exclusively by its actor.
@@ -320,6 +323,23 @@ pub struct SessionRuntime {
     /// socket died must never pin the actor alive, and the detach is saturating
     /// so a retired actor's stale decrement is harmless.
     pty_attachments: usize,
+    /// The transcript refusal the background tail last reported for this
+    /// session, and `None` once a read succeeds again (see
+    /// [`Self::note_transcript_refusal`]).
+    ///
+    /// A refused transcript (not a regular file, over the size limit) is
+    /// refused again on every tick, so without this the tail would log the
+    /// same warning twice a second for as long as the session stays open.
+    /// Kept here, with the session's other runtime state, rather than in the
+    /// server's poll loop: the loop sees only one tick-wide result and holds no
+    /// per-session state, while this actor already serializes every read of
+    /// its transcript and is where the refusal is caught — so one session's
+    /// refusal is settled inside its own actor and never becomes another
+    /// session's failure. NOT part of [`Self::is_empty`]: the tail only polls
+    /// open sessions, which already pin the actor alive, and a refusal that
+    /// outlives the session is forgotten with its actor — reported afresh if
+    /// the session is opened again.
+    reported_transcript_refusal: Option<TranscriptRefusal>,
 }
 
 impl SessionRuntime {

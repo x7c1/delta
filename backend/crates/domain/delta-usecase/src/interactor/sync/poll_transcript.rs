@@ -2,9 +2,11 @@ use std::collections::BTreeSet;
 
 use delta_model::Message;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{
+    GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, TranscriptError, Workspace,
+};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -48,6 +50,14 @@ where
     /// The same messages and events are also *returned*, unchanged, for
     /// callers that inspect the batch. They have already been emitted, so a
     /// caller that drains the seam must not broadcast them a second time.
+    ///
+    /// **A refused transcript is reported once, not on every tick.** A
+    /// [`TranscriptError::Refused`] read is answered with an empty batch, and
+    /// warned about only when it is news: the first refusal, one that differs
+    /// from the last reported, or one after a read succeeded in between (that
+    /// recovery is logged at `info`). The record lives in the session's
+    /// runtime state (`SessionRuntime::note_transcript_refusal`). Any other
+    /// failure still fails the tick.
     pub(in crate::interactor) async fn sync_tick(
         &mut self,
     ) -> Result<(Vec<Message>, Vec<SessionEvent>)> {
@@ -60,7 +70,32 @@ where
         let Some(session) = self.store.session(self.id).await? else {
             return Ok((Vec::new(), Vec::new()));
         };
-        let (messages, mut events) = self.sync_transcript(&session).await?;
+        let (messages, mut events) = match self.sync_transcript(&session).await {
+            Ok(batch) => {
+                self.note_transcript_read();
+                batch
+            }
+            // A refused transcript is refused again on every tick until the
+            // file itself changes, so it is reported here, once, instead of
+            // failing the tick (which the server would log on every tick, and
+            // which would end the fan-out's collection early, hiding the other
+            // sessions' results). Every other failure may pass on the next
+            // read and keeps failing the tick as before.
+            Err(Error::Transcript(TranscriptError::Refused { path, reason })) => {
+                if self.state.note_transcript_refusal(reason) {
+                    tracing::warn!(
+                        session_id = %self.id,
+                        path = %path.display(),
+                        reason = %reason,
+                        "the transcript is refused; the background tail skips this \
+                         session and stays quiet until the refusal changes or a read \
+                         succeeds"
+                    );
+                }
+                return Ok((Vec::new(), Vec::new()));
+            }
+            Err(err) => return Err(err),
+        };
         // An interrupt ends the turn but fires no `Stop` hook, so the tail is
         // where it is observed. Release any queued send now that the session
         // is idle — done here, after `sync_transcript` has returned, so
@@ -87,6 +122,18 @@ where
         }
         self.announce_ingest(&messages, &events);
         Ok((messages, events))
+    }
+
+    /// Note that this session's transcript was read, logging the recovery
+    /// when the background tail had reported it refused.
+    fn note_transcript_read(&mut self) {
+        if let Some(reason) = self.state.clear_transcript_refusal() {
+            tracing::info!(
+                session_id = %self.id,
+                was = %reason,
+                "the transcript is read again after being refused"
+            );
+        }
     }
 
     /// Announce what this tick ingested on the async event seam.

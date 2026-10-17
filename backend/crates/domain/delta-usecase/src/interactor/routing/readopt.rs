@@ -7,6 +7,7 @@ use crate::interactor::lifecycle::Readoption;
 use crate::interactor::session_actor::input::SessionInput;
 use crate::interactor::Interactor;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::with_causes;
 
 use super::{HookEndpointChange, ReadoptionSummary};
 
@@ -88,7 +89,7 @@ where
                 Err(err) => {
                     tracing::warn!(
                         session_id = %id,
-                        error = %err,
+                        error = %with_causes(&err),
                         "re-adopting a session that may have survived the restart failed; \
                          it stays closed"
                     );

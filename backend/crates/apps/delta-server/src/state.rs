@@ -619,7 +619,10 @@ impl AppState {
                         }
                     }
                     Err(err) => {
-                        tracing::warn!(error = %err, "resume dispatch failed");
+                        tracing::warn!(
+                            error = %delta_usecase::with_causes(&err),
+                            "resume dispatch failed"
+                        );
                     }
                 }
                 let resumes_done = Instant::now();
@@ -636,7 +639,10 @@ impl AppState {
                         }
                     }
                     Err(err) => {
-                        tracing::warn!(error = %err, "liveness reap failed");
+                        tracing::warn!(
+                            error = %delta_usecase::with_causes(&err),
+                            "liveness reap failed"
+                        );
                     }
                 }
                 let reap_done = Instant::now();
@@ -656,7 +662,10 @@ impl AppState {
                         }
                     }
                     Err(err) => {
-                        tracing::warn!(error = %err, "echo deadline sweep failed");
+                        tracing::warn!(
+                            error = %delta_usecase::with_causes(&err),
+                            "echo deadline sweep failed"
+                        );
                     }
                 }
                 let echo_sweep_done = Instant::now();
@@ -665,7 +674,10 @@ impl AppState {
                 // at the moment its rows landed, so the returned batch is dropped
                 // (see this function's doc comment).
                 if let Err(err) = interactor.poll_transcript(TRANSCRIPT_POLL_INTERVAL).await {
-                    tracing::warn!(error = %err, "transcript tail poll failed");
+                    tracing::warn!(
+                        error = %delta_usecase::with_causes(&err),
+                        "transcript tail poll failed"
+                    );
                 }
                 // A tick that outruns its own interval starves every stage behind
                 // it, so name what it spent the time on. Each fan-out is bounded,

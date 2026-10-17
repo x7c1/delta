@@ -8,6 +8,8 @@
 
 mod support;
 
+mod a_refused_transcript_does_not_stop_another_session_from_ingesting;
+mod a_refused_transcript_is_reported_once_per_refusal;
 mod api_error_line_emits_turn_interrupted_and_stays_on_thread;
 mod background_task_completion_clears_the_running_subagent;
 mod background_task_completion_lands_on_launching_thread;

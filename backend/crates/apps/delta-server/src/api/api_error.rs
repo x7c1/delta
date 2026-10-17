@@ -469,7 +469,9 @@ impl IntoResponse for ApiError {
                     // preparation failures only land here defensively: they
                     // happen long after the send was accepted, so they reach
                     // the browser as a `spawn_failed` event, never as a
-                    // response body.
+                    // response body. A transcript failure is one whatever its
+                    // kind — a refused transcript included: the hook or
+                    // request was fine, the server could not read the file.
                     Error::Tmux(_)
                     | Error::Agent(_)
                     | Error::Git(_)
@@ -482,7 +484,10 @@ impl IntoResponse for ApiError {
                     | Error::Workspace(_)
                     | Error::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, None),
                 };
-                (status, err.to_string(), code)
+                // The whole cause chain: an error whose kind is kept as a
+                // value (a transcript read's I/O failure, say) names only its
+                // own level and leaves the cause to its `source`.
+                (status, delta_usecase::with_causes(&err), code)
             }
         };
         if status.is_server_error() {
@@ -517,6 +522,27 @@ mod tests {
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned);
         (status, code)
+    }
+
+    /// A transcript failure is a `500` whose message carries the failure's
+    /// cause, which the use-case error keeps as its `source` rather than in
+    /// its own text.
+    #[tokio::test]
+    async fn a_transcript_io_failure_renders_its_cause() {
+        let err = delta_usecase::Error::Transcript(delta_usecase::TranscriptError::Io {
+            path: "/p/t.jsonl".into(),
+            source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        });
+        let response = ApiError::from(err).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let message = body["error"].as_str().unwrap();
+        assert!(
+            message.contains("/p/t.jsonl") && message.contains("permission denied"),
+            "the message names the path and the cause, got {message:?}"
+        );
+        assert!(body.get("code").is_none(), "no stable code, got {body}");
     }
 
     /// A branch send to a session whose launch has not bound yet is a conflict

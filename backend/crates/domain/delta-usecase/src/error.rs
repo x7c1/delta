@@ -6,6 +6,8 @@
 
 use thiserror::Error;
 
+use crate::ports::TranscriptError;
+
 /// Errors raised while executing a use case.
 #[derive(Debug, Error)]
 pub enum Error {
@@ -386,9 +388,12 @@ pub enum Error {
     #[error("external tool spawn failed: {0}")]
     ExternalOpenerSpawnFailed(String),
 
-    /// A transcript read/parse failure.
-    #[error("transcript error: {0}")]
-    Transcript(String),
+    /// A transcript read failed. Its kind says whether it is a lasting
+    /// refusal or a failure that may pass, and its text and `source` are the
+    /// [`TranscriptError`]'s own, so [`crate::with_causes()`] renders the
+    /// cause once. Surfaced as `500`.
+    #[error(transparent)]
+    Transcript(#[from] TranscriptError),
 
     /// A persistence failure.
     #[error("store error: {0}")]
