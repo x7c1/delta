@@ -101,6 +101,7 @@ task only makes the mid-turn shape behave like the idle one.
 
 ### Before merge (verified outside the check command)
 
-- [ ] In `make dev`, opening a session whose transcript contains a mid-turn
-      hand-back (a `queued_command` attachment with `commandMode: "prompt"`)
-      shows it as a meta line, not a user bubble.
+- [x] In a `make dev` session, a background subagent whose report arrives
+      while the main agent is still running a tool (recorded as a
+      `queued_command` attachment with `commandMode: "prompt"`) shows as a
+      meta line, not a user bubble.
