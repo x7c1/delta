@@ -373,9 +373,9 @@ mod tests {
             message.contains("not a regular file") && message.contains(&path),
             "the error names the FIFO as not a regular file, got {message:?}"
         );
-        // The port renders the error to a message; the reader's own result
-        // carries the variant. Safe to call directly: the read above proved the
-        // open does not block.
+        // The reader's own result carries the variant (the port maps it to
+        // `TranscriptError::Refused`). Safe to call directly: the read above
+        // proved the open does not block.
         let err = read_transcript(&fifo).unwrap_err();
         assert!(
             matches!(&err, Error::NotRegularFile { path } if *path == fifo),
