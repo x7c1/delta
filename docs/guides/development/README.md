@@ -189,10 +189,16 @@ assumed — the server relies on a cached Claude Code token (or
 inside its own process on a free loopback port and opens one window on it,
 serving the built SPA (`embed-web`). It is a launcher only: the page talks to
 the server over plain HTTP exactly as a browser does, with no Tauri IPC. It is
-single-instance (`tauri-plugin-single-instance`, scoped by the app's
-identifier): a second launch focuses the running window and exits, so it cannot
-start a rival server on the same database and tmux socket, nor take over the
-hook port the running copy holds.
+single-instance, scoped by the app's identifier: a second launch focuses the
+running window and exits, so it cannot start a rival server on the same database
+and tmux socket, nor take over the hook port the running copy holds. On Linux
+the lock is `tauri-plugin-single-instance`, which holds a name on the session
+D-Bus. On macOS it is the shell's own (`src/single_instance/`): a Unix socket
+named `<identifier with . and - as _>_si.sock` in the per-user temporary
+directory macOS assigns (`confstr(_CS_DARWIN_USER_TEMP_DIR)`, mode 0700),
+because the plugin's socket would sit in `/tmp`, where another user could take
+its path first. When that lock cannot be set up, the reason is logged and the
+app starts without it.
 
 At startup the shell reads `PATH`, `LANG` and `LC_*` from the user's login
 shell (`src/login_env/`) and hands them to the server as values, in the

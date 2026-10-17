@@ -61,9 +61,11 @@
 //! ([`window_size`]).
 //!
 //! Only one copy runs at a time: launching the app again focuses the running
-//! window and exits (see [`focus_running_window`]). On Linux the second launch
-//! passes its activation token on, so a Wayland compositor lets the window
-//! come to the front (`activation_token.rs`).
+//! window and exits (see [`focus_running_window`]). On Linux the lock is
+//! `tauri-plugin-single-instance`, over the session D-Bus; on macOS it is the
+//! shell's own socket in the user's temporary directory (`single_instance`).
+//! On Linux the second launch passes its activation token on, so a Wayland
+//! compositor lets the window come to the front (`activation_token.rs`).
 //!
 //! Closing the window ends the process and the server with it. The tmux server
 //! on Delta's socket is left running, so the Claude Code sessions open in it
@@ -99,6 +101,8 @@ mod placeholder;
 #[cfg(any(target_os = "linux", test))]
 mod quit_shortcut;
 mod relaunch;
+#[cfg(any(target_os = "macos", test))]
+mod single_instance;
 mod started_server;
 mod window_size;
 
@@ -162,27 +166,32 @@ fn main() {
         }
     };
 
-    let app = tauri::Builder::default()
-        // Registered first, so a second launch is caught before anything else
-        // runs: the plugin hands its arguments to the running instance and
-        // exits, and its `setup` below — which would start a second server on
-        // the same database and tmux socket — never runs. See
-        // `focus_running_window`.
-        //
-        // On Linux `enableGTKAppId` also makes the GTK application unique on
-        // the session bus, but that does not get in the way: plugins are set
-        // up while the app is built, before the event loop runs, so a second
-        // launch exits here before GTK would forward an `activate` to the
-        // running copy.
-        .plugin(tauri_plugin_single_instance::init(
-            move |app, _argv, _cwd| {
-                focus_running_window(
-                    app,
-                    #[cfg(target_os = "linux")]
-                    handoff.as_ref().and_then(activation_token::Handoff::take),
-                );
-            },
-        ))
+    let app = tauri::Builder::default();
+    // Registered first, so a second launch is caught before anything else
+    // runs: the single-instance lock tells the running instance and exits,
+    // and the `setup` below — which would start a second server on the same
+    // database and tmux socket — never runs. See `focus_running_window`.
+    //
+    // On Linux this is `tauri-plugin-single-instance`, over the session
+    // D-Bus. `enableGTKAppId` also makes the GTK application unique on the
+    // session bus, but that does not get in the way: plugins are set up while
+    // the app is built, before the event loop runs, so a second launch exits
+    // here before GTK would forward an `activate` to the running copy.
+    #[cfg(target_os = "linux")]
+    let app = app.plugin(tauri_plugin_single_instance::init(
+        move |app, _argv, _cwd| {
+            focus_running_window(
+                app,
+                handoff.as_ref().and_then(activation_token::Handoff::take),
+            );
+        },
+    ));
+    // On macOS the plugin's socket would sit in the shared `/tmp`, so the
+    // shell keeps its own lock in the user's temporary directory
+    // (`single_instance`).
+    #[cfg(target_os = "macos")]
+    let app = app.plugin(single_instance::init(focus_running_window));
+    let app = app
         // Remembers whether the window is maximized; the size is
         // `window_size`'s own, as the plugin's grows on Linux (see there).
         // After single-instance, so a second launch exits before this loads
@@ -203,7 +212,7 @@ fn main() {
         // reported (and exits 1) inside the hook instead.
         .setup(move |app| {
             // Only the running instance gets here; a second launch has
-            // exited in the single-instance plugin.
+            // exited in the single-instance lock.
             #[cfg(target_os = "linux")]
             activation_token::claim(activation);
             logging::warn_if_the_resolver_disagrees(

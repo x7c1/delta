@@ -21,13 +21,13 @@ anyhow = { workspace = true }
 # The UTC day of the log file a write lands in (`logging::OwnerOnlyAppender`).
 chrono = { workspace = true }
 dirs = { workspace = true }
-# `O_NOFOLLOW` for the log file created owner-only.
+# `O_NOFOLLOW` for the log file created owner-only, and on macOS the user's
+# temporary directory for the single-instance socket (`confstr`).
 libc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
-tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -56,6 +56,9 @@ gdkwayland-sys = "0.18"
 gdkx11 = "0.18"
 glib = "0.18"
 gtk = "0.18"
+# Single-instance over the session D-Bus. macOS uses the shell's own lock
+# (src/single_instance), as the plugin's socket there is in the shared `/tmp`.
+tauri-plugin-single-instance = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
