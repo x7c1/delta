@@ -312,13 +312,14 @@ describe('TranscriptPane composer context meter', () => {
       renderPane();
 
       const item = await screen.findByTestId('composer-context-meter');
-      expect(within(item).getByRole('meter')).toHaveAttribute(
-        'aria-valuenow',
-        now,
-      );
+      const meter = within(item).getByRole('meter');
+      expect(meter).toHaveAttribute('aria-valuenow', now);
       expect(
         within(item).getByTestId('composer-context-pct'),
       ).toHaveTextContent(pct);
+      // A screen reader announces the rounded readout on screen, not the raw
+      // `aria-valuenow`.
+      expect(meter).toHaveAttribute('aria-valuetext', pct);
     },
   );
 

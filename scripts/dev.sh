@@ -407,7 +407,7 @@ up() {
     die "Something is already listening on 127.0.0.1:$FRONTEND_PORT (the frontend dev server). Run 'scripts/dev.sh --down' first."
   fi
 
-  log "Data directory: $DEV_DATA_DIR (database, session settings, tmux config and per-spawn workdirs)"
+  log "Data directory: $DEV_DATA_DIR (database, session settings and tmux config)"
 
   mkdir -p "$LOG_DIR"
 
@@ -507,7 +507,7 @@ main() {
     --open-url|open-url) print_open_url ;;
     -h|--help|help) usage ;;
     "")            up ;;
-    *)             usage >&2; die "Unknown argument: $1 (the session workdir is no longer an argument: sessions run under the data directory)" ;;
+    *)             usage >&2; die "Unknown argument: $1 (the session workdir is no longer an argument: each session starts in a repository chosen in the app)" ;;
   esac
 }
 

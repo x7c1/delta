@@ -26,6 +26,7 @@ export function ContextUsageMeter({ usedPercentage }: ContextUsageMeterProps) {
   const clamped = Number.isFinite(usedPercentage)
     ? Math.min(100, Math.max(0, usedPercentage))
     : 0;
+  const readout = `${Math.round(clamped)}%`;
   return (
     <div
       className={cn(COMPOSER_RAIL_ITEM_CLASS, 'group/ctx relative')}
@@ -47,12 +48,13 @@ export function ContextUsageMeter({ usedPercentage }: ContextUsageMeterProps) {
             // Accessible name only: the custom tooltip below already shows the
             // same words, and a native `title` would add a second one.
             label={LABEL}
+            valueText={readout}
           />
           <span
             className="inline-block min-w-[3ch] text-right tabular-nums"
             data-testid="composer-context-pct"
           >
-            {Math.round(clamped)}%
+            {readout}
           </span>
         </div>
       </div>

@@ -217,6 +217,9 @@ function RateLimitRow({
   const duration = rateWindow.duration_seconds;
   const label = windowLabel(duration) ?? UNKNOWN_WINDOW_LABEL;
   const percentage = rateWindow.used_percentage ?? 0;
+  // Unclamped, unlike the bar: an over-limit window reads e.g. `104%`. The
+  // meter announces this same text so a screen reader matches the screen.
+  const readout = `${Math.round(percentage)}%`;
   const reset =
     rateWindow.resets_at !== null
       ? formatResetCountdown(rateWindow.resets_at)
@@ -250,8 +253,8 @@ function RateLimitRow({
   // The tooltip is where the reading's age is reachable — the row itself has
   // no column to spare, and its `↻` countdown means something else entirely.
   const title = restored
-    ? `${label} rate limit: ${Math.round(percentage)}% used — last observed ${formatObservedAt(restoredObservedAt)}`
-    : `${label} rate limit: ${Math.round(percentage)}% used`;
+    ? `${label} rate limit: ${readout} used — last observed ${formatObservedAt(restoredObservedAt)}`
+    : `${label} rate limit: ${readout} used`;
   return (
     <div
       className={cn(
@@ -274,6 +277,7 @@ function RateLimitRow({
           fillClassName={fillClassName}
           className={meterClassName}
           title={title}
+          valueText={readout}
         />
         {budgetLinePercentage !== null && trackWidth > 0 && (
           <span
@@ -294,7 +298,7 @@ function RateLimitRow({
         className="inline-block min-w-[3ch] shrink-0 text-right"
         data-testid={`${testId}-pct`}
       >
-        {Math.round(percentage)}%
+        {readout}
       </span>
       {reset !== null && (
         <span
