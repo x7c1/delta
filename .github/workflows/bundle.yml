@@ -181,8 +181,15 @@ jobs:
 
       # Given no token, releaseId, tagName or releaseName, the action only
       # builds: it can create, change or upload to no Release or tag.
+      #
+      # On the macOS runner, `hdiutil create` in the dmg step now and then fails
+      # with "Resource busy" while something else on the runner still holds the
+      # new disk image; the same build passes when run again. So on macOS a
+      # failure here is retried once by the next step. The retry rebuilds from
+      # the compiled target, so a real failure fails it too, a few minutes later.
       - name: Build the bundles
         id: tauri
+        continue-on-error: ${{ runner.os == 'macOS' }}
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           # Marks the bundle as built by this workflow, the only build the
@@ -194,11 +201,22 @@ jobs:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           uploadUpdaterJson: false
 
+      - name: Build the bundles (retry on macOS)
+        id: tauri-retry
+        if: steps.tauri.outcome == 'failure'
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
+        env:
+          DELTA_BUILD_ORIGIN: release
+        with:
+          projectPath: backend/crates/apps/delta-desktop
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          uploadUpdaterJson: false
+
       # artifactPaths is a JSON array; upload-artifact takes one path per line.
       - name: List the bundle paths
         id: paths
         env:
-          ARTIFACT_PATHS: ${{ steps.tauri.outputs.artifactPaths }}
+          ARTIFACT_PATHS: ${{ steps.tauri.outputs.artifactPaths || steps.tauri-retry.outputs.artifactPaths }}
         run: |
           delimiter="PATHS_$(openssl rand -hex 16)"
           {
