@@ -95,7 +95,7 @@ when Delta restarted (re-adoption closes that turn by design).
 
 ### Before merge (verified outside the check command)
 
-- [ ] In `make dev`, a session that launches a background subagent which runs
+- [x] In `make dev`, a session that launches a background subagent which runs
       long enough to survive a server restart (only the `delta-server`
       process is restarted; the dev tmux server and its pane keep running —
       `make down` would kill them) shows the navigator spinner and the running
