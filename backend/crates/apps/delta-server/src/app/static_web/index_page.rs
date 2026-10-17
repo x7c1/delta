@@ -235,10 +235,10 @@ mod tests {
         assert_allows_every_inline_script(WEB_INDEX);
     }
 
-    /// Only runs with the feature on, which neither `make check` nor CI tests
-    /// with (they only build it): run it after `make web-dist` with
-    /// `cargo test -p delta-server --features embed-web index_page`. The test
-    /// above is what the gate checks.
+    /// Only exists with the feature on, which needs the built `dist/`:
+    /// `make check` runs it in `check-embedded`, and CI in the step that
+    /// builds and tests the embedded server. By hand, run it after
+    /// `make web-dist` with `cargo test -p delta-server --features embed-web`.
     #[cfg(feature = "embed-web")]
     #[test]
     fn allows_every_inline_script_of_the_embedded_build_by_its_hash() {
