@@ -66,6 +66,10 @@ pub(crate) struct FakeStoreInner {
     /// the `SubagentLaunch` carrying the launching thread plus the optional
     /// `task_id` learned via the `PostToolUse(Agent)` hook.
     pub(crate) subagent_launches: HashMap<(SessionId, String), SubagentLaunch>,
+    /// The launches among [`Self::subagent_launches`] that lit the running
+    /// indicator, in the order they were marked, mirroring the SQL
+    /// `subagent_launch.drives_indicator` / `subagent_type` / `description` columns.
+    pub(crate) subagent_indicators: Vec<FakeSubagentIndicator>,
     pub(crate) clone_roots: Vec<CloneRoot>,
     /// The tmux pane each session row remembers, mirroring the SQL
     /// `session.tmux_session` / `tmux_pane` / `hooks_unreachable` columns.
@@ -81,6 +85,16 @@ pub(crate) struct FakeStoreInner {
     /// How many times some read methods were called, for tests that assert a
     /// use case reads in batches rather than once per row.
     pub(crate) calls: FakeStoreCalls,
+}
+
+/// One launch marked as lighting the running indicator (see
+/// [`FakeStoreInner::subagent_indicators`]).
+#[derive(Debug, Clone)]
+pub(crate) struct FakeSubagentIndicator {
+    pub(crate) session_id: SessionId,
+    pub(crate) tool_use_id: String,
+    pub(crate) subagent_type: Option<String>,
+    pub(crate) description: Option<String>,
 }
 
 /// Call counts of the fake's thread reads (see [`FakeStoreInner::calls`]).

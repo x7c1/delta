@@ -7,11 +7,13 @@ use async_trait::async_trait;
 use delta_attribution::SubagentLaunch;
 use delta_model::{SessionId, ThreadId};
 
-use super::SessionStore;
+use super::{RunningSubagentLaunch, SessionStore};
 use crate::error::Result;
 
 /// The outstanding background-task launches, keyed by the launching tool_use
-/// id, that let a late `<task-notification>` find its launching thread.
+/// id, that let a late `<task-notification>` find its launching thread, and,
+/// for the launches that lit the running-subagent indicator, let a re-adopted
+/// session light it again (see [`Self::running_subagent_launches`]).
 ///
 /// One of the concerns [`SessionStore`] gathers.
 #[async_trait]
@@ -62,6 +64,30 @@ pub trait SubagentLaunchStore: Send + Sync {
         &self,
         session_id: &SessionId,
     ) -> Result<BTreeMap<String, SubagentLaunch>>;
+
+    /// Mark a recorded background launch as one that lit the running-subagent
+    /// indicator, with the `subagent_type` and `description` the indicator
+    /// shows. Called when the transcript fold starts the indicator for a
+    /// BACKGROUND launch, right after [`Self::record_subagent_launch`] recorded
+    /// its row in the same fold, so [`Self::running_subagent_launches`] can
+    /// light it again for a re-adopted pane whose launch line is already
+    /// behind the cursor. Marking an unknown launch is a no-op.
+    async fn record_subagent_indicator(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        subagent_type: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<()>;
+
+    /// The session's outstanding launches that lit the running-subagent
+    /// indicator (see [`Self::record_subagent_indicator`]), oldest first —
+    /// the running set a re-adopted session rebuilds. A launch that never lit
+    /// it (a background `Bash`) is not among them.
+    async fn running_subagent_launches(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<RunningSubagentLaunch>>;
 }
 
 #[async_trait]
@@ -99,5 +125,24 @@ impl SubagentLaunchStore for Box<dyn SessionStore> {
         session_id: &SessionId,
     ) -> Result<BTreeMap<String, SubagentLaunch>> {
         (**self).outstanding_subagent_launches(session_id).await
+    }
+
+    async fn record_subagent_indicator(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        subagent_type: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<()> {
+        (**self)
+            .record_subagent_indicator(session_id, tool_use_id, subagent_type, description)
+            .await
+    }
+
+    async fn running_subagent_launches(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<RunningSubagentLaunch>> {
+        (**self).running_subagent_launches(session_id).await
     }
 }

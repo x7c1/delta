@@ -48,26 +48,27 @@ where
     ///   immediately rather than waiting for a notification that never comes;
     /// - calls [`SubagentLaunchStore::clear_subagent_launch`](crate::ports::SubagentLaunchStore::clear_subagent_launch) to drop the persisted
     ///   launch row, so a later stray notification cannot double-fire and a
-    ///   resume cannot resurrect the entry from persisted state.
+    ///   re-adoption cannot resurrect the entry from persisted state.
     ///
     /// The sweep cannot fail. A store error while clearing one launch row is
     /// logged at `warn` (with the session and tool_use ids) and the sweep
     /// carries on: that entry's `SubagentFinished` is still emitted, and so are
     /// every other entry's. The process is gone either way and the in-memory
     /// entries are already drained, so stopping would only strand the viewers'
-    /// indicators; the cost of the failure is a leftover launch row, which a
-    /// resume does not turn back into a lit indicator (see below).
+    /// indicators; the cost of the failure is a leftover launch row (see below
+    /// for what can still read it back).
     ///
-    /// On the resume point: a resume never rebuilds the in-memory
-    /// `running_subagents` set from persisted launch rows. `sync_transcript`
-    /// reads only NEW lines past a per-session line cursor, and the line that
-    /// lit the indicator — the `Agent`/`Task` tool_use, or the
-    /// `<forked-skill-launch>` element — sits behind that cursor, so it is never
-    /// re-folded; the persisted launch rows are read back only by
-    /// `outstanding_subagent_launches`, which reseeds the attribution fold's
-    /// thread map for a late completion notification, not the indicator set.
-    /// Clearing the launch row here therefore removes the last trace, and there
-    /// is no path that would re-light a swept entry on resume.
+    /// On the resume point: the in-memory `running_subagents` set is rebuilt
+    /// from persisted launch rows in exactly one place, the re-adoption of a
+    /// pane that survived a restart of Delta (`restore_running_subagents`),
+    /// which lights every outstanding row the fold marked as having lit the
+    /// indicator. A resume does not rebuild it: `sync_transcript` reads only
+    /// NEW lines past a per-session line cursor, the line that lit the
+    /// indicator sits behind that cursor, and the resume drops the rows its
+    /// previous process left lit. Clearing the launch row here is therefore
+    /// what keeps a swept entry from being lit again by a later re-adoption:
+    /// a row this sweep failed to clear is the one way it can come back, until
+    /// the next resume or sweep drops it.
     ///
     /// This is the shared body behind all three process-gone call sites;
     /// keeping it in one place ensures they emit and persist identically.

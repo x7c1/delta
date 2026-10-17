@@ -77,7 +77,7 @@ async fn close_session_sweeps_a_lingering_background_subagent() {
             .unwrap()
             .is_empty(),
         "the persisted launch row is cleared so a stray notification cannot \
-         double-fire and a resume cannot resurrect the entry"
+         double-fire and a re-adoption cannot resurrect the entry"
     );
     assert!(ix.bound_pane(&session).await.is_none(), "closed");
 }

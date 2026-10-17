@@ -279,6 +279,13 @@ where
     /// rather than left waiting for a Send that would type it twice (see
     /// [`delivered_held_sends`]).
     ///
+    /// Between the two, the running-subagent set is rebuilt from the session's
+    /// outstanding launch rows ([`Self::restore_running_subagents`]): a
+    /// background subagent launched before the restart may still be running
+    /// in the pane, and its launch line is behind the cursor the catch-up
+    /// starts from. Restoring before the catch-up lets a completion it ingests
+    /// finish the restored entry.
+    ///
     /// Neither step can unbind the pane, so neither failure is returned: the
     /// pane is live and bound whatever happens, the next tick retries the sync,
     /// and an `Err` would tell a caller the session was not adopted when it
@@ -297,6 +304,7 @@ where
                  may be left unsettled"
             );
         }
+        self.restore_running_subagents().await;
         match self.sync_transcript(session).await {
             Ok((messages, events)) => {
                 for event in events {

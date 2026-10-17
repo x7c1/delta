@@ -18,8 +18,8 @@ use delta_model::{
 use delta_usecase::{
     CloneRoot, CloneRootStore, LaunchOptionStore, MessageStore, NewSession, PermissionStore,
     PromptTemplateStore, RecentWorkdir, RememberedPane, RememberedPaneStore, RepositoryCloneRow,
-    SendStore, SessionHistoryStore, SessionPageCursor, SessionPageRow, SessionRecordStore,
-    SpawningSession, SubagentLaunchStore, ThreadStore,
+    RunningSubagentLaunch, SendStore, SessionHistoryStore, SessionPageCursor, SessionPageRow,
+    SessionRecordStore, SpawningSession, SubagentLaunchStore, ThreadStore,
 };
 
 use super::SqliteStore;
@@ -491,6 +491,24 @@ impl SubagentLaunchStore for SqliteStore {
         session_id: &SessionId,
     ) -> std::result::Result<BTreeMap<String, SubagentLaunch>, delta_usecase::Error> {
         self.outstanding_subagent_launches(session_id).await
+    }
+
+    async fn record_subagent_indicator(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        subagent_type: Option<&str>,
+        description: Option<&str>,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        self.record_subagent_indicator(session_id, tool_use_id, subagent_type, description)
+            .await
+    }
+
+    async fn running_subagent_launches(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Vec<RunningSubagentLaunch>, delta_usecase::Error> {
+        self.running_subagent_launches(session_id).await
     }
 }
 

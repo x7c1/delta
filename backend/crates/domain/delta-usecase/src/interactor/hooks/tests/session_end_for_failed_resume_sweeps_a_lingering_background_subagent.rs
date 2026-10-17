@@ -94,6 +94,6 @@ async fn session_end_for_failed_resume_sweeps_a_lingering_background_subagent() 
             .await
             .unwrap()
             .is_empty(),
-        "the persisted launch row is cleared so a resume cannot resurrect the entry"
+        "the persisted launch row is cleared so a re-adoption cannot resurrect the entry"
     );
 }
