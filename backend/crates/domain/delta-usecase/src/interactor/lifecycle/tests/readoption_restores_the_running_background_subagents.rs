@@ -4,32 +4,13 @@
 //! rows instead, so the indicator stays lit until the subagent completes —
 //! and only for the launches that lit it before the restart.
 
-use delta_model::{ContentBlock, SessionId, ThreadId};
+use delta_model::{ContentBlock, SessionId};
 
 use crate::interactor::testing::*;
 use crate::ports::{SessionEvent, StopHook};
 use crate::{HookEndpointChange, RunningSubagent};
 
-use super::readoption_support::{left_behind, survives, SURVIVING_TOKEN};
-
-/// What the previous process persisted for a background `Agent` launch it lit
-/// the indicator for: the launch row, its indicator marking, and the task id
-/// its `PostToolUse(Agent)` learned.
-async fn left_running(ix: &TestInteractor, id: &SessionId, tool_use_id: &str, thread: ThreadId) {
-    let store = ix.store();
-    store
-        .record_subagent_launch(id, tool_use_id, thread)
-        .await
-        .unwrap();
-    store
-        .record_subagent_indicator(id, tool_use_id, Some("general-purpose"), Some("Long crawl"))
-        .await
-        .unwrap();
-    store
-        .upgrade_subagent_task_id(id, tool_use_id, "a31425032172620ed")
-        .await
-        .unwrap();
-}
+use super::readoption_support::{left_behind, left_running, survives, SURVIVING_TOKEN};
 
 /// An assistant line launching `Bash` with `run_in_background: true`: it
 /// leaves a launch row (its completion is routed back to its thread) but never
