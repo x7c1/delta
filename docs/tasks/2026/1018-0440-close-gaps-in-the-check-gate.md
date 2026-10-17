@@ -88,5 +88,5 @@ one-test-per-file layout. If the test exposes a bug, fix it in this change.
 
 ### Before merge (verified outside the check command)
 
-- [ ] The PR's CI run shows the embedded-server step running the
+- [x] The PR's CI run shows the embedded-server step running the
       `delta-server` tests with `embed-web`, and passing.
