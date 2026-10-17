@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-contract"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "delta-usecase",
 ]
@@ -307,7 +307,7 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "binary-detector"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "delta-usecase",
@@ -561,14 +561,14 @@ dependencies = [
 
 [[package]]
 name = "claude-agent"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "delta-usecase",
 ]
 
 [[package]]
 name = "codex-agent"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -806,7 +806,7 @@ dependencies = [
 
 [[package]]
 name = "delta-attribution"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "delta-model",
  "delta-transcript",
@@ -817,7 +817,7 @@ dependencies = [
 
 [[package]]
 name = "delta-bootstrap"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "binary-detector",
@@ -844,7 +844,7 @@ dependencies = [
 
 [[package]]
 name = "delta-desktop"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -877,14 +877,14 @@ dependencies = [
 
 [[package]]
 name = "delta-model"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "delta-server"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "delta-sqlite"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "delta-attribution",
@@ -937,7 +937,7 @@ dependencies = [
 
 [[package]]
 name = "delta-transcript"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "delta-model",
@@ -953,7 +953,7 @@ dependencies = [
 
 [[package]]
 name = "delta-update-helper"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "libc",
  "release-signature",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "delta-usecase"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "delta-attribution",
@@ -989,7 +989,7 @@ dependencies = [
 
 [[package]]
 name = "delta-wire"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "delta-model",
  "delta-usecase",
@@ -1258,7 +1258,7 @@ dependencies = [
 
 [[package]]
 name = "external-opener"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "delta-usecase",
@@ -1268,7 +1268,7 @@ dependencies = [
 
 [[package]]
 name = "fake-claude"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "axum",
  "delta-bootstrap",
@@ -1284,7 +1284,7 @@ dependencies = [
 
 [[package]]
 name = "fake-codex"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "agent-contract",
  "axum",
@@ -1653,7 +1653,7 @@ dependencies = [
 
 [[package]]
 name = "gh-cli"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1699,7 +1699,7 @@ dependencies = [
 
 [[package]]
 name = "git-worktree"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "delta-usecase",
@@ -3432,7 +3432,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "release-feed"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "delta-usecase",
@@ -3453,7 +3453,7 @@ dependencies = [
 
 [[package]]
 name = "release-signature"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "minisign-verify",
  "semver",
@@ -4797,7 +4797,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tmux-driver"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "delta-usecase",
@@ -5202,7 +5202,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "update-installer"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "delta-usecase",
@@ -6096,7 +6096,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-fs"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "delta-usecase",
