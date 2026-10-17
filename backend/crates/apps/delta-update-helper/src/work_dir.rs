@@ -102,6 +102,15 @@ mod tests {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
     }
 
+    /// A fresh directory only its owner may change, whatever the process
+    /// umask: `tempfile` creates it through the umask, and under umask 002
+    /// it would come out mode 775 and be refused as a parent.
+    fn private_tempdir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        chmod(dir.path(), 0o700);
+        dir
+    }
+
     fn reason(result: Result<(), Refusal>) -> String {
         match result {
             Err(Refusal::WorkDir { reason, .. }) => reason,
@@ -149,26 +158,27 @@ mod tests {
     #[test]
     fn a_directory_others_may_write_to_is_refused() {
         for mode in [0o720, 0o702, 0o777] {
-            let parent = tempfile::tempdir().unwrap();
+            let parent = private_tempdir();
             let dir = parent.path().join("work");
             std::fs::create_dir(&dir).unwrap();
             chmod(&dir, mode);
 
             let reason = reason(prepare(&dir, me()));
+            assert!(!reason.starts_with("its parent "), "{mode:o}: {reason}");
             assert!(reason.contains("may write to it"), "{mode:o}: {reason}");
         }
     }
 
     #[test]
     fn a_directory_owned_by_someone_else_is_refused() {
-        let parent = tempfile::tempdir().unwrap();
+        let parent = private_tempdir();
         let reason = reason(prepare(&parent.path().join("work"), me() + 1));
         assert!(reason.contains("owned by uid"), "{reason}");
     }
 
     #[test]
     fn a_symlink_or_a_file_is_refused() {
-        let parent = tempfile::tempdir().unwrap();
+        let parent = private_tempdir();
         let elsewhere = tempfile::tempdir().unwrap();
         let link = parent.path().join("link");
         symlink(elsewhere.path(), &link).unwrap();
@@ -188,7 +198,7 @@ mod tests {
     #[test]
     fn staging_ignores_tmpdir() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let root = tempfile::tempdir().unwrap();
+        let root = private_tempdir();
         run_in_child(
             "work_dir::tests::child_staging_ignores_tmpdir",
             &[

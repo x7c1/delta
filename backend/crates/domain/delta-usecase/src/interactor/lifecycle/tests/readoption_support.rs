@@ -1,7 +1,7 @@
 //! Shared setup for the re-adoption tests: a session a previous Delta process
 //! left behind, whose row remembers a pane.
 
-use delta_model::SessionId;
+use delta_model::{SessionId, ThreadId};
 
 use crate::SessionListing;
 
@@ -51,6 +51,30 @@ pub(super) async fn left_behind(ix: &TestInteractor, id: &str, token: &str) -> S
         .await
         .unwrap();
     session.id
+}
+
+/// What the previous process persisted for a background `Agent` launch it lit
+/// the indicator for: the launch row, its indicator marking, and the task id
+/// its `PostToolUse(Agent)` learned.
+pub(super) async fn left_running(
+    ix: &TestInteractor,
+    id: &SessionId,
+    tool_use_id: &str,
+    thread: ThreadId,
+) {
+    let store = ix.store();
+    store
+        .record_subagent_launch(id, tool_use_id, thread)
+        .await
+        .unwrap();
+    store
+        .record_subagent_indicator(id, tool_use_id, Some("general-purpose"), Some("Long crawl"))
+        .await
+        .unwrap();
+    store
+        .upgrade_subagent_task_id(id, tool_use_id, "a31425032172620ed")
+        .await
+        .unwrap();
 }
 
 /// Make `token` a tmux session that is still running, as one that survived the

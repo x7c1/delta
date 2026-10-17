@@ -190,7 +190,7 @@ lint:
 	cd backend && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — everything CI runs except the network-bound dependency audit (`make audit`): backend fmt/build/test/clippy/rustdoc/file length + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint/file length + the embedded-server build (`embed-web`) + the desktop-shell build/test/clippy + both Playwright suites (needs tmux) + the release version check's scratch-repo test + the workflow pin check and its test — plus the canary gate's, the re-vendor script's, gen-check's and the test-residue sweep's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
+## check: full pre-PR gate — everything CI runs except the network-bound dependency audit (`make audit`): backend fmt/build/test/clippy/rustdoc/file length + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint/file length + the embedded-server build/test (`embed-web`) + the desktop-shell build/test/clippy + both Playwright suites (needs tmux) + the release version check's scratch-repo test + the workflow pin check and its test — plus the canary gate's, the re-vendor script's, gen-check's and the test-residue sweep's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
 # The point of this target is that passing it means CI will pass, so it has to
 # stay a superset of what the workflow runs — including BOTH Playwright suites.
 # The one exception is CI's `audit` job (`make audit`): it fetches advisory
@@ -315,11 +315,13 @@ check-e2e: check-frontend-build
 check-e2e-fake: check-backend-build check-frontend-build
 	$(MAKE) e2e-fake
 
-# Builds delta-server with `embed-web` against the `dist/` check-frontend-build
-# just produced, so the compile-time include and the static routes are proven
+# Builds and tests delta-server with `embed-web` against the `dist/`
+# check-frontend-build just produced, so the compile-time include, the static
+# routes and the tests that only exist with the feature on (such as the one
+# checking the built page's inline scripts against its CSP hashes) are proven
 # against a real build on every gate. Debug is enough for that.
 check-embedded: check-backend-build check-frontend-build
-	cd backend && cargo build -p delta-server --features embed-web
+	cd backend && cargo build -p delta-server --features embed-web && cargo test -p delta-server --features embed-web
 
 # The desktop shell is outside the workspace's default members, so only this
 # step builds, tests and lints it. It embeds the same `dist/` through
