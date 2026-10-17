@@ -126,13 +126,16 @@ tests, which currently describe newline-separated input.
 
 ### Before merge (verified outside the check command)
 
-- [ ] On the macOS development machine, with `make desktop-dev`: the first
+- [x] On the macOS development machine, with `make desktop-dev`: the first
       launch creates its socket under the per-user temporary directory and
       nothing named `*delta*_si.sock` under `/tmp`; a second launch of the
-      same binary exits 0 while the first keeps running and its window comes
-      to the front (`osascript` frontmost-app check or a screenshot); after
-      quitting, the socket is gone.
-- [ ] On the same machine, with the shell's rc defining a variable whose value
+      same binary exits 0 while the first keeps running; after quitting, the
+      socket is gone.
+- [ ] On macOS, a second launch brings the running window to the front —
+      needs a person: macOS does not let a process started from a background
+      terminal take focus (the plugin-based build behaves the same), and the
+      agent here has no accessibility access to observe the window.
+- [x] On the same machine, with the shell's rc defining a variable whose value
       contains a newline followed by `PATH=/nonexistent`, the dev app still
       starts its server and finds `tmux` (the imported `PATH` is the real one).
 - [ ] On Linux, a second launch still raises the running window (the plugin
