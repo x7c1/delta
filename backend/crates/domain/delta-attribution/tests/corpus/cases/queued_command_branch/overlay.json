@@ -1,5 +1,5 @@
 {
-  "comment": "LEGACY FORMAT (older claude versions; kept because old transcripts are still resumed/viewed \u2014 see the queued-prompt drift note in docs/guides/development.md): a branch send composed while a turn was in flight was recorded ONLY as a queued_command attachment (no UserPromptSubmit of its own), yet it must correlate to its send so prompt and reply land on the child.",
+  "comment": "LEGACY FORMAT (older claude versions; kept because old transcripts are still resumed/viewed \u2014 see the queued-prompt drift note in docs/guides/development/canary.md): a branch send composed while a turn was in flight was recorded ONLY as a queued_command attachment (no UserPromptSubmit of its own), yet it must correlate to its send so prompt and reply land on the child.",
   "main_thread": 1,
   "sends": [
     {

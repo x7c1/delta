@@ -61,9 +61,9 @@ pub fn api_error_line(uuid: &str) -> TranscriptMessage {
 
 /// A `queued_command` attachment line: a prompt the user composed while a
 /// turn was in flight, surfaced by the parser as a flagged user line.
-/// LEGACY FORMAT — written only by older claude versions; current claude
-/// replays queued prompts as plain user lines (see the queued-prompt drift
-/// note in docs/guides/development/canary.md).
+/// LEGACY FORMAT — human-typed queued prompts are written this way only by
+/// older claude versions; current claude replays them as plain user lines
+/// (see the queued-prompt drift note in docs/guides/development/canary.md).
 pub fn queued_command_line(uuid: &str, text: &str) -> TranscriptMessage {
     TranscriptMessage {
         is_queued_command: true,
@@ -91,8 +91,9 @@ pub fn interrupt_line(uuid: &str) -> TranscriptMessage {
 }
 
 /// A harness-injected `<task-notification>`: a background-task completion that
-/// current claude delivers as a plain `role: user` line (NOT a legacy
-/// `queued_command` attachment), so it carries no `is_queued_command` flag.
+/// current claude delivers as a plain `role: user` line when the session is
+/// idle (mid-turn it arrives as a `queued_command` attachment instead), so it
+/// carries no `is_queued_command` flag.
 /// KEYLESS — it carries neither `<tool-use-id>` nor `<task-id>`, so it matches
 /// a launch only under the single-outstanding-launch rule, and otherwise falls
 /// back to inheriting `carry_thread`.

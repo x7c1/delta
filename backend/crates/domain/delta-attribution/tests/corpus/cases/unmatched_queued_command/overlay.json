@@ -1,5 +1,5 @@
 {
-  "comment": "LEGACY FORMAT (older claude versions; kept because old transcripts are still resumed/viewed \u2014 see the queued-prompt drift note in docs/guides/development.md): a queued_command matching no send (a harness-injected task notification) arrives mid-branch: a programmatic injection inherits the active child thread instead of tearing the turn back to main.",
+  "comment": "A queued_command matching no send (a harness-injected task notification, which current claude still records as a queued_command attachment when it arrives mid-turn \u2014 see the queued-prompt drift note in docs/guides/development/canary.md) arrives mid-branch: a programmatic injection inherits the active child thread instead of tearing the turn back to main.",
   "main_thread": 1,
   "sends": [
     {

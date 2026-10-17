@@ -122,24 +122,41 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
         return Ok(ParsedLine::Skip);
     };
 
-    // LEGACY FORMAT COMPATIBILITY — keep this path. Older claude versions
-    // recorded a prompt composed while a turn was in flight ONLY as a
-    // `queued_command` attachment line — never as a normal `type: "user"`
-    // line — so without special handling it parses as a contentless
-    // `Role::Other` line: invisible in the transcript and uncorrelatable to
-    // its queued send, which drops the whole turn (prompt and reply) onto
-    // `main`. Surface it as a user message carrying the queued prompt text so
-    // it both displays and flows through send correlation. Current claude
-    // writes a `queue-operation` line instead and replays the prompt as a
-    // plain user line (see the queued-prompt drift note in
-    // docs/guides/development/canary.md), but transcripts recorded by older versions
-    // are still resumed and viewed.
-    let queued_prompt = raw
+    // A `queued_command` attachment carries a prompt delivered while a turn
+    // was in flight, recorded ONLY as this attachment — never as a normal
+    // `type: "user"` line — so without special handling it parses as a
+    // contentless `Role::Other` line. It has two uses; keep both paths:
+    //
+    // - LEGACY human-typed queued prompts. Older claude versions recorded a
+    //   prompt typed mid-turn this way; dropping it would make it invisible
+    //   and uncorrelatable to its queued send, putting the whole turn on
+    //   `main`. Current claude writes a `queue-operation` line instead and
+    //   replays the prompt as a plain user line (see the queued-prompt drift
+    //   note in docs/guides/development/canary.md), but transcripts recorded
+    //   by older versions are still resumed and viewed.
+    // - CURRENT harness injections delivered mid-turn: background-task
+    //   `<task-notification>`s (`commandMode: "task-notification"`, no
+    //   attachment `isMeta`) and subagent hand-backs (`commandMode:
+    //   "prompt"`, attachment `isMeta: true`).
+    //
+    // Surface the prompt text as the line's content either way. Classify it
+    // as `Role::User` (flagged `is_queued_command`) unless the attachment
+    // itself is `isMeta` (the hand-back case): then it folds to `Role::Meta`,
+    // exactly like the idle hand-back, an `isMeta` user line.
+    let queued_attachment = raw
         .attachment
         .as_ref()
-        .filter(|a| a.attachment_type.as_deref() == Some("queued_command"))
-        .and_then(|a| a.prompt.clone());
-    let is_queued_command = queued_prompt.is_some();
+        .filter(|a| a.attachment_type.as_deref() == Some("queued_command"));
+    let queued_prompt = queued_attachment.and_then(|a| a.prompt.clone());
+    let is_meta_queued_command =
+        queued_prompt.is_some() && queued_attachment.is_some_and(|a| a.is_meta == Some(true));
+    // Only a queued command surfaced as `Role::User` carries the flag. Its one
+    // consumer is attribution's human-turn branch (an uncorrelated queued
+    // command inherits `carry_thread` instead of resetting to `main`); a meta
+    // line never reaches that branch — it is not a human turn and inherits
+    // `carry_thread` like every other non-human line — so flagging it would
+    // only blur the flag's meaning ("a queued prompt shown as a user turn").
+    let is_queued_command = queued_prompt.is_some() && !is_meta_queued_command;
 
     // `isMeta` lines are harness-injected (skill bodies, system reminders,
     // local-command output) recorded as `type: "user"` but not human-authored.
@@ -226,14 +243,15 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
     // `type: "user"` line. Attribution keys on this to keep a post-compact
     // queued replay out of the local-command group it shares a `promptId`
     // with (see the `is_queued_replay` guard in `attribute.rs`). Independent
-    // of `is_queued_command`, which flags the LEGACY attachment shape.
+    // of `is_queued_command`, which flags the `queued_command` attachment
+    // shape.
     let is_queued_replay = raw.prompt_source.as_deref() == Some("queued");
 
     let role = if is_compact_summary {
         Role::CompactSummary
     } else if is_queued_command {
         Role::User
-    } else if is_meta || is_local_command_output {
+    } else if is_meta || is_meta_queued_command || is_local_command_output {
         Role::Meta
     } else {
         raw.line_type
@@ -356,8 +374,8 @@ mod tests {
         // must not perturb `role` or `flatten_text`) and lifts the provenance
         // to the new `is_queued_replay` flag, which attribution reads to keep
         // the replay out of a local-command group when the queue drains right
-        // after a `/compact`. `is_queued_command` — the LEGACY attachment
-        // shape's flag — stays `false`; the two flags are distinct.
+        // after a `/compact`. `is_queued_command` — the `queued_command`
+        // attachment shape's flag — stays `false`; the two flags are distinct.
         let line = r#"{"uuid":"u9","parentUuid":"m8","type":"user","promptSource":"queued","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"Reply with only the word: ok"}}"#;
         let msg = parse_line(line).unwrap().unwrap();
         assert_eq!(msg.role, Role::User);
@@ -404,11 +422,65 @@ mod tests {
             Some("queued while the turn was busy")
         );
         assert!(msg.is_queued_command);
-        // Orthogonality pin: the LEGACY attachment shape sets ONLY
+        // Orthogonality pin: the `queued_command` attachment shape sets ONLY
         // `is_queued_command`; the MODERN `promptSource: "queued"` replay flag
         // must stay false so downstream fold logic (compact-group exclusion)
         // keys off the correct provenance.
         assert!(!msg.is_queued_replay);
+    }
+
+    #[test]
+    fn mid_turn_subagent_hand_back_queued_command_parses_as_meta() {
+        // CURRENT SHAPE: a background subagent's final report handed back
+        // while the parent session is mid-turn. Claude writes it as a
+        // `queued_command` attachment with `commandMode: "prompt"`, the
+        // attachment's own `isMeta: true`, and a peer hand-back `origin` (the
+        // line itself carries no `isMeta`). It is a harness injection, so it
+        // must fold to `Role::Meta` like the idle shape (an `isMeta` user
+        // line), not render as a human user turn.
+        let line = r#"{"parentUuid":"a1","isSidechain":false,"attachment":{"type":"queued_command","prompt":"<agent-message from=\"a0000000000000001\">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to.\n  result: success\n</agent-message>","commandMode":"prompt","origin":{"kind":"peer","from":"a0000000000000001","senderTaskId":"a0000000000000001","name":"general-purpose","body":"[Subagent hand-back] The text below is the final report of a subagent this session delegated to.","handback":true,"handbackReportText":"result: success"},"timestamp":"2026-10-16T15:12:39.751Z","isMeta":true},"type":"attachment","uuid":"q1","timestamp":"2026-10-16T15:12:39.751Z","renderedRole":"system","sessionId":"s1","version":"2.1.301"}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.uuid, MessageUuid::from("q1"));
+        assert_eq!(msg.role, Role::Meta);
+        assert_eq!(msg.linear_parent_uuid, Some(MessageUuid::from("a1")));
+        assert!(
+            msg.flatten_text()
+                .as_deref()
+                .is_some_and(|text| text.starts_with("<agent-message from=")),
+            "the hand-back prompt must still be surfaced as the line's content"
+        );
+        // The flag marks a queued prompt surfaced as a user turn; a meta line
+        // never takes attribution's human-turn branch that reads it.
+        assert!(!msg.is_queued_command);
+        assert!(!msg.is_queued_replay);
+    }
+
+    #[test]
+    fn mid_turn_task_notification_queued_command_stays_a_queued_user_line() {
+        // CURRENT SHAPE: a background task's completion delivered mid-turn as
+        // a `queued_command` attachment with `commandMode:
+        // "task-notification"` and NO attachment `isMeta`. It stays a
+        // `Role::User` line flagged `is_queued_command`: the task-notification
+        // card and launch-thread resolution depend on the `Role::User` (they
+        // recognize the notification by its text, not by the flag).
+        let line = r#"{"uuid":"q2","parentUuid":"a1","type":"attachment","timestamp":"2026-10-16T15:12:39.751Z","attachment":{"type":"queued_command","prompt":"<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>","commandMode":"task-notification"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::User);
+        assert!(msg.is_queued_command);
+        assert!(msg
+            .flatten_text()
+            .as_deref()
+            .is_some_and(|text| text.starts_with("<task-notification>")));
+    }
+
+    #[test]
+    fn queued_command_with_attachment_is_meta_false_stays_a_user_line() {
+        // Only an explicit attachment-level `isMeta: true` reclassifies a
+        // queued command; `false` behaves like an absent flag.
+        let line = r#"{"uuid":"q3","type":"attachment","attachment":{"type":"queued_command","prompt":"typed while busy","commandMode":"prompt","isMeta":false}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::User);
+        assert!(msg.is_queued_command);
     }
 
     #[test]

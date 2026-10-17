@@ -26,32 +26,39 @@ pub struct TranscriptMessage {
     /// position even when earlier lines were skipped (blank, no-uuid, or
     /// unparsable). The reader assigns this; the fold persists it.
     pub seq: i64,
-    /// True when this line is a Claude Code `queued_command` attachment: a
-    /// prompt the user composed while a turn was in flight, which **older**
-    /// claude versions recorded *only* as this attachment (never as a normal
-    /// `type: "user"` line) and injected programmatically once the turn
-    /// yielded.
+    /// True when this line is a Claude Code `queued_command` attachment that
+    /// the parser surfaced as a [`Role::User`] message: a prompt delivered
+    /// while a turn was in flight and recorded *only* as this attachment
+    /// (never as a normal `type: "user"` line). Two shapes carry it:
     ///
-    /// LEGACY FORMAT COMPATIBILITY — keep this flag and its handling. Current
-    /// claude records a uuid-less `queue-operation` line instead (skipped by
-    /// the parser) and replays the prompt as a plain user line that flows the
-    /// normal attribution path (see the queued-prompt drift note in
-    /// docs/guides/development/canary.md); but transcripts recorded by older
-    /// versions are still resumed and viewed.
+    /// - **Human-typed queued prompts (legacy).** Older claude versions
+    ///   recorded a prompt the user typed mid-turn this way. Current claude
+    ///   records a uuid-less `queue-operation` line instead (skipped by the
+    ///   parser) and replays the prompt as a plain user line that flows the
+    ///   normal attribution path (see the queued-prompt drift note in
+    ///   docs/guides/development/canary.md); but transcripts recorded by older
+    ///   versions are still resumed and viewed — keep this handling.
+    /// - **Mid-turn `<task-notification>`s (current).** Current claude still
+    ///   delivers a background task's completion this way when it arrives
+    ///   mid-turn; attribution recognizes it by its text, not by this flag.
     ///
-    /// It is surfaced as a [`Role::User`] message so it both displays and feeds
-    /// the send-correlation path. The flag matters for the *uncorrelated* case:
+    /// A `queued_command` whose attachment is itself `isMeta` (the mid-turn
+    /// shape of a subagent hand-back) is a harness injection: the parser
+    /// surfaces it as [`Role::Meta`] and leaves this flag `false`, since a
+    /// meta line never takes the human-turn branch that reads it.
+    ///
+    /// Surfacing it as a user message lets it both display and feed the
+    /// send-correlation path. The flag matters for the *uncorrelated* case:
     /// a queued command that matches no queued send must NOT reset attribution
     /// to `main` the way stray pane typing does, because it is a programmatic
-    /// injection (e.g. a background task notification), not external input — it
-    /// inherits the active thread instead.
+    /// injection, not external input — it inherits the active thread instead.
     pub is_queued_command: bool,
     /// True when Claude Code stamped this line with `promptSource: "queued"`:
     /// the replay of a prompt the user submitted while a turn was in flight,
     /// which the CLI buffered in its internal input queue and wrote back as
     /// an ordinary `type: "user"` line once the queue drained.
     ///
-    /// Distinct from [`Self::is_queued_command`] (the LEGACY attachment shape).
+    /// Distinct from [`Self::is_queued_command`] (the `queued_command` attachment shape).
     /// A modern queued replay is a real user line and flows the normal
     /// send-correlation path; the flag exists so the attribution fold can
     /// exclude it from local-command grouping when the CLI happens to have

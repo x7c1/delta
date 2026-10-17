@@ -5,14 +5,15 @@ use crate::support::*;
 #[test]
 fn a_task_notification_mid_branch_inherits_carry_and_does_not_reset_to_main() {
     // A `<task-notification>` is a harness-injected background-task completion,
-    // delivered as a plain `role: user` line (NOT a legacy `queued_command`
-    // attachment). It is a programmatic continuation of the in-flight turn, not
-    // a new human turn, so it must inherit `carry_thread` — the notification,
-    // the assistant's continuation, and every later turn must stay on the
-    // sub-thread rather than dropping onto `main`. It must also not run through
-    // send correlation. (Regression: keying the inherit guard on
-    // `is_queued_command`, which real task-notifications do not carry, let them
-    // fall through to the `main` reset.)
+    // delivered here as a plain `role: user` line (the idle shape; mid-turn it
+    // arrives as a `queued_command` attachment instead). It is a programmatic
+    // continuation of the in-flight turn, not a new human turn, so it must
+    // inherit `carry_thread` — the notification, the assistant's continuation,
+    // and every later turn must stay on the sub-thread rather than dropping
+    // onto `main`. It must also not run through send correlation.
+    // (Regression: keying the inherit guard on `is_queued_command`, which
+    // plain-line task-notifications do not carry, let them fall through to the
+    // `main` reset.)
     let unrelated = send(9, MAIN, "unrelated prompt");
     let outcome = attribute_lines(
         &session(),

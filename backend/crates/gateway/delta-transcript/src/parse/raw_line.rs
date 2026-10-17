@@ -36,10 +36,14 @@ pub(super) struct RawLine {
     /// milliseconds. An `f64` because the wire value is a JSON number.
     #[serde(rename = "durationMs")]
     pub duration_ms: Option<f64>,
-    /// Present on `type: "attachment"` lines; carries a queued command's prompt.
+    /// Present on `type: "attachment"` lines; carries a `queued_command`'s
+    /// prompt — a legacy human-typed queued prompt, or a current mid-turn
+    /// harness injection (task notification, subagent hand-back).
     pub attachment: Option<RawAttachment>,
-    /// Set on harness-injected lines (skill bodies, system reminders) that
-    /// Claude records as `type: "user"` but are not human-authored turns.
+    /// Set on harness-injected lines (skill bodies, system reminders, idle
+    /// subagent hand-backs) that Claude records as `type: "user"` but are not
+    /// human-authored turns. A mid-turn hand-back carries the flag on its
+    /// `queued_command` attachment instead (see [`RawAttachment`]).
     /// Drives [`Role::Meta`](delta_model::Role::Meta) classification. Note: the current Claude Code
     /// shape records local-command output as a `type: "system"` /
     /// `subtype: "local_command"` line carrying a top-level [`content`] instead
