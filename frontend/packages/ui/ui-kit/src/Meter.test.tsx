@@ -41,6 +41,24 @@ describe('Meter', () => {
     expect((meter.firstElementChild as HTMLElement).style.width).toBe('0%');
   });
 
+  it('announces the caller readout as aria-valuetext, keeping aria-valuenow numeric', () => {
+    // The caller renders `43%` beside a 42.7 value; the screen reader must
+    // announce that same text, not the raw 42.7.
+    render(<Meter value={42.7} title="usage" valueText="43%" />);
+
+    const meter = screen.getByRole('meter', { name: 'usage' });
+    expect(meter).toHaveAttribute('aria-valuetext', '43%');
+    expect(meter).toHaveAttribute('aria-valuenow', '42.7');
+  });
+
+  it('sets no aria-valuetext when the caller gives none', () => {
+    render(<Meter value={42.7} title="bare" />);
+
+    expect(screen.getByRole('meter', { name: 'bare' })).not.toHaveAttribute(
+      'aria-valuetext',
+    );
+  });
+
   it('takes an accessible name without a native tooltip via label', () => {
     render(<Meter value={10} label="quiet" />);
 

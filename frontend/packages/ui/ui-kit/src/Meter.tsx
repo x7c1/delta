@@ -27,6 +27,15 @@ export interface MeterProps {
    * accessible name.
    */
   label?: string;
+  /**
+   * The readout announced to assistive technology (`aria-valuetext`). Pass the
+   * exact text rendered beside the bar (e.g. `43%` for a value of 42.7), so a
+   * screen reader announces what a sighted user reads rather than the raw
+   * `aria-valuenow`. Taken from the caller, which owns the readout's rounding
+   * and clamping (they differ between callers), so the announcement cannot
+   * drift from the screen. When omitted, `aria-valuenow` is announced.
+   */
+  valueText?: string;
 }
 
 /** Clamp a percentage into the inclusive 0–100 range. */
@@ -41,7 +50,8 @@ function clampPercentage(value: number): number {
  * A horizontal progress/usage bar: a rounded track with a rounded fill whose
  * width is {@link MeterProps.value} percent. A real DOM bar (not a text/unicode
  * one), so it scales and themes cleanly. Exposes `role="meter"` with
- * `aria-valuenow`/`min`/`max` reporting the clamped value. The numeric label is
+ * `aria-valuenow`/`min`/`max` reporting the clamped value, plus the caller's
+ * {@link MeterProps.valueText} as `aria-valuetext`. The numeric label is
  * the caller's concern — render it as a sibling, not baked in here — so the same
  * primitive serves both the footer rate-limit rows and the composer rail's
  * context-usage meter.
@@ -59,6 +69,7 @@ export function Meter({
   className,
   title,
   label,
+  valueText,
 }: MeterProps) {
   const clamped = clampPercentage(value);
   return (
@@ -67,6 +78,7 @@ export function Meter({
       aria-valuenow={clamped}
       aria-valuemin={0}
       aria-valuemax={100}
+      aria-valuetext={valueText}
       aria-label={label ?? title}
       title={title}
       className={cn(

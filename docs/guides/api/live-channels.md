@@ -455,6 +455,19 @@ which frames arrive, and a client must handle each event whenever it lands.
   completion is folded during transcript sync (its `<task-notification>`, or
   the parent's own `TaskOutput` retrieval of the result, which suppresses the
   notification), so the client must not sweep it at turn end.
+  It is also **sent again after a re-adoption**: when a send reaches a closed
+  session whose Claude pane survived a server restart, the server re-adopts the
+  pane and emits one `subagent_started` (always `background: true`) for each
+  background subagent it restores to the running set (see `running_subagents`
+  in [`GET /api/sessions/{id}/sends`](sends.md#get-apisessionsidsends) for
+  which ones), with the same `tool_use_id` and fields as before the restart. A
+  client that already holds that id must treat the event as idempotent. A
+  completion the agent wrote while the server was down follows straight away
+  as that entry's `subagent_finished`, from the re-adoption's transcript
+  catch-up. The re-adoption at boot restores entries too, but runs before the
+  server accepts connections, so its events reach no client; a client that
+  connects after any re-adoption sees the restored entries only in the sends
+  envelope.
 - `subagent_finished` — the subagent correlated by `tool_use_id` finished. It
   carries no thread; the client maps the id back to the `subagent_started` that
   named one. A finish for an id that was never tracked, or was already cleared,
