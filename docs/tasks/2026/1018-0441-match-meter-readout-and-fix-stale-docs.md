@@ -74,6 +74,6 @@ nothing live with the sends envelope as the only source — linking to the
 
 ### Before merge (verified outside the check command)
 
-- [ ] Reading the diff of `docs/guides/api/live-channels.md` against the code
+- [x] Reading the diff of `docs/guides/api/live-channels.md` against the code
       confirms that what it says a client receives after a re-adoption is what
       the server does.
