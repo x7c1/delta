@@ -83,9 +83,9 @@ The two-layer sync rule:
 
 Drift already pinned by the suite and synced:
 
-- **The queued-prompt format.** A prompt typed while a turn is in flight is
-  no longer written as a `queued_command` attachment line — current claude
-  records a uuid-less
+- **The queued-prompt format.** A prompt the user types while a turn is in
+  flight is no longer written as a `queued_command` attachment line — current
+  claude records a uuid-less
   `{"type":"queue-operation","operation":"enqueue",…}` line at submit time and
   replays the prompt as a plain `type:"user"` line (`promptSource: "queued"`,
   firing its own `UserPromptSubmit`) when it dequeues. Both layers follow the
@@ -93,9 +93,16 @@ Drift already pinned by the suite and synced:
   steps, and the parser deliberately skips the uuid-less bookkeeping line while
   the replayed user line flows the normal attribution path (pinned by the
   `queue_operation_dequeue*` corpus cases in `delta-attribution`). The parser's
-  `queued_command` special case is kept as **legacy-format compatibility**:
-  transcripts recorded by older claude versions are still resumed and viewed,
-  so that path must not be cleaned up. Delta's own dispatch is unaffected
+  `queued_command` special case is **not** legacy-only, though. For
+  human-typed prompts it is legacy-format compatibility (transcripts recorded
+  by older claude versions are still resumed and viewed), but current claude
+  still writes `queued_command` attachments for harness injections delivered
+  mid-turn: background-task `<task-notification>`s (`commandMode:
+  "task-notification"`, parsed as a flagged user line) and subagent
+  hand-backs (`commandMode: "prompt"` with the attachment's own
+  `isMeta: true`, parsed as a meta line like the idle hand-back's `isMeta`
+  user line; pinned by the `mid_turn_subagent_hand_back` corpus case). So
+  that path must not be cleaned up. Delta's own dispatch is unaffected
   either way — it holds browser-composed sends in its own queue and only types
   them into an idle pane, so claude-side queueing happens only for prompts
   typed directly into the TUI.

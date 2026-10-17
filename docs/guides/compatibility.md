@@ -261,8 +261,14 @@ the doc-comment on `ProviderAvailability` in
 **legacy-format compatibility** — paths that keep older Claude Code
 transcript shapes parseable so existing recorded transcripts can still
 be viewed and resumed. The current example is the pre-`queue-operation`
-queued-prompt shape (see the drift runbook in
+shape of a human-typed queued prompt (see the drift runbook in
 [development/canary.md](development/canary.md) for context).
+
+The `queued_command` attachment branch itself is not one of these: current
+Claude Code still writes that attachment for harness injections delivered
+mid-turn (background-task notifications and subagent hand-backs), so only
+its human-typed-prompt use is legacy. Removing the branch would break those
+current shapes, so it is kept regardless of the stance below.
 
 Symmetric with the "freely break" stance of subdomains 1 and 2, these
 legacy branches **may be removed at any time during `v0.x`**. There is no

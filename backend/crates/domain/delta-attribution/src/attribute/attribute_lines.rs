@@ -28,8 +28,10 @@ use super::{Attributed, AttributionState, Effect};
 ///   whether the text still reads as the send's own), and `carry_thread`
 ///   advances to it. A human user line arriving with NO outstanding send is
 ///   external input and lands on `main`, resetting `carry_thread` — unless it
-///   is a `queued_command`, a programmatic injection that inherits
-///   `carry_thread`.
+///   is a legacy human-typed `queued_command`, which the CLI injected
+///   programmatically once the turn yielded, so it inherits `carry_thread`.
+///   A mid-turn subagent hand-back, though recorded as a `queued_command`,
+///   reaches the fold as a [`Role::Meta`] line and is not a human line at all.
 /// - Every other line follows `carry_thread` — the thread of the turn it
 ///   belongs to. This covers assistant/system lines AND tool-result lines,
 ///   which Claude delivers as `role: user` but which are part of the
@@ -171,13 +173,14 @@ pub fn attribute_lines(
         // A `<task-notification>` is a third such `role: user` line: the
         // harness injects it to report a background task's completion, so it is
         // a programmatic continuation of the in-flight turn, not a new human
-        // turn. Claude delivers it as a normal `type: "user"` line (NOT a
-        // legacy `queued_command` attachment), so the parser does not flag it
-        // `is_queued_command`. It must likewise be excluded from
-        // `is_human_turn` and inherit `carry_thread`; otherwise, when a
-        // background task completes while the user is working in a sub-thread,
-        // the notification (and the assistant's continuation, and every later
-        // turn) would reset to `main`.
+        // turn. Claude delivers it as a normal `type: "user"` line, or — when
+        // it arrives mid-turn — as a `queued_command` attachment the parser
+        // flags `is_queued_command`; either way it is recognized by its
+        // `<task-notification>` text, not the flag. It must likewise be
+        // excluded from `is_human_turn` and inherit `carry_thread`; otherwise,
+        // when a background task completes while the user is working in a
+        // sub-thread, the notification (and the assistant's continuation, and
+        // every later turn) would reset to `main`.
         // Classify against the reclassified `role`: a local-command member that
         // was folded to `Role::Meta` above is no longer a human turn (the
         // command-name line is handled by its own branch below).

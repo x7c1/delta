@@ -4,9 +4,10 @@ use crate::support::*;
 
 #[test]
 fn an_unmatched_queued_command_inherits_the_carry_thread() {
-    // LEGACY FORMAT (older claude versions; see the queued-prompt drift note
-    // in docs/guides/development/canary.md): a queued command that matches no send —
-    // e.g. a background task notification injected mid-turn — is a
+    // A queued command that matches no send — e.g. a background task
+    // notification injected mid-turn, which current claude still records as a
+    // `queued_command` attachment (see the queued-prompt drift note in
+    // docs/guides/development/canary.md) — is a
     // programmatic injection, not stray pane typing, so it must inherit the
     // active thread rather than reset attribution to `main`. (Ported from the
     // actor-level sync test

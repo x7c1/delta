@@ -135,16 +135,19 @@ pub(super) fn resolve_line_thread(
                 (pending.thread_id, pending.semantic_parent_uuid)
             }
             None if is_queued_command => {
-                // A LEGACY `queued_command` attachment arriving with NO
-                // outstanding send is a programmatic injection, not stray pane
-                // typing, so it must not tear the active turn back to `main` —
-                // inherit the current thread the way a non-human line does.
-                // (Harness-injected `<task-notification>` lines, which
-                // current claude delivers as plain user lines rather than
-                // `queued_command` attachments, are handled earlier: they
-                // are excluded from `is_human_turn` and inherit
-                // `carry_thread` via the `else` branch, like interrupt
-                // markers and tool_result lines.)
+                // A `queued_command` attachment arriving with NO outstanding
+                // send is a programmatic injection, not stray pane typing, so
+                // it must not tear the active turn back to `main` — inherit
+                // the current thread the way a non-human line does. (Only
+                // legacy human-typed queued prompts reach this arm in
+                // practice: a `<task-notification>` — delivered either as a
+                // plain user line or, mid-turn, as a `queued_command` — is
+                // excluded from `is_human_turn` and handled by the
+                // task-notification branch below, and a mid-turn subagent
+                // hand-back, whose attachment is `isMeta`, is parsed as
+                // `Role::Meta` without the flag and inherits `carry_thread`
+                // via the `else` branch, like interrupt markers and
+                // tool_result lines.)
                 (state.carry_thread, None)
             }
             None => {

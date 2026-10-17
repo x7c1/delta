@@ -677,8 +677,10 @@ async fn interrupting_a_turn_writes_the_marker_and_queued_prompts_dequeue() {
     // re-enacts it (`enqueue_prompt`/`dequeue_prompt` steps). Older claude
     // versions wrote a `queued_command` attachment line instead, which
     // `delta-transcript` still parses as legacy-format compatibility for
-    // transcripts recorded back then (see the queued-prompt drift note in
-    // docs/guides/development/canary.md).
+    // transcripts recorded back then. (Current claude still writes
+    // `queued_command` for mid-turn harness injections — task notifications
+    // and subagent hand-backs — just not for prompts the user types; see the
+    // queued-prompt drift note in docs/guides/development/canary.md.)
     with_one_retry("interrupt_and_queued", || async {
         let capture = Arc::new(Capture {
             events: Mutex::new(Vec::new()),

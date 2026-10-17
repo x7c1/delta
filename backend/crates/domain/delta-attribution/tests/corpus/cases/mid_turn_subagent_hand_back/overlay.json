@@ -1,0 +1,8 @@
+{
+  "comment": "A background subagent's hand-back arrives mid-turn while a send is outstanding. Current claude records it as a queued_command attachment (commandMode prompt) whose attachment-level isMeta is true; the parser classifies it as Role::Meta, like the idle hand-back shape (an isMeta user line). So it is not a human turn: it inherits the active sub-thread instead of positionally consuming the outstanding main-thread send, and the send's real echo that follows still matches it.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 2, "semantic_parent_uuid": "a-prior", "text": "explore the side topic" },
+    { "id": 2, "thread_id": 1, "text": "back to the main question" }
+  ]
+}
