@@ -388,7 +388,13 @@ disconnected: events fired during the gap are never replayed.
     `tool_use_id` is the synthetic `forked-skill:<agentId>` — see
     [`subagent_started`](live-channels.md#streaming-and-subagents)).
     `background` is `true` for a `run_in_background` launch and for every forked
-    skill, either of which can outlive the turn that started it.
+    skill, either of which can outlive the turn that started it. A background
+    subagent can also outlive the server: when a Claude pane that survived a
+    restart is re-adopted, every background subagent it launched that has not
+    completed is listed again, with the same fields it had before the restart.
+    One launched by a server version that did not yet keep those fields comes
+    back with `subagent_type` and `description` as `null` when the server
+    cannot recover them.
 
   A `queued` send may carry `held_at` (see `Send` in
   [shapes.md](shapes.md#send)): the row is **held in the queue until the user

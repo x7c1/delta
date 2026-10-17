@@ -1,4 +1,4 @@
-//! Outstanding subagent launches keyed by their Task tool_use_id.
+//! Outstanding subagent launches keyed by their launching tool_use_id.
 
 use std::collections::BTreeMap;
 
@@ -6,6 +6,7 @@ use rusqlite::params;
 
 use delta_attribution::SubagentLaunch;
 use delta_model::{SessionId, ThreadId};
+use delta_usecase::RunningSubagentLaunch;
 
 use crate::error::Error;
 use crate::time::now_iso8601;
@@ -98,5 +99,55 @@ impl SqliteStore {
             out.insert(tool_use_id, launch);
         }
         Ok(out)
+    }
+
+    pub(super) async fn record_subagent_indicator(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        subagent_type: Option<&str>,
+        description: Option<&str>,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // Targeted UPDATE, like `upgrade_subagent_task_id`: the fold records
+        // the launch row before it lights the indicator, so an unknown id means
+        // there is no launch to mark (a foreground call leaves none) — a no-op.
+        conn.execute(
+            "UPDATE subagent_launch
+               SET drives_indicator = 1, subagent_type = ?3, description = ?4
+             WHERE session_id = ?1 AND tool_use_id = ?2",
+            params![session_id.as_str(), tool_use_id, subagent_type, description],
+        )
+        .map_err(Error::from)?;
+        Ok(())
+    }
+
+    pub(super) async fn running_subagent_launches(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Vec<RunningSubagentLaunch>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // Oldest first, the order the indicator lit them in; `rowid` breaks a
+        // tie between launches recorded within the same timestamp.
+        let mut stmt = conn
+            .prepare(
+                "SELECT tool_use_id, thread_id, task_id, subagent_type, description \
+                 FROM subagent_launch WHERE session_id = ?1 AND drives_indicator = 1 \
+                 ORDER BY created_at, rowid",
+            )
+            .map_err(Error::from)?;
+        let rows = stmt
+            .query_map(params![session_id.as_str()], |row| {
+                Ok(RunningSubagentLaunch {
+                    tool_use_id: row.get(0)?,
+                    thread_id: ThreadId(row.get::<_, i64>(1)?),
+                    task_id: row.get(2)?,
+                    subagent_type: row.get(3)?,
+                    description: row.get(4)?,
+                })
+            })
+            .map_err(Error::from)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|err| Error::from(err).into())
     }
 }

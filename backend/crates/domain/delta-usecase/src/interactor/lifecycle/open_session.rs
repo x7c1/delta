@@ -178,6 +178,10 @@ where
         // last thread rather than a DB-behind `None`. The sync runs on this
         // same actor, so it is already ordered against the hooks.
         self.sync_transcript(&session).await?;
+        // The previous process's background subagents ended with it; drop
+        // their launch rows so a later re-adoption of this session's pane does
+        // not light them again (see `restore_running_subagents`).
+        self.forget_subagents_of_the_previous_process().await;
         Ok(())
     }
 

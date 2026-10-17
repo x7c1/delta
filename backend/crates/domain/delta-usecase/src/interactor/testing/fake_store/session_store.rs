@@ -18,9 +18,9 @@ use delta_model::{
 use crate::error::Result;
 use crate::ports::{
     CloneRoot, CloneRootStore, LaunchOptionStore, MessageStore, NewSession, PermissionStore,
-    PromptTemplateStore, RememberedPane, RememberedPaneStore, RepositoryCloneRow, SendStore,
-    SessionHistoryStore, SessionPageRow, SessionRecordStore, SpawningSession, SubagentLaunchStore,
-    ThreadStore,
+    PromptTemplateStore, RememberedPane, RememberedPaneStore, RepositoryCloneRow,
+    RunningSubagentLaunch, SendStore, SessionHistoryStore, SessionPageRow, SessionRecordStore,
+    SpawningSession, SubagentLaunchStore, ThreadStore,
 };
 use crate::SessionPageCursor;
 
@@ -391,6 +391,24 @@ impl SubagentLaunchStore for FakeStore {
         session_id: &SessionId,
     ) -> Result<BTreeMap<String, SubagentLaunch>> {
         self.outstanding_subagent_launches(session_id).await
+    }
+
+    async fn record_subagent_indicator(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        subagent_type: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<()> {
+        self.record_subagent_indicator(session_id, tool_use_id, subagent_type, description)
+            .await
+    }
+
+    async fn running_subagent_launches(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<RunningSubagentLaunch>> {
+        self.running_subagent_launches(session_id).await
     }
 }
 

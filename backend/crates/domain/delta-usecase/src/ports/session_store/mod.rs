@@ -28,6 +28,8 @@ mod remembered_pane_store;
 pub use remembered_pane_store::RememberedPaneStore;
 mod repository_clone_row;
 pub use repository_clone_row::RepositoryCloneRow;
+mod running_subagent_launch;
+pub use running_subagent_launch::RunningSubagentLaunch;
 mod send_store;
 pub use send_store::SendStore;
 mod session_history_store;

@@ -347,6 +347,24 @@ where
                                 .await?;
                         }
                     }
+                    // A BACKGROUND launch outlives this process's memory of
+                    // it: mark its launch row (recorded by
+                    // `Effect::SubagentLaunched` earlier in this fold) as one
+                    // that lit the indicator, with what the indicator shows, so
+                    // a re-adoption after a restart can light it again from the
+                    // row — its launch line will be behind the cursor by then.
+                    // A foreground launch has no row and cannot outlive its
+                    // turn, so there is nothing to mark.
+                    if background {
+                        self.store
+                            .record_subagent_indicator(
+                                session_id,
+                                &tool_use_id,
+                                subagent_type.as_deref(),
+                                description.as_deref(),
+                            )
+                            .await?;
+                    }
                     if newly {
                         events.push(SessionEvent::SubagentStarted {
                             session_id: session_id.clone(),

@@ -25,6 +25,7 @@ use crate::migrations::{migrate, Step, UNDO_HELD_AT_RENAME};
 use crate::SCHEMA_VERSION;
 
 mod session_pane_columns;
+mod subagent_launch_columns;
 
 /// Apply a synthetic next-version step to an open store, standing in for the
 /// first real migration that will ride a later change.
@@ -269,6 +270,14 @@ async fn a_session_written_before_a_later_step_stays_a_claude_row() {
 /// duplicate column, a table that already exists).
 fn downgrade_sql(version: u32) -> String {
     let mut sql = String::new();
+    // v12 added what a launch row needs to light the running indicator again.
+    if version < 12 {
+        sql.push_str(
+            "ALTER TABLE subagent_launch DROP COLUMN drives_indicator;\n\
+             ALTER TABLE subagent_launch DROP COLUMN subagent_type;\n\
+             ALTER TABLE subagent_launch DROP COLUMN description;\n",
+        );
+    }
     // v11 added the session's close reason.
     if version < 11 {
         sql.push_str("ALTER TABLE session DROP COLUMN closed_reason;\n");

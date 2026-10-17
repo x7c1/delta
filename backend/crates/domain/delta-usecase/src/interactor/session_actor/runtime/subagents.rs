@@ -146,6 +146,13 @@ impl SessionRuntime {
         true
     }
 
+    /// Whether a subagent with this `tool_use_id` is in the running set.
+    pub fn is_running_subagent(&self, tool_use_id: &str) -> bool {
+        self.running_subagents
+            .iter()
+            .any(|s| s.tool_use_id == tool_use_id)
+    }
+
     /// Drop the FOREGROUND running subagent with this `tool_use_id`, returning
     /// whether one was actually removed.
     ///

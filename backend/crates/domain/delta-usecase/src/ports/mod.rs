@@ -69,9 +69,9 @@ pub use session_event::SessionEvent;
 mod session_store;
 pub use session_store::{
     CloneRoot, CloneRootStore, LaunchOptionStore, MessageStore, PermissionStore,
-    PromptTemplateStore, RecentWorkdir, RememberedPaneStore, RepositoryCloneRow, SendStore,
-    SessionHistoryStore, SessionPageRow, SessionRecordStore, SessionStore, SubagentLaunchStore,
-    ThreadStore,
+    PromptTemplateStore, RecentWorkdir, RememberedPaneStore, RepositoryCloneRow,
+    RunningSubagentLaunch, SendStore, SessionHistoryStore, SessionPageRow, SessionRecordStore,
+    SessionStore, SubagentLaunchStore, ThreadStore,
 };
 mod spawning_session;
 pub use spawning_session::SpawningSession;
