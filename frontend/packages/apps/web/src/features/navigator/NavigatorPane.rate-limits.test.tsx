@@ -138,6 +138,32 @@ describe('NavigatorPane rate-limit meters', () => {
     expect(screen.getByTestId('rate-limit-1d-pct')).toHaveTextContent('50%');
   });
 
+  it.each([
+    { used: 42.7, pct: '43%' },
+    // The readout is not clamped like the bar, so the announcement must not be
+    // either.
+    { used: 104.2, pct: '104%' },
+  ])(
+    'announces the rendered readout $pct as the meter value text',
+    ({ used, pct }) => {
+      useLiveStore.setState({
+        rateLimits: { claude: [window(FIVE_HOURS, used, null)] },
+      });
+
+      renderPane();
+
+      const meter = within(screen.getByTestId('rate-limit-5h')).getByRole(
+        'meter',
+      );
+      expect(screen.getByTestId('rate-limit-5h-pct')).toHaveTextContent(pct);
+      expect(meter).toHaveAttribute('aria-valuetext', pct);
+      expect(meter).toHaveAttribute(
+        'aria-valuenow',
+        String(Math.min(100, used)),
+      );
+    },
+  );
+
   it('renders the budget-line marker on each row when resets_at is present', () => {
     // Both fixtures keep the fill strictly inside the current bucket's share
     // so the marker's color assertion is covered by a dedicated test below;
