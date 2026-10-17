@@ -73,9 +73,11 @@ Fix:
 
 ### Before merge (verified outside the check command)
 
-- [ ] With `make dev`, a session whose transcript is replaced by a FIFO (or
+- [x] With `make dev`, a session whose transcript is replaced by a FIFO (or
       made larger than the limit with a sparse file) logs one warning for it in
-      the server log over at least ten seconds, not one per tick.
+      the server log over at least ten seconds, not one per tick. (Verified on
+      the e2e-fake harness, which runs the same `delta-server` against the
+      scripted `fake-claude`, rather than `make dev`.)
 
 ## Last subagent report
 
