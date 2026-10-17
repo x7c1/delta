@@ -345,10 +345,11 @@ jobs:
 
       # The one job with both toolchains: the build above also produced the web
       # app's dist/, which delta-server's `embed-web` feature compiles in. This
-      # proves the include and the static routes build against a real bundle
-      # (`make check` runs the same step as check-embedded).
-      - name: Build the embedded server
-        run: cargo build --locked -p delta-server --features embed-web
+      # proves the include and the static routes build against a real bundle,
+      # and runs delta-server's tests with the feature on, including those that
+      # only exist with it (`make check` runs the same step as check-embedded).
+      - name: Build and test the embedded server
+        run: cargo build --locked -p delta-server --features embed-web && cargo test --locked -p delta-server --features embed-web
         working-directory: backend
 
       # The desktop shell is outside the workspace's default members, so the

@@ -25,4 +25,7 @@ ignore = [
   { id = "RUSTSEC-2024-0429", reason = "glib 0.18 VariantStrIter unsoundness: the fix is glib 0.20, but tauri 2's Linux runtime (gtk/webkit2gtk 0.18) requires glib 0.18, and delta-desktop must use the same glib. Delta never iterates a VariantStrIter." },
   { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained: a build-time dependency of glib-macros 0.18, pinned by tauri 2's gtk 0.18 stack like RUSTSEC-2024-0429." },
   { id = "RUSTSEC-2017-0008", reason = "serial is unmaintained: pulled in by portable-pty 0.8 for its serial-port support, which Delta does not use. portable-pty 0.9 replaces it with serial2, an upgrade across a breaking version that no compatible update reaches." },
+  { id = "RUSTSEC-2026-0370", reason = "zvariant 5 is unmaintained (its contents moved into zbus 6): pulled in through zbus 5 by tauri-plugin-single-instance 2.5.2, the newest stable release; only its 3.0 pre-releases move to zbus 6. The desktop shell's single-instance lock on Linux talks to the session D-Bus through it." },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names 4 is unmaintained (moved into zbus 6): the same zbus 5 dependency of tauri-plugin-single-instance 2.5.2 as RUSTSEC-2026-0370." },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive 5 is unmaintained (moved into zbus 6): the same zbus 5 dependency of tauri-plugin-single-instance 2.5.2 as RUSTSEC-2026-0370." },
 ]
