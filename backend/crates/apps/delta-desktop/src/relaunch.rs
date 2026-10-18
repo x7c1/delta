@@ -1,7 +1,7 @@
 //! Starting the app again after an update was installed over it.
 //!
 //! The running process cannot start its successor directly: the
-//! single-instance plugin would see this copy still running and make the new
+//! single-instance lock would see this copy still running and make the new
 //! one exit at once. So the desktop shell exits after starting a detached
 //! `/bin/sh` that waits for this process to exit and then starts the
 //! installed app: on Linux by running its binary, on macOS by `open`ing its

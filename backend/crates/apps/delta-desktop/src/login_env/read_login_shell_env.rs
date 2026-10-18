@@ -18,12 +18,16 @@ pub const TIMEOUT: Duration = Duration::from_secs(8);
 ///
 /// `printf` and `env` with `;` between them behave the same in `sh`, `bash`,
 /// `zsh` and `fish`, and `env` prints `PATH` `:`-joined in every one of them.
+/// `env` is the external binary in each, and `-0` (which both macOS's
+/// `/usr/bin/env` and GNU coreutils' accept) ends each entry with a NUL
+/// instead of a newline, so a value holding a newline cannot pass for another
+/// variable ([`parse_printed_env()`]).
 fn login_shell_args() -> [String; 4] {
     [
         "-i".to_owned(),
         "-l".to_owned(),
         "-c".to_owned(),
-        format!("printf '%s\\n' {MARKER}; env; printf '%s' {MARKER}"),
+        format!("printf '%s\\n' {MARKER}; env -0; printf '%s' {MARKER}"),
     ]
 }
 

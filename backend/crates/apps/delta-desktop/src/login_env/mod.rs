@@ -22,11 +22,12 @@
 //! The shell runs as an interactive login shell (`-i -l`), so both the profile
 //! files (`.zprofile`, `.bash_profile`, `path_helper` on macOS) and the rc files
 //! (`.zshrc`, `.bashrc`, where installers often append to `PATH`) are read.
-//! Its `env` output is printed between two markers, so whatever the rc files
-//! write to stdout around it is ignored. A shell that does not answer within
-//! [`TIMEOUT`](read_login_shell_env::TIMEOUT), exits without printing the
-//! markers, or cannot be spawned yields no pairs from the shell, so the
-//! commands keep the inherited environment, with a warning. The timeout bounds
+//! Its environment is printed NUL-separated (`env -0`) between two markers, so
+//! whatever the rc files write to stdout around it is ignored, and a newline
+//! inside a value cannot make it read as another variable. A shell that does
+//! not answer within [`TIMEOUT`](read_login_shell_env::TIMEOUT), exits without
+//! printing the markers, or cannot be spawned yields no pairs from the shell,
+//! so the commands keep the inherited environment, with a warning. The timeout bounds
 //! how long the server's start waits for the shell. The locale fallback
 //! applies either way. Why the `PATH` was not read is returned as a
 //! [`PathNotImported`], so a startup that then stops on a missing command can
