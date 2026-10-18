@@ -11,6 +11,7 @@ use crate::interactor::Interactor;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::session_prune::{PruneCriteria, SkipReason};
 use crate::session_removal::{DiskItem, KeepReason, KeptItem};
+use crate::with_causes;
 
 /// Every row status, so the session listing below takes every stored session.
 const EVERY_STATUS: [SessionStatus; 4] = [
@@ -106,7 +107,7 @@ where
                 Err(Error::SessionNotFound(_)) => {}
                 Err(err) => tracing::warn!(
                     %session_id,
-                    error = %err,
+                    error = %with_causes(&err),
                     "closing a session before erasing failed; removing it anyway"
                 ),
             }

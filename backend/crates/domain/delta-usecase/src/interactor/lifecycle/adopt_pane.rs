@@ -41,6 +41,7 @@ use crate::pane_token::PaneToken;
 use crate::ports::{
     GitWorktree, RememberedPane, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace,
 };
+use crate::with_causes;
 
 /// The reason recorded on a session boot closed because the server moved to a
 /// new port while the session's agent still called the old one — what the
@@ -314,7 +315,7 @@ where
             }
             Err(err) => tracing::warn!(
                 session_id = %self.id,
-                error = %err,
+                error = %with_causes(&err),
                 "catching up the transcript of a re-adopted session failed; the \
                  background tail retries on its next tick"
             ),

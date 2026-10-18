@@ -52,10 +52,12 @@ use delta_wire::hooks::{
 
 use crate::state::AppState;
 
-/// Map a use-case error to a 500 with a logged reason.
+/// Map a use-case error to a 500 with a logged reason, causes included (a
+/// transcript failure keeps its I/O or parse cause as a source).
 fn internal_error(err: delta_usecase::Error) -> (StatusCode, String) {
-    tracing::error!(error = %err, "hook handler failed");
-    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+    let reason = delta_usecase::with_causes(&err);
+    tracing::error!(error = %reason, "hook handler failed");
+    (StatusCode::INTERNAL_SERVER_ERROR, reason)
 }
 
 pub async fn user_prompt_submit(
@@ -444,5 +446,27 @@ fn rate_limit_window_from(
         duration_seconds: Some(duration_seconds),
         used_percentage: window.used_percentage,
         resets_at: window.resets_at,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A hook whose use case fails on a transcript read answers with the
+    /// failure's cause, which the use-case error keeps as its `source` rather
+    /// than in its own text.
+    #[test]
+    fn a_transcript_io_failure_renders_its_cause() {
+        let err = delta_usecase::Error::Transcript(delta_usecase::TranscriptError::Io {
+            path: "/p/t.jsonl".into(),
+            source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        });
+        let (status, reason) = internal_error(err);
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            reason.contains("/p/t.jsonl") && reason.contains("permission denied"),
+            "the reason names the path and the cause, got {reason:?}"
+        );
     }
 }

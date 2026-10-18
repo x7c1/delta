@@ -7,7 +7,9 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 
 use crate::error::Result;
-use crate::ports::{Transcript, TranscriptMessage, TranscriptRead};
+use crate::ports::{
+    Transcript, TranscriptError, TranscriptMessage, TranscriptRead, TranscriptRefusal,
+};
 
 /// An in-memory transcript modelled as a list of file lines, keyed by path so
 /// several sessions (each with its own transcript path) can be driven at once.
@@ -50,6 +52,10 @@ pub(crate) struct FakeTranscript {
     /// ingests are genuinely in flight at the same time: each read parks on
     /// the shared barrier, so the test only completes if they overlap.
     read_gates: Mutex<HashMap<String, std::sync::Arc<tokio::sync::Barrier>>>,
+    /// Paths whose reads are refused, and why, set via [`Self::refuse`] —
+    /// modelling a transcript the real reader refuses outright (a FIFO, a file
+    /// over the size limit) until the file changes.
+    refusals: Mutex<HashMap<String, TranscriptRefusal>>,
 }
 
 #[async_trait]
@@ -58,6 +64,13 @@ impl Transcript for FakeTranscript {
         let gate = self.read_gates.lock().unwrap().get(path).cloned();
         if let Some(gate) = gate {
             gate.wait().await;
+        }
+        if let Some(reason) = self.refusals.lock().unwrap().get(path).copied() {
+            return Err(TranscriptError::Refused {
+                path: path.into(),
+                reason,
+            }
+            .into());
         }
         let by_path = self.by_path.lock().unwrap();
         let lines = by_path.get(path).cloned().unwrap_or_default();
@@ -153,6 +166,20 @@ impl FakeTranscript {
             .lock()
             .unwrap()
             .insert(path.to_owned(), gate);
+    }
+
+    /// Refuse every read of `path` for `reason` until [`Self::stop_refusing`]
+    /// (a later call replaces the reason).
+    pub(crate) fn refuse(&self, path: &str, reason: TranscriptRefusal) {
+        self.refusals
+            .lock()
+            .unwrap()
+            .insert(path.to_owned(), reason);
+    }
+
+    /// Read `path` normally again after [`Self::refuse`].
+    pub(crate) fn stop_refusing(&self, path: &str) {
+        self.refusals.lock().unwrap().remove(path);
     }
 
     /// Append a line that produces no message but still occupies a line and
