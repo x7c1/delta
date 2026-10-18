@@ -38,10 +38,7 @@ async fn the_pane_probe_ignores_an_adapter_backed_session() {
         "open on its adapter, with no pane"
     );
 
-    let events = ix
-        .reap_stale_spawns(Instant::now(), TICK_BOUND)
-        .await
-        .unwrap();
+    let events = ix.reap_stale_spawns(Instant::now(), TICK_BOUND).await;
 
     assert!(
         events.is_empty(),

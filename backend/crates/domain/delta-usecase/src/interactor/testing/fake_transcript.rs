@@ -52,10 +52,19 @@ pub(crate) struct FakeTranscript {
     /// ingests are genuinely in flight at the same time: each read parks on
     /// the shared barrier, so the test only completes if they overlap.
     read_gates: Mutex<HashMap<String, std::sync::Arc<tokio::sync::Barrier>>>,
-    /// Paths whose reads are refused, and why, set via [`Self::refuse`] —
-    /// modelling a transcript the real reader refuses outright (a FIFO, a file
-    /// over the size limit) until the file changes.
-    refusals: Mutex<HashMap<String, TranscriptRefusal>>,
+    /// Paths whose reads fail, and how, set via [`Self::refuse`] or
+    /// [`Self::fail_reads`] until [`Self::stop_failing`].
+    failures: Mutex<HashMap<String, FakeReadFailure>>,
+}
+
+/// How a read of a [`FakeTranscript`] path fails.
+#[derive(Clone, Copy)]
+enum FakeReadFailure {
+    /// The reader refuses the transcript outright (a FIFO, a file over the
+    /// size limit) until the file changes.
+    Refused(TranscriptRefusal),
+    /// The read fails with an I/O error of this kind, one that may pass.
+    Io(std::io::ErrorKind),
 }
 
 #[async_trait]
@@ -65,10 +74,16 @@ impl Transcript for FakeTranscript {
         if let Some(gate) = gate {
             gate.wait().await;
         }
-        if let Some(reason) = self.refusals.lock().unwrap().get(path).copied() {
-            return Err(TranscriptError::Refused {
-                path: path.into(),
-                reason,
+        if let Some(failure) = self.failures.lock().unwrap().get(path).copied() {
+            return Err(match failure {
+                FakeReadFailure::Refused(reason) => TranscriptError::Refused {
+                    path: path.into(),
+                    reason,
+                },
+                FakeReadFailure::Io(kind) => TranscriptError::Io {
+                    path: path.into(),
+                    source: kind.into(),
+                },
             }
             .into());
         }
@@ -168,18 +183,28 @@ impl FakeTranscript {
             .insert(path.to_owned(), gate);
     }
 
-    /// Refuse every read of `path` for `reason` until [`Self::stop_refusing`]
-    /// (a later call replaces the reason).
+    /// Refuse every read of `path` for `reason` until [`Self::stop_failing`]
+    /// (a later call replaces the failure).
     pub(crate) fn refuse(&self, path: &str, reason: TranscriptRefusal) {
-        self.refusals
+        self.failures
             .lock()
             .unwrap()
-            .insert(path.to_owned(), reason);
+            .insert(path.to_owned(), FakeReadFailure::Refused(reason));
     }
 
-    /// Read `path` normally again after [`Self::refuse`].
-    pub(crate) fn stop_refusing(&self, path: &str) {
-        self.refusals.lock().unwrap().remove(path);
+    /// Fail every read of `path` with an I/O error of `kind` until
+    /// [`Self::stop_failing`] (a later call replaces the failure).
+    pub(crate) fn fail_reads(&self, path: &str, kind: std::io::ErrorKind) {
+        self.failures
+            .lock()
+            .unwrap()
+            .insert(path.to_owned(), FakeReadFailure::Io(kind));
+    }
+
+    /// Read `path` normally again after [`Self::refuse`] or
+    /// [`Self::fail_reads`].
+    pub(crate) fn stop_failing(&self, path: &str) {
+        self.failures.lock().unwrap().remove(path);
     }
 
     /// Append a line that produces no message but still occupies a line and

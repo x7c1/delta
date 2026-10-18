@@ -123,7 +123,7 @@ async fn the_pty_lookup_resolves_nothing_for_a_spawn_that_failed() {
         "an unbound spawn is attachable while its pane is alive"
     );
 
-    let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
+    let events = ix.reap_stale_spawns(now, TICK_BOUND).await;
     assert!(
         events
             .iter()

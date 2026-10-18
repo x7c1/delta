@@ -65,6 +65,6 @@ async fn sessions_ingest_concurrently_while_a_third_handles_a_hook() {
     .await
     .expect("ingests must overlap; serialization would deadlock this barrier");
 
-    let (groups, _events) = poll_result.unwrap();
+    let (groups, _events) = poll_result;
     assert_eq!(groups.len(), 2, "each gated session ingested its line");
 }

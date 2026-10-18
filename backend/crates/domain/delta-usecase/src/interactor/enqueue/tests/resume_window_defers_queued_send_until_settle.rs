@@ -116,8 +116,7 @@ async fn resume_settle_with_no_held_prompt_flushes_the_queued_send() {
     // row.
     let events = ix
         .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(
         events.iter().any(|e| matches!(
             e,
@@ -172,8 +171,7 @@ async fn resume_settle_with_held_prompt_types_it_first_queued_row_follows_on_tur
         .unwrap();
     let events = ix
         .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(
         events.is_empty(),
         "the held-prompt dispatch is not a queued-send promotion"
@@ -257,8 +255,7 @@ async fn resume_settle_flushes_the_queued_row_but_never_a_restored_one() {
         .unwrap();
     let events = ix
         .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
 
     // Only the genuinely queued row flushes; the older restored row is
     // skipped, not typed, and keeps its marker.

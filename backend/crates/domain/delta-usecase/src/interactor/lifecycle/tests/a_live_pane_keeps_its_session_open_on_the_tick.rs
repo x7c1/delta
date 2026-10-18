@@ -26,8 +26,7 @@ async fn a_live_pane_keeps_its_session_open_on_the_tick() {
     // presence is keeping this session open.
     let events = ix
         .reap_stale_spawns(Instant::now() + Duration::from_secs(3600), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
 
     assert!(
         events.is_empty(),

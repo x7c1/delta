@@ -77,8 +77,7 @@ async fn boot_restored_send_stays_unsent_until_released_then_matches() {
         .unwrap();
     let events = ix
         .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(
         events.is_empty(),
         "the settle flush must not promote a restored row"
@@ -189,8 +188,7 @@ async fn release_on_a_closed_session_resumes_it_then_dispatches_at_settle() {
         .unwrap();
     let events = ix
         .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(
         events.iter().any(|e| matches!(
             e,
@@ -270,8 +268,7 @@ async fn release_conflicts_are_send_not_releasable() {
         .await
         .unwrap();
     ix.dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
 
     // First release wins; the second finds the marker already cleared (the
     // row has even dispatched by now).

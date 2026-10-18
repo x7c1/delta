@@ -24,7 +24,7 @@ async fn a_refused_transcript_does_not_stop_another_session_from_ingesting() {
     ix.transcript_fake()
         .push_to("/tmp/s2.jsonl", assistant_line("a-2", "reply two"));
 
-    let (groups, _events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
+    let (groups, _events) = ix.poll_transcript(TICK_BOUND).await;
     let ingested: Vec<_> = groups
         .iter()
         .flatten()

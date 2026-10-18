@@ -66,7 +66,7 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
         "\n Quick safety check: Is this a project you created or one you trust?\n\n          > 1. Yes, I trust this project\n   2. No, exit\n\n",
     );
 
-    let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
+    let events = ix.reap_stale_spawns(now, TICK_BOUND).await;
 
     // SpawnFailed is emitted with the minted id, the pane token, and a reason
     // built from the deadline and the pane.

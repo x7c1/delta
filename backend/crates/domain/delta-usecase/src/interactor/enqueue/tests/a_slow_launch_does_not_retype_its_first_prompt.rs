@@ -75,8 +75,7 @@ async fn an_unbound_spawn_keeps_its_first_prompt_past_the_echo_deadline() {
 
     let dispatched = ix
         .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
 
     assert!(
         dispatched.is_empty(),
@@ -112,8 +111,7 @@ async fn the_echo_deadline_counts_from_the_bind_after_a_slow_launch() {
     // The launch sits on a dialog past the deadline; the sweeps meanwhile
     // leave it alone.
     ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     // Make the wait as old as that long launch: the stamp comes from the live
     // clock, so without this the bind would follow it by milliseconds.
     ix.with_runtime(&session_id, |state| {
@@ -137,10 +135,7 @@ async fn the_echo_deadline_counts_from_the_bind_after_a_slow_launch() {
     ix.with_runtime(&session_id, |_| ()).await;
 
     // The next tick lands before the positional prompt's submission.
-    let dispatched = ix
-        .sweep_echo_deadlines(Instant::now(), TICK_BOUND)
-        .await
-        .unwrap();
+    let dispatched = ix.sweep_echo_deadlines(Instant::now(), TICK_BOUND).await;
     assert!(
         dispatched.is_empty(),
         "the wait restarted at the bind, so nothing is re-typed; got {dispatched:?}"
@@ -179,8 +174,7 @@ async fn the_echo_deadline_counts_from_the_bind_after_a_slow_launch() {
     // Even a sweep long after: there is no outstanding send left to re-type.
     let dispatched = ix
         .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(dispatched.is_empty(), "got {dispatched:?}");
     assert_pane_untouched(&ix, "the first prompt is never typed into the pane");
     assert!(
@@ -205,8 +199,7 @@ async fn a_bound_spawns_silent_first_prompt_is_retyped_after_the_deadline() {
 
     let dispatched = ix
         .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(
         dispatched.contains(&SessionEvent::SendDispatched {
             session_id: session_id.clone(),

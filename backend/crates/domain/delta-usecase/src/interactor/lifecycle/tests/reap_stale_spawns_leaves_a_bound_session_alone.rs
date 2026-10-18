@@ -30,8 +30,7 @@ async fn reap_stale_spawns_leaves_a_bound_session_alone() {
             Instant::now() + std::time::Duration::from_secs(3600),
             TICK_BOUND,
         )
-        .await
-        .unwrap();
+        .await;
 
     assert!(events.is_empty(), "a bound session yields no SpawnFailed");
     assert!(

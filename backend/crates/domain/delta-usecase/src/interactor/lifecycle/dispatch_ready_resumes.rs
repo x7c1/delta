@@ -38,8 +38,8 @@ where
     /// On a `send_line` failure it mirrors the other dispatch sites so a failed
     /// dispatch cannot wedge the queue: the `DispatchFailed` turn input cancels
     /// the now-undeliverable outstanding send and returns the turn to idle. The
-    /// failure is logged rather than propagated, so one pane's send failure
-    /// cannot strand the other sessions' ticks.
+    /// failure is logged rather than propagated: the failed send is already
+    /// cancelled, so there is nothing left to recover.
     ///
     /// Settling is also what flushes any send deferred by the resume window:
     /// `dispatch_queued_send` is a no-op while the resuming entry exists (a
@@ -79,9 +79,8 @@ where
             // send waits for its explicit release instead of auto-resending
             // here.
             // A dispatch failure is logged rather than propagated, mirroring
-            // the held-prompt path below: one pane's send failure must not
-            // strand the other sessions' ticks (the failed row was already
-            // cancelled inside `dispatch_queued_send`).
+            // the held-prompt path below: the failed row was already cancelled
+            // inside `dispatch_queued_send`, so there is nothing left to recover.
             return match self.dispatch_queued_send().await {
                 Ok(event) => Ok(event),
                 Err(err) => {

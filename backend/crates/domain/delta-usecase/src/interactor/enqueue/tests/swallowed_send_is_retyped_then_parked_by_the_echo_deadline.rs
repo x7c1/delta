@@ -69,10 +69,7 @@ async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
     assert_eq!(behind.status, SendStatus::Queued);
 
     // A sweep before the deadline changes nothing: the wait is still young.
-    let dispatched = ix
-        .sweep_echo_deadlines(Instant::now(), TICK_BOUND)
-        .await
-        .unwrap();
+    let dispatched = ix.sweep_echo_deadlines(Instant::now(), TICK_BOUND).await;
     assert!(dispatched.is_empty(), "no deadline has passed yet");
     assert_eq!(
         ix.store().send(send.id).await.unwrap().unwrap().status,
@@ -85,8 +82,7 @@ async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
     // before the text lands again.
     let dispatched = ix
         .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(
         dispatched.contains(&SessionEvent::SendDispatched {
             session_id: session.clone(),
@@ -136,8 +132,7 @@ async fn swallowed_send_is_retyped_then_parked_by_the_echo_deadline() {
     // announced — and the queue behind it moves past it.
     let dispatched = ix
         .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(
         dispatched.contains(&SessionEvent::SendDispatched {
             session_id: session.clone(),
@@ -227,8 +222,7 @@ async fn a_retyped_send_still_matches_its_echo_and_self_heals() {
 
     // The first keystrokes are swallowed, so the deadline re-types the send.
     ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert_eq!(
         ix.live_state_for(&session).await.turn,
         TurnState::AwaitingEcho {
@@ -269,8 +263,7 @@ async fn a_retyped_send_still_matches_its_echo_and_self_heals() {
     );
     let dispatched = ix
         .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(dispatched.is_empty(), "got {dispatched:?}");
     let healed = ix.store().send(send.id).await.unwrap().unwrap();
     assert_eq!(healed.status, SendStatus::Matched);
@@ -307,8 +300,7 @@ async fn echo_deadline_after_a_matched_echo_never_retypes() {
     // wait still been open — finds nothing to do.
     let dispatched = ix
         .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(dispatched.is_empty(), "got {dispatched:?}");
     assert_eq!(
         ix.tmux_fake().sent.lock().unwrap().len(),
@@ -374,8 +366,7 @@ async fn a_held_resume_prompt_is_not_swept_by_the_echo_deadline() {
     // no requeue, no park, no Escape into a pane that is still coming up.
     let dispatched = ix
         .sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(dispatched.is_empty(), "got {dispatched:?}");
     assert_eq!(
         ix.store().send(send.id).await.unwrap().unwrap().status,

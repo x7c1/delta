@@ -82,6 +82,11 @@ pub(crate) struct FakeStoreInner {
     /// error for this tool_use id (and succeeds for every other), so a test
     /// can make the process-gone subagent sweep hit a failing row write.
     pub(crate) fail_clear_subagent_launch_for: Option<String>,
+    /// When set, [`SessionRecordStore::session`](crate::ports::SessionRecordStore::session)
+    /// fails with a store error for this session (and succeeds for every
+    /// other), so a test can make one session's background tick fail outside
+    /// its transcript read.
+    pub(crate) fail_session_lookup_for: Option<SessionId>,
     /// How many times some read methods were called, for tests that assert a
     /// use case reads in batches rather than once per row.
     pub(crate) calls: FakeStoreCalls,

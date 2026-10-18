@@ -56,11 +56,9 @@ async fn parked_send_is_released_by_the_user_and_typed_once() {
         .unwrap();
     assert_eq!(send.status, SendStatus::Dispatched);
     ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
 
     let parked = ix.store().send(send.id).await.unwrap().unwrap();
     assert_eq!(parked.status, SendStatus::Queued, "held, not cancelled");
@@ -77,8 +75,7 @@ async fn parked_send_is_released_by_the_user_and_typed_once() {
     // A further idle sweep leaves it alone: a held row is skipped by every
     // automatic dispatch trigger, exactly like a boot-restored one.
     ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert_eq!(
         typed(&ix, "swallowed by a dialog"),
         2,
@@ -151,11 +148,9 @@ async fn a_released_send_gets_a_fresh_retry_budget() {
         .await
         .unwrap();
     ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert_eq!(
         typed(&ix, "swallowed by a dialog"),
         2,
@@ -170,8 +165,7 @@ async fn a_released_send_gets_a_fresh_retry_budget() {
         "the release types the message once"
     );
     ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert_eq!(
         typed(&ix, "swallowed by a dialog"),
         4,
@@ -186,8 +180,7 @@ async fn a_released_send_gets_a_fresh_retry_budget() {
     // And the fresh budget is just as bounded: the retry's own deadline parks
     // the row a second time, held for another explicit release.
     ix.sweep_echo_deadlines(past_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     let reparked = ix.store().send(send.id).await.unwrap().unwrap();
     assert_eq!(reparked.status, SendStatus::Queued);
     assert!(

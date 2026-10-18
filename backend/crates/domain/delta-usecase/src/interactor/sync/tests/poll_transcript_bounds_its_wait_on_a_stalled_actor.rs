@@ -49,8 +49,7 @@ async fn poll_transcript_bounds_its_wait_on_a_stalled_actor() {
     let (groups, _events) =
         tokio::time::timeout(Duration::from_secs(5), ix.poll_transcript(SHORT_BOUND))
             .await
-            .expect("the bound ends the fan-out; session one never replies")
-            .unwrap();
+            .expect("the bound ends the fan-out; session one never replies");
     assert!(
         started.elapsed() < Duration::from_secs(2),
         "the tick returned on its bound, not on the stalled actor"
@@ -67,12 +66,11 @@ async fn poll_transcript_bounds_its_wait_on_a_stalled_actor() {
     // way). Its mailbox is ordered, so by the time that tick is handled the
     // ingest the timed-out tick started has been persisted.
     stalled.wait().await;
-    let (polled, _released) = tokio::time::timeout(Duration::from_secs(5), async {
+    let (_polled, _released) = tokio::time::timeout(Duration::from_secs(5), async {
         tokio::join!(ix.poll_transcript(TICK_BOUND), stalled.wait())
     })
     .await
     .expect("the released actor answers the next tick");
-    polled.unwrap();
 
     let session = SessionId::from("sess-1");
     let main = ix.store().main_thread_id(&session).await.unwrap();

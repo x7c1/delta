@@ -51,8 +51,7 @@ async fn detaching_from_a_pane_gives_the_launch_its_deadline_afresh() {
     // precisely the one that looked like the close killing the session.
     let events = ix
         .reap_stale_spawns(launched_at + PENDING_SPAWN_DEADLINE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
 
     assert!(
         events.is_empty(),
@@ -72,8 +71,7 @@ async fn detaching_from_a_pane_gives_the_launch_its_deadline_afresh() {
     // nobody ever reached — the grace is a restart, not an exemption.
     let events = ix
         .reap_stale_spawns(detached_at + PENDING_SPAWN_DEADLINE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
 
     assert_eq!(
         events.len(),

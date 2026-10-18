@@ -57,7 +57,7 @@ async fn reap_stale_resuming_fails_a_resume_that_never_became_ready() {
         .unwrap()
         .push("delta-7".to_owned());
 
-    let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
+    let events = ix.reap_stale_spawns(now, TICK_BOUND).await;
 
     // SpawnFailed is emitted with the resumed session's id and pane token.
     assert_eq!(

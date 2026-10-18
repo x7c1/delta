@@ -34,10 +34,7 @@ async fn the_pane_probe_ignores_a_session_that_is_not_open() {
     assert!(!ix.is_session_open(&closed).await, "closed");
     ix.tmux_fake().killed.lock().unwrap().clear();
 
-    let events = ix
-        .reap_stale_spawns(Instant::now(), TICK_BOUND)
-        .await
-        .unwrap();
+    let events = ix.reap_stale_spawns(Instant::now(), TICK_BOUND).await;
 
     assert!(
         events.is_empty(),

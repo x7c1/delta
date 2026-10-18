@@ -95,7 +95,7 @@ async fn a_queued_send_of_such_a_session_is_not_flushed_into_its_pane() {
     // which is a queue-flush trigger.
     ix.transcript_fake()
         .push_to("/work/sess-A.jsonl", api_error_line("api-error"));
-    ix.poll_transcript(TICK_BOUND).await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await;
 
     assert!(ix.tmux_fake().sent.lock().unwrap().is_empty());
     let row = ix.store().send(queued.id).await.unwrap().expect("row kept");

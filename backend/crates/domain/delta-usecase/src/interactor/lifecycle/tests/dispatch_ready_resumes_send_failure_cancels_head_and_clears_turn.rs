@@ -54,8 +54,7 @@ async fn dispatch_ready_resumes_send_failure_cancels_head_and_clears_turn() {
 
     // Dispatch once settled: `send_line` fails inside the tick.
     ix.dispatch_ready_resumes(ready_at + RESUME_DISPATCH_SETTLE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
 
     // The undeliverable pending row was cancelled (no longer the pending head)...
     let head = ix.store().head_dispatched_send(&session_id).await.unwrap();

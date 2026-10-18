@@ -7,6 +7,7 @@ use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{
     GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, TranscriptError, Workspace,
 };
+use crate::with_causes;
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -51,13 +52,17 @@ where
     /// callers that inspect the batch. They have already been emitted, so a
     /// caller that drains the seam must not broadcast them a second time.
     ///
-    /// **A refused transcript is reported once, not on every tick.** A
-    /// [`TranscriptError::Refused`] read is answered with an empty batch, and
-    /// warned about only when it is news: the first refusal, one that differs
+    /// **A failing transcript read is reported once, not on every tick.** A
+    /// read that fails with a [`TranscriptError`] — refused, I/O, parse,
+    /// aborted — is answered with an empty batch, and warned about (with its
+    /// cause chain) only when it is news: the first failure, one that differs
     /// from the last reported, or one after a read succeeded in between (that
-    /// recovery is logged at `info`). The record lives in the session's
-    /// runtime state (`SessionRuntime::note_transcript_refusal`). Any other
-    /// failure still fails the tick.
+    /// recovery is logged at `info`). A failure that may pass is simply tried
+    /// again on the next tick. The record, and what counts as the same
+    /// failure, live in the session's runtime state
+    /// (`SessionRuntime::note_transcript_failure`). Any other failure (the
+    /// store, say) fails this session's tick, which the fan-out reports for
+    /// this session alone.
     pub(in crate::interactor) async fn sync_tick(
         &mut self,
     ) -> Result<(Vec<Message>, Vec<SessionEvent>)> {
@@ -66,7 +71,7 @@ where
         }
         // The session is open, so it must still be in the store; a missing
         // row would be a torn-down binding, so skip it defensively rather
-        // than error the whole tick.
+        // than fail this session's tick on every poll.
         let Some(session) = self.store.session(self.id).await? else {
             return Ok((Vec::new(), Vec::new()));
         };
@@ -75,23 +80,13 @@ where
                 self.note_transcript_read();
                 batch
             }
-            // A refused transcript is refused again on every tick until the
-            // file itself changes, so it is reported here, once, instead of
-            // failing the tick (which the server would log on every tick, and
-            // which would end the fan-out's collection early, hiding the other
-            // sessions' results). Every other failure may pass on the next
-            // read and keeps failing the tick as before.
-            Err(Error::Transcript(TranscriptError::Refused { path, reason })) => {
-                if self.state.note_transcript_refusal(reason) {
-                    tracing::warn!(
-                        session_id = %self.id,
-                        path = %path.display(),
-                        reason = %reason,
-                        "the transcript is refused; the background tail skips this \
-                         session and stays quiet until the refusal changes or a read \
-                         succeeds"
-                    );
-                }
+            // A transcript read that fails tends to fail the same way on every
+            // tick (a refusal until the file changes, a `permission denied`
+            // until the mode does), so it is reported here, when it is news,
+            // instead of failing the tick, which the fan-out would report on
+            // every tick.
+            Err(Error::Transcript(err)) => {
+                self.note_transcript_failure(&err);
                 return Ok((Vec::new(), Vec::new()));
             }
             Err(err) => return Err(err),
@@ -124,14 +119,41 @@ where
         Ok((messages, events))
     }
 
+    /// Report that the background tail could not read this session's
+    /// transcript, unless the same failure was already reported (see
+    /// `SessionRuntime::note_transcript_failure`).
+    fn note_transcript_failure(&mut self, err: &TranscriptError) {
+        let rendered = with_causes(err);
+        if !self.state.note_transcript_failure(rendered.clone()) {
+            return;
+        }
+        match err {
+            TranscriptError::Refused { path, reason } => tracing::warn!(
+                session_id = %self.id,
+                path = %path.display(),
+                reason = %reason,
+                "the transcript is refused; the background tail skips this \
+                 session and stays quiet until the refusal changes or a read \
+                 succeeds"
+            ),
+            _ => tracing::warn!(
+                session_id = %self.id,
+                error = %rendered,
+                "the transcript could not be read; the background tail retries \
+                 on every tick and stays quiet until the failure changes or a \
+                 read succeeds"
+            ),
+        }
+    }
+
     /// Note that this session's transcript was read, logging the recovery
-    /// when the background tail had reported it refused.
+    /// when the background tail had reported it failing.
     fn note_transcript_read(&mut self) {
-        if let Some(reason) = self.state.clear_transcript_refusal() {
+        if let Some(failure) = self.state.clear_transcript_failure() {
             tracing::info!(
                 session_id = %self.id,
-                was = %reason,
-                "the transcript is read again after being refused"
+                was = %failure,
+                "the transcript is read again after failing"
             );
         }
     }

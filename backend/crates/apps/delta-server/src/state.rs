@@ -583,9 +583,11 @@ impl AppState {
     /// all are cheap periodic passes over the same registry.
     ///
     /// The task clones the `Arc`-shared interactor and the broadcast sender, so
-    /// it stays alive independently of any request. A poll or reap error is
-    /// logged and the loop continues — a transient failure must never kill the
-    /// tail or the watchdog.
+    /// it stays alive independently of any request. No stage can fail as a
+    /// whole: a session whose part of a stage fails is logged by the use case,
+    /// naming the session and the stage, and every other session's result is
+    /// still used — a transient failure must never kill the tail or the
+    /// watchdog, nor one session's failure hide another's events.
     pub fn spawn_transcript_tail(&self) -> tokio::task::JoinHandle<()> {
         let interactor = Arc::clone(&self.interactor);
         let events = self.events.clone();
@@ -609,21 +611,11 @@ impl AppState {
                 // sees each queued→dispatched transition. `Instant::now()` is the
                 // live clock; tests drive `dispatch_ready_resumes` directly with
                 // an injected `now`.
-                match interactor
+                for event in interactor
                     .dispatch_ready_resumes(now, SWEEP_TICK_BOUND)
                     .await
                 {
-                    Ok(dispatched_events) => {
-                        for event in dispatched_events {
-                            let _ = events.send(event);
-                        }
-                    }
-                    Err(err) => {
-                        tracing::warn!(
-                            error = %delta_usecase::with_causes(&err),
-                            "resume dispatch failed"
-                        );
-                    }
+                    let _ = events.send(event);
                 }
                 let resumes_done = Instant::now();
                 // Liveness reap: reap fresh spawns that never bound and
@@ -632,18 +624,8 @@ impl AppState {
                 // exited, died or was killed, so there is nothing left to type
                 // into). `Instant::now()` is the live clock here; tests drive
                 // `reap_stale_spawns` directly with an injected `now`.
-                match interactor.reap_stale_spawns(now, SWEEP_TICK_BOUND).await {
-                    Ok(failed_events) => {
-                        for event in failed_events {
-                            let _ = events.send(event);
-                        }
-                    }
-                    Err(err) => {
-                        tracing::warn!(
-                            error = %delta_usecase::with_causes(&err),
-                            "liveness reap failed"
-                        );
-                    }
+                for event in interactor.reap_stale_spawns(now, SWEEP_TICK_BOUND).await {
+                    let _ = events.send(event);
                 }
                 let reap_done = Instant::now();
                 // Echo watchdog: release any send whose keystrokes vanished
@@ -655,30 +637,15 @@ impl AppState {
                 // event to react to; the ticks are what make the silence
                 // observable. `Instant::now()` is the live clock here; tests
                 // drive `sweep_echo_deadlines` directly with an injected `now`.
-                match interactor.sweep_echo_deadlines(now, SWEEP_TICK_BOUND).await {
-                    Ok(dispatched_events) => {
-                        for event in dispatched_events {
-                            let _ = events.send(event);
-                        }
-                    }
-                    Err(err) => {
-                        tracing::warn!(
-                            error = %delta_usecase::with_causes(&err),
-                            "echo deadline sweep failed"
-                        );
-                    }
+                for event in interactor.sweep_echo_deadlines(now, SWEEP_TICK_BOUND).await {
+                    let _ = events.send(event);
                 }
                 let echo_sweep_done = Instant::now();
                 // Transcript poll. Nothing is broadcast from here: every session's
                 // actor already announced its own ingest on the async event seam,
                 // at the moment its rows landed, so the returned batch is dropped
                 // (see this function's doc comment).
-                if let Err(err) = interactor.poll_transcript(TRANSCRIPT_POLL_INTERVAL).await {
-                    tracing::warn!(
-                        error = %delta_usecase::with_causes(&err),
-                        "transcript tail poll failed"
-                    );
-                }
+                interactor.poll_transcript(TRANSCRIPT_POLL_INTERVAL).await;
                 // A tick that outruns its own interval starves every stage behind
                 // it, so name what it spent the time on. Each fan-out is bounded,
                 // so this reports a *slow* tick rather than a stuck one — the

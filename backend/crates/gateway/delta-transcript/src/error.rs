@@ -43,9 +43,17 @@ pub enum Error {
         source: tokio::task::JoinError,
     },
 
-    /// A line could not be parsed as JSON.
-    #[error("transcript parse error")]
-    Parse(#[from] serde_json::Error),
+    /// Line `line` (1-based) of the transcript at `path` could not be parsed
+    /// as JSON. `path` and `line` lead an operator to the broken line; the
+    /// parser's own error is the `source`. A read never fails with it:
+    /// [`crate::JsonlTranscript`] skips the line and logs this error instead.
+    #[error("transcript parse error at {} line {line}", path.display())]
+    Parse {
+        path: PathBuf,
+        line: usize,
+        #[source]
+        source: serde_json::Error,
+    },
 }
 
 impl Error {
@@ -80,7 +88,7 @@ impl From<Error> for TranscriptError {
                 path,
                 source: Box::new(source),
             },
-            Error::Parse(source) => TranscriptError::Parse(source),
+            Error::Parse { path, line, source } => TranscriptError::Parse { path, line, source },
         }
     }
 }
@@ -180,13 +188,22 @@ mod tests {
     }
 
     #[test]
-    fn a_parse_error_stays_a_parse_error_with_its_cause() {
+    fn a_parse_error_stays_a_parse_error_with_its_location_and_cause() {
         let source = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
-        let err = converted(Error::Parse(source));
+        let err = converted(Error::Parse {
+            path: PathBuf::from("/p/t.jsonl"),
+            line: 3,
+            source,
+        });
         assert!(matches!(
             &err,
-            delta_usecase::Error::Transcript(TranscriptError::Parse(source)) if source.is_eof()
+            delta_usecase::Error::Transcript(TranscriptError::Parse { path, line: 3, source })
+                if path == Path::new("/p/t.jsonl") && source.is_eof()
         ));
+        assert_eq!(
+            err.to_string(),
+            "transcript parse error at /p/t.jsonl line 3"
+        );
     }
 
     #[tokio::test]

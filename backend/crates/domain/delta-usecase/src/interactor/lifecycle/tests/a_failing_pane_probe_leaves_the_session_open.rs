@@ -24,10 +24,7 @@ async fn a_failing_pane_probe_leaves_the_session_open() {
     // tmux stops answering. The pane is still there; Delta just cannot see it.
     ix.tmux_fake().fail_probes();
 
-    let events = ix
-        .reap_stale_spawns(Instant::now(), TICK_BOUND)
-        .await
-        .unwrap();
+    let events = ix.reap_stale_spawns(Instant::now(), TICK_BOUND).await;
 
     assert!(
         events.is_empty(),
