@@ -131,16 +131,21 @@ tests, which currently describe newline-separated input.
       nothing named `*delta*_si.sock` under `/tmp`; a second launch of the
       same binary exits 0 while the first keeps running; after quitting, the
       socket is gone.
-- [ ] On macOS, a second launch brings the running window to the front —
+- [x] On macOS, a second launch brings the running window to the front —
       needs a person: macOS does not let a process started from a background
       terminal take focus (the plugin-based build behaves the same), and the
-      agent here has no accessibility access to observe the window.
+      agent here has no accessibility access to observe the window. (Checked
+      by a person with `make desktop-dev`: the running window came to the
+      front.)
 - [x] On the same machine, with the shell's rc defining a variable whose value
       contains a newline followed by `PATH=/nonexistent`, the dev app still
       starts its server and finds `tmux` (the imported `PATH` is the real one).
-- [ ] On Linux, a second launch still raises the running window (the plugin
+- [x] On Linux, a second launch still raises the running window (the plugin
       path is unchanged) — needs a person: this machine is macOS, and no agent
-      here can reach the Linux desktop session.
+      here can reach the Linux desktop session. (Checked by a person with
+      `make desktop-dev` under GNOME on Wayland: a second launch from a
+      terminal reached the running copy and showed its notification, which is
+      the existing behaviour for a launch that carries no activation token.)
 
 ## Last failure
 
