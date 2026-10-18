@@ -70,8 +70,7 @@ async fn resume_window_requeue_drops_the_held_first_prompt() {
         .await
         .unwrap();
     ix.dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(
         ix.tmux_fake().sent.lock().unwrap().is_empty(),
         "the settle must not type a send the queue now owns",

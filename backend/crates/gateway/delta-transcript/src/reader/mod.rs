@@ -32,9 +32,9 @@ pub const MAX_TRANSCRIPT_BYTES: u64 = 256 * 1024 * 1024;
 /// still advance the line index, so the reported `total_lines` and each
 /// message's `seq` track the file's true position and the caller's line cursor
 /// reads each line exactly once. Unparsable non-blank lines are skipped (with a
-/// warning), and lines that are not UTF-8 are skipped (at `debug`, with their
-/// line number), rather than aborting the whole read, so one malformed line
-/// cannot stall ingestion.
+/// warning naming the transcript and the line), and lines that are not UTF-8
+/// are skipped (at `debug`, with their line number), rather than aborting the
+/// whole read, so one malformed line cannot stall ingestion.
 ///
 /// The read is bounded: only a regular file is read — a FIFO, a device or a
 /// directory is refused with [`Error::NotRegularFile`], and the file is opened
@@ -90,80 +90,21 @@ impl Transcript for JsonlTranscript {
             });
         };
 
-        // Consume only newline-terminated lines: a trailing remainder without a
-        // `\n` is a line still being appended, so defer it to the next read
-        // instead of counting it (see the type doc for why). Splitting the
-        // prefix that stops just before the last `\n` yields exactly the
-        // complete lines (one empty line for a file that is a lone `\n`); with
-        // no `\n` written yet there are none.
-        let lines = contents
-            .iter()
-            .rposition(|&b| b == b'\n')
-            .map(|last| contents[..last].split(|&b| b == b'\n'))
-            .into_iter()
-            .flatten();
-
-        // Parse every line in range into an outcome first, keeping `turn_duration`
-        // outcomes interleaved in file order, so a turn's latency can be
-        // correlated onto the turn's assistant message (it is written right after
-        // it). Message outcomes already carry their absolute line index as `seq`.
-        let mut outcomes = Vec::new();
-        let mut total_lines = 0;
-        let mut relocated_cwd = None;
-        for (idx, line) in lines.enumerate() {
-            total_lines = idx + 1;
-            if idx < from_line {
-                continue;
-            }
-            // Decoded line by line, so one line that is not UTF-8 costs only
-            // itself. A `\r` before the `\n` is dropped, as `str::lines` does.
-            let line = line.strip_suffix(b"\r").unwrap_or(line);
-            let line = match std::str::from_utf8(line) {
-                Ok(line) => line,
-                Err(err) => {
-                    tracing::debug!(
-                        path,
-                        line = idx + 1,
-                        error = %err,
-                        "skipping a transcript line that is not UTF-8"
-                    );
-                    continue;
-                }
-            };
-            match parse_line_outcome(line) {
-                Ok(ParsedLine::Message(mut msg)) => {
-                    // The message's absolute line index is its persisted `seq`.
-                    msg.seq = idx as i64;
-                    outcomes.push(ParsedLine::Message(msg));
-                }
-                Ok(other @ ParsedLine::TurnDuration { .. }) => outcomes.push(other),
-                // A moved transcript can carry several `relocated` lines (one
-                // per move); the last one names where the session is now.
-                Ok(ParsedLine::Relocated { cwd }) => relocated_cwd = Some(cwd),
-                Ok(ParsedLine::Skip) => {}
-                Err(err) => {
-                    tracing::warn!(error = %err, "skipping unparsable transcript line");
-                }
-            }
+        let parsed = parse_lines(Path::new(path), &contents, from_line);
+        // An unparsable line is skipped rather than failing the read (see the
+        // type doc), but still reported, naming the file and the line, so an
+        // operator can find it. The cursor moves past it, so each is reported
+        // once.
+        for err in &parsed.unparsable {
+            tracing::warn!(
+                error = %delta_usecase::with_causes(err),
+                "skipping unparsable transcript line"
+            );
         }
-
-        // Stamp each turn's response time onto its assistant message, then drop
-        // the now-consumed `turn_duration` outcomes — they are not messages.
-        correlate_turn_durations(&mut outcomes);
-        let messages = outcomes
-            .into_iter()
-            .filter_map(|outcome| match outcome {
-                ParsedLine::Message(msg) => Some(*msg),
-                ParsedLine::TurnDuration { .. }
-                | ParsedLine::Relocated { .. }
-                | ParsedLine::Skip => None,
-            })
-            .collect();
-
         Ok(TranscriptRead {
-            messages,
-            total_lines,
-            relocated_cwd,
+            messages: parsed.messages,
+            total_lines: parsed.total_lines,
+            relocated_cwd: parsed.relocated_cwd,
         })
     }
 
@@ -181,6 +122,101 @@ impl Transcript for JsonlTranscript {
         find_session_transcript::find_session_transcript(root, session_id)
             .await
             .map_err(Into::into)
+    }
+}
+
+/// What [`parse_lines`] made of a transcript's contents.
+struct ParsedLines {
+    messages: Vec<delta_usecase::TranscriptMessage>,
+    total_lines: usize,
+    relocated_cwd: Option<String>,
+    /// One [`Error::Parse`] per line at or past the cursor that could not be
+    /// parsed, in file order. Those lines are skipped, not fatal.
+    unparsable: Vec<Error>,
+}
+
+/// Parse the complete lines of `contents`, the transcript at `path`, from the
+/// 0-based line `from_line` on.
+///
+/// Only newline-terminated lines are consumed: a trailing remainder without a
+/// `\n` is a line still being appended, so it is deferred to the next read
+/// instead of counted (see [`JsonlTranscript`] for why). Splitting the prefix
+/// that stops just before the last `\n` yields exactly the complete lines (one
+/// empty line for a file that is a lone `\n`); with no `\n` written yet there
+/// are none.
+fn parse_lines(path: &Path, contents: &[u8], from_line: usize) -> ParsedLines {
+    let lines = contents
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map(|last| contents[..last].split(|&b| b == b'\n'))
+        .into_iter()
+        .flatten();
+
+    // Parse every line in range into an outcome first, keeping `turn_duration`
+    // outcomes interleaved in file order, so a turn's latency can be
+    // correlated onto the turn's assistant message (it is written right after
+    // it). Message outcomes already carry their absolute line index as `seq`.
+    let mut outcomes = Vec::new();
+    let mut total_lines = 0;
+    let mut relocated_cwd = None;
+    let mut unparsable = Vec::new();
+    for (idx, line) in lines.enumerate() {
+        total_lines = idx + 1;
+        if idx < from_line {
+            continue;
+        }
+        // Decoded line by line, so one line that is not UTF-8 costs only
+        // itself. A `\r` before the `\n` is dropped, as `str::lines` does.
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        let line = match std::str::from_utf8(line) {
+            Ok(line) => line,
+            Err(err) => {
+                tracing::debug!(
+                    path = %path.display(),
+                    line = idx + 1,
+                    error = %err,
+                    "skipping a transcript line that is not UTF-8"
+                );
+                continue;
+            }
+        };
+        match parse_line_outcome(line) {
+            Ok(ParsedLine::Message(mut msg)) => {
+                // The message's absolute line index is its persisted `seq`.
+                msg.seq = idx as i64;
+                outcomes.push(ParsedLine::Message(msg));
+            }
+            Ok(other @ ParsedLine::TurnDuration { .. }) => outcomes.push(other),
+            // A moved transcript can carry several `relocated` lines (one
+            // per move); the last one names where the session is now.
+            Ok(ParsedLine::Relocated { cwd }) => relocated_cwd = Some(cwd),
+            Ok(ParsedLine::Skip) => {}
+            Err(source) => unparsable.push(Error::Parse {
+                path: path.to_path_buf(),
+                line: idx + 1,
+                source,
+            }),
+        }
+    }
+
+    // Stamp each turn's response time onto its assistant message, then drop
+    // the now-consumed `turn_duration` outcomes — they are not messages.
+    correlate_turn_durations(&mut outcomes);
+    let messages = outcomes
+        .into_iter()
+        .filter_map(|outcome| match outcome {
+            ParsedLine::Message(msg) => Some(*msg),
+            ParsedLine::TurnDuration { .. } | ParsedLine::Relocated { .. } | ParsedLine::Skip => {
+                None
+            }
+        })
+        .collect();
+
+    ParsedLines {
+        messages,
+        total_lines,
+        relocated_cwd,
+        unparsable,
     }
 }
 
@@ -503,6 +539,48 @@ mod tests {
         // the parsed message's seq to its true index.
         assert_eq!(out.total_lines, 2);
         assert_eq!(out.messages[0].seq, 1);
+    }
+
+    /// A line that is not JSON is reported as a parse error naming the
+    /// transcript and the line (1-based), and that location survives the
+    /// conversion into the use-case error, which keeps the parser's error as
+    /// its source. Lines before the cursor are not re-reported.
+    #[test]
+    fn an_unparsable_line_is_reported_with_its_path_and_line() {
+        use delta_usecase::TranscriptError;
+        use std::error::Error as _;
+
+        let user = r#"{"uuid":"u1","type":"user","message":{"content":"ok","role":"user"}}"#;
+        let contents = format!("{user}\nnot json at all\n{user}\n");
+        let path = Path::new("/p/-work/sess-1.jsonl");
+
+        let parsed = parse_lines(path, contents.as_bytes(), 0);
+        assert_eq!(parsed.messages.len(), 2, "the bad line costs only itself");
+        let [err] = <[Error; 1]>::try_from(parsed.unparsable).unwrap();
+        let err = delta_usecase::Error::from(err);
+        let delta_usecase::Error::Transcript(TranscriptError::Parse {
+            path: err_path,
+            line,
+            ..
+        }) = &err
+        else {
+            panic!("expected a parse error, got {err:?}");
+        };
+        assert_eq!(err_path, path);
+        assert_eq!(*line, 2);
+        let message = err.to_string();
+        assert!(
+            message.contains("/p/-work/sess-1.jsonl") && message.contains("line 2"),
+            "the message names the transcript and the line, got {message:?}"
+        );
+        let source = err.source().expect("the parse error has a source");
+        assert!(
+            source.downcast_ref::<serde_json::Error>().is_some(),
+            "the source is the serde_json error, got {source:?}"
+        );
+
+        let past_it = parse_lines(path, contents.as_bytes(), 2);
+        assert!(past_it.unparsable.is_empty());
     }
 
     /// A no-uuid line (e.g. Claude Code's `file-history-snapshot`) interleaved

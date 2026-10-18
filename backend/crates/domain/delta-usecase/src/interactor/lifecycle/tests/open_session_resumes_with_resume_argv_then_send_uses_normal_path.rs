@@ -77,8 +77,7 @@ async fn open_session_resumes_with_resume_argv_then_send_uses_normal_path() {
     // RESUME_DISPATCH_SETTLE, the held prompt is typed on the normal `send_line`
     // path — after the hook returned and `claude` is input-ready.
     ix.dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     let sent = ix.tmux_fake().sent.lock().unwrap().clone();
     assert!(
         sent.iter().any(|(p, t)| p == &pane && t == "after resume"),

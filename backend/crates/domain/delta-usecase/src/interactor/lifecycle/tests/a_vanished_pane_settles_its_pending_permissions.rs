@@ -56,10 +56,7 @@ async fn a_vanished_pane_settles_the_dialog_it_stranded_before_closing() {
 
     // The tmux session is killed from outside Delta. No hook arrives.
     ix.tmux_fake().vanish_session("delta-1");
-    let events = ix
-        .reap_stale_spawns(Instant::now(), TICK_BOUND)
-        .await
-        .unwrap();
+    let events = ix.reap_stale_spawns(Instant::now(), TICK_BOUND).await;
 
     let resolved = events
         .iter()
@@ -129,10 +126,7 @@ async fn a_vanished_pane_with_nothing_pending_announces_nothing_extra() {
     .unwrap();
 
     ix.tmux_fake().vanish_session("delta-1");
-    let events = ix
-        .reap_stale_spawns(Instant::now(), TICK_BOUND)
-        .await
-        .unwrap();
+    let events = ix.reap_stale_spawns(Instant::now(), TICK_BOUND).await;
 
     assert!(
         !events

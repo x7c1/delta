@@ -86,7 +86,7 @@ async fn each_session_announces_its_own_ingest_while_another_stalls() {
     .await
     .expect("the stalled read is released, so the poll finishes");
 
-    let (groups, _events) = polled.unwrap();
+    let (groups, _events) = polled;
     assert_eq!(
         groups.len(),
         2,

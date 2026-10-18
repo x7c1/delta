@@ -30,9 +30,15 @@ pub enum TranscriptError {
         source: std::io::Error,
     },
 
-    /// The transcript could not be parsed as JSON.
-    #[error("transcript parse error")]
-    Parse(#[source] serde_json::Error),
+    /// Line `line` (1-based) of the transcript at `path` could not be parsed
+    /// as JSON; the parser's own error is the `source`.
+    #[error("transcript parse error at {} line {line}", path.display())]
+    Parse {
+        path: PathBuf,
+        line: usize,
+        #[source]
+        source: serde_json::Error,
+    },
 
     /// The task reading the transcript at `path` ended without a result: it
     /// panicked, or the runtime cancelled it while shutting down.
@@ -49,10 +55,8 @@ pub enum TranscriptError {
 /// Why the reader refuses a transcript ([`TranscriptError::Refused`]).
 ///
 /// A plain value rather than an error: it carries what the message needs and
-/// lets a caller tell one refusal from another — the background tail reports a
-/// refusal once and again only when it changes (see
-/// `SessionRuntime::note_transcript_refusal`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// lets a caller tell one refusal from another.
+#[derive(Debug, Clone, Copy)]
 pub enum TranscriptRefusal {
     /// The path names something other than a regular file — a FIFO, a device,
     /// a directory. Reading a FIFO would block until a writer appears, and a

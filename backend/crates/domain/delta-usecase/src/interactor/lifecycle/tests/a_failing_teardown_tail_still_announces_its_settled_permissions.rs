@@ -226,10 +226,7 @@ async fn a_vanished_pane_whose_turn_close_fails_still_announces_the_settled_dial
     assert_still_awaiting_echo(&ix, &session, send.id).await;
 
     ix.tmux_fake().vanish_session("delta-1");
-    let events = ix
-        .reap_stale_spawns(Instant::now(), TICK_BOUND)
-        .await
-        .unwrap();
+    let events = ix.reap_stale_spawns(Instant::now(), TICK_BOUND).await;
 
     assert_eq!(
         resolved_ids(&events),

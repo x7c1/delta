@@ -3,17 +3,18 @@
 //! open sessions whose pane has gone) and the echo-deadline sweep. Each posts
 //! one input to every live actor and collects the replies under a
 //! caller-supplied bound; `collect_tick_replies` holds the shape they all
-//! share.
+//! share. A tick cannot fail as a whole: one session's failure is reported for
+//! that session and the others' results are still returned.
 
 use std::time::{Duration, Instant};
 
 use delta_model::Message;
 use tokio::sync::oneshot;
 
-use crate::error::Result;
 use crate::interactor::session_actor::input::{Reply, SessionInput};
 use crate::interactor::Interactor;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::with_causes;
 
 impl<T, X, S, W, G> Interactor<T, X, S, W, G>
 where
@@ -41,6 +42,14 @@ where
     /// return value is dropped. A dropped reply (the actor retired mid-tick,
     /// during tear-down) is skipped silently.
     ///
+    /// **One session's error is that session's alone.** An actor that answers
+    /// with an `Err` is `warn!`ed about — named by session and stage, with the
+    /// error's whole cause chain — and skipped, and collection carries on: the
+    /// replies already collected, and those still pending, from every other
+    /// session are returned as usual. Failing the whole tick instead would
+    /// discard them all for one session's fault, and the caller could only log
+    /// a tick-wide failure that does not say which session caused it.
+    ///
     /// What that dropped contribution costs differs by tick, and it is the
     /// caller's job to size `bound` accordingly. The transcript poll loses
     /// nothing a browser needs: its actor announces its own ingest on the async
@@ -59,7 +68,7 @@ where
         bound: Duration,
         stage: &'static str,
         mut make: impl FnMut(Reply<R>) -> SessionInput,
-    ) -> Result<Vec<R>> {
+    ) -> Vec<R> {
         let mut pending = Vec::new();
         for id in self.sessions.ids() {
             let (tx, rx) = oneshot::channel();
@@ -71,9 +80,16 @@ where
         let mut replies = Vec::with_capacity(pending.len());
         for (id, rx) in pending {
             match tokio::time::timeout_at(deadline, rx).await {
-                Ok(Ok(result)) => replies.push(result?),
+                Ok(Ok(Ok(reply))) => replies.push(reply),
+                Ok(Ok(Err(err))) => tracing::warn!(
+                    session_id = %id,
+                    stage,
+                    error = %with_causes(&err),
+                    "session actor failed its background tick; skipping its \
+                     result for this tick"
+                ),
                 // A dropped reply means the actor retired mid-tick
-                // (tear-down); skip it rather than failing the whole tick.
+                // (tear-down); skip it silently, as it is no failure.
                 Ok(Err(_dropped)) => continue,
                 Err(_elapsed) => tracing::warn!(
                     session_id = %id,
@@ -84,7 +100,7 @@ where
                 ),
             }
         }
-        Ok(replies)
+        replies
     }
 
     /// Poll the transcript of every currently-open (live-pane) session for
@@ -110,16 +126,14 @@ where
     /// seam, so a caller that drains the seam must not broadcast them again.
     ///
     /// `bound` caps how long the fan-out waits on the actors; see
-    /// `Self::collect_tick_replies`.
-    pub async fn poll_transcript(
-        &self,
-        bound: Duration,
-    ) -> Result<(Vec<Vec<Message>>, Vec<SessionEvent>)> {
+    /// `Self::collect_tick_replies`, which also reports and skips a session
+    /// whose tick fails.
+    pub async fn poll_transcript(&self, bound: Duration) -> (Vec<Vec<Message>>, Vec<SessionEvent>) {
         let replies = self
             .collect_tick_replies(bound, "transcript poll", |reply| SessionInput::SyncTick {
                 reply,
             })
-            .await?;
+            .await;
         let mut groups = Vec::new();
         let mut events = Vec::new();
         for (messages, session_events) in replies {
@@ -128,7 +142,7 @@ where
                 groups.push(messages);
             }
         }
-        Ok((groups, events))
+        (groups, events)
     }
 
     /// Dispatch the held first prompt of every resume that is ready *and* has
@@ -146,19 +160,16 @@ where
     /// `now` is injected (rather than read here) so the dispatch is
     /// deterministic under test: the server loop passes `Instant::now()`,
     /// while tests advance a controlled instant. `bound` caps how long the
-    /// fan-out waits on the actors; see `Self::collect_tick_replies`.
-    pub async fn dispatch_ready_resumes(
-        &self,
-        now: Instant,
-        bound: Duration,
-    ) -> Result<Vec<SessionEvent>> {
+    /// fan-out waits on the actors; see `Self::collect_tick_replies`, which also
+    /// reports and skips a session whose tick fails.
+    pub async fn dispatch_ready_resumes(&self, now: Instant, bound: Duration) -> Vec<SessionEvent> {
         let replies = self
             .collect_tick_replies(bound, "resume dispatch", |reply| SessionInput::ResumeTick {
                 now,
                 reply,
             })
-            .await?;
-        Ok(replies.into_iter().flatten().collect())
+            .await;
+        replies.into_iter().flatten().collect()
     }
 
     /// The liveness sweep: reap launches that never became ready before their
@@ -182,19 +193,16 @@ where
     /// `now` is injected so the watchdog is deterministic under test; the
     /// server owns the periodic tick that calls this and broadcasts the
     /// result. `bound` caps how long the fan-out waits on the actors; see
-    /// `Self::collect_tick_replies`.
-    pub async fn reap_stale_spawns(
-        &self,
-        now: Instant,
-        bound: Duration,
-    ) -> Result<Vec<SessionEvent>> {
+    /// `Self::collect_tick_replies`, which also reports and skips a session
+    /// whose tick fails.
+    pub async fn reap_stale_spawns(&self, now: Instant, bound: Duration) -> Vec<SessionEvent> {
         let replies = self
             .collect_tick_replies(bound, "spawn reap", |reply| SessionInput::ReapTick {
                 now,
                 reply,
             })
-            .await?;
-        Ok(replies.into_iter().flatten().collect())
+            .await;
+        replies.into_iter().flatten().collect()
     }
 
     /// Give up on every dispatched send whose `UserPromptSubmit` echo — and
@@ -211,17 +219,14 @@ where
     /// produced, for the caller to broadcast. `now` is
     /// injected so the sweep is deterministic under test; the server owns the
     /// periodic tick that calls this. `bound` caps how long the fan-out waits
-    /// on the actors; see `Self::collect_tick_replies`.
-    pub async fn sweep_echo_deadlines(
-        &self,
-        now: Instant,
-        bound: Duration,
-    ) -> Result<Vec<SessionEvent>> {
+    /// on the actors; see `Self::collect_tick_replies`, which also
+    /// reports and skips a session whose tick fails.
+    pub async fn sweep_echo_deadlines(&self, now: Instant, bound: Duration) -> Vec<SessionEvent> {
         let replies = self
             .collect_tick_replies(bound, "echo deadline sweep", |reply| {
                 SessionInput::EchoDeadlineTick { now, reply }
             })
-            .await?;
-        Ok(replies.into_iter().flatten().collect())
+            .await;
+        replies.into_iter().flatten().collect()
     }
 }

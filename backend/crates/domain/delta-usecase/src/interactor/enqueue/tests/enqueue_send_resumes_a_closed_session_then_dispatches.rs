@@ -76,8 +76,7 @@ async fn enqueue_send_resumes_a_closed_session_then_dispatches() {
     // On the background tick, once the resume has settled, the held prompt is
     // dispatched into the resumed pane on the normal `send_line` path.
     ix.dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     let sent = ix.tmux_fake().sent.lock().unwrap().clone();
     assert!(
         sent.iter().any(|(p, t)| p == &pane && t == "after resume"),

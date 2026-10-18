@@ -4,7 +4,7 @@ use crate::interactor::testing::*;
 use crate::ports::TranscriptRefusal;
 
 const REFUSED: &str = "the transcript is refused";
-const RECOVERED: &str = "the transcript is read again after being refused";
+const RECOVERED: &str = "the transcript is read again after failing";
 
 /// A transcript the reader refuses is refused again on every tick, so the
 /// background tail reports it once — at `warn`, naming the session and the
@@ -25,7 +25,7 @@ async fn a_refused_transcript_is_reported_once_per_refusal() {
     ix.transcript_fake()
         .refuse("/tmp/s1.jsonl", TranscriptRefusal::NotRegularFile);
     for _ in 0..3 {
-        let (groups, events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
+        let (groups, events) = ix.poll_transcript(TICK_BOUND).await;
         assert!(groups.is_empty() && events.is_empty());
     }
     assert_eq!(count(REFUSED), 1, "reported once: {}", logs.text());
@@ -39,22 +39,22 @@ async fn a_refused_transcript_is_reported_once_per_refusal() {
     // Another refusal (here, another size) is reported again, once.
     let too_large = |size| TranscriptRefusal::TooLarge { size, cap: 10 };
     ix.transcript_fake().refuse("/tmp/s1.jsonl", too_large(11));
-    ix.poll_transcript(TICK_BOUND).await.unwrap();
-    ix.poll_transcript(TICK_BOUND).await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await;
+    ix.poll_transcript(TICK_BOUND).await;
     ix.transcript_fake().refuse("/tmp/s1.jsonl", too_large(12));
-    ix.poll_transcript(TICK_BOUND).await.unwrap();
-    ix.poll_transcript(TICK_BOUND).await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await;
+    ix.poll_transcript(TICK_BOUND).await;
     assert_eq!(count(REFUSED), 3, "one report per refusal: {}", logs.text());
     assert_eq!(count(RECOVERED), 0);
 
     // The session recovers: the recovery is logged once at `info`, and the
     // lines written meanwhile are ingested.
-    ix.transcript_fake().stop_refusing("/tmp/s1.jsonl");
+    ix.transcript_fake().stop_failing("/tmp/s1.jsonl");
     ix.transcript_fake()
         .push_to("/tmp/s1.jsonl", assistant_line("a-1", "reply"));
-    let (groups, _events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
+    let (groups, _events) = ix.poll_transcript(TICK_BOUND).await;
     assert_eq!(groups.len(), 1, "the recovered session is ingested again");
-    ix.poll_transcript(TICK_BOUND).await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await;
     assert_eq!(count(RECOVERED), 1, "recovery logged once: {}", logs.text());
     let logged = logs.text();
     let line = logged.lines().find(|l| l.contains(RECOVERED)).unwrap();
@@ -62,8 +62,8 @@ async fn a_refused_transcript_is_reported_once_per_refusal() {
 
     // The same refusal as before the recovery is news again.
     ix.transcript_fake().refuse("/tmp/s1.jsonl", too_large(12));
-    ix.poll_transcript(TICK_BOUND).await.unwrap();
-    ix.poll_transcript(TICK_BOUND).await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await;
+    ix.poll_transcript(TICK_BOUND).await;
     assert_eq!(
         count(REFUSED),
         4,

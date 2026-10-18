@@ -64,17 +64,13 @@ async fn a_local_command_send_frees_the_session_at_its_short_deadline() {
 
     // Nothing is ever heard about the command: no hook, no transcript line.
     // Before its deadline the wait is left alone.
-    let dispatched = ix
-        .sweep_echo_deadlines(Instant::now(), TICK_BOUND)
-        .await
-        .unwrap();
+    let dispatched = ix.sweep_echo_deadlines(Instant::now(), TICK_BOUND).await;
     assert!(dispatched.is_empty(), "no deadline has passed yet");
 
     // Past the slash-command deadline: the command is taken to have run.
     let dispatched = ix
         .sweep_echo_deadlines(past_slash_command_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert_eq!(
         dispatched,
         vec![SessionEvent::SendDispatched {
@@ -162,8 +158,7 @@ async fn a_plain_send_is_not_released_at_the_slash_command_deadline() {
 
     let dispatched = ix
         .sweep_echo_deadlines(past_slash_command_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(dispatched.is_empty(), "got {dispatched:?}");
     assert_eq!(
         ix.store().send(send.id).await.unwrap().unwrap().status,
@@ -210,8 +205,7 @@ async fn an_echoed_slash_command_presses_no_escape() {
     // A sweep past the slash-command deadline finds no wait to settle.
     let dispatched = ix
         .sweep_echo_deadlines(past_slash_command_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert!(dispatched.is_empty(), "got {dispatched:?}");
 
     // The turn ends and the queue behind the skill flushes.
@@ -261,8 +255,7 @@ async fn a_failed_escape_still_settles_the_command() {
 
     let dispatched = ix
         .sweep_echo_deadlines(past_slash_command_deadline(Instant::now()), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert_eq!(
         dispatched,
         vec![SessionEvent::SendDispatched {

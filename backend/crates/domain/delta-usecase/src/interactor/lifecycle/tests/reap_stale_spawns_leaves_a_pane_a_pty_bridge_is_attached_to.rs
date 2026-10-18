@@ -47,7 +47,7 @@ async fn reap_stale_spawns_leaves_a_pane_a_pty_bridge_is_attached_to() {
         "the bridge attached to an unbound spawn's pane"
     );
 
-    let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
+    let events = ix.reap_stale_spawns(now, TICK_BOUND).await;
 
     assert!(
         events.is_empty(),
@@ -73,7 +73,7 @@ async fn reap_stale_spawns_leaves_a_pane_a_pty_bridge_is_attached_to() {
         "a second bridge attaches to the same pane"
     );
     ix.detach_pane(&session_id, now).await;
-    let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
+    let events = ix.reap_stale_spawns(now, TICK_BOUND).await;
 
     assert!(
         events.is_empty(),
@@ -92,8 +92,7 @@ async fn reap_stale_spawns_leaves_a_pane_a_pty_bridge_is_attached_to() {
     ix.detach_pane(&session_id, now).await;
     let events = ix
         .reap_stale_spawns(now + PENDING_SPAWN_DEADLINE, TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
 
     assert_eq!(events.len(), 1, "with nobody attached, the spawn is reaped");
     assert_eq!(

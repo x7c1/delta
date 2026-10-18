@@ -25,7 +25,7 @@ async fn list_sessions_page_lists_a_failed_launch_among_the_closed_ones() {
         "/tmp/older.jsonl",
         assistant_line_at("a-older", "older", "2025-06-01T00:00:00Z"),
     );
-    ix.poll_transcript(TICK_BOUND).await.unwrap();
+    ix.poll_transcript(TICK_BOUND).await;
     ix.close_session(&SessionId::from("sess-older"))
         .await
         .unwrap();

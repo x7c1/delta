@@ -6,8 +6,10 @@
 //! bindings, with `RouteBinder` rejecting any drift between the two.
 //!
 //! Under the `embed-web` feature the built web frontend is mounted behind those
-//! bindings, as the router's fallback — see [`static_web`]. The request log
-//! ([`crate::request_log`]) wraps the whole of it.
+//! bindings, as the router's fallback — see the `static_web` module (named
+//! rather than linked: it is not compiled without the feature, so a link would
+//! not resolve there). The request log ([`crate::request_log`]) wraps the
+//! whole of it.
 
 use axum::Router;
 

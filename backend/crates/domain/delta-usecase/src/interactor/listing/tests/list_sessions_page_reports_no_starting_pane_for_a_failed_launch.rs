@@ -41,7 +41,7 @@ async fn list_sessions_page_reports_no_starting_pane_for_a_failed_launch() {
         "attachable while the pane is still alive"
     );
 
-    let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
+    let events = ix.reap_stale_spawns(now, TICK_BOUND).await;
     assert!(
         events
             .iter()

@@ -75,10 +75,7 @@ async fn a_vanished_pane_closes_its_open_session() {
     // The tmux session is killed from outside Delta. No hook arrives.
     ix.tmux_fake().vanish_session("delta-1");
 
-    let events = ix
-        .reap_stale_spawns(Instant::now(), TICK_BOUND)
-        .await
-        .unwrap();
+    let events = ix.reap_stale_spawns(Instant::now(), TICK_BOUND).await;
 
     assert!(
         !ix.is_session_open(&id).await,

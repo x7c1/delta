@@ -48,10 +48,7 @@ async fn failed_send_release_after_an_interrupt_still_announces_the_ingest() {
     // The user interrupts: the marker line is ingested, the turn ends, and the
     // release of the queued send fails on the dead pane.
     ix.transcript_fake().push(interrupt_line("u-int"));
-    let (groups, _events) = ix
-        .poll_transcript(TICK_BOUND)
-        .await
-        .expect("the failed release is logged, not propagated out of the tick");
+    let (groups, _events) = ix.poll_transcript(TICK_BOUND).await;
     assert_eq!(groups.len(), 1, "the marker line was ingested");
     assert!(
         ix.store()

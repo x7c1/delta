@@ -45,7 +45,7 @@ async fn poll_transcript_only_polls_open_sessions() {
         assistant_line("a-closed", "external resume reply"),
     );
 
-    let (groups, _events) = ix.poll_transcript(TICK_BOUND).await.unwrap();
+    let (groups, _events) = ix.poll_transcript(TICK_BOUND).await;
 
     // Only the open session is ingested and returned.
     assert_eq!(groups.len(), 1, "only the open session is polled");

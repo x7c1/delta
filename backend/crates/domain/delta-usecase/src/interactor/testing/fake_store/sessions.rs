@@ -3,7 +3,7 @@
 
 use delta_model::{AgentProvider, Session, SessionId, SessionStatus, Thread, ThreadId};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::ports::{NewSession, SessionPageRow, SpawningSession};
 use crate::SessionPageCursor;
 
@@ -314,13 +314,12 @@ impl FakeStore {
     }
 
     pub(super) async fn session(&self, id: &SessionId) -> Result<Option<Session>> {
-        Ok(self
-            .inner
-            .lock()
-            .unwrap()
-            .sessions
-            .iter()
-            .find(|s| &s.id == id)
-            .cloned())
+        let g = self.inner.lock().unwrap();
+        if g.fail_session_lookup_for.as_ref() == Some(id) {
+            return Err(Error::Store(format!(
+                "injected session lookup failure for {id}"
+            )));
+        }
+        Ok(g.sessions.iter().find(|s| &s.id == id).cloned())
     }
 }

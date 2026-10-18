@@ -39,8 +39,7 @@ async fn a_reaped_resume_forgets_the_pane_it_killed() {
     let id = stalled_resume(&ix).await;
 
     ix.reap_stale_spawns(past_the_resume_deadline(), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
 
     assert_eq!(
         ix.tmux_fake().killed.lock().unwrap().last().cloned(),
@@ -56,8 +55,7 @@ async fn a_reaped_resume_keeps_the_record_of_a_pane_it_could_not_confirm_gone() 
     ix.tmux_fake().fail_probes();
 
     ix.reap_stale_spawns(past_the_resume_deadline(), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
 
     assert!(!ix.is_session_open(&id).await);
     assert_eq!(

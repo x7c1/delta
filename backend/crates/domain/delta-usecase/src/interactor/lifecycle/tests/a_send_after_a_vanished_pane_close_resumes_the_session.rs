@@ -27,9 +27,7 @@ async fn a_send_after_a_vanished_pane_close_resumes_the_session() {
 
     // The pane goes away without a hook, and the tick closes the session.
     ix.tmux_fake().vanish_session("delta-1");
-    ix.reap_stale_spawns(Instant::now(), TICK_BOUND)
-        .await
-        .unwrap();
+    ix.reap_stale_spawns(Instant::now(), TICK_BOUND).await;
     assert!(!ix.is_session_open(&id).await, "closed by the tick");
 
     // The next send resumes the session rather than failing into a dead pane.

@@ -135,8 +135,11 @@ where
     ///   [`Self::end_for_moved_port`]): its hooks would reach whatever now
     ///   listens on the old port.
     ///
-    /// See [`Readoption`] for the outcomes. Only a store error is an `Err`; a
-    /// tmux probe that could not run is [`Readoption::Unprobed`].
+    /// See [`Readoption`] for the outcomes. A store error is an `Err`, and so,
+    /// on the [`HookEndpointChange::PortMoved`] path, is any failure of the
+    /// close that ends the session (see [`Self::end_for_moved_port`]): its
+    /// last transcript sync, its tmux teardown or its row writes. A tmux probe
+    /// that could not run is not an error but [`Readoption::Unprobed`].
     pub(in crate::interactor) async fn readopt_remembered_pane(
         &mut self,
         change: HookEndpointChange,

@@ -136,8 +136,7 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     state
         .interactor()
         .dispatch_ready_resumes(Instant::now() + Duration::from_secs(1), TICK_BOUND)
-        .await
-        .unwrap();
+        .await;
     assert_eq!(
         tmux.sent.load(Ordering::SeqCst),
         1,

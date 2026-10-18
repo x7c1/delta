@@ -35,7 +35,7 @@ async fn a_vanished_pane_leaves_a_resuming_session_to_the_resume_reaper() {
     ix.push_resuming_at("delta-7", &session_id, Some("held".to_owned()), now)
         .await;
 
-    let events = ix.reap_stale_spawns(now, TICK_BOUND).await.unwrap();
+    let events = ix.reap_stale_spawns(now, TICK_BOUND).await;
 
     assert!(
         events.is_empty(),
