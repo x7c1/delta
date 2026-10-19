@@ -320,8 +320,12 @@ to it instead.
   drawn inline as in a browser. WebKitGTK binds no key to undo, so inside the
   Linux app the page handles Ctrl-Z (undo) and Ctrl-Shift-Z (redo) in text
   fields itself (`undoKeys.ts`), through WebKit's page-wide history — not in
-  the terminal, where Ctrl-Z goes on to the pane. macOS gets Cmd-Z from the
-  default Edit menu.
+  the terminal, where Ctrl-Z goes on to the pane. WebKit would make a whole
+  run of typing, Backspace included, one undo step, so the page splits it
+  where typing switches between inserting and deleting, at a space or a line
+  break, after a one-second pause, and when an input method commits its
+  text. macOS gets Cmd-Z from the default Edit
+  menu.
 
 ## Shut down
 

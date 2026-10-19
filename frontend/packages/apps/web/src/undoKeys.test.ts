@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { handleUndoKey, installUndoKeys, type ExecCommand } from './undoKeys';
+import { handleUndoKey, installUndoKeys, TypingSteps, TYPING_PAUSE_MS, type ExecCommand } from './undoKeys';
 import { LINUX_SHELL, MACOS_SHELL } from './shell';
 
 /** Dispatch a keydown on `target` with `handleUndoKey` listening on it. */
@@ -102,6 +102,72 @@ describe('handleUndoKey', () => {
       expect(exec).not.toHaveBeenCalled();
       expect(event.defaultPrevented).toBe(false);
     }
+  });
+});
+
+describe('TypingSteps', () => {
+  /** Feed `keys` to a fresh `TypingSteps` on `target`; returns how many steps were closed. */
+  function closedSteps(target: HTMLElement, keys: { key: string; at?: number; init?: KeyboardEventInit }[]): number {
+    const steps = new TypingSteps();
+    const close = vi.spyOn(target as HTMLTextAreaElement, 'setSelectionRange');
+    keys.forEach(({ key, at, init }, i) => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, ...init });
+      Object.defineProperty(event, 'target', { value: target });
+      steps.onKeyDown(event, at ?? i);
+    });
+    return close.mock.calls.length;
+  }
+
+  const typed = (text: string) => [...text].map((key) => ({ key }));
+
+  it('keeps a run of the same kind of typing in one step', () => {
+    expect(closedSteps(mount(document.createElement('textarea')), typed('abc'))).toBe(0);
+  });
+
+  it('starts a step when typing switches between inserting and deleting', () => {
+    const keys = [...typed('abc'), { key: 'Backspace' }, { key: 'Backspace' }, { key: 'x' }];
+    expect(closedSteps(mount(document.createElement('textarea')), keys)).toBe(2);
+  });
+
+  it('starts a step at a space and at a line break', () => {
+    const keys = [...typed('ab'), { key: ' ' }, { key: 'c' }, { key: 'Enter' }, { key: 'd' }];
+    expect(closedSteps(mount(document.createElement('textarea')), keys)).toBe(2);
+  });
+
+  it('starts a step after a pause', () => {
+    const keys = [{ key: 'a', at: 0 }, { key: 'b', at: TYPING_PAUSE_MS }, { key: 'c', at: 2 * TYPING_PAUSE_MS + 1 }];
+    expect(closedSteps(mount(document.createElement('textarea')), keys)).toBe(1);
+  });
+
+  it('closes the step when an input method commits its text', () => {
+    const textarea = mount(document.createElement('textarea'));
+    const steps = new TypingSteps();
+    const close = vi.spyOn(textarea, 'setSelectionRange');
+    const composing = new KeyboardEvent('keydown', { key: 'Process', isComposing: true, bubbles: true });
+    textarea.dispatchEvent(composing);
+    steps.onKeyDown(composing, 0);
+    const end = new CompositionEvent('compositionend', { data: 'あいう', bubbles: true });
+    textarea.dispatchEvent(end);
+    steps.onCompositionEnd(end);
+    expect(close).toHaveBeenCalledTimes(1);
+
+    const outside = new CompositionEvent('compositionend', { bubbles: true });
+    mount(document.createElement('button')).dispatchEvent(outside);
+    steps.onCompositionEnd(outside);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('does nothing during IME composition or outside a selectable text field', () => {
+    const composing = [...typed('ab'), { key: 'Backspace', init: { isComposing: true } }, { key: 'c' }];
+    expect(closedSteps(mount(document.createElement('textarea')), composing)).toBe(0);
+
+    const terminal = mount(document.createElement('div'));
+    terminal.className = 'xterm';
+    const helper = mount(document.createElement('textarea'), terminal);
+    expect(closedSteps(helper, [...typed('ab'), { key: 'Backspace' }])).toBe(0);
+
+    const number = mount(Object.assign(document.createElement('input'), { type: 'number' }));
+    expect(closedSteps(number, [...typed('12'), { key: 'Backspace' }])).toBe(0);
   });
 });
 

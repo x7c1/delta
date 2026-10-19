@@ -7,8 +7,11 @@ import { isLinuxShell } from './shell';
  * WebKitGTK binds no key to undo, so without this the Linux app has none;
  * macOS gets Cmd-Z from the default Edit menu, and a browser has its own. The
  * history is WebKit's page-wide one, the same the macOS app's Edit menu acts
- * on: one step undoes a run of uninterrupted typing, and undoing past one
- * field's edits moves into another field's.
+ * on, so undoing past one field's edits moves into another field's.
+ *
+ * WebKit groups a whole run of uninterrupted typing, Backspace included, into
+ * one undo step, so Ctrl-Z after deleting a few characters cannot bring just
+ * those back. {@link TypingSteps} splits that run where an editor would.
  *
  * The terminal is left alone: Ctrl-Z there goes to the tmux pane (SIGTSTP).
  */
@@ -67,6 +70,97 @@ export function handleUndoKey(event: KeyboardEvent, exec: ExecCommand): void {
   event.preventDefault();
 }
 
+/** How long a pause in typing ends an undo step, in milliseconds. */
+export const TYPING_PAUSE_MS = 1000;
+
+/** What a key press does to a field's text, as far as undo steps go. */
+type TypingKind = 'insert' | 'delete';
+
+/** The typing kind of a plain key press, or `null` for any other key. */
+function typingKindOf(event: KeyboardEvent): TypingKind | null {
+  if (event.ctrlKey || event.altKey || event.metaKey) {
+    return null;
+  }
+  if (event.key === 'Backspace' || event.key === 'Delete') {
+    return 'delete';
+  }
+  return event.key.length === 1 || event.key === 'Enter' ? 'insert' : null;
+}
+
+/**
+ * Splits WebKit's run of typing into undo steps: a new step starts when the
+ * typing switches between inserting and deleting, at a space or a line break,
+ * after a pause of {@link TYPING_PAUSE_MS}, in a different field, and when an
+ * input method commits its text.
+ *
+ * It works on keydown, before WebKit applies the key: by the time `beforeinput`
+ * fires, WebKit has already added the edit to the open step. Setting the
+ * selection to where it already is closes that step, and the next edit opens a
+ * new one. Only fields with a text selection (`textarea`, text-like `input`)
+ * are split; key presses during IME composition are left to the input method.
+ */
+export class TypingSteps {
+  private lastKind: TypingKind | null = null;
+  private lastAt = 0;
+  private lastTarget: EventTarget | null = null;
+
+  /** Record a key press, closing the open undo step first when a new one starts. */
+  onKeyDown(event: KeyboardEvent, now: number): void {
+    const kind = event.isComposing ? null : typingKindOf(event);
+    const field = kind === null ? null : selectableField(event.target);
+    if (kind === null || field === null) {
+      this.lastKind = null;
+      return;
+    }
+    const startsStep =
+      this.lastKind !== null &&
+      (event.target !== this.lastTarget ||
+        kind !== this.lastKind ||
+        now - this.lastAt > TYPING_PAUSE_MS ||
+        (kind === 'insert' && (event.key === ' ' || event.key === 'Enter')));
+    if (startsStep) {
+      closeStep(field);
+    }
+    this.lastKind = kind;
+    this.lastAt = now;
+    this.lastTarget = event.target;
+  }
+
+  /**
+   * Close the undo step when the input method commits its text, so each
+   * committed conversion is its own step. Its key presses arrive as
+   * composing, which {@link onKeyDown} leaves alone, so without this a
+   * Backspace right after the commit would join the committed text's step.
+   */
+  onCompositionEnd(event: CompositionEvent): void {
+    const field = selectableField(event.target);
+    if (field !== null) {
+      closeStep(field);
+    }
+    this.lastKind = null;
+  }
+}
+
+/** Close WebKit's open typing step by setting the selection to where it already is. */
+function closeStep(field: HTMLTextAreaElement | HTMLInputElement): void {
+  field.setSelectionRange(field.selectionStart, field.selectionEnd, field.selectionDirection ?? undefined);
+}
+
+/** `target` when it is a text field with a text selection, outside the terminal. */
+function selectableField(target: EventTarget | null): HTMLTextAreaElement | HTMLInputElement | null {
+  if (!isEditableTextField(target)) {
+    return null;
+  }
+  if (target instanceof HTMLTextAreaElement) {
+    return target;
+  }
+  // A `number` input has no text selection: setting one throws.
+  if (target instanceof HTMLInputElement && target.selectionStart !== null) {
+    return target;
+  }
+  return null;
+}
+
 /**
  * Install the undo keys on the whole document, inside the Linux shell only.
  * Returns whether they were installed.
@@ -79,6 +173,11 @@ export function installUndoKeys(): boolean {
     // Deprecated, but the only way to reach the engine's own undo history.
     document.execCommand(command);
   };
-  document.addEventListener('keydown', (event) => handleUndoKey(event, exec));
+  const steps = new TypingSteps();
+  document.addEventListener('keydown', (event) => {
+    handleUndoKey(event, exec);
+    steps.onKeyDown(event, performance.now());
+  });
+  document.addEventListener('compositionend', (event) => steps.onCompositionEnd(event));
   return true;
 }
