@@ -13,6 +13,11 @@ export function isMacosShell(): boolean {
   return document.documentElement.dataset.shell === MACOS_SHELL;
 }
 
+/** Whether the page is inside the Linux desktop shell. */
+export function isLinuxShell(): boolean {
+  return document.documentElement.dataset.shell === LINUX_SHELL;
+}
+
 /**
  * What the document title ends with while the terminal has focus. The Linux
  * shell follows the title (see `quit_shortcut.rs`, which holds the same
@@ -26,7 +31,7 @@ export const TERMINAL_FOCUSED_TITLE_SUFFIX = ' [terminal focused]';
  * outside the Linux shell, so the browser's tab title never changes.
  */
 export function reportTerminalFocus(focused: boolean): void {
-  if (document.documentElement.dataset.shell !== LINUX_SHELL) {
+  if (!isLinuxShell()) {
     return;
   }
   const base = document.title.endsWith(TERMINAL_FOCUSED_TITLE_SUFFIX)

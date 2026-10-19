@@ -314,6 +314,14 @@ to it instead.
   the document title while the terminal has focus; the app follows the title
   (the window's own title stays "Delta"). The browser version leaves the title
   alone.
+- **Text input on Linux.** wry turns off the input method's uncommitted
+  (preedit) text on every WebKitGTK webview, so the app turns it back on once
+  the window exists (`ime_preedit.rs`); text being composed with an IME is
+  drawn inline as in a browser. WebKitGTK binds no key to undo, so inside the
+  Linux app the page handles Ctrl-Z (undo) and Ctrl-Shift-Z (redo) in text
+  fields itself (`undoKeys.ts`), through WebKit's page-wide history — not in
+  the terminal, where Ctrl-Z goes on to the pane. macOS gets Cmd-Z from the
+  default Edit menu.
 
 ## Shut down
 
