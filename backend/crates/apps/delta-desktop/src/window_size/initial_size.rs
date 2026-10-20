@@ -5,25 +5,25 @@ use super::{FALLBACK_SIZE, MIN_SIZE};
 /// The share of the monitor's work area the first window takes, per side.
 const WORK_AREA_SHARE: f64 = 0.8;
 
-/// The widest the first window gets for its height: 16:9. A 16:9 or narrower
-/// screen is not affected; on an ultrawide one, 80 % of the width would open a
-/// window far wider than the conversation and the terminal can use.
-const MAX_ASPECT_RATIO: f64 = 16.0 / 9.0;
+/// The widest the first window gets, in logical pixels: the navigator's 288px
+/// (`w-72`) and the terminal's default 384px leave the conversation about
+/// 930px. The conversation has no maximum width of its own, so on a large or
+/// ultrawide screen 80 % of the width would only stretch its lines. A screen
+/// whose 80 % is narrower (1920 wide or less) is not affected.
+const MAX_WIDTH: f64 = 1600.0;
 
 /// The first window's size for a monitor whose work area is `work_area`
-/// logical pixels: 80 % of it per side, no wider than [`MAX_ASPECT_RATIO`]
-/// of its height, and never below [`MIN_SIZE`]. Without a monitor,
-/// [`FALLBACK_SIZE`].
+/// logical pixels: 80 % of it per side, no wider than [`MAX_WIDTH`], and never
+/// below [`MIN_SIZE`]. Without a monitor, [`FALLBACK_SIZE`].
 pub fn initial_size(work_area: Option<LogicalSize<f64>>) -> LogicalSize<f64> {
     match work_area {
-        Some(area) => {
-            let height = (area.height * WORK_AREA_SHARE).round().max(MIN_SIZE.height);
-            let width = (area.width * WORK_AREA_SHARE)
-                .min(height * MAX_ASPECT_RATIO)
+        Some(area) => LogicalSize {
+            width: (area.width * WORK_AREA_SHARE)
+                .min(MAX_WIDTH)
                 .round()
-                .max(MIN_SIZE.width);
-            LogicalSize { width, height }
-        }
+                .max(MIN_SIZE.width),
+            height: (area.height * WORK_AREA_SHARE).round().max(MIN_SIZE.height),
+        },
         None => FALLBACK_SIZE,
     }
 }
@@ -60,23 +60,18 @@ mod tests {
     }
 
     #[test]
-    fn an_ultrawide_work_area_is_narrowed_to_16_by_9() {
+    fn an_ultrawide_work_area_is_narrowed_to_the_maximum_width() {
         assert_eq!(
             initial_size(Some(size(3440.0, 1400.0))),
-            size(1991.0, 1120.0)
+            size(1600.0, 1120.0)
         );
     }
 
     #[test]
-    fn a_short_ultrawide_work_area_is_narrowed_to_16_by_9_of_the_minimum_height() {
-        assert_eq!(initial_size(Some(size(2560.0, 700.0))), size(1138.0, 640.0));
-    }
-
-    #[test]
-    fn a_16_by_10_work_area_keeps_80_percent_of_its_width() {
+    fn a_large_work_area_keeps_80_percent_of_its_height() {
         assert_eq!(
-            initial_size(Some(size(2560.0, 1600.0))),
-            size(2048.0, 1280.0)
+            initial_size(Some(size(3840.0, 2100.0))),
+            size(1600.0, 1680.0)
         );
     }
 
