@@ -222,11 +222,13 @@ to it instead.
   bar and the desktop's own bars, which GNOME on Wayland does not report — so
   it still fits. The first time — when nothing is remembered yet — it opens
   at 80 % of the screen's work area (the screen less the menu bar and Dock, or
-  the panels), centred on macOS, not maximized, and at 1280×800 if no screen
-  can be read. It cannot be made smaller than 1024×640, the smallest size at
-  which the navigator, the conversation and the terminal still sit side by
-  side. Only the size and the maximized state are remembered, not the
-  position: Wayland does not let an app place its window. They are kept in
+  the panels) but no wider than 16:9 of its height, so an ultrawide screen
+  does not open a very wide window; centred on macOS, not maximized, and at
+  1280×800 if no screen can be read. It cannot be made smaller than 1024×640,
+  the smallest size at which the navigator, the conversation and the terminal
+  still sit side by side. Only the size and the maximized state are
+  remembered, not the position: Wayland does not let an app place its
+  window. They are kept in
   the app config directory, written as the app quits — the size in
   `window-size.json` and the maximized state in `.window-state.json`:
   `~/Library/Application Support/io.github.x7c1.delta/` on macOS (the data
