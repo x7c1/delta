@@ -56,6 +56,9 @@ gdkwayland-sys = "0.18"
 gdkx11 = "0.18"
 glib = "0.18"
 gtk = "0.18"
+# Turns the input method's uncommitted text back on in the webview
+# (src/ime_preedit.rs). Pinned to the version wry uses, so no second copy is built.
+webkit2gtk = { version = "=2.0.2", features = ["v2_28"] }
 # Single-instance over the session D-Bus. macOS uses the shell's own lock
 # (src/single_instance), as the plugin's socket there is in the shared `/tmp`.
 tauri-plugin-single-instance = "2"

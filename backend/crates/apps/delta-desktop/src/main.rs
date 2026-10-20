@@ -75,6 +75,8 @@
 //! shortcut from the shell (`quit_shortcut.rs`) — except while the terminal has
 //! focus, where Ctrl-Q goes on to the pane. No menu is installed: replacing
 //! macOS's default one would lose its Edit menu and Cmd-C/V/X/A in the page.
+//! On Linux the shell also turns the input method's uncommitted text back on
+//! in the webview, which wry turns off (`ime_preedit.rs`).
 //!
 //! Erasing everything from Settings → Storage ends it the other way round: the
 //! server stops on its own and returns what it kept ([`serve::ServerStopped`]).
@@ -92,6 +94,8 @@
 #[cfg(target_os = "linux")]
 mod activation_token;
 mod erase;
+#[cfg(target_os = "linux")]
+mod ime_preedit;
 mod links;
 mod logging;
 mod login_env;
@@ -555,6 +559,12 @@ fn open_window(app: &App, started_server: Arc<StartedServer>) -> anyhow::Result<
     #[cfg(target_os = "linux")]
     if let Err(err) = quit_shortcut::install(&window, terminal_focus) {
         tracing::warn!("could not install the Ctrl-Q shortcut: {err:#}");
+    }
+    // Without it the IME still commits text; only the text being composed is
+    // not drawn.
+    #[cfg(target_os = "linux")]
+    if let Err(err) = ime_preedit::enable(&window) {
+        tracing::warn!("could not re-enable the IME's uncommitted text: {err:#}");
     }
     Ok(())
 }

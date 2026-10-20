@@ -4,6 +4,7 @@ import { ApiClient } from '@delta/api-client';
 import { App } from './App';
 import { apiBaseUrl, isMockMode } from './config';
 import { establishAuth, type AuthState } from './features/auth/establishAuth';
+import { installUndoKeys } from './undoKeys';
 import './index.css';
 
 /**
@@ -20,6 +21,7 @@ async function settleAuth(): Promise<AuthState> {
 }
 
 async function bootstrap(): Promise<void> {
+  installUndoKeys();
   if (isMockMode()) {
     const { startMockServiceWorker } = await import('./mocks/browser');
     await startMockServiceWorker();
