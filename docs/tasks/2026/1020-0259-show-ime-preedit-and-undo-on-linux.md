@@ -110,11 +110,11 @@ edit to the open step.)
 
 ### Before merge (verified outside the check command)
 
-- [ ] In the Linux desktop app built from this branch, typing Japanese in
+- [x] In the Linux desktop app built from this branch, typing Japanese in
       the composer with fcitx5 + mozc shows the uncommitted text inline,
       and the candidate window sits at the caret — needs a person: an
       IME session typed by hand.
-- [ ] In the same build, Ctrl-Z undoes typing in the composer step by
+- [x] In the same build, Ctrl-Z undoes typing in the composer step by
       step (typing `abc` then three Backspaces, Ctrl-Z brings `abc`
       back, and the same with Japanese `あいう`) and Ctrl-Shift-Z redoes it, and Ctrl-Z in the terminal still reaches the
       pane (suspends a foreground job) — needs a person: keyboard input in
