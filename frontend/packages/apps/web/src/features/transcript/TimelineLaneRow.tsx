@@ -42,6 +42,13 @@ interface TimelineLaneRowProps {
   messagePxByUuid: Map<string, number>;
   /** The playhead's x (px) on the shared lane axis. */
   playheadX: number;
+  /**
+   * The widest the label cell may grow (px), shared by every lane so the
+   * label column — and with it every lane's playhead segment — stays
+   * aligned. Undefined leaves the label uncapped (before the first
+   * measurement).
+   */
+  labelMaxWidthPx: number | undefined;
 }
 
 /**
@@ -54,6 +61,7 @@ export function TimelineLaneRow({
   laneAxisWidth,
   messagePxByUuid,
   playheadX,
+  labelMaxWidthPx,
 }: TimelineLaneRowProps) {
   // The active-lane highlight (border-y + bg-surface-elevated) is
   // applied identically to BOTH cells of the active lane so
@@ -155,7 +163,14 @@ export function TimelineLaneRow({
         // the old `lineHeight: LANE_HEIGHT_PX` centred only
         // at exactly that height and would leave the glyph
         // pinned to the top of a taller stretched cell.
-        className={`flex h-full items-center truncate whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-code ${
+        // `maxWidth` caps the label so a long subthread name
+        // cannot widen the sticky column over most of the
+        // axis. `text-overflow` does not apply to the text of
+        // a flex container, so the ellipsis lives on the inner
+        // span (a flex item that may shrink below its content
+        // width because it clips its overflow); the full name
+        // stays in the `title` tooltip.
+        className={`flex h-full items-center overflow-hidden whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-code ${
           lane.isMain ? 'text-fg' : 'text-fg-muted'
         } ${labelHighlightClasses}`}
         style={{
@@ -163,9 +178,10 @@ export function TimelineLaneRow({
           left: 0,
           zIndex: 1,
           minHeight: LANE_HEIGHT_PX,
+          maxWidth: labelMaxWidthPx,
         }}
       >
-        {lane.label}
+        <span className="min-w-0 truncate">{lane.label}</span>
       </span>
       <div
         data-timeline-axis=""

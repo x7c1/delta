@@ -34,6 +34,7 @@ import { useTimelinePaneJump } from './useTimelinePaneJump';
 import { LANE_LEFT_PAD_PX, TimelineLaneRow } from './TimelineLaneRow';
 import { useTimelineScrollCatchUp } from './useTimelineScrollCatchUp';
 import { useTimelinePaneScrollFollow } from './useTimelinePaneScrollFollow';
+import { useTimelineAxisViewport } from './useTimelineAxisViewport';
 
 export interface ThreadTimelineOverlayProps {
   /** All threads (main + subthreads) in the focused session. */
@@ -52,6 +53,16 @@ export interface ThreadTimelineOverlayProps {
 const MIN_LANE_AXIS_PX = 240;
 
 /**
+ * The widest the lane label column may grow, as a fraction of the timeline's
+ * visible width (the horizontal-scroll container's `clientWidth`). The sticky
+ * label paints over the axis beneath it, so an uncapped long subthread name
+ * on a narrow card would leave only a sliver of the axis (and often hide the
+ * playhead). Longer labels truncate with an ellipsis; the full name stays in
+ * the label's `title` tooltip.
+ */
+export const LANE_LABEL_MAX_WIDTH_FRACTION = 0.4;
+
+/**
  * Tailwind class string for the collapsed-state toggle button. Mirrors the
  * pane-toggle button's shape exactly so the two buttons sit side-by-side in the
  * top region without one reading as a different control type. The pane-toggle
@@ -64,9 +75,9 @@ export const TIMELINE_TOGGLE_BUTTON_CLASS =
 
 /**
  * Tailwind class string for the expanded-state jump-to-edge buttons (skip-back
- * / skip-forward) that sit on the LEFT of the expanded header row.
+ * / skip-forward) that sit on the right of the expanded header row.
  *
- * Visually intentionally lighter than the Timeline toggle on the right: no
+ * Visually intentionally lighter than the Timeline toggle on the left: no
  * border, no fill, no shadow — just the icon in a muted slate, with a soft
  * background tint on hover for click affordance. The icon itself matches the
  * Timeline glyph's `h-3.5 w-3.5` size so the three header icons read as one
@@ -84,8 +95,8 @@ export const TIMELINE_JUMP_BUTTON_CLASS =
   'inline-flex items-center justify-center rounded p-1 text-fg-subtle transition-colors hover:bg-surface-elevated-hover hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed';
 
 /**
- * The fixed footer between the conversation pane and the composer: a swim-lane
- * timeline of every subthread (and the main thread). Each thread is a row,
+ * The timeline in the transcript's top region (`TranscriptTopRegion`): a
+ * swim-lane timeline of every subthread (and the main thread). Each thread is a row,
  * each speech turn is a mark, and every mark sits on a SHARED time axis driven
  * by the message's `created_at` — idle and thinking gaps render as horizontal
  * whitespace, so the time order is visible at a glance rather than being
@@ -114,8 +125,8 @@ export const TIMELINE_JUMP_BUTTON_CLASS =
  * the eye catches where the jump landed. Hovering a mark does nothing — the
  * playhead is the single source of truth.
  *
- * The footer is always present; clicking the title bar collapses or expands
- * the lanes, and the preference is persisted per device.
+ * The timeline is always present; clicking the title bar collapses or expands
+ * the lanes, and the preference is stored per session.
  *
  * Marks are color-coded by author (user vs everything else) and sized by
  * role (large = main conversation, small = auxiliary). Cross-row derivation
@@ -258,7 +269,7 @@ export function ThreadTimelineOverlay({
     });
 
   // The lane the highlight follows: the active message's lane when there is
-  // one, else fall back to the prop so a freshly-mounted footer still marks
+  // one, else fall back to the prop so a freshly-mounted timeline still marks
   // the active thread before any messages have loaded.
   const highlightedThreadId = activeMessage?.threadId ?? activeThreadId;
 
@@ -270,6 +281,15 @@ export function ThreadTimelineOverlay({
   // and suppress the page scroll while scrubbing.
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const axisScrollRef = useRef<HTMLDivElement | null>(null);
+  // The axis-scroll container's visible width drives the label-column cap
+  // and the playhead catch-up on resize. 0 until it is mounted and measured,
+  // in which case the labels stay uncapped.
+  const { setAxisScrollNode, axisViewportWidth } =
+    useTimelineAxisViewport(axisScrollRef);
+  const labelMaxWidthPx =
+    axisViewportWidth > 0
+      ? Math.floor(axisViewportWidth * LANE_LABEL_MAX_WIDTH_FRACTION)
+      : undefined;
   // Both mirrors feed the native wheel / keyboard handlers, so they follow the
   // same layout-phase discipline as `sortedMessagesRef` above: a step must be
   // computed from the playhead position and the mark list the user can
@@ -358,6 +378,7 @@ export function ThreadTimelineOverlay({
   useTimelineScrollCatchUp({
     userActedTick,
     axisScrollRef,
+    axisViewportWidth,
     bodyRef,
     activeMessage,
     laneAxisWidth,
@@ -402,7 +423,7 @@ export function ThreadTimelineOverlay({
   }
   // Disable the jump buttons when there is nothing to jump to. The
   // single-source flag matches `setActiveMessageIndex`'s own empty-list guard
-  // (L927) — calling it with no messages is a no-op anyway, but visibly
+  // — calling it with no messages is a no-op anyway, but visibly
   // dimming the buttons reads as "no targets" rather than "broken control".
   // Clicking either button at the edge (e.g. "jump to start" when already at
   // index 0) is intentionally still allowed — it bumps `scrubTick` which
@@ -436,9 +457,9 @@ export function ThreadTimelineOverlay({
                   `h-3.5 w-3.5` — for the same "quieter satellite"
                   reason. The jump buttons live outside the toggle so a
                   click on either one does NOT collapse the timeline.
-                  The wrapper's `pr-3` keeps the right inset symmetric
-                  with the left (12 px before the rightmost jump
-                  button). */}
+                  The header row's `pr-1` leaves a 4 px inset after the
+                  rightmost jump button, whose own `p-1` adds the rest
+                  of the breathing room. */}
       <div className="flex w-full items-center justify-between pr-1">
         <button
           type="button"
@@ -488,7 +509,7 @@ export function ThreadTimelineOverlay({
             </p>
           ) : (
             <div
-              ref={axisScrollRef}
+              ref={setAxisScrollNode}
               data-testid="thread-timeline-axis-column"
               // The single horizontal-scroll container for the whole lane
               // grid. The wheel listener attaches here (it discriminates
@@ -504,11 +525,15 @@ export function ThreadTimelineOverlay({
                   issues at once. `grid-template-columns: max-content 1fr`
                   sizes the label column to the widest label across every
                   lane, so all lane labels share the same width and there is
-                  no hard-coded fixed gutter. `align-items: center` centres
-                  each row's two cells on the same baseline, eliminating
-                  the cumulative drift the prior flex layout suffered when
-                  the label cell's padding inflated its height past the
-                  axis cell's fixed pixel height. The lane rows share
+                  no hard-coded fixed gutter. Each label carries the same
+                  `maxWidth` (LANE_LABEL_MAX_WIDTH_FRACTION of the visible
+                  width), which bounds its max-content contribution, so the
+                  shared column never grows past the cap. `align-items:
+                  stretch` (see the style below) gives each row's two cells
+                  the same height, eliminating the cumulative drift the
+                  prior flex layout suffered when the label cell's padding
+                  inflated its height past the axis cell's fixed pixel
+                  height. The lane rows share
                   `row-gap: 0` (the Tailwind default — no `gap-y-*` class)
                   so the per-lane playhead spans align edge-to-edge across
                   rows; any non-zero row gap would show as a visible break
@@ -565,6 +590,7 @@ export function ThreadTimelineOverlay({
                       laneAxisWidth={laneAxisWidth}
                       messagePxByUuid={messagePxByUuid}
                       playheadX={playheadX}
+                      labelMaxWidthPx={labelMaxWidthPx}
                     />
                   );
                 })}

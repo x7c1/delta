@@ -130,7 +130,7 @@ export interface LaneCluster {
 }
 
 /**
- * A swim lane in the timeline footer: one row per (sub)thread. Lanes are
+ * A swim lane in the timeline: one row per (sub)thread. Lanes are
  * sorted oldest → newest by the thread's `created_at`, matching the
  * navigator's tree order.
  */
@@ -140,7 +140,8 @@ export interface TimelineLane {
    * Label shown next to the lane: `main` for the main thread, or the wire
    * `thread.title` for a subthread (same source Navigator displays, via the
    * shared {@link threadDisplayName} helper). Visual truncation is the
-   * renderer's job (it reserves a fixed label column and CSS-truncates).
+   * renderer's job (it caps the label column at a fraction of the visible
+   * timeline width and truncates with an ellipsis).
    */
   label: string;
   /**
@@ -340,7 +341,7 @@ export const IDLE_GAP_CAP_FACTOR_K = 3;
 export const MIN_IDLE_GAP_CAP_MS = 60_000;
 
 /**
- * Build the swim-lane structure for the timeline footer from a session's
+ * Build the swim-lane structure for the timeline from a session's
  * thread list and a per-thread message map.
  *
  * Each thread becomes one lane; lane labels go through the shared
@@ -358,7 +359,7 @@ export const MIN_IDLE_GAP_CAP_MS = 60_000;
  * by author (user vs everything else).
  *
  * A thread missing from `messagesByThread` contributes an empty lane (no
- * marks). This lets the footer still draw the lane row while the per-thread
+ * marks). This lets the timeline still draw the lane row while the per-thread
  * fetch is in flight, instead of suppressing it and resizing the moment the
  * data arrives.
  */

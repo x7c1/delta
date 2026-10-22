@@ -1,4 +1,4 @@
-import { useEffect, type MutableRefObject } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { SortedMessage } from './timelineLanes';
 import { LANE_LEFT_PAD_PX } from './TimelineLaneRow';
 
@@ -7,6 +7,12 @@ interface TimelineScrollCatchUpArgs {
   userActedTick: number;
   /** The horizontal-scroll container of the lane grid. */
   axisScrollRef: MutableRefObject<HTMLDivElement | null>;
+  /**
+   * The horizontal-scroll container's measured width (px); 0 while it is
+   * unmounted or not measured yet. A change between two non-zero widths
+   * re-runs the horizontal visibility check without a navigation.
+   */
+  axisViewportWidth: number;
   /** The vertically scrolling body wrapper around the lane grid. */
   bodyRef: MutableRefObject<HTMLDivElement | null>;
   /** The message the playhead sits on, or null. */
@@ -18,64 +24,93 @@ interface TimelineScrollCatchUpArgs {
 }
 
 /**
- * Keep the playhead inside the lane grid's horizontal viewport and the active
- * lane row inside its vertical one after every user-driven navigation.
+ * Scroll the lane grid horizontally so the playhead sits inside the visible
+ * axis band, the part of the viewport to the right of the sticky label
+ * column. Does nothing while the playhead is already inside that band with a
+ * comfortable margin on both sides.
+ *
+ * The scroll container hosts BOTH the sticky label column and the axis cells
+ * (one grid, `grid-template-columns: max-content 1fr`), so scroll-content
+ * x=0 sits at the label cell's left edge. A mark's content-space x is
+ * therefore `labelWidth + LANE_LEFT_PAD_PX + xInAxis`; the label width is
+ * read live from the first axis cell's `offsetLeft`, the same for every
+ * lane because all lanes share one grid column.
+ *
+ * The sticky label (`position: sticky; left: 0; zIndex: 1`, opaque) paints
+ * over viewport-x `[0, labelWidth]`, so the playhead is hidden as soon as it
+ * enters that band. The visible axis band is `[labelWidth, clientWidth]` in
+ * viewport space, and both the trigger and the landing are expressed against
+ * it:
+ *
+ *  - Trigger: the left threshold is `viewLeft + labelWidth + margin`, the
+ *    right one `viewRight - margin` (nothing covers the right edge). The
+ *    margin re-centres the playhead BEFORE it reaches either boundary, so it
+ *    never visibly vanishes during a scrub.
+ *  - Landing: the playhead lands in the middle of the visible axis band, not
+ *    of the whole viewport. Centring on the whole viewport would put the
+ *    playhead under the label whenever the label column is wider than half
+ *    the viewport.
+ */
+function scrollPlayheadIntoAxisBand(
+  scrollEl: HTMLDivElement,
+  playheadXInAxis: number,
+): void {
+  const axisEl = scrollEl.querySelector<HTMLElement>('[data-timeline-axis]');
+  // Falling back to 0 treats the axis as starting at the scroll origin if
+  // the query misses (e.g. before first paint).
+  const labelOffsetPx = axisEl?.offsetLeft ?? 0;
+  const playheadInContent = labelOffsetPx + playheadXInAxis + LANE_LEFT_PAD_PX;
+  const viewportWidth = scrollEl.clientWidth;
+  // The margin is `max(80, clientWidth / 5)`: 80 px is a hard floor so the
+  // threshold is meaningful on narrow panels, and 20% of the viewport scales
+  // it up on wider ones.
+  const margin = Math.max(80, viewportWidth / 5);
+  const viewLeft = scrollEl.scrollLeft;
+  const viewRight = viewLeft + viewportWidth;
+  const leftEdgeThreshold = viewLeft + labelOffsetPx + margin;
+  const rightEdgeThreshold = viewRight - margin;
+  if (
+    playheadInContent >= leftEdgeThreshold &&
+    playheadInContent <= rightEdgeThreshold
+  ) {
+    return;
+  }
+  // Middle of the visible axis band, in viewport space. Landing there
+  // maximises the distance to either edge before the next step can trigger
+  // another scroll.
+  const bandCentre = labelOffsetPx + (viewportWidth - labelOffsetPx) / 2;
+  // Use the native smooth-scroll API so the re-centre animates instead of
+  // snapping; it also honours `prefers-reduced-motion` with no explicit
+  // branch on our side.
+  scrollEl.scrollTo({
+    left: Math.max(0, playheadInContent - bandCentre),
+    behavior: 'smooth',
+  });
+}
+
+/**
+ * Keep the playhead inside the lane grid's visible axis band and the active
+ * lane row inside its vertical viewport after every user-driven navigation,
+ * and bring the playhead back into the band when the timeline is resized.
  */
 export function useTimelineScrollCatchUp({
   userActedTick,
   axisScrollRef,
+  axisViewportWidth,
   bodyRef,
   activeMessage,
   laneAxisWidth,
   messagePxByUuid,
 }: TimelineScrollCatchUpArgs): void {
   // After a user-driven navigation, ensure the playhead is visible inside
-  // the axis column's horizontal viewport. The lane axis is fixed-width so
-  // this only matters when the viewport is narrower than the axis (e.g. a
-  // narrow side panel); when the axis fits, no scroll is needed.
+  // the visible axis band. The lane axis is fixed-width so this only matters
+  // when the viewport is narrower than the label column plus the axis (e.g.
+  // a narrow window); when everything fits, no scroll is needed.
   //
-  // v31 fix 1: re-centre as soon as the playhead crosses INTO the edge
-  // margin, not only after it has gone completely off-screen. Without the
-  // margin, the scroll catch-up fires one full edge-width late and the
-  // playhead visibly disappears for ~one viewport before the scroll lands.
-  //
-  // v31 fix 2 (label-width offset): under the v20 grid layout the same
-  // scroll container hosts BOTH the sticky label column AND the axis cell
-  // — `<ul style="grid-template-columns: max-content 1fr; width: max-content">`
-  // — so scroll-content x=0 sits at the label cell's left edge, not at the
-  // axis's left edge. The dots' content-space x is therefore
-  // `labelWidth + LANE_LEFT_PAD_PX + xInAxis`, where the leading
-  // `labelWidth` only enters via the axis cell's `offsetLeft` (the prior
-  // v9 layout did not have this offset because labels lived outside the
-  // scroll container). The previous math used `LANE_LEFT_PAD_PX +
-  // xInAxis` alone, so the visibility check sat `labelWidth` pixels to
-  // the left of where the playhead actually paints — early-message
-  // playheads read as "in view" while their on-screen position was
-  // already past the right edge, and late-message playheads triggered a
-  // scroll past the real content.
-  //
-  // v31 fix 3 (asymmetric edge thresholds): the sticky label cell paints
-  // over viewport-x `[0, labelOffsetPx]` on every frame (it is
-  // `position: sticky; left: 0; zIndex: 1` and the playhead carries no
-  // explicit z-index, so the label wins the stack). That means the
-  // playhead becomes physically hidden the moment its viewport-x drops
-  // below `labelOffsetPx`, even though it is still inside the scroll
-  // viewport mathematically. The left-edge catch-up therefore has to
-  // fire AT the back of the sticky band, not at the raw viewport left:
-  // `leftEdgeThreshold = viewLeft + labelOffsetPx + margin`. The right
-  // edge has no symmetric overlay (nothing pins to the right of the axis
-  // column), so it stays `viewRight - margin`. When `labelOffsetPx === 0`
-  // the left formula collapses back to `viewLeft + margin`, so this is a
-  // pure widening of the trigger band on layouts that do have a label
-  // column — the no-label path is unchanged.
-  //
-  // Gated on {@link userActedTick} (not {@link scrubTick}) so EVERY route
-  // that moves the active message — wheel/click jump, pane-scroll follower,
-  // and Navigator-driven cross-pane switch — keeps the playhead inside the
-  // axis viewport. A fresh mount still sits at `userActedTick === 0` and
-  // performs no scroll, matching the prior behaviour. The wider gate is
-  // what fixes the dogfooding bug where picking a subthread from the
-  // Navigator left the playhead off-screen on long sessions.
+  // Gated on {@link userActedTick} (not `scrubTick`) so EVERY route that
+  // moves the active message — wheel/click jump, pane-scroll follower, and
+  // Navigator-driven cross-pane switch — keeps the playhead visible. A fresh
+  // mount sits at `userActedTick === 0` and performs no scroll.
   useEffect(() => {
     if (userActedTick === 0) {
       return;
@@ -84,55 +119,41 @@ export function useTimelineScrollCatchUp({
     if (!scrollEl || activeMessage === null) {
       return;
     }
-    // The first axis cell shares its content-space origin with every
-    // other lane (one grid column, same `<ul>`), so its `offsetLeft` is
-    // the label-column width inside the scroll container. Using the live
-    // measurement (rather than a hard-coded width) keeps the fix robust
-    // against future label-width tweaks. Falling back to 0 leaves us in
-    // the v30 coord system if the query misses (e.g. before first paint).
-    const axisEl = scrollEl.querySelector<HTMLElement>('[data-timeline-axis]');
-    const labelOffsetPx = axisEl?.offsetLeft ?? 0;
-    const playheadInContent =
-      labelOffsetPx +
-      (messagePxByUuid.get(activeMessage.uuid) ?? 0) +
-      LANE_LEFT_PAD_PX;
-    // Threshold-based scroll-follow. The margin keeps the playhead inside
-    // a comfortable band away from both viewport edges so the bar never
-    // visibly vanishes during a scrub: as the user steps the playhead
-    // toward an edge, the scroll re-centres BEFORE the bar reaches the
-    // boundary. The bound is `max(80, clientWidth / 5)`: 80 px is a hard
-    // floor so the threshold is meaningful even on narrow panels, and
-    // 20% of the viewport scales the margin up gracefully on wider ones.
-    // On a 600 px viewport the margin is 120 px (a fifth); on a 200 px
-    // panel it's the 80 px floor. Re-centering puts the playhead at the
-    // viewport's midpoint — the same generous landing the off-screen
-    // case used in v30 — which maximises the distance to either edge
-    // before the next step can trigger another scroll.
-    const margin = Math.max(80, scrollEl.clientWidth / 5);
-    const viewLeft = scrollEl.scrollLeft;
-    const viewRight = viewLeft + scrollEl.clientWidth;
-    // Asymmetric thresholds: the left edge accounts for the sticky label
-    // overlay (see "v31 fix 3" above) so the catch-up fires before the
-    // playhead disappears under it. The right edge stays at the raw
-    // viewport boundary because nothing covers it.
-    const leftEdgeThreshold = viewLeft + labelOffsetPx + margin;
-    const rightEdgeThreshold = viewRight - margin;
-    if (
-      playheadInContent < leftEdgeThreshold ||
-      playheadInContent > rightEdgeThreshold
-    ) {
-      // Use the native smooth-scroll API so the re-centre animates instead
-      // of snapping. A direct `scrollLeft = ...` assignment causes a visible
-      // jump as the playhead approaches the viewport edge; `scrollTo` lets
-      // the browser interpolate, and it also honours `prefers-reduced-motion`
-      // automatically — users who have disabled motion still get an instant
-      // jump via the same code path, with no explicit branch on our side.
-      scrollEl.scrollTo({
-        left: Math.max(0, playheadInContent - scrollEl.clientWidth / 2),
-        behavior: 'smooth',
-      });
-    }
+    scrollPlayheadIntoAxisBand(
+      scrollEl,
+      messagePxByUuid.get(activeMessage.uuid) ?? 0,
+    );
   }, [userActedTick, activeMessage, laneAxisWidth, messagePxByUuid]);
+
+  // Resize path: narrowing the window shrinks the visible axis band (and the
+  // capped label column with it), which can leave the playhead under the
+  // sticky label or past the right edge with no navigation to trigger the
+  // effect above. Re-run the same check whenever the measured width changes
+  // between two non-zero values. The first measurement after mount (0 → w)
+  // is skipped, so a fresh mount still performs no scroll; a collapse
+  // unmounts the scroll container and resets the width to 0, so the next
+  // expand is a fresh mount too. Other dependency changes leave the width
+  // unchanged and return early: the navigation path above owns those.
+  const previousAxisViewportWidthRef = useRef(axisViewportWidth);
+  useEffect(() => {
+    const previous = previousAxisViewportWidthRef.current;
+    previousAxisViewportWidthRef.current = axisViewportWidth;
+    if (
+      previous === 0 ||
+      axisViewportWidth === 0 ||
+      previous === axisViewportWidth
+    ) {
+      return;
+    }
+    const scrollEl = axisScrollRef.current;
+    if (!scrollEl || activeMessage === null) {
+      return;
+    }
+    scrollPlayheadIntoAxisBand(
+      scrollEl,
+      messagePxByUuid.get(activeMessage.uuid) ?? 0,
+    );
+  }, [axisViewportWidth, axisScrollRef, activeMessage, messagePxByUuid]);
 
   // Vertical counterpart of the horizontal catch-up above: keep the ACTIVE
   // LANE ROW visible inside the body wrapper's vertical viewport (the
@@ -158,8 +179,8 @@ export function useTimelineScrollCatchUp({
   //     playhead's content x from `messagePxByUuid` (the playhead is a
   //     painted offset, not an element with its own scroll geometry); the
   //     lane row IS an element, so measuring rect-vs-rect against the
-  //     scroll container is both simpler and immune to the label-offset
-  //     coordinate bug the horizontal math had to fix (v31 fix 2).
+  //     scroll container is both simpler and needs no label-offset
+  //     correction.
   //
   // The measured element is the active lane's AXIS CELL, not its `<li>`:
   // the `<li>` is `display: contents` and generates no box, so its rect is
