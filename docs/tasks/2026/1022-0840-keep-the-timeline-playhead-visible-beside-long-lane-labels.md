@@ -98,8 +98,8 @@ The timeline has moved from a footer to the top region of the transcript
 
 ### Before merge (verified outside the check command)
 
-- [ ] In the running app, with a subthread whose name is longer than half the
+- [x] In the running app, with a subthread whose name is longer than half the
       timeline's width, narrowing the window keeps the playhead visible and
       the long label ends in an ellipsis whose tooltip shows the full name.
-- [ ] Wheel, ArrowLeft / ArrowRight and click navigation still move the
+- [x] Wheel, ArrowLeft / ArrowRight and click navigation still move the
       playhead and keep it visible on a narrow window with long labels.
