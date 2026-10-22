@@ -87,6 +87,10 @@ pub(crate) struct FakeStoreInner {
     /// other), so a test can make one session's background tick fail outside
     /// its transcript read.
     pub(crate) fail_session_lookup_for: Option<SessionId>,
+    /// When set, [`MessageStore::set_transcript_lines_read`](crate::ports::MessageStore::set_transcript_lines_read)
+    /// fails with a store error, so a test can make the line cursor stay put
+    /// after a read.
+    pub(crate) fail_set_transcript_lines_read: bool,
     /// How many times some read methods were called, for tests that assert a
     /// use case reads in batches rather than once per row.
     pub(crate) calls: FakeStoreCalls,

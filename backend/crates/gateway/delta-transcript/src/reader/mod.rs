@@ -31,10 +31,11 @@ pub const MAX_TRANSCRIPT_BYTES: u64 = 256 * 1024 * 1024;
 /// blank, no-uuid (e.g. `file-history-snapshot`), not UTF-8, or unparsable —
 /// still advance the line index, so the reported `total_lines` and each
 /// message's `seq` track the file's true position and the caller's line cursor
-/// reads each line exactly once. Unparsable non-blank lines are skipped (with a
-/// warning naming the transcript and the line), and lines that are not UTF-8
-/// are skipped (at `debug`, with their line number), rather than aborting the
-/// whole read, so one malformed line cannot stall ingestion.
+/// reads each line exactly once. Unparsable non-blank lines are skipped and
+/// returned in [`TranscriptRead::unparsable_lines`], each naming the transcript
+/// and the line, for the caller to report once its cursor has moved past them.
+/// Lines that are not UTF-8 are skipped (at `debug`, with their line number).
+/// Neither aborts the whole read, so one malformed line cannot stall ingestion.
 ///
 /// The read is bounded: only a regular file is read — a FIFO, a device or a
 /// directory is refused with [`Error::NotRegularFile`], and the file is opened
@@ -87,24 +88,16 @@ impl Transcript for JsonlTranscript {
                 messages: Vec::new(),
                 total_lines: 0,
                 relocated_cwd: None,
+                unparsable_lines: Vec::new(),
             });
         };
 
         let parsed = parse_lines(Path::new(path), &contents, from_line);
-        // An unparsable line is skipped rather than failing the read (see the
-        // type doc), but still reported, naming the file and the line, so an
-        // operator can find it. The cursor moves past it, so each is reported
-        // once.
-        for err in &parsed.unparsable {
-            tracing::warn!(
-                error = %delta_usecase::with_causes(err),
-                "skipping unparsable transcript line"
-            );
-        }
         Ok(TranscriptRead {
             messages: parsed.messages,
             total_lines: parsed.total_lines,
             relocated_cwd: parsed.relocated_cwd,
+            unparsable_lines: parsed.unparsable.into_iter().map(Into::into).collect(),
         })
     }
 
@@ -541,36 +534,46 @@ mod tests {
         assert_eq!(out.messages[0].seq, 1);
     }
 
-    /// A line that is not JSON is reported as a parse error naming the
-    /// transcript and the line (1-based), and that location survives the
-    /// conversion into the use-case error, which keeps the parser's error as
-    /// its source. Lines before the cursor are not re-reported.
-    #[test]
-    fn an_unparsable_line_is_reported_with_its_path_and_line() {
+    /// A line that is not JSON is returned in the read as a parse error naming
+    /// the transcript and the line (1-based), with the parser's error as its
+    /// source, while the lines around it are still read. Lines before the
+    /// cursor are not returned again.
+    #[tokio::test]
+    async fn an_unparsable_line_is_returned_with_its_path_and_line() {
         use delta_usecase::TranscriptError;
         use std::error::Error as _;
 
-        let user = r#"{"uuid":"u1","type":"user","message":{"content":"ok","role":"user"}}"#;
-        let contents = format!("{user}\nnot json at all\n{user}\n");
-        let path = Path::new("/p/-work/sess-1.jsonl");
+        let mut file = tempfile_jsonl();
+        let user = |uuid: &str| {
+            format!(
+                r#"{{"uuid":"{uuid}","type":"user","message":{{"content":"ok","role":"user"}}}}"#
+            )
+        };
+        writeln!(file, "{}", user("u1")).unwrap();
+        writeln!(file, "not json at all").unwrap();
+        writeln!(file, "{}", user("u2")).unwrap();
+        file.flush().unwrap();
+        let path = file.path().to_str().unwrap().to_owned();
 
-        let parsed = parse_lines(path, contents.as_bytes(), 0);
-        assert_eq!(parsed.messages.len(), 2, "the bad line costs only itself");
-        let [err] = <[Error; 1]>::try_from(parsed.unparsable).unwrap();
-        let err = delta_usecase::Error::from(err);
-        let delta_usecase::Error::Transcript(TranscriptError::Parse {
+        let t = JsonlTranscript::new();
+        let read = t.read_from(&path, 0).await.unwrap();
+        assert_eq!(read.total_lines, 3);
+        let seqs: Vec<i64> = read.messages.iter().map(|m| m.seq).collect();
+        assert_eq!(seqs, [0, 2], "the bad line costs only itself");
+        let [err] = <[TranscriptError; 1]>::try_from(read.unparsable_lines).unwrap();
+        let TranscriptError::Parse {
             path: err_path,
             line,
             ..
-        }) = &err
+        } = &err
         else {
             panic!("expected a parse error, got {err:?}");
         };
-        assert_eq!(err_path, path);
+        assert_eq!(err_path, Path::new(&path));
         assert_eq!(*line, 2);
         let message = err.to_string();
         assert!(
-            message.contains("/p/-work/sess-1.jsonl") && message.contains("line 2"),
+            message.contains(&path) && message.contains("line 2"),
             "the message names the transcript and the line, got {message:?}"
         );
         let source = err.source().expect("the parse error has a source");
@@ -579,8 +582,9 @@ mod tests {
             "the source is the serde_json error, got {source:?}"
         );
 
-        let past_it = parse_lines(path, contents.as_bytes(), 2);
-        assert!(past_it.unparsable.is_empty());
+        let past_it = t.read_from(&path, 2).await.unwrap();
+        assert!(past_it.unparsable_lines.is_empty());
+        assert_eq!(past_it.messages.len(), 1);
     }
 
     /// A no-uuid line (e.g. Claude Code's `file-history-snapshot`) interleaved

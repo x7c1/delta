@@ -2,7 +2,7 @@
 
 use delta_model::{Message, MessageUuid, SessionId, ThreadId};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 use super::FakeStore;
 
@@ -64,11 +64,13 @@ impl FakeStore {
         session_id: &SessionId,
         lines: usize,
     ) -> Result<()> {
-        self.inner
-            .lock()
-            .unwrap()
-            .transcript_lines_read
-            .insert(session_id.clone(), lines);
+        let mut g = self.inner.lock().unwrap();
+        if g.fail_set_transcript_lines_read {
+            return Err(Error::Store(format!(
+                "injected line cursor write failure for {session_id}"
+            )));
+        }
+        g.transcript_lines_read.insert(session_id.clone(), lines);
         Ok(())
     }
 

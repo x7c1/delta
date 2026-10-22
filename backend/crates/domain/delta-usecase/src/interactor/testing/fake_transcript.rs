@@ -31,8 +31,11 @@ pub(crate) const DEFAULT_TRANSCRIPT_PATH: &str = "/tmp/t.jsonl";
 enum FakeLine {
     /// A line that parses into a message.
     Message(Box<TranscriptMessage>),
-    /// A line that produces no message (blank / no-uuid / unparsable).
+    /// A line that produces no message (blank / no-uuid).
     Skipped,
+    /// A line that cannot be parsed: it produces no message and is returned
+    /// in the read as a [`TranscriptError::Parse`].
+    Unparsable,
     /// A `relocated` line naming the working directory the transcript was
     /// moved for.
     Relocated(String),
@@ -91,6 +94,7 @@ impl Transcript for FakeTranscript {
         let lines = by_path.get(path).cloned().unwrap_or_default();
         let mut messages = Vec::new();
         let mut relocated_cwd = None;
+        let mut unparsable_lines = Vec::new();
         for (idx, line) in lines.iter().enumerate().skip(from_line) {
             match line {
                 FakeLine::Message(msg) => {
@@ -99,6 +103,12 @@ impl Transcript for FakeTranscript {
                     messages.push(msg);
                 }
                 FakeLine::Skipped => {}
+                FakeLine::Unparsable => unparsable_lines.push(TranscriptError::Parse {
+                    path: path.into(),
+                    line: idx + 1,
+                    source: serde_json::from_str::<serde_json::Value>("not json")
+                        .expect_err("not JSON"),
+                }),
                 FakeLine::Relocated(cwd) => relocated_cwd = Some(cwd.clone()),
             }
         }
@@ -106,6 +116,7 @@ impl Transcript for FakeTranscript {
             messages,
             total_lines: lines.len(),
             relocated_cwd,
+            unparsable_lines,
         })
     }
 
@@ -216,5 +227,17 @@ impl FakeTranscript {
             .entry(DEFAULT_TRANSCRIPT_PATH.to_owned())
             .or_default()
             .push(FakeLine::Skipped);
+    }
+
+    /// Append a line that cannot be parsed as the next line of `path`: like
+    /// the real reader, it produces no message, advances the cursor, and is
+    /// returned in the read as a parse error naming the path and the line.
+    pub(crate) fn push_unparsable_line_to(&self, path: &str) {
+        self.by_path
+            .lock()
+            .unwrap()
+            .entry(path.to_owned())
+            .or_default()
+            .push(FakeLine::Unparsable);
     }
 }
