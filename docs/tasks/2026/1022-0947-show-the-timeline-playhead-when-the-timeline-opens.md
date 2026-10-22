@@ -72,6 +72,6 @@ the same) so they describe the new behaviour.
 
 ### Before merge (verified outside the check command)
 
-- [ ] In the running app, on a long session, expanding the timeline shows the
+- [x] In the running app, on a long session, expanding the timeline shows the
       playhead inside the visible axis band immediately, without a sliding
       animation, and collapsing and re-expanding does the same.
