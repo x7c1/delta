@@ -25,6 +25,7 @@ use delta_model::{Message, Session};
 
 use crate::error::Result;
 use crate::ports::{SessionStore, Transcript};
+use crate::with_causes;
 
 /// A per-provider producer of canonical conversation content.
 ///
@@ -106,6 +107,19 @@ where
         self.store
             .set_transcript_lines_read(&session.id, read.total_lines)
             .await?;
+
+        // An unparsable line is skipped rather than stalling ingestion, but
+        // reported, naming the file and the line, so an operator can find it.
+        // Reported only now that the cursor has moved past it: while the
+        // cursor write fails, the next tick re-reads the same range, and a
+        // report made before the write would repeat on every tick.
+        for err in &read.unparsable_lines {
+            tracing::warn!(
+                session_id = %session.id,
+                error = %with_causes(err),
+                "skipping unparsable transcript line"
+            );
+        }
 
         if read.messages.is_empty() {
             return Ok((Vec::new(), Vec::new()));

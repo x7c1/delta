@@ -46,7 +46,8 @@ pub enum Error {
     /// Line `line` (1-based) of the transcript at `path` could not be parsed
     /// as JSON. `path` and `line` lead an operator to the broken line; the
     /// parser's own error is the `source`. A read never fails with it:
-    /// [`crate::JsonlTranscript`] skips the line and logs this error instead.
+    /// [`crate::JsonlTranscript`] skips the line and returns this error in the
+    /// read for the caller to report.
     #[error("transcript parse error at {} line {line}", path.display())]
     Parse {
         path: PathBuf,

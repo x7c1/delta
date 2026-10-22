@@ -157,6 +157,7 @@ mod tests {
                 .collect(),
             total_lines,
             relocated_cwd: None,
+            unparsable_lines: Vec::new(),
         }
     }
 
