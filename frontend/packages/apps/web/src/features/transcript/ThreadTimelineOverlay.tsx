@@ -173,6 +173,14 @@ export function ThreadTimelineOverlay({
     return map;
   }, [messagesQueries]);
 
+  // False while any lane's first fetch is still in flight. A background
+  // refetch keeps `isPending` false, so a refetch never turns it back to
+  // false; a lane added later (a new subthread) does, until its first fetch
+  // lands. Lanes already in the cache (a re-expand) are settled at once.
+  const lanesSettled = messagesQueries.every(
+    (entry) => !entry.result.isPending,
+  );
+
   const lanes = useMemo(
     () => buildTimelineLanes(threads, messagesByThread),
     [threads, messagesByThread],
@@ -383,6 +391,8 @@ export function ThreadTimelineOverlay({
     activeMessage,
     laneAxisWidth,
     messagePxByUuid,
+    showingKey: focusedSessionId,
+    lanesSettled,
   });
 
   useTimelinePaneScrollFollow({

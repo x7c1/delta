@@ -10,6 +10,7 @@
 import { createRef, type RefObject } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
+  act,
   render,
   screen,
   waitFor,
@@ -110,33 +111,40 @@ export function makeUserText(
 
 /**
  * Render the overlay against a stubbed ApiClient that resolves
- * `getThreadMessages` from the provided in-memory map. The conversation body
- * is a sibling div carrying the article elements the playhead's jump targets.
+ * `getThreadMessages` from the provided in-memory map, read at call time so a
+ * test can change the map and refetch through the returned `queryClient`.
+ * `beforeFetch`, when given, is awaited before each response so a test can
+ * hold the lane messages back. The conversation body is a sibling div
+ * carrying the article elements the playhead's jump targets.
  */
 export function renderOverlay({
   threads,
   messagesByThread,
   activeThreadId = null,
   conversationArticles = [] as { uuid: string }[],
+  beforeFetch,
 }: {
   threads: Thread[];
   messagesByThread: Map<number, Message[]>;
   activeThreadId?: number | null;
   conversationArticles?: { uuid: string }[];
+  beforeFetch?: () => Promise<void>;
   // Explicit return type: the inferred RenderResult drags non-portable
   // pretty-format type paths into the exported signature (TS2742).
 }): RenderResult & {
   apiClient: ApiClient;
   bodyRef: RefObject<HTMLDivElement>;
+  queryClient: QueryClient;
 } {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   const apiClient = new ApiClient({ baseUrl: 'http://localhost' });
   vi.spyOn(apiClient, 'getThreadMessages').mockImplementation(
-    async (threadId) => ({
-      messages: messagesByThread.get(threadId as number) ?? [],
-    }),
+    async (threadId) => {
+      await beforeFetch?.();
+      return { messages: messagesByThread.get(threadId as number) ?? [] };
+    },
   );
   const bodyRef = createRef<HTMLDivElement>();
   const result = render(
@@ -159,7 +167,7 @@ export function renderOverlay({
       </ApiProvider>
     </QueryClientProvider>,
   );
-  return { ...result, apiClient, bodyRef };
+  return { ...result, apiClient, bodyRef, queryClient };
 }
 
 /**
@@ -273,3 +281,67 @@ export async function waitForPlayheadAt(expectedPx: string): Promise<void> {
 export const TIMERS_ONLY: Parameters<typeof vi.useFakeTimers>[0] = {
   toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
 };
+
+/**
+ * Override a layout property on a single element. jsdom runs no layout, so
+ * `clientWidth` and `offsetLeft` are 0 unless a test stubs them.
+ */
+export function defineLayoutProp(
+  el: HTMLElement,
+  prop: 'clientWidth' | 'offsetLeft',
+  value: number,
+): void {
+  Object.defineProperty(el, prop, {
+    configurable: true,
+    get: () => value,
+  });
+}
+
+export interface ControllableResizeObservers {
+  /** Stub `el`'s `clientWidth` to `width` and notify its observer. */
+  resize: (el: HTMLElement, width: number) => void;
+  restore: () => void;
+}
+
+/**
+ * Replace the inert global `ResizeObserver` with one whose callbacks the
+ * test fires by hand through {@link ControllableResizeObservers.resize}.
+ * Call `restore` after the test (typically from `afterEach`).
+ */
+export function installControllableResizeObserver(): ControllableResizeObservers {
+  const observers = new Map<Element, ResizeObserverCallback>();
+  const original = globalThis.ResizeObserver;
+  class ControllableResizeObserver implements ResizeObserver {
+    private readonly observed = new Set<Element>();
+    constructor(private readonly callback: ResizeObserverCallback) {}
+    observe(el: Element): void {
+      observers.set(el, this.callback);
+      this.observed.add(el);
+    }
+    unobserve(el: Element): void {
+      observers.delete(el);
+      this.observed.delete(el);
+    }
+    disconnect(): void {
+      for (const el of this.observed) {
+        observers.delete(el);
+      }
+      this.observed.clear();
+    }
+  }
+  globalThis.ResizeObserver =
+    ControllableResizeObserver as unknown as typeof ResizeObserver;
+  return {
+    resize: (el, width) => {
+      defineLayoutProp(el, 'clientWidth', width);
+      const callback = observers.get(el);
+      expect(callback).toBeDefined();
+      act(() => {
+        callback!([], {} as ResizeObserver);
+      });
+    },
+    restore: () => {
+      globalThis.ResizeObserver = original;
+    },
+  };
+}
