@@ -1,7 +1,9 @@
-//! The result of reading a transcript: the parsed messages plus the file's
-//! true line count.
+//! The result of reading a transcript: the parsed messages, the file's true
+//! line count, and the lines that could not be parsed.
 
 use delta_attribution::TranscriptMessage;
+
+use crate::ports::TranscriptError;
 
 /// The outcome of a single transcript read.
 ///
@@ -12,9 +14,13 @@ use delta_attribution::TranscriptMessage;
 /// skipped, so each line is read exactly once and `seq` values stay gap-free
 /// relative to the file.
 ///
-/// Holds `Vec<TranscriptMessage>`, which carries an `f64` (`response_time_ms`),
-/// so this derives only `PartialEq` — a float cannot implement `Eq`.
-#[derive(Debug, Clone, PartialEq)]
+/// An unparsable line does not fail the read: it is skipped like any other
+/// line that produces no message, and handed back in
+/// [`Self::unparsable_lines`] for the caller to report. The reader does not log
+/// it itself, because only the caller knows when its cursor has moved past the
+/// line; reporting it then is what makes each line reported once rather than
+/// on every re-read of the same range.
+#[derive(Debug)]
 pub struct TranscriptRead {
     /// The messages parsed from lines at or after the requested start index,
     /// each carrying its absolute 0-based line index as its `seq`.
@@ -26,4 +32,9 @@ pub struct TranscriptRead {
     /// transcript to the project directory of a new working directory (on
     /// entering a worktree); it is never a message, so it surfaces here instead.
     pub relocated_cwd: Option<String>,
+    /// One [`TranscriptError::Parse`] per line at or after the requested start
+    /// index that could not be parsed, in file order. Each names the
+    /// transcript and the 1-based line number and keeps the parser's error as
+    /// its `source`.
+    pub unparsable_lines: Vec<TranscriptError>,
 }

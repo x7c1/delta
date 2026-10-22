@@ -15,8 +15,11 @@ pub trait Transcript: Send + Sync {
     /// Each returned message carries its absolute line index as its `seq`.
     /// Skipped lines (blank, no-uuid, unparsable) still advance the index, so
     /// `seq` and `total_lines` reflect the file's true position and a
-    /// line-based cursor reads each line exactly once. A missing file yields no
-    /// messages and `total_lines = 0`.
+    /// line-based cursor reads each line exactly once. An unparsable line is
+    /// not logged here but returned in
+    /// [`TranscriptRead::unparsable_lines`], for the caller to report once its
+    /// cursor has moved past it. A missing file yields no messages and
+    /// `total_lines = 0`.
     async fn read_from(&self, path: &str, from_line: usize) -> Result<TranscriptRead>;
 
     /// Report whether a transcript file exists at `path`.
