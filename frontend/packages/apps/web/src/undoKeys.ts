@@ -13,6 +13,9 @@ import { isLinuxShell } from './shell';
  * one undo step, so Ctrl-Z after deleting a few characters cannot bring just
  * those back. {@link TypingSteps} splits that run where an editor would.
  *
+ * Z is the key labelled Z, or the key in QWERTY's Z position under a layout
+ * without a Latin Z (Russian, Greek, Hebrew, ...); see {@link isZKey}.
+ *
  * The terminal is left alone: Ctrl-Z there goes to the tmux pane (SIGTSTP).
  */
 
@@ -41,6 +44,24 @@ function isEditableTextField(target: EventTarget | null): boolean {
   return editingHost !== null && editingHost.getAttribute('contenteditable') !== 'false';
 }
 
+/** A single printable ASCII character, as `KeyboardEvent.key` reports one. */
+const ASCII_CHARACTER = /^[\x20-\x7E]$/;
+
+/**
+ * Whether a key press is the Z key. An ASCII `event.key` decides, so a layout
+ * that moves Z (Dvorak, AZERTY, QWERTZ) matches on the key labelled Z, and the
+ * key in QWERTY's Z position does not undo when it types something else there
+ * (`;` under Dvorak, `y` under QWERTZ). Any other `event.key` — a Cyrillic,
+ * Greek or Hebrew letter under a layout without a Latin Z — falls back to the
+ * physical key, `event.code`, as editors and browsers do for shortcuts.
+ */
+function isZKey(event: KeyboardEvent): boolean {
+  if (ASCII_CHARACTER.test(event.key)) {
+    return event.key.toLowerCase() === 'z';
+  }
+  return event.code === 'KeyZ';
+}
+
 /** The command a key press asks for, or `null` when it is not ours to handle. */
 function commandFor(event: KeyboardEvent): 'undo' | 'redo' | null {
   if (
@@ -49,7 +70,7 @@ function commandFor(event: KeyboardEvent): 'undo' | 'redo' | null {
     !event.ctrlKey ||
     event.altKey ||
     event.metaKey ||
-    event.key.toLowerCase() !== 'z' ||
+    !isZKey(event) ||
     !isEditableTextField(event.target)
   ) {
     return null;

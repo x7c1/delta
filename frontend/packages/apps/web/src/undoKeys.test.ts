@@ -41,6 +41,41 @@ describe('handleUndoKey', () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
+  it('falls back to the physical Z key under a layout without a Latin Z', () => {
+    const textarea = mount(document.createElement('textarea'));
+    const undo = press(textarea, { key: 'я', code: 'KeyZ', ctrlKey: true });
+    expect(undo.exec).toHaveBeenCalledWith('undo');
+    expect(undo.event.defaultPrevented).toBe(true);
+
+    const redo = press(textarea, { key: 'Я', code: 'KeyZ', ctrlKey: true, shiftKey: true });
+    expect(redo.exec).toHaveBeenCalledWith('redo');
+    expect(redo.event.defaultPrevented).toBe(true);
+
+    const greek = press(textarea, { key: 'ζ', code: 'KeyZ', ctrlKey: true });
+    expect(greek.exec).toHaveBeenCalledWith('undo');
+
+    const otherKey = press(textarea, { key: 'я', code: 'KeyQ', ctrlKey: true });
+    expect(otherKey.exec).not.toHaveBeenCalled();
+    expect(otherKey.event.defaultPrevented).toBe(false);
+  });
+
+  it('lets an ASCII key decide over the physical key', () => {
+    const textarea = mount(document.createElement('textarea'));
+    // Dvorak: Z is typed by the key in QWERTY's slash position.
+    const labelledZ = press(textarea, { key: 'z', code: 'Slash', ctrlKey: true });
+    expect(labelledZ.exec).toHaveBeenCalledWith('undo');
+
+    // QWERTZ: the key in QWERTY's Z position types Y.
+    const physicalZ = press(textarea, { key: 'y', code: 'KeyZ', ctrlKey: true });
+    expect(physicalZ.exec).not.toHaveBeenCalled();
+    expect(physicalZ.event.defaultPrevented).toBe(false);
+
+    // Dvorak: the key in QWERTY's Z position types a semicolon.
+    const semicolon = press(textarea, { key: ';', code: 'KeyZ', ctrlKey: true });
+    expect(semicolon.exec).not.toHaveBeenCalled();
+    expect(semicolon.event.defaultPrevented).toBe(false);
+  });
+
   it('runs undo in a text input, a number input, and a contenteditable element', () => {
     const input = mount(document.createElement('input'));
     expect(press(input, { key: 'z', ctrlKey: true }).exec).toHaveBeenCalledWith('undo');
