@@ -16,7 +16,7 @@ import {
  * inline effects followed before they were extracted into these hooks.
  */
 interface TimelineStepNavigationArgs {
-  /** Whether the timeline footer is expanded; collapsed attaches nothing. */
+  /** Whether the timeline is expanded; collapsed attaches nothing. */
   expanded: boolean;
   /** Every mark in (created_at asc, seq asc) order. */
   sortedMessagesRef: MutableRefObject<SortedMessage[]>;

@@ -68,7 +68,7 @@ function readTopRegionReserve(container: Element): number {
 }
 
 interface TimelinePaneScrollFollowArgs {
-  /** Whether the timeline footer is expanded; collapsed runs no follower. */
+  /** Whether the timeline is expanded; collapsed runs no follower. */
   expanded: boolean;
   /** The conversation-pane scroll container whose articles are observed. */
   conversationBodyRef: RefObject<HTMLElement | null>;

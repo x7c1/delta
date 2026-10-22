@@ -31,9 +31,10 @@ import {
 /**
  * Horizontal scroll-follow effect (v31).
  *
- * The effect runs after a user-driven navigation (`scrubTick > 0`) and is
- * responsible for keeping the playhead inside the axis-column wrapper's
- * horizontal viewport when the viewport is narrower than the rendered
+ * The effect runs after a user-driven navigation (`userActedTick > 0`;
+ * the resize path is covered in ThreadTimelineOverlay.long-label.test.tsx)
+ * and is responsible for keeping the playhead inside the axis-column
+ * wrapper's horizontal viewport when the viewport is narrower than the rendered
  * content (a wide axis + a fixed-width side panel). v31 introduces two
  * changes to the math:
  *
@@ -48,6 +49,12 @@ import {
  *     not `LANE_LEFT_PAD_PX + xInAxis` (which is what the v30 effect
  *     used). The fix derives `labelWidth` live from the first axis
  *     cell's `offsetLeft`.
+ *
+ * The re-centre lands the playhead in the middle of the visible axis band
+ * (the viewport right of the sticky label column), so the expected
+ * `scrollLeft` below is `playheadInContent - (labelWidth + (clientWidth -
+ * labelWidth) / 2)`. With no label offset that is the plain viewport
+ * midpoint.
  *
  * jsdom does not run CSS, so `clientWidth`, `offsetLeft`, and `scrollLeft`
  * are all 0 by default. The helpers below stub the layout we need on a
@@ -131,22 +138,17 @@ describe('ThreadTimelineOverlay horizontal scroll-follow', () => {
         }),
       );
     });
-    // Under v31 the effect sees playheadInContent = 100 + 120 + 16 =
-    // 236, which is to the LEFT of the current view [300, 500], so it
-    // re-centres to max(0, 236 - 100) = 136 — a value that lands the
-    // dot's true content-space position (236) right at the viewport
-    // midpoint (136 + 100). The exact midpoint anchor is the assertion:
-    // half a clientWidth past the new scrollLeft must equal the dot's
-    // content x.
+    // The effect sees playheadInContent = 100 + 120 + 16 = 236, which is
+    // to the LEFT of the current view [300, 500], so it re-centres the dot
+    // on the middle of the visible axis band — the viewport right of the
+    // 100 px label column, centred at viewport-x 100 + (200 - 100) / 2 =
+    // 150 — giving scrollLeft = 236 - 150 = 86.
     await waitFor(() => {
       // playheadInContent = labelOffset + xInAxis + LANE_LEFT_PAD
       const playheadInContent =
         100 + 120 + LANE_LEFT_PAD_PX; // = 236
-      const expectedScrollLeft = Math.max(
-        0,
-        playheadInContent - 200 / 2,
-      ); // 200 = clientWidth
-      expect(wrapper.scrollLeft).toBe(expectedScrollLeft);
+      const bandCentre = 100 + (200 - 100) / 2; // = 150
+      expect(wrapper.scrollLeft).toBe(playheadInContent - bandCentre);
     });
   });
 
@@ -437,7 +439,8 @@ describe('ThreadTimelineOverlay horizontal scroll-follow', () => {
     // Under the new left-edge formula `viewLeft + labelOffsetPx + margin
     // = 150 + 140 + 80 = 370`:
     //   playheadInContent (276) < 370?  Yes → catch-up fires.
-    // Expected new scrollLeft: max(0, 276 - 300/2) = max(0, 126) = 126.
+    // Expected new scrollLeft: the middle of the visible axis band sits at
+    // viewport-x 140 + (300 - 140) / 2 = 220, so 276 - 220 = 56.
     wrapper.scrollLeft = 150;
     // Scrub via wheel-up to step msg-c → msg-b (bumps userActedTick).
     act(() => {
@@ -452,11 +455,8 @@ describe('ThreadTimelineOverlay horizontal scroll-follow', () => {
     await waitFor(() => {
       // playheadInContent = labelOffset + xInAxis + LANE_LEFT_PAD
       const playheadInContent = 140 + 120 + LANE_LEFT_PAD_PX; // = 276
-      const expectedScrollLeft = Math.max(
-        0,
-        playheadInContent - 300 / 2,
-      ); // = 126
-      expect(wrapper.scrollLeft).toBe(expectedScrollLeft);
+      const bandCentre = 140 + (300 - 140) / 2; // = 220
+      expect(wrapper.scrollLeft).toBe(playheadInContent - bandCentre); // = 56
     });
   });
 
@@ -530,11 +530,8 @@ describe('ThreadTimelineOverlay horizontal scroll-follow', () => {
     });
     await waitFor(() => {
       const playheadInContent = 140 + 120 + LANE_LEFT_PAD_PX; // = 276
-      const expectedScrollLeft = Math.max(
-        0,
-        playheadInContent - 300 / 2,
-      ); // = 126
-      expect(wrapper.scrollLeft).toBe(expectedScrollLeft);
+      const bandCentre = 140 + (300 - 140) / 2; // = 220
+      expect(wrapper.scrollLeft).toBe(playheadInContent - bandCentre); // = 56
     });
   });
 

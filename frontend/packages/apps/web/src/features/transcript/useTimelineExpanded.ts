@@ -6,7 +6,7 @@ import {
 } from '../../store/sessionScopedStorage';
 
 /**
- * Sub-key under {@link sessionScopedKey} for the timeline footer's
+ * Sub-key under {@link sessionScopedKey} for the timeline's
  * expanded/collapsed state. The preference is **per session** — sessions
  * with many subthreads usually want the timeline expanded while
  * single-thread sessions prefer it collapsed, and a global toggle made the
@@ -40,7 +40,7 @@ function readPersistedExpanded(sessionId: SessionId): boolean {
 /**
  * Persist the expanded preference for a session. Failures are swallowed by
  * the helper so a quota error or a disabled-storage browser never crashes
- * the footer — the UI keeps working in-memory for the page session.
+ * the timeline — the UI keeps working in-memory for the page session.
  */
 function writePersistedExpanded(sessionId: SessionId, expanded: boolean): void {
   writeSessionScoped<boolean>(
@@ -110,7 +110,7 @@ export function resetTimelineExpandedForTests(): void {
 }
 
 /**
- * Expanded/collapsed state for the timeline footer, persisted to localStorage
+ * Expanded/collapsed state for the timeline, persisted to localStorage
  * per session so the preference is remembered independently for each session
  * — large multi-thread sessions can stay expanded while short single-thread
  * ones stay collapsed, instead of one device-wide toggle.
