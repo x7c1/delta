@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LANE_LEFT_PAD_PX } from './TimelineLaneRow';
 import { LANE_LABEL_MAX_WIDTH_FRACTION } from './ThreadTimelineOverlay';
 import {
+  defineLayoutProp,
+  installControllableResizeObserver,
   makeThread,
   makeUserText,
   renderOverlay,
@@ -18,6 +20,7 @@ import {
   stubAxisRect,
   timelineExpandedKey,
   waitForPlayheadAt,
+  type ControllableResizeObservers,
 } from './ThreadTimelineOverlay.testkit';
 
 const LONG_TITLE =
@@ -28,60 +31,17 @@ const LONG_TITLE =
  * cell's offset are stubbed per element, and the global inert
  * `ResizeObserver` is replaced by one whose callbacks the test fires by hand.
  */
-let observers: Map<Element, ResizeObserverCallback>;
-let originalResizeObserver: typeof ResizeObserver;
+let resizeObservers: ControllableResizeObservers;
 
 beforeEach(() => {
   resetGlobals();
   window.localStorage.setItem(timelineExpandedKey(), 'true');
-  observers = new Map();
-  originalResizeObserver = globalThis.ResizeObserver;
-  class ControllableResizeObserver implements ResizeObserver {
-    private readonly observed = new Set<Element>();
-    constructor(private readonly callback: ResizeObserverCallback) {}
-    observe(el: Element): void {
-      observers.set(el, this.callback);
-      this.observed.add(el);
-    }
-    unobserve(el: Element): void {
-      observers.delete(el);
-      this.observed.delete(el);
-    }
-    disconnect(): void {
-      for (const el of this.observed) {
-        observers.delete(el);
-      }
-      this.observed.clear();
-    }
-  }
-  globalThis.ResizeObserver =
-    ControllableResizeObserver as unknown as typeof ResizeObserver;
+  resizeObservers = installControllableResizeObserver();
 });
 
 afterEach(() => {
-  globalThis.ResizeObserver = originalResizeObserver;
+  resizeObservers.restore();
 });
-
-function defineLayoutProp(
-  el: HTMLElement,
-  prop: 'clientWidth' | 'offsetLeft',
-  value: number,
-): void {
-  Object.defineProperty(el, prop, {
-    configurable: true,
-    get: () => value,
-  });
-}
-
-/** Resize the axis-scroll container to `width` and notify its observer. */
-function resizeAxisColumn(wrapper: HTMLElement, width: number): void {
-  defineLayoutProp(wrapper, 'clientWidth', width);
-  const callback = observers.get(wrapper);
-  expect(callback).toBeDefined();
-  act(() => {
-    callback!([], {} as ResizeObserver);
-  });
-}
 
 /** Three large messages on one long-named subthread under `main`. */
 function renderLongLabelTimeline() {
@@ -121,7 +81,7 @@ describe('ThreadTimelineOverlay long lane labels', () => {
     renderLongLabelTimeline();
     await screen.findAllByTestId('thread-timeline-dot');
     const wrapper = screen.getByTestId('thread-timeline-axis-column');
-    resizeAxisColumn(wrapper, 300);
+    resizeObservers.resize(wrapper, 300);
 
     const expectedCapPx = Math.floor(300 * LANE_LABEL_MAX_WIDTH_FRACTION);
     const labels = screen.getAllByTestId('thread-timeline-lane-label');
@@ -143,7 +103,7 @@ describe('ThreadTimelineOverlay long lane labels', () => {
     expect(longLabel.getAttribute('title')).toContain(LONG_TITLE);
 
     // The cap follows the card width.
-    resizeAxisColumn(wrapper, 500);
+    resizeObservers.resize(wrapper, 500);
     for (const label of screen.getAllByTestId('thread-timeline-lane-label')) {
       expect(label.style.maxWidth).toBe(
         `${Math.floor(500 * LANE_LABEL_MAX_WIDTH_FRACTION)}px`,
@@ -193,17 +153,18 @@ describe('ThreadTimelineOverlay long lane labels', () => {
     const axisEl = wrapper.querySelector<HTMLElement>('[data-timeline-axis]')!;
     wrapper.scrollLeft = 0;
 
-    // Wide card: the first measurement after mount performs no scroll, so a
-    // fresh mount still leaves the scroll position alone.
+    // Wide card: the playhead (content x = 240 + 240 + 16 = 496) already
+    // sits inside the visible axis band, so the initial placement on the
+    // first measurement leaves the scroll position alone.
     defineLayoutProp(axisEl, 'offsetLeft', 240);
-    resizeAxisColumn(wrapper, 600);
+    resizeObservers.resize(wrapper, 800);
     expect(wrapper.scrollLeft).toBe(0);
 
     // Narrow the card: the capped label column shrinks to 120 px and msg-c
     // (content x = 120 + 240 + 16 = 376) now sits past the right edge of the
     // 300 px viewport.
     defineLayoutProp(axisEl, 'offsetLeft', 120);
-    resizeAxisColumn(wrapper, 300);
+    resizeObservers.resize(wrapper, 300);
     const playheadInContent = 120 + 240 + LANE_LEFT_PAD_PX; // = 376
     await waitFor(() => {
       expect(wrapper.scrollLeft).toBe(

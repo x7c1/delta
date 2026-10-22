@@ -32,7 +32,9 @@ import {
  * Horizontal scroll-follow effect (v31).
  *
  * The effect runs after a user-driven navigation (`userActedTick > 0`;
- * the resize path is covered in ThreadTimelineOverlay.long-label.test.tsx)
+ * the resize path is covered in ThreadTimelineOverlay.long-label.test.tsx
+ * and the placement on showing in
+ * ThreadTimelineOverlay.open-placement.test.tsx)
  * and is responsible for keeping the playhead inside the axis-column
  * wrapper's horizontal viewport when the viewport is narrower than the rendered
  * content (a wide axis + a fixed-width side panel). v31 introduces two

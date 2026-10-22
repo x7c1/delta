@@ -21,6 +21,18 @@ interface TimelineScrollCatchUpArgs {
   laneAxisWidth: number;
   /** Each message's x (px) on the shared lane axis. */
   messagePxByUuid: Map<string, number>;
+  /**
+   * Identifies what the timeline is showing (the focused session id). A
+   * change while the timeline stays mounted and expanded counts as a new
+   * showing, so the new session's playhead is placed like a fresh expand.
+   */
+  showingKey: string | null;
+  /**
+   * True once every lane's messages have finished their first fetch. The
+   * initial placement waits for it: lanes that land later re-lay the shared
+   * x map, which would move the playhead off a placement made too early.
+   */
+  lanesSettled: boolean;
 }
 
 /**
@@ -54,6 +66,7 @@ interface TimelineScrollCatchUpArgs {
 function scrollPlayheadIntoAxisBand(
   scrollEl: HTMLDivElement,
   playheadXInAxis: number,
+  behavior: ScrollBehavior,
 ): void {
   const axisEl = scrollEl.querySelector<HTMLElement>('[data-timeline-axis]');
   // Falling back to 0 treats the axis as starting at the scroll origin if
@@ -79,19 +92,17 @@ function scrollPlayheadIntoAxisBand(
   // maximises the distance to either edge before the next step can trigger
   // another scroll.
   const bandCentre = labelOffsetPx + (viewportWidth - labelOffsetPx) / 2;
-  // Use the native smooth-scroll API so the re-centre animates instead of
-  // snapping; it also honours `prefers-reduced-motion` with no explicit
-  // branch on our side.
   scrollEl.scrollTo({
     left: Math.max(0, playheadInContent - bandCentre),
-    behavior: 'smooth',
+    behavior,
   });
 }
 
 /**
- * Keep the playhead inside the lane grid's visible axis band and the active
- * lane row inside its vertical viewport after every user-driven navigation,
- * and bring the playhead back into the band when the timeline is resized.
+ * Place the playhead inside the lane grid's visible axis band when the
+ * timeline is shown, keep it there and the active lane row inside its
+ * vertical viewport after every user-driven navigation, and bring the
+ * playhead back into the band when the timeline is resized.
  */
 export function useTimelineScrollCatchUp({
   userActedTick,
@@ -101,7 +112,53 @@ export function useTimelineScrollCatchUp({
   activeMessage,
   laneAxisWidth,
   messagePxByUuid,
+  showingKey,
+  lanesSettled,
 }: TimelineScrollCatchUpArgs): void {
+  // Initial placement: the playhead auto-anchors on the latest message, at
+  // the far right of a long axis, while a freshly mounted scroll container
+  // sits at scrollLeft 0. Without this the timeline would open with the
+  // playhead thousands of pixels off-screen until the first navigation.
+  //
+  // A showing starts when the scroll container gets a non-zero width
+  // (expanding remounts it; a collapse unmounts it and resets the width to
+  // 0) or when `showingKey` changes under a mounted timeline. The lane
+  // messages are fetched only after the expand, so the placement waits
+  // until the width, the active message, and its x are all known. It runs
+  // once per showing: afterwards only the navigation and resize paths below
+  // move the scroll, so a background refetch never overrides a position
+  // the user picked with the scrollbar.
+  //
+  // The scroll is instant: a timeline that has just opened should already
+  // show the playhead rather than slide the axis across the screen.
+  const placedShowingRef = useRef<{ key: string | null } | null>(null);
+  useEffect(() => {
+    if (axisViewportWidth === 0) {
+      placedShowingRef.current = null;
+      return;
+    }
+    if (placedShowingRef.current?.key === showingKey) {
+      return;
+    }
+    if (!lanesSettled || activeMessage === null) {
+      return;
+    }
+    const playheadXInAxis = messagePxByUuid.get(activeMessage.uuid);
+    const scrollEl = axisScrollRef.current;
+    if (playheadXInAxis === undefined || !scrollEl) {
+      return;
+    }
+    placedShowingRef.current = { key: showingKey };
+    scrollPlayheadIntoAxisBand(scrollEl, playheadXInAxis, 'auto');
+  }, [
+    axisViewportWidth,
+    showingKey,
+    lanesSettled,
+    activeMessage,
+    messagePxByUuid,
+    axisScrollRef,
+  ]);
+
   // After a user-driven navigation, ensure the playhead is visible inside
   // the visible axis band. The lane axis is fixed-width so this only matters
   // when the viewport is narrower than the label column plus the axis (e.g.
@@ -109,8 +166,13 @@ export function useTimelineScrollCatchUp({
   //
   // Gated on {@link userActedTick} (not `scrubTick`) so EVERY route that
   // moves the active message — wheel/click jump, pane-scroll follower, and
-  // Navigator-driven cross-pane switch — keeps the playhead visible. A fresh
-  // mount sits at `userActedTick === 0` and performs no scroll.
+  // Navigator-driven cross-pane switch — keeps the playhead visible. Before
+  // the first navigation (`userActedTick === 0`) the initial placement above
+  // owns the horizontal scroll.
+  //
+  // Smooth, unlike the initial placement: the re-centre follows a step the
+  // user just made, so animating it keeps the move legible. The native API
+  // also honours `prefers-reduced-motion` with no explicit branch here.
   useEffect(() => {
     if (userActedTick === 0) {
       return;
@@ -122,6 +184,7 @@ export function useTimelineScrollCatchUp({
     scrollPlayheadIntoAxisBand(
       scrollEl,
       messagePxByUuid.get(activeMessage.uuid) ?? 0,
+      'smooth',
     );
   }, [userActedTick, activeMessage, laneAxisWidth, messagePxByUuid]);
 
@@ -130,10 +193,9 @@ export function useTimelineScrollCatchUp({
   // sticky label or past the right edge with no navigation to trigger the
   // effect above. Re-run the same check whenever the measured width changes
   // between two non-zero values. The first measurement after mount (0 → w)
-  // is skipped, so a fresh mount still performs no scroll; a collapse
-  // unmounts the scroll container and resets the width to 0, so the next
-  // expand is a fresh mount too. Other dependency changes leave the width
-  // unchanged and return early: the navigation path above owns those.
+  // is left to the initial placement above, which also waits for the lane
+  // messages. Other dependency changes leave the width unchanged and return
+  // early: the navigation path above owns those.
   const previousAxisViewportWidthRef = useRef(axisViewportWidth);
   useEffect(() => {
     const previous = previousAxisViewportWidthRef.current;
@@ -152,6 +214,7 @@ export function useTimelineScrollCatchUp({
     scrollPlayheadIntoAxisBand(
       scrollEl,
       messagePxByUuid.get(activeMessage.uuid) ?? 0,
+      'smooth',
     );
   }, [axisViewportWidth, axisScrollRef, activeMessage, messagePxByUuid]);
 
