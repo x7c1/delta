@@ -46,9 +46,3 @@ state how the key is matched and why.
       press with `key: 'z'` and a different `code` runs undo, and one with a
       Latin key other than `z` and `code: 'KeyZ'` does not.
 - [x] The existing undo-key and typing-step tests still pass.
-
-### Before merge (verified outside the check command)
-
-- [ ] On the Linux desktop app, with a non-Latin layout active (for example
-      Russian), Ctrl-Z in the composer undoes the last edit (needs a person
-      to switch the layout).
