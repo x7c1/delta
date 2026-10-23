@@ -8,7 +8,7 @@ use std::path::Path;
 use async_trait::async_trait;
 use tokio::fs;
 
-use delta_usecase::{Transcript, TranscriptRead};
+use delta_usecase::{Transcript, TranscriptRead, UnparsableTranscriptLine};
 
 use crate::error::{Error, Result};
 use crate::parse::{correlate_turn_durations, parse_line_outcome, ParsedLine};
@@ -97,7 +97,7 @@ impl Transcript for JsonlTranscript {
             messages: parsed.messages,
             total_lines: parsed.total_lines,
             relocated_cwd: parsed.relocated_cwd,
-            unparsable_lines: parsed.unparsable.into_iter().map(Into::into).collect(),
+            unparsable_lines: parsed.unparsable,
         })
     }
 
@@ -123,9 +123,9 @@ struct ParsedLines {
     messages: Vec<delta_usecase::TranscriptMessage>,
     total_lines: usize,
     relocated_cwd: Option<String>,
-    /// One [`Error::Parse`] per line at or past the cursor that could not be
-    /// parsed, in file order. Those lines are skipped, not fatal.
-    unparsable: Vec<Error>,
+    /// One entry per line at or past the cursor that could not be parsed, in
+    /// file order. Those lines are skipped, not fatal.
+    unparsable: Vec<UnparsableTranscriptLine>,
 }
 
 /// Parse the complete lines of `contents`, the transcript at `path`, from the
@@ -184,7 +184,7 @@ fn parse_lines(path: &Path, contents: &[u8], from_line: usize) -> ParsedLines {
             // per move); the last one names where the session is now.
             Ok(ParsedLine::Relocated { cwd }) => relocated_cwd = Some(cwd),
             Ok(ParsedLine::Skip) => {}
-            Err(source) => unparsable.push(Error::Parse {
+            Err(source) => unparsable.push(UnparsableTranscriptLine {
                 path: path.to_path_buf(),
                 line: idx + 1,
                 source,
@@ -534,13 +534,12 @@ mod tests {
         assert_eq!(out.messages[0].seq, 1);
     }
 
-    /// A line that is not JSON is returned in the read as a parse error naming
-    /// the transcript and the line (1-based), with the parser's error as its
-    /// source, while the lines around it are still read. Lines before the
-    /// cursor are not returned again.
+    /// A line that is not JSON is returned in the read as an unparsable line
+    /// naming the transcript and the line (1-based), with the parser's error
+    /// as its source, while the lines around it are still read. Lines before
+    /// the cursor are not returned again.
     #[tokio::test]
     async fn an_unparsable_line_is_returned_with_its_path_and_line() {
-        use delta_usecase::TranscriptError;
         use std::error::Error as _;
 
         let mut file = tempfile_jsonl();
@@ -560,17 +559,9 @@ mod tests {
         assert_eq!(read.total_lines, 3);
         let seqs: Vec<i64> = read.messages.iter().map(|m| m.seq).collect();
         assert_eq!(seqs, [0, 2], "the bad line costs only itself");
-        let [err] = <[TranscriptError; 1]>::try_from(read.unparsable_lines).unwrap();
-        let TranscriptError::Parse {
-            path: err_path,
-            line,
-            ..
-        } = &err
-        else {
-            panic!("expected a parse error, got {err:?}");
-        };
-        assert_eq!(err_path, Path::new(&path));
-        assert_eq!(*line, 2);
+        let [err] = <[UnparsableTranscriptLine; 1]>::try_from(read.unparsable_lines).unwrap();
+        assert_eq!(err.path, Path::new(&path));
+        assert_eq!(err.line, 2);
         let message = err.to_string();
         assert!(
             message.contains(&path) && message.contains("line 2"),

@@ -88,7 +88,7 @@ pub use transcript::Transcript;
 // [`Transcript`] port against `delta_usecase` types only.
 pub use delta_attribution::TranscriptMessage;
 mod transcript_error;
-pub use transcript_error::{TranscriptError, TranscriptRefusal};
+pub use transcript_error::{TranscriptError, TranscriptRefusal, UnparsableTranscriptLine};
 mod transcript_read;
 pub use transcript_read::TranscriptRead;
 mod install_error;

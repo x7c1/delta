@@ -53,7 +53,7 @@ where
     /// caller that drains the seam must not broadcast them a second time.
     ///
     /// **A failing transcript read is reported once, not on every tick.** A
-    /// read that fails with a [`TranscriptError`] — refused, I/O, parse,
+    /// read that fails with a [`TranscriptError`] — refused, I/O,
     /// aborted — is answered with an empty batch, and warned about (with its
     /// cause chain) only when it is news: the first failure, one that differs
     /// from the last reported, or one after a read succeeded in between (that
