@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use crate::error::Result;
 use crate::ports::{
     Transcript, TranscriptError, TranscriptMessage, TranscriptRead, TranscriptRefusal,
+    UnparsableTranscriptLine,
 };
 
 /// An in-memory transcript modelled as a list of file lines, keyed by path so
@@ -34,7 +35,7 @@ enum FakeLine {
     /// A line that produces no message (blank / no-uuid).
     Skipped,
     /// A line that cannot be parsed: it produces no message and is returned
-    /// in the read as a [`TranscriptError::Parse`].
+    /// in the read as an [`UnparsableTranscriptLine`].
     Unparsable,
     /// A `relocated` line naming the working directory the transcript was
     /// moved for.
@@ -103,7 +104,7 @@ impl Transcript for FakeTranscript {
                     messages.push(msg);
                 }
                 FakeLine::Skipped => {}
-                FakeLine::Unparsable => unparsable_lines.push(TranscriptError::Parse {
+                FakeLine::Unparsable => unparsable_lines.push(UnparsableTranscriptLine {
                     path: path.into(),
                     line: idx + 1,
                     source: serde_json::from_str::<serde_json::Value>("not json")

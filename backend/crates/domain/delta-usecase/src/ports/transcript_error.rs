@@ -30,16 +30,6 @@ pub enum TranscriptError {
         source: std::io::Error,
     },
 
-    /// Line `line` (1-based) of the transcript at `path` could not be parsed
-    /// as JSON; the parser's own error is the `source`.
-    #[error("transcript parse error at {} line {line}", path.display())]
-    Parse {
-        path: PathBuf,
-        line: usize,
-        #[source]
-        source: serde_json::Error,
-    },
-
     /// The task reading the transcript at `path` ended without a result: it
     /// panicked, or the runtime cancelled it while shutting down.
     #[error("transcript read at {} was aborted", path.display())]
@@ -50,6 +40,23 @@ pub enum TranscriptError {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+}
+
+/// Line `line` (1-based) of the transcript at `path` could not be parsed as
+/// JSON; the parser's own error is the `source`, to be rendered with
+/// [`crate::with_causes()`].
+///
+/// Not a [`TranscriptError`]: an unparsable line never fails a read. The read
+/// skips it and hands it back in
+/// [`TranscriptRead::unparsable_lines`](super::TranscriptRead::unparsable_lines)
+/// for the caller to report.
+#[derive(Debug, thiserror::Error)]
+#[error("transcript parse error at {} line {line}", path.display())]
+pub struct UnparsableTranscriptLine {
+    pub path: PathBuf,
+    pub line: usize,
+    #[source]
+    pub source: serde_json::Error,
 }
 
 /// Why the reader refuses a transcript ([`TranscriptError::Refused`]).

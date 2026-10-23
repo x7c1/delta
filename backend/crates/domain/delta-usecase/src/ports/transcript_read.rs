@@ -3,7 +3,7 @@
 
 use delta_attribution::TranscriptMessage;
 
-use crate::ports::TranscriptError;
+use crate::ports::UnparsableTranscriptLine;
 
 /// The outcome of a single transcript read.
 ///
@@ -32,9 +32,7 @@ pub struct TranscriptRead {
     /// transcript to the project directory of a new working directory (on
     /// entering a worktree); it is never a message, so it surfaces here instead.
     pub relocated_cwd: Option<String>,
-    /// One [`TranscriptError::Parse`] per line at or after the requested start
-    /// index that could not be parsed, in file order. Each names the
-    /// transcript and the 1-based line number and keeps the parser's error as
-    /// its `source`.
-    pub unparsable_lines: Vec<TranscriptError>,
+    /// One [`UnparsableTranscriptLine`] per line at or after the requested start
+    /// index that could not be parsed, in file order.
+    pub unparsable_lines: Vec<UnparsableTranscriptLine>,
 }
