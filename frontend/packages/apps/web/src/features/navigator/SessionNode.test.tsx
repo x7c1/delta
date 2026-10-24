@@ -568,6 +568,20 @@ describe('SessionNode kebab menu', () => {
     ).toBeInTheDocument();
   });
 
+  it('opens the menu when the mouse rests on the kebab', () => {
+    renderNode({});
+
+    const trigger = screen.getByRole('button', { name: /Session actions for/ });
+    fireEvent.pointerEnter(trigger.parentElement as HTMLElement, {
+      pointerType: 'mouse',
+    });
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(
+      screen.getByRole('menuitem', { name: 'Copy session ID' }),
+    ).toBeInTheDocument();
+  });
+
   it('swaps "Close" for "Remove" when the session is closed', () => {
     // The menu trigger must still be enabled for a closed session — copying the
     // id is useful regardless of whether the session is running. A closed

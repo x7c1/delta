@@ -526,6 +526,7 @@ export const SessionNode = memo(function SessionNode({
             label={`Session actions for ${label} (${PROVIDER_METADATA[item.session.provider].label} session)`}
             triggerClassName={PROVIDER_TRIGGER_TINT[item.session.provider]}
             onOpenChange={setMenuOpen}
+            openOnHover
             // Item order is fixed top-to-bottom:
             //   1. Open in VS Code — the primary "act on this session"
             //      affordance, so it takes the top slot the user's eye
