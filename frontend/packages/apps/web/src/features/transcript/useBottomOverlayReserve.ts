@@ -2,7 +2,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type MutableRefObject,
+  type RefObject,
 } from 'react';
 import { useComposerStore } from '../../store/composerStore';
 
@@ -51,9 +51,9 @@ interface BottomOverlayReserveArgs {
   /** Whether a bottom overlay is mounted at all. */
   hasBottomOverlay: boolean;
   /** The scrolling transcript body. */
-  bodyRef: MutableRefObject<HTMLDivElement | null>;
+  bodyRef: RefObject<HTMLDivElement | null>;
   /** Whether the body is following new content. */
-  stickRef: MutableRefObject<boolean>;
+  stickRef: RefObject<boolean>;
 }
 
 /**

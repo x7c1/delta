@@ -1,4 +1,4 @@
-import type { ComponentProps, MutableRefObject, ReactNode } from 'react';
+import type { ComponentProps, RefObject, ReactNode } from 'react';
 import type { Thread } from '@delta/wire-gen';
 import { Breadcrumb } from '@delta/ui-kit';
 import { ThreadTimelineOverlay } from './ThreadTimelineOverlay';
@@ -20,13 +20,13 @@ interface TranscriptTopRegionProps {
   /** The breadcrumb's crumbs, main thread first. */
   breadcrumbItems: ComponentProps<typeof Breadcrumb>['items'];
   /** The scrolling transcript body the timeline jumps within. */
-  bodyRef: MutableRefObject<HTMLDivElement | null>;
+  bodyRef: RefObject<HTMLDivElement | null>;
   /** The collapsed breadcrumb card, measured for the top reserve. */
-  breadcrumbOverlayRef: MutableRefObject<HTMLDivElement | null>;
+  breadcrumbOverlayRef: RefObject<HTMLDivElement | null>;
   /** The collapsed right-side cluster, measured for the top reserve. */
-  rightClusterOverlayRef: MutableRefObject<HTMLDivElement | null>;
+  rightClusterOverlayRef: RefObject<HTMLDivElement | null>;
   /** The expanded container, measured for the top reserve. */
-  expandedContainerRef: MutableRefObject<HTMLDivElement | null>;
+  expandedContainerRef: RefObject<HTMLDivElement | null>;
 }
 
 /**

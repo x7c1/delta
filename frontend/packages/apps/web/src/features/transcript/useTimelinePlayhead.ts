@@ -4,7 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
-  type MutableRefObject,
+  type RefObject,
 } from 'react';
 import type { ThreadId } from '@delta/model';
 import type { SortedMessage } from './timelineLanes';
@@ -53,7 +53,7 @@ interface TimelinePlayheadArgs {
   /** The active thread the auto-anchor lands on. */
   activeThreadId: ThreadId | null;
   /** Layout-phase mirror of `sortedMessages` for native-listener commits. */
-  sortedMessagesRef: MutableRefObject<SortedMessage[]>;
+  sortedMessagesRef: RefObject<SortedMessage[]>;
 }
 
 /**
@@ -90,6 +90,16 @@ export function useTimelinePlayhead({
         null,
       ),
   );
+  // The latest pick, written synchronously by {@link setActiveMessageUuid}
+  // before React renders it. The setters compare against it instead of
+  // reading `prev` inside a state updater: React may defer an updater to the
+  // next render, so a "did it change?" flag set inside one is not reliably
+  // visible to the caller.
+  const activeMessageUuidRef = useRef(activeMessageUuid);
+  const setActiveMessageUuid = useCallback((uuid: string | null) => {
+    activeMessageUuidRef.current = uuid;
+    setActiveMessageUuidState(uuid);
+  }, []);
 
   // The active message's index in `sortedMessages`, DERIVED from the canonical
   // UUID on every render. When the picked message is not in the current list
@@ -168,9 +178,9 @@ export function useTimelinePlayhead({
       // Resolve the index to its message's UUID at commit time — the UUID is
       // the canonical state, so a later array-identity change re-derives the
       // index and keeps the playhead on the exact message the user picked.
-      setActiveMessageUuidState(list[clamped].uuid);
+      setActiveMessageUuid(list[clamped].uuid);
     },
-    [bumpUserActedTick],
+    [bumpUserActedTick, setActiveMessageUuid],
   );
 
   /**
@@ -202,22 +212,16 @@ export function useTimelinePlayhead({
       }
       const clamped = Math.max(0, Math.min(sortedMessages.length - 1, next));
       const uuid = sortedMessages[clamped].uuid;
-      let changed = false;
-      setActiveMessageUuidState((prev) => {
-        if (prev === uuid) {
-          return prev;
-        }
-        changed = true;
-        return uuid;
-      });
-      // Bump the "user has acted" gate only when we actually moved the
+      // Bump the "user has acted" gate only when we actually move the
       // playhead — repeat IO entries for the same topmost message should not
       // keep flipping the auto-anchor gate on every burst.
-      if (changed) {
-        bumpUserActedTick();
+      if (activeMessageUuidRef.current === uuid) {
+        return;
       }
+      setActiveMessageUuid(uuid);
+      bumpUserActedTick();
     },
-    [sortedMessages, bumpUserActedTick],
+    [sortedMessages, bumpUserActedTick, setActiveMessageUuid],
   );
 
   // The active message itself, derived from the index — the single source of
@@ -263,15 +267,20 @@ export function useTimelinePlayhead({
     if (userActedRef.current) {
       return;
     }
-    setActiveMessageUuidState((prev) =>
+    setActiveMessageUuid(
       resolveAutoAnchorUuid(
         sortedMessages,
         largeSortedMessages,
         activeThreadId,
-        prev,
+        activeMessageUuidRef.current,
       ),
     );
-  }, [sortedMessages, largeSortedMessages, activeThreadId]);
+  }, [
+    sortedMessages,
+    largeSortedMessages,
+    activeThreadId,
+    setActiveMessageUuid,
+  ]);
 
   return {
     activeMessageIndex,

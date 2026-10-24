@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useRef,
-  type MutableRefObject,
   type RefObject,
 } from 'react';
 import type { ThreadId } from '@delta/model';
@@ -28,11 +27,11 @@ interface TimelinePaneJumpArgs {
   /** The main-conversation (large) subset. */
   largeSortedMessages: SortedMessage[];
   /** Layout-phase mirror of `sortedMessages`. */
-  sortedMessagesRef: MutableRefObject<SortedMessage[]>;
+  sortedMessagesRef: RefObject<SortedMessage[]>;
   /** Bumped by every user-driven jump; re-fires the jump effect. */
   scrubTick: number;
   /** The latest active message, read without re-firing on identity changes. */
-  activeMessageRef: MutableRefObject<SortedMessage | null>;
+  activeMessageRef: RefObject<SortedMessage | null>;
   /** Commit an active index without re-firing a jump. */
   setActiveMessageIndexFromPaneScroll: (next: number) => void;
   /** Mark that the user has acted on the timeline. */

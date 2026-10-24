@@ -3,7 +3,7 @@ import {
   useContext,
   useMemo,
   useRef,
-  type MutableRefObject,
+  type RefObject,
   type ReactNode,
 } from 'react';
 import type { ThreadId } from '@delta/model';
@@ -17,7 +17,7 @@ export interface ComposerDraftTarget {
   /** The `composerStore.drafts` key the visible textarea is bound to. */
   draftKey: ThreadId;
   /** The live textarea node, or `null` while the composer is unmounted. */
-  textareaRef: MutableRefObject<HTMLTextAreaElement | null>;
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
   /**
    * Whether the textarea has been focused at least once since the composer
    * mounted.
@@ -28,7 +28,7 @@ export interface ComposerDraftTarget {
    * draft the user has only pasted or restored, never clicked into. This flag
    * is what lets that case fall back to "insert at the end" instead.
    */
-  everFocusedRef: MutableRefObject<boolean>;
+  everFocusedRef: RefObject<boolean>;
 }
 
 const ComposerDraftTargetContext = createContext<ComposerDraftTarget | null>(
