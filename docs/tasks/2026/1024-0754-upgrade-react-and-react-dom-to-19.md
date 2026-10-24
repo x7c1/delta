@@ -58,6 +58,6 @@ and adapts the frontend to React 19.
 
 ### Before merge (verified outside the check command)
 
-- [ ] The web UI loads in `make dev`, a session can be opened, and its
+- [x] The web UI loads in `make dev`, a session can be opened, and its
       transcript and timeline render without React errors in the browser
       console.
