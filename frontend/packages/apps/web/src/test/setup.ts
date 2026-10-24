@@ -16,10 +16,12 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
 }
 
 // jsdom performs no layout, so every element reports `offsetHeight`/`offsetWidth`
-// of 0. The virtualizer reads the scroll element's `offsetHeight` to size its
-// window; a 0-height viewport yields an empty window and no session rows render
-// under test. Give elements a non-zero default viewport so the virtualizer
-// renders a realistic window in jsdom (a real browser reports true sizes).
+// and `clientHeight`/`clientWidth` of 0. The virtualizer reads the scroll
+// element's `clientHeight` to size its window; a 0-height viewport yields an
+// empty window and no session rows render under test. Give elements a non-zero
+// default viewport so the virtualizer renders a realistic window in jsdom (a
+// real browser reports true sizes). `clientWidth` stays 0: the virtualizer is
+// vertical, and the timeline tests define the widths they need per element.
 const VIRTUAL_VIEWPORT_HEIGHT = 600;
 const VIRTUAL_VIEWPORT_WIDTH = 288; // matches the navigator pane width (w-72)
 
@@ -37,6 +39,18 @@ if (
     configurable: true,
     get() {
       return VIRTUAL_VIEWPORT_WIDTH;
+    },
+  });
+}
+
+if (
+  Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight')
+    ?.configurable !== false
+) {
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get() {
+      return VIRTUAL_VIEWPORT_HEIGHT;
     },
   });
 }
