@@ -111,6 +111,13 @@ export function Menu({
   openOnHover = false,
 }: MenuProps) {
   const [open, setOpen] = useState(false);
+  // The open state as of the latest change, readable before React re-renders.
+  // A mouse click follows the pointer's arrival within the same burst of input,
+  // and a hover open is not necessarily rendered by the time the click arrives,
+  // so the event handlers below read this instead of the rendered `open` —
+  // otherwise that click would see the panel as shut and toggle it straight
+  // back.
+  const openRef = useRef(false);
   // Whether the current panel was opened by hovering, which decides both the
   // focus handling below and what a click on the trigger does while it is open.
   const openedByHover = useRef(false);
@@ -130,10 +137,15 @@ export function Menu({
     }
   }, []);
 
+  const changeOpen = useCallback((next: boolean) => {
+    openRef.current = next;
+    setOpen(next);
+  }, []);
+
   const close = useCallback(() => {
     cancelPendingClose();
-    setOpen(false);
-  }, [cancelPendingClose]);
+    changeOpen(false);
+  }, [cancelPendingClose, changeOpen]);
 
   useEffect(() => cancelPendingClose, [cancelPendingClose]);
 
@@ -199,13 +211,13 @@ export function Menu({
       // A mouse click lands on a trigger it is already hovering, so in hover
       // mode the panel is open by then; the click keeps it open rather than
       // toggling it shut under the pointer.
-      if (open && openedByHover.current) {
+      if (openRef.current && openedByHover.current) {
         return;
       }
       openedByHover.current = false;
-      setOpen((prev) => !prev);
+      changeOpen(!openRef.current);
     },
-    [isDisabled, open],
+    [isDisabled, changeOpen],
   );
 
   const handlePointerEnter = useCallback(
@@ -214,23 +226,23 @@ export function Menu({
         return;
       }
       cancelPendingClose();
-      if (!open) {
+      if (!openRef.current) {
         openedByHover.current = true;
-        setOpen(true);
+        changeOpen(true);
       }
     },
-    [openOnHover, isDisabled, open, cancelPendingClose],
+    [openOnHover, isDisabled, cancelPendingClose, changeOpen],
   );
 
   const handlePointerLeave = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!openOnHover || !open || event.pointerType === 'touch') {
+      if (!openOnHover || !openRef.current || event.pointerType === 'touch') {
         return;
       }
       cancelPendingClose();
       closeTimer.current = setTimeout(close, HOVER_CLOSE_DELAY_MS);
     },
-    [openOnHover, open, close, cancelPendingClose],
+    [openOnHover, close, cancelPendingClose],
   );
 
   const handleSelect = useCallback(

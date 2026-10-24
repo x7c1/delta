@@ -196,6 +196,19 @@ describe('Menu', () => {
       expect(screen.getByRole('menu')).toBeInTheDocument();
     });
 
+    it('keeps the panel open when the click arrives before the hover open renders', () => {
+      const { trigger, wrapper } = renderHoverMenu();
+
+      // A real mouse click follows the pointer's arrival within one burst of
+      // input; dispatch both before React re-renders.
+      act(() => {
+        fireEvent.pointerEnter(wrapper, { pointerType: 'mouse' });
+        fireEvent.click(trigger);
+      });
+
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+    });
+
     it('runs an item picked from a hover-opened panel', () => {
       const onSelect = vi.fn();
       const { wrapper } = renderHoverMenu(onSelect);
