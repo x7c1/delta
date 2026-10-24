@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { cn } from './cn';
 
@@ -41,7 +42,24 @@ export interface MenuProps {
    * `transform`ed stacking context and the panel cannot otherwise escape it).
    */
   onOpenChange?: (open: boolean) => void;
+  /**
+   * Open the panel when a mouse rests on the trigger, and close it shortly
+   * after the pointer leaves the trigger and the panel, instead of waiting for
+   * a click. A panel opened this way leaves focus where it was — hovering past
+   * a row must not pull focus out of whatever the user is typing in. Touch
+   * input ignores hover and keeps tap-to-open, and the keyboard keeps
+   * Enter/Space; a panel opened either of those ways still moves focus into
+   * itself.
+   */
+  openOnHover?: boolean;
 }
+
+/**
+ * How long a hover-opened panel stays open after the pointer leaves it. Long
+ * enough to cross the gap between the trigger and the panel, short enough that
+ * a pointer moving on reads as closing the menu.
+ */
+const HOVER_CLOSE_DELAY_MS = 150;
 
 const ITEM_TONE_CLASSES: Record<MenuItemTone, string> = {
   // The default item text uses `text-fg`: slate-700 (the original literal)
@@ -76,7 +94,8 @@ function KebabIcon() {
 
 /**
  * A small, reusable kebab dropdown menu. The trigger is a three-dot button;
- * clicking it toggles a right-aligned panel rendered below the trigger.
+ * clicking it toggles a right-aligned panel rendered below the trigger (or,
+ * with {@link MenuProps.openOnHover}, hovering it opens the panel).
  * Click-outside and Escape close the panel, and selecting an item runs its
  * `onSelect` then closes. The trigger stops click propagation so it never
  * activates an enclosing row's handler. When disabled (explicitly or because
@@ -89,15 +108,34 @@ export function Menu({
   className,
   triggerClassName,
   onOpenChange,
+  openOnHover = false,
 }: MenuProps) {
   const [open, setOpen] = useState(false);
+  // Whether the current panel was opened by hovering, which decides both the
+  // focus handling below and what a click on the trigger does while it is open.
+  const openedByHover = useRef(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const firstItemRef = useRef<HTMLButtonElement>(null);
 
   const isDisabled = disabled || items.length === 0;
 
-  const close = useCallback(() => setOpen(false), []);
+  const cancelPendingClose = useCallback(() => {
+    if (closeTimer.current !== undefined) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = undefined;
+    }
+  }, []);
+
+  const close = useCallback(() => {
+    cancelPendingClose();
+    setOpen(false);
+  }, [cancelPendingClose]);
+
+  useEffect(() => cancelPendingClose, [cancelPendingClose]);
 
   // Surface open/close to the parent. `setState` setters are identity-stable, so
   // a parent passing one directly keeps this effect from re-firing each render.
@@ -107,19 +145,24 @@ export function Menu({
 
   // Move focus into the panel on open; restore it to the trigger on close.
   //
-  // Only *restore* focus when closing after having been open — never on the
-  // initial mount. Without the `wasOpen` guard, the `else` branch fires on mount
+  // Only *restore* focus when this panel moved it in — never on the initial
+  // mount. Without the `movedFocus` guard, the `else` branch fires on mount
   // (open starts false) and every freshly rendered Menu grabs focus, so right
   // after a page load a kebab trigger shows a focus ring it never earned. With
   // a windowed list that mounts many Menus at once, this is very visible.
-  const wasOpen = useRef(false);
+  //
+  // A hover-opened panel moves no focus, so its close restores none either.
+  const movedFocus = useRef(false);
   useEffect(() => {
     if (open) {
-      firstItemRef.current?.focus();
-    } else if (wasOpen.current) {
+      if (!openedByHover.current) {
+        firstItemRef.current?.focus();
+        movedFocus.current = true;
+      }
+    } else if (movedFocus.current) {
       triggerRef.current?.focus();
+      movedFocus.current = false;
     }
-    wasOpen.current = open;
   }, [open]);
 
   // Escape closes; click-outside closes.
@@ -153,9 +196,41 @@ export function Menu({
       if (isDisabled) {
         return;
       }
+      // A mouse click lands on a trigger it is already hovering, so in hover
+      // mode the panel is open by then; the click keeps it open rather than
+      // toggling it shut under the pointer.
+      if (open && openedByHover.current) {
+        return;
+      }
+      openedByHover.current = false;
       setOpen((prev) => !prev);
     },
-    [isDisabled],
+    [isDisabled, open],
+  );
+
+  const handlePointerEnter = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!openOnHover || isDisabled || event.pointerType === 'touch') {
+        return;
+      }
+      cancelPendingClose();
+      if (!open) {
+        openedByHover.current = true;
+        setOpen(true);
+      }
+    },
+    [openOnHover, isDisabled, open, cancelPendingClose],
+  );
+
+  const handlePointerLeave = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!openOnHover || !open || event.pointerType === 'touch') {
+        return;
+      }
+      cancelPendingClose();
+      closeTimer.current = setTimeout(close, HOVER_CLOSE_DELAY_MS);
+    },
+    [openOnHover, open, close, cancelPendingClose],
   );
 
   const handleSelect = useCallback(
@@ -167,7 +242,15 @@ export function Menu({
   );
 
   return (
-    <div ref={containerRef} className={cn('relative', className)}>
+    <div
+      ref={containerRef}
+      className={cn('relative', className)}
+      // The panel is a child of this wrapper, so the pointer moving from the
+      // trigger onto the panel stays "inside" and only the gap between them
+      // is covered by the close delay.
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
+    >
       <button
         ref={triggerRef}
         type="button"
