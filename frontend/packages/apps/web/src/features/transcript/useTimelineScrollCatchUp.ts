@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MutableRefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import type { SortedMessage } from './timelineLanes';
 import { LANE_LEFT_PAD_PX } from './TimelineLaneRow';
 
@@ -6,7 +6,7 @@ interface TimelineScrollCatchUpArgs {
   /** Bumped by every route that moves the active message; 0 means none yet. */
   userActedTick: number;
   /** The horizontal-scroll container of the lane grid. */
-  axisScrollRef: MutableRefObject<HTMLDivElement | null>;
+  axisScrollRef: RefObject<HTMLDivElement | null>;
   /**
    * The horizontal-scroll container's measured width (px); 0 while it is
    * unmounted or not measured yet. A change between two non-zero widths
@@ -14,7 +14,7 @@ interface TimelineScrollCatchUpArgs {
    */
   axisViewportWidth: number;
   /** The vertically scrolling body wrapper around the lane grid. */
-  bodyRef: MutableRefObject<HTMLDivElement | null>;
+  bodyRef: RefObject<HTMLDivElement | null>;
   /** The message the playhead sits on, or null. */
   activeMessage: SortedMessage | null;
   /** The shared lane axis width (px). */

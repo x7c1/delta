@@ -11,7 +11,7 @@ import {
   usePromptTemplatesQuery,
   useUpdatePromptTemplateMutation,
 } from '@delta/api-client';
-import type { PropsWithChildren } from 'react';
+import type { JSX, PropsWithChildren } from 'react';
 
 /**
  * The prompt-template hooks against the mock server: what a caller of

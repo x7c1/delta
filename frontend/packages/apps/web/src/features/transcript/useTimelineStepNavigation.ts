@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MutableRefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import type { SortedMessage } from './timelineLanes';
 import {
   WHEEL_STEP_COOLDOWN_MS,
@@ -19,18 +19,18 @@ interface TimelineStepNavigationArgs {
   /** Whether the timeline is expanded; collapsed attaches nothing. */
   expanded: boolean;
   /** Every mark in (created_at asc, seq asc) order. */
-  sortedMessagesRef: MutableRefObject<SortedMessage[]>;
+  sortedMessagesRef: RefObject<SortedMessage[]>;
   /** The main-conversation (large) subset the step navigation walks. */
-  largeSortedMessagesRef: MutableRefObject<SortedMessage[]>;
+  largeSortedMessagesRef: RefObject<SortedMessage[]>;
   /** The active message's index in the global sorted list, or null. */
-  activeMessageIndexRef: MutableRefObject<number | null>;
+  activeMessageIndexRef: RefObject<number | null>;
   /** Clamp + commit a new active index (bumps the scrub/user-acted ticks). */
   setActiveMessageIndex: (next: number) => void;
 }
 
 interface TimelineWheelStepNavigationArgs extends TimelineStepNavigationArgs {
   /** The axis scroll container the `passive: false` wheel listener binds to. */
-  axisScrollRef: MutableRefObject<HTMLDivElement | null>;
+  axisScrollRef: RefObject<HTMLDivElement | null>;
 }
 
 /**

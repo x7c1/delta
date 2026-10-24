@@ -1,4 +1,4 @@
-import { useEffect, type MutableRefObject, type RefObject } from 'react';
+import { useEffect, type RefObject } from 'react';
 import type { ThreadId } from '@delta/model';
 import type { SortedMessage } from './timelineLanes';
 import { ALL_ARTICLES_SELECTOR } from './timelineScroll';
@@ -79,9 +79,9 @@ interface TimelinePaneScrollFollowArgs {
   /** The active thread; a change re-binds the observer to the new DOM. */
   activeThreadId: ThreadId | null;
   /** The in-flight cross-lane jump count; above zero suppresses the follower. */
-  crossLaneJumpInFlightCountRef: MutableRefObject<number>;
+  crossLaneJumpInFlightCountRef: RefObject<number>;
   /** When the latest programmatic scroll fired, or null when none is recent. */
-  lastProgrammaticScrollAtRef: MutableRefObject<number | null>;
+  lastProgrammaticScrollAtRef: RefObject<number | null>;
 }
 
 // Pane scroll → playhead follow (Improvement 3). Observe each rendered

@@ -2,7 +2,7 @@ import {
   useCallback,
   useLayoutEffect,
   useState,
-  type MutableRefObject,
+  type RefObject,
 } from 'react';
 
 interface TimelineAxisViewport {
@@ -23,7 +23,7 @@ interface TimelineAxisViewport {
  * the playhead catch-up follow the card width as the window is resized.
  */
 export function useTimelineAxisViewport(
-  axisScrollRef: MutableRefObject<HTMLDivElement | null>,
+  axisScrollRef: RefObject<HTMLDivElement | null>,
 ): TimelineAxisViewport {
   const [axisScrollEl, setAxisScrollEl] = useState<HTMLDivElement | null>(
     null,

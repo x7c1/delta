@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type MutableRefObject } from 'react';
+import { useLayoutEffect, useRef, type RefObject } from 'react';
 import type { ThreadId } from '@delta/model';
 import type { Message, Thread } from '@delta/wire-gen';
 import { useNavStore } from '../../store/navStore';
@@ -22,7 +22,7 @@ interface StickToBottomArgs {
   /** The live assistant preview; its growth re-sticks. */
   streaming: StreamingMessage | null;
   /** The child chip a breadcrumb "go up" wants to land on, if any. */
-  scrollToChildRef: MutableRefObject<ThreadId | null>;
+  scrollToChildRef: RefObject<ThreadId | null>;
   /** Drop the hovered sub-thread chip's highlight. */
   setHoveredBranchTitle: (title: string | null) => void;
 }

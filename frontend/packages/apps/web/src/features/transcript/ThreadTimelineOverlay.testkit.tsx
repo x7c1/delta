@@ -133,7 +133,7 @@ export function renderOverlay({
   // pretty-format type paths into the exported signature (TS2742).
 }): RenderResult & {
   apiClient: ApiClient;
-  bodyRef: RefObject<HTMLDivElement>;
+  bodyRef: RefObject<HTMLDivElement | null>;
   queryClient: QueryClient;
 } {
   const queryClient = new QueryClient({
