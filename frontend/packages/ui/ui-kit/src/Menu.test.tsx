@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { Menu } from './Menu';
 
 describe('Menu', () => {
@@ -133,5 +133,119 @@ describe('Menu', () => {
 
     const item = screen.getByRole('menuitem', { name: 'Copy session ID' });
     expect(item.className).toContain('whitespace-nowrap');
+  });
+
+  describe('with openOnHover', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function renderHoverMenu(onSelect = vi.fn()) {
+      render(
+        <div>
+          <input aria-label="Composer" />
+          <Menu
+            label="Session actions"
+            openOnHover
+            items={[{ label: 'Close', onSelect }]}
+          />
+        </div>,
+      );
+      const trigger = screen.getByRole('button', { name: 'Session actions' });
+      // The pointer handlers sit on the wrapper around the trigger and panel.
+      return { trigger, wrapper: trigger.parentElement as HTMLElement };
+    }
+
+    it('opens when a mouse enters the trigger, without moving focus', () => {
+      const { trigger, wrapper } = renderHoverMenu();
+      const composer = screen.getByRole('textbox', { name: 'Composer' });
+      composer.focus();
+
+      fireEvent.pointerEnter(wrapper, { pointerType: 'mouse' });
+
+      expect(trigger).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+      // Hovering past a row must not pull focus out of the composer.
+      expect(composer).toHaveFocus();
+    });
+
+    it('closes shortly after the pointer leaves, and stays open if it comes back', () => {
+      vi.useFakeTimers();
+      const { wrapper } = renderHoverMenu();
+
+      fireEvent.pointerEnter(wrapper, { pointerType: 'mouse' });
+      fireEvent.pointerLeave(wrapper, { pointerType: 'mouse' });
+      // Crossing the gap between trigger and panel: back inside before the
+      // delay runs out, so the panel stays.
+      fireEvent.pointerEnter(wrapper, { pointerType: 'mouse' });
+      act(() => vi.advanceTimersByTime(1000));
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+
+      fireEvent.pointerLeave(wrapper, { pointerType: 'mouse' });
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(1000));
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('keeps a hover-opened panel open when the trigger is clicked', () => {
+      const { trigger, wrapper } = renderHoverMenu();
+
+      fireEvent.pointerEnter(wrapper, { pointerType: 'mouse' });
+      fireEvent.click(trigger);
+
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+    });
+
+    it('keeps the panel open when the click arrives before the hover open renders', () => {
+      const { trigger, wrapper } = renderHoverMenu();
+
+      // A real mouse click follows the pointer's arrival within one burst of
+      // input; dispatch both before React re-renders.
+      act(() => {
+        fireEvent.pointerEnter(wrapper, { pointerType: 'mouse' });
+        fireEvent.click(trigger);
+      });
+
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+    });
+
+    it('runs an item picked from a hover-opened panel', () => {
+      const onSelect = vi.fn();
+      const { wrapper } = renderHoverMenu(onSelect);
+
+      fireEvent.pointerEnter(wrapper, { pointerType: 'mouse' });
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Close' }));
+
+      expect(onSelect).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('ignores touch hover and keeps tap to open', () => {
+      const { trigger, wrapper } = renderHoverMenu();
+
+      fireEvent.pointerEnter(wrapper, { pointerType: 'touch' });
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+      fireEvent.click(trigger);
+      expect(screen.getByRole('menu')).toBeInTheDocument();
+    });
+
+    it('does not open on hover when disabled', () => {
+      render(
+        <Menu
+          label="Session actions"
+          openOnHover
+          disabled
+          items={[{ label: 'Close', onSelect: vi.fn() }]}
+        />,
+      );
+      const trigger = screen.getByRole('button', { name: 'Session actions' });
+
+      fireEvent.pointerEnter(trigger.parentElement as HTMLElement, {
+        pointerType: 'mouse',
+      });
+
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
   });
 });
