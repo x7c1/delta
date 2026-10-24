@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+} from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import type { SessionId } from '@delta/model';
 import type { RateLimitWindow, SessionListItem } from '@delta/wire-gen';
 import {
   Button,
@@ -23,6 +30,7 @@ import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
 import { useUpdateControl } from './UpdateControl';
 import { launchesFirst } from './launchesFirst';
+import { heldOrder } from './heldOrder';
 import { footerRateLimitGroups } from './footerRateLimitGroups';
 import {
   computeBudgetLinePercentage,
@@ -355,7 +363,7 @@ export function NavigatorPane({
   // list — so a launch that fails stays in view instead of sinking below every
   // open session (see `launchesFirst`). The registry is oldest first.
   const spawns = useLiveStore((state) => state.spawns);
-  const rows = useMemo(
+  const liveRows = useMemo(
     () =>
       launchesFirst(
         sessions,
@@ -363,6 +371,21 @@ export function NavigatorPane({
       ),
     [sessions, spawns],
   );
+  // While the mouse is over the list, the cards stay in the order they had when
+  // it arrived, so a card does not slide away just as the user clicks it; the
+  // live order returns once the pointer leaves (see `heldOrder`). Touch input
+  // has no hover to hold the order for.
+  const [heldIds, setHeldIds] = useState<SessionId[] | null>(null);
+  const rows = useMemo(
+    () => (heldIds === null ? liveRows : heldOrder(liveRows, heldIds)),
+    [liveRows, heldIds],
+  );
+  const holdOrder = (event: PointerEvent<HTMLUListElement>) => {
+    if (event.pointerType !== 'touch') {
+      setHeldIds(rows.map((item) => item.session.id));
+    }
+  };
+  const releaseOrder = () => setHeldIds(null);
 
   // The Panel body is the scroll container; the virtualizer reads its scroll
   // position and viewport height to decide which rows to render.
@@ -377,10 +400,11 @@ export function NavigatorPane({
   // list is open-first and recency-ordered within each group, so sending a
   // message bumps that session to the top of its group, and opening or closing
   // one carries it across the groups (as does a launch being pinned to the top
-  // or released) — either way the rows below reindex. With
-  // the default index key, each row would inherit the cached height of whichever
-  // session previously sat at its index — a tall threaded card's height landing
-  // on a short collapsed one, leaving gaps (and vice versa, overlaps). Keying by
+  // or released, or the order held under the pointer let go) — either way the
+  // rows below reindex. With the default index key, each row would inherit the
+  // cached height of whichever session previously sat at its index — a tall
+  // threaded card's height landing on a short collapsed one, leaving gaps (and
+  // vice versa, overlaps). Keying by
   // id makes a measured height travel with its session across reorders, so the
   // spacers stay correct.
   const virtualizer = useVirtualizer({
@@ -703,6 +727,8 @@ export function NavigatorPane({
         data-testid="sessions-list"
         className="relative w-full"
         style={{ height: virtualizer.getTotalSize() }}
+        onPointerEnter={holdOrder}
+        onPointerLeave={releaseOrder}
       >
         {virtualItems.map((virtualRow) => {
           const item = rows[virtualRow.index];

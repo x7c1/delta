@@ -264,6 +264,64 @@ describe('NavigatorPane launched-session placement', () => {
   });
 });
 
+describe('NavigatorPane order under the pointer', () => {
+  const first = makeItem('first-session', 101);
+  const second = makeItem('second-session', 102);
+
+  /** The repo names of the mounted cards, top to bottom. */
+  function renderedNames(): string[] {
+    return screen
+      .getAllByRole('listitem')
+      .map((row) =>
+        row.textContent?.includes('dev/first-session') ? 'first' : 'second',
+      );
+  }
+
+  beforeEach(() => {
+    useLiveStore.setState({
+      connection: 'open',
+      notices: {},
+      runningThreads: {},
+      unread: {},
+      spawns: [],
+    });
+    useNavStore.setState({ focusedSessionId: null, activeThreadId: null });
+  });
+
+  it('keeps the cards in place while the mouse is over the list, and reorders once it leaves', () => {
+    const pane = renderPane([first, second]);
+    const list = screen.getByTestId('sessions-list');
+
+    fireEvent.pointerEnter(list, { pointerType: 'mouse' });
+    // Activity on the second session moves it to the top of the live order.
+    pane.setSessions([second, first]);
+    expect(renderedNames()).toEqual(['first', 'second']);
+
+    fireEvent.pointerLeave(list, { pointerType: 'mouse' });
+    expect(renderedNames()).toEqual(['second', 'first']);
+  });
+
+  it('adds a session listed under the pointer below the held cards', () => {
+    const pane = renderPane([first]);
+    const list = screen.getByTestId('sessions-list');
+
+    fireEvent.pointerEnter(list, { pointerType: 'mouse' });
+    pane.setSessions([second, first]);
+
+    expect(renderedNames()).toEqual(['first', 'second']);
+  });
+
+  it('does not hold the order for touch input', () => {
+    const pane = renderPane([first, second]);
+    const list = screen.getByTestId('sessions-list');
+
+    fireEvent.pointerEnter(list, { pointerType: 'touch' });
+    pane.setSessions([second, first]);
+
+    expect(renderedNames()).toEqual(['second', 'first']);
+  });
+});
+
 describe('NavigatorPane settings entry', () => {
   beforeEach(() => {
     useLiveStore.setState({

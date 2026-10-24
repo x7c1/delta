@@ -68,21 +68,28 @@ const sessions = [
   makeItem(SESSION_ID_2, SESSION_2_MAIN_THREAD_ID),
 ];
 
-export function renderPane(items: SessionListItem[] = sessions): RenderResult {
+export interface RenderedPane extends RenderResult {
+  /** Re-render the same pane with a new session list, as a refetch would. */
+  setSessions: (items: SessionListItem[]) => void;
+}
+
+export function renderPane(items: SessionListItem[] = sessions): RenderedPane {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   const client = new ApiClient({ baseUrl: 'http://localhost' });
-  return render(
+  const pane = (list: SessionListItem[]) => (
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
         <NavigatorPane
-          sessions={items}
+          sessions={list}
           hasMoreSessions={false}
           isLoadingMoreSessions={false}
           onLoadMoreSessions={() => {}}
         />
       </ApiProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const result = render(pane(items));
+  return { ...result, setSessions: (list) => result.rerender(pane(list)) };
 }
