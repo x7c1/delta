@@ -10,7 +10,7 @@ check_command: "make check && grep -rq 'fn a_codex_turn_announces_its_start' bac
 assignee: null
 branch: task/1025-1524-announce-codex-turn-starts-to-the-browser
 created_at: 2026-10-25T15:24:57Z
-updated_at: 2026-10-25T15:54:31Z
+updated_at: 2026-10-25T16:06:08Z
 ---
 
 # fix(server): announce Codex turn starts so the session list shows them running
@@ -103,6 +103,6 @@ symptom the Claude fix removed.
 
 ### Before merge (verified outside the check command)
 
-- [ ] In `make dev`, a Codex session that is not focused shows the running
+- [x] In `make dev`, a Codex session that is not focused shows the running
       spinner in the session list while its turn runs, without clicking it,
       and the spinner goes out when the turn ends.
