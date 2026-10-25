@@ -133,6 +133,6 @@ be deleted — e.g.
 
 ### Before merge (verified outside the check command)
 
-- [ ] In `make dev`, a session that is not focused and whose turn is started
+- [x] In `make dev`, a session that is not focused and whose turn is started
       by a background-task notification after `Stop` shows the running
       spinner in the session list while that turn runs, without clicking it.
