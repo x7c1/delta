@@ -94,9 +94,12 @@ where
             AgentEvent::RateLimitsUpdated { windows } => self.report_rate_limits(windows),
             AgentEvent::SessionEnded { reason } => self.settle_agent_session_end(reason).await,
             // Every other event either completed content (handled above) or is
-            // control-only with no browser signal in this slice (session
-            // start, turn start — already applied at send — and
-            // unsupported-interaction handling lands in a later slice).
+            // control-only with no browser signal of its own: session start,
+            // and turn start — already applied to the turn machine and
+            // announced to the browser (`SessionEvent::TurnStarted`) at the
+            // send's `turn/start` acknowledgement, so announcing it again here
+            // would double it. Unsupported-interaction handling lands in a
+            // later slice.
             //
             // `ThinkingDelta` is deliberately NOT streamed: the only live
             // preview the browser has is `AssistantStreaming`, which is reply

@@ -89,8 +89,10 @@ pub trait SessionStore:
     /// 3. [`ThreadStore::main_thread_id`] (no send and no user line yet — a turn at
     ///    the very start of a session).
     ///
-    /// Provided as a default method so the composition lives in one place and
-    /// the two hook call sites cannot drift apart.
+    /// Provided as a default method so the composition lives in one place:
+    /// every caller that names the running turn's thread — its start, its end,
+    /// and anything reporting on it in between — must resolve the same thread,
+    /// or the browser lights one thread and clears another.
     async fn in_progress_turn_thread(&self, session_id: &SessionId) -> Result<ThreadId> {
         if let Some(send) = self.head_dispatched_send(session_id).await? {
             return Ok(send.thread_id);
