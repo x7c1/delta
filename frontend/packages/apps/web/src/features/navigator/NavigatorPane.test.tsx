@@ -58,6 +58,31 @@ describe('NavigatorPane per-session running indicator', () => {
     expect(screen.getAllByTestId('session-running')).toHaveLength(1);
   });
 
+  it('lights the running indicator from a turn_started that names no send, on a session that is not focused', () => {
+    // A turn no send started — a background-task notification after `Stop`,
+    // or a prompt typed into the pane — is still announced, with neither a
+    // send id nor a matched line. The session is not focused, so no sends
+    // fetch re-seeds the flag: the event alone must light its row.
+    renderPane();
+    expect(screen.queryByTestId('session-running')).not.toBeInTheDocument();
+
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'turn_started',
+        session_id: SESSION_ID,
+        send_id: null,
+        thread_id: 1,
+        matched_uuid: null,
+      });
+    });
+
+    const rows = screen.getAllByRole('listitem');
+    expect(
+      within(rows[0]).queryByTestId('session-running'),
+    ).toBeInTheDocument();
+    expect(screen.getAllByTestId('session-running')).toHaveLength(1);
+  });
+
   it('shows no running indicator when no session has an in-flight turn', () => {
     renderPane();
 

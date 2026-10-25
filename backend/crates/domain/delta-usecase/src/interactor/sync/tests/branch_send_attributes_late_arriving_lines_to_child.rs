@@ -38,11 +38,15 @@ async fn branch_send_attributes_late_arriving_lines_to_child() {
     let expected =
         frame_branch_entry_context(&frame_locator_context("quoted line").unwrap(), child);
     assert_eq!(additional, Some(expected));
+    // The turn is still announced on the branch, naming the send but no
+    // matched line: the line has not been written yet.
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::TurnStarted { .. })),
-        "no turn started while the user line is absent"
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::TurnStarted { send_id, thread_id, matched_uuid: None, .. }
+                if *send_id == Some(pending.id) && *thread_id == child
+        )),
+        "the turn starts on the branch before its line is written; got {events:?}"
     );
     assert!(
         !events

@@ -159,7 +159,7 @@ async fn the_echo_deadline_counts_from_the_bind_after_a_slow_launch() {
     assert!(
         events.iter().any(|event| matches!(
             event,
-            SessionEvent::TurnStarted { send_id: id, .. } if *id == send_id
+            SessionEvent::TurnStarted { send_id: id, .. } if *id == Some(send_id)
         )),
         "the positional prompt consumes the first send, got {events:?}"
     );

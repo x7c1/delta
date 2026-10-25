@@ -238,7 +238,7 @@ async fn a_retyped_send_still_matches_its_echo_and_self_heals() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            SessionEvent::TurnStarted { send_id, .. } if *send_id == send.id
+            SessionEvent::TurnStarted { send_id, .. } if *send_id == Some(send.id)
         )),
         "the re-typed send is credited with the turn it started; got {events:?}"
     );

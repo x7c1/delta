@@ -79,14 +79,16 @@ async fn mismatched_prompt_consumes_the_outstanding_send() {
             .any(|e| matches!(e, SessionEvent::ExternalInput { .. })),
         "got {events:?}"
     );
-    // The hook's own announcement still keys on the text: no submitted prompt
-    // equals the send, so no `TurnStarted` goes out here (the `TurnCompleted`
-    // refetch covers the UI). The line's THREAD attribution no longer depends
-    // on that — the ingest above already bound it to the send.
+    // The turn is announced as the send's, on its thread. The matched uuid in
+    // the announcement still keys on the text: no submitted prompt equals the
+    // send, so it names none. The line's THREAD attribution does not depend on
+    // that — the ingest above already bound it to the send.
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::TurnStarted { .. })),
-        "an unattributed send announces no matched uuid; got {events:?}"
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::TurnStarted { send_id, thread_id, matched_uuid: None, .. }
+                if *send_id == Some(send.id) && *thread_id == main
+        )),
+        "an unattributed send announces its turn without a matched uuid; got {events:?}"
     );
 }

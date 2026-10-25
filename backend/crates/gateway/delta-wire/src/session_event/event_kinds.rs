@@ -81,9 +81,9 @@ fn sample_events() -> Vec<WireSessionEvent> {
         },
         WireSessionEvent::TurnStarted {
             session_id: session_id(),
-            send_id: 1,
+            send_id: Some(1),
             thread_id: 1,
-            matched_uuid: "uuid-sample".to_owned(),
+            matched_uuid: Some("uuid-sample".to_owned()),
         },
         WireSessionEvent::ExternalInput {
             session_id: session_id(),

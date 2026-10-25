@@ -55,14 +55,18 @@ pub enum WireSessionEvent {
         send_id: i64,
         text: String,
     },
-    /// A queued send was confirmed as a turn start. `thread_id` is the thread
-    /// the dispatched send took its turn on, so the running indicator lights on
-    /// the exact thread rather than the whole session.
+    /// A turn started: sent for every prompt submission, a Delta send or not.
+    /// `thread_id` is the thread that took the turn, so the running indicator
+    /// lights on the exact thread rather than the whole session. `send_id` is
+    /// the send the prompt consumed and `matched_uuid` that send's user line;
+    /// each is `null` when not known (a prompt typed into the pane or a
+    /// background-task notification has no send; a send's line may not be in
+    /// the transcript yet).
     TurnStarted {
         session_id: String,
-        send_id: i64,
+        send_id: Option<i64>,
         thread_id: i64,
-        matched_uuid: String,
+        matched_uuid: Option<String>,
     },
     /// External input was detected (typed directly into the pane).
     ExternalInput { session_id: String, prompt: String },

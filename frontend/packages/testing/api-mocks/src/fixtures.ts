@@ -105,7 +105,7 @@ export interface MockStore {
      * and the app's authoritative turn re-seed would wipe the running flag
      * the event just set. Absent means no turn is in flight.
      */
-    activeTurn?: { sendId: number; threadId: number | null };
+    activeTurn?: { sendId: number | null; threadId: number | null };
   }[];
   messagesByThread: Record<number, Message[]>;
   sends: Send[];

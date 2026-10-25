@@ -254,17 +254,19 @@ which frames arrive, and a client must handle each event whenever it lands.
   message: the next open-send refetch shows the held row. Pane-backed sessions
   only: parking is the echo-correlation path's failure mode, and an
   adapter-backed session matches on the turn id its provider returns instead.
-- `turn_started` — a queued send was correlated with a transcript message,
-  named by `matched_uuid`. `send_id` is the send that took the turn and
-  `thread_id` the thread it took it on, so the running indicator lights on that
-  exact thread rather than on the whole session. It is **not** emitted once per
-  turn: it fires only when the send's own user line was already in the transcript
-  as the prompt hook ran, and usually the line lands later — that turn then
-  produces no `turn_started` at all and its `turn_completed` drives the refresh.
-  Pane-backed sessions only, too: an adapter-backed session has no prompt hook
-  to fire. So never wait for this event to learn that a turn is running; the
-  answer that is always there is the `turn` in
-  [`GET /api/sessions/{id}/sends`](sends.md#get-apisessionsidsends).
+- `turn_started` — a prompt submission put a turn in flight, whoever
+  submitted it: a Delta send, a prompt typed into the pane, or a
+  background-task notification the harness submits after the previous turn
+  ended. `thread_id` is the thread that took the turn, so the running
+  indicator lights on that exact thread rather than on the whole session.
+  `send_id` is the send the prompt consumed and `matched_uuid` that send's
+  user line; each is `null` when not known (no send was consumed, or the
+  send's line was not in the transcript yet when the prompt hook ran). It can
+  repeat for a prompt submitted mid-turn, so handle it idempotently.
+  Pane-backed sessions only: an adapter-backed session has no prompt hook to
+  fire. A client that was disconnected misses it, so never wait for this
+  event to learn that a turn is running; the answer that is always there is
+  the `turn` in [`GET /api/sessions/{id}/sends`](sends.md#get-apisessionsidsends).
 - `external_input` — a prompt that consumed no send: the user typed straight
   into the pane while no send was outstanding (or while a send resuming the
   session was still held back). A dispatched send's echo never lands here, even

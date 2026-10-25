@@ -32,7 +32,8 @@ export interface MockApi {
    * ingestion resolves sends and its lifecycle hooks activate spawns; the mock
    * has neither, so the scripted event itself is the moment the store moves:
    *
-   * - `turn_started` matches the named send (terminal — it leaves the open list);
+   * - `turn_started` matches the named send, if it names one (terminal — it
+   *   leaves the open list);
    * - `turn_completed` matches every open send of the session;
    * - `turn_interrupted` cancels every open send of the session;
    * - `session_registered` activates a `spawning` row (already listed; it now
@@ -211,7 +212,7 @@ export function createMockApi(): MockApi {
 
   const setActiveTurn = (
     sessionId: string,
-    turn: { sendId: number; threadId: number | null } | undefined,
+    turn: { sendId: number | null; threadId: number | null } | undefined,
   ) => {
     const entry = store.sessions.find((s) => s.session.id === sessionId);
     if (entry) {
@@ -295,7 +296,8 @@ export function createMockApi(): MockApi {
         finishSubagent(event.session_id, event.tool_use_id);
         break;
       case 'turn_started': {
-        // The named send correlated with its transcript line: terminal.
+        // The named send, if any, is terminal. A turn no send started (pane
+        // typing, a background-task notification) names none.
         const send = store.sends.find((s) => s.id === event.send_id);
         if (send && (send.status === 'queued' || send.status === 'dispatched')) {
           send.status = 'matched';

@@ -98,27 +98,41 @@ pub enum SessionEvent {
         /// that one — so the field is a convenience, not the recovery path.
         text: String,
     },
-    /// A queued send was confirmed as a turn start.
+    /// A turn started: a `UserPromptSubmit` left the turn machine `InFlight`.
     ///
-    /// `thread_id` is the thread the dispatched send was composed for, so the
-    /// browser can light the running indicator on the exact thread (main or a
-    /// branch) that took the turn rather than the session as a whole.
+    /// Announced for every prompt, whoever submitted it — a Delta send, a
+    /// prompt typed into the pane, a background-task notification the harness
+    /// injects after the previous turn's `Stop` — and again for a prompt
+    /// submitted mid-turn (the browser's handling is idempotent), so a session
+    /// that is not open still shows its turn running.
+    ///
+    /// `thread_id` is the thread that took the turn, so the browser can light
+    /// the running indicator on that exact thread (main or a branch) rather
+    /// than the session as a whole: the consumed send's own thread, or
+    /// otherwise the one `SessionStore::in_progress_turn_thread` resolves —
+    /// the same resolution [`Self::TurnCompleted`] uses, so the start and the
+    /// end of a turn name the same thread.
+    ///
+    /// `send_id` names the send the prompt consumed, `None` when it consumed
+    /// none. `matched_uuid` is the send's user line, known only when the
+    /// prompt still reads as the send's own text and that line was already in
+    /// the transcript when the hook ran; `None` otherwise.
     ///
     /// Pane-backed sessions only, too: an adapter-backed session has no prompt
     /// hook to fire.
     TurnStarted {
         session_id: SessionId,
-        send_id: i64,
+        send_id: Option<i64>,
         thread_id: ThreadId,
-        matched_uuid: MessageUuid,
+        matched_uuid: Option<MessageUuid>,
     },
     /// A prompt **consumed** no outstanding send. Usually the user typed
     /// straight into the pane; the other producer is the resume window, where
     /// the outstanding send's keystrokes are still held and so cannot be what
     /// submitted. A send whose echo came back mangled does NOT land here:
-    /// consumption is positional, so that prompt is still its send's — it is
-    /// simply announced by the turn end rather than by [`Self::TurnStarted`],
-    /// which needs the matched uuid only a verbatim echo can name this early.
+    /// consumption is positional, so that prompt is still its send's. The turn
+    /// itself is announced by [`Self::TurnStarted`] in both cases; for a
+    /// prompt that lands here it goes out alongside this event.
     ///
     /// Pane-backed sessions only: an adapter-backed session has no pane to
     /// type into and no prompt hook to fire.

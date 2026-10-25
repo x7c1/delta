@@ -36,10 +36,12 @@ export interface RunningThreadsSlice {
    * (any running thread → spinner), while the expanded thread tree reads each
    * thread's own flag. Keyed by session first so a `session_closed` (which
    * carries only a session id) clears the whole session in one drop, with no
-   * separate thread→session map to keep in step. Note `turn_started` only fires
-   * when the user line was ingested in the same `UserPromptSubmit` sync, so
-   * absence here does not prove idleness — same semantics the FIFO's
-   * `in_progress` status had.
+   * separate thread→session map to keep in step. The server sends
+   * `turn_started` for every prompt submission — a Delta send, pane typing, a
+   * background-task notification — so this is the live signal for every
+   * session, open or not. Absence here still does not prove idleness: an event
+   * missed while the live stream was down leaves the flag unset until a
+   * `/sends` fetch re-seeds it.
    */
   runningThreads: Record<SessionId, Record<ThreadId, true>>;
 

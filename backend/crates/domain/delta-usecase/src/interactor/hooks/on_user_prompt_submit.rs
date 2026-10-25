@@ -1,4 +1,5 @@
 use delta_attribution::claude_format;
+use delta_model::{Message, Send};
 
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
@@ -7,7 +8,7 @@ use crate::ports::{
     GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, UserPromptSubmitHook,
     Workspace,
 };
-use crate::turn::TurnInput;
+use crate::turn::{TurnInput, TurnState};
 
 use super::match_uuid_for_prompt;
 
@@ -60,13 +61,25 @@ where
     /// delivered (`OrphanedSend::SettleIfUnmatched`), so the row never lingers
     /// `dispatched` and is never reported as failed.
     ///
+    /// ## Every prompt announces its turn
+    ///
+    /// [`SessionEvent::TurnStarted`] goes out whenever this hook leaves the
+    /// turn machine `InFlight` — which `PromptSubmitted` always does — whoever
+    /// submitted the prompt: a Delta send (whether or not its line is in the
+    /// transcript yet), a prompt typed into the pane, or a background-task
+    /// notification the harness injects after the previous turn's `Stop`. It
+    /// is the browser's only live signal that a turn is running, so a session
+    /// whose conversation is not open would otherwise lose its running
+    /// indicator for the whole turn. See [`Self::turn_started`] for what the
+    /// event names in each case.
+    ///
     /// [`claude_format::prompt_echoes_send`] (exact equality for a plain send,
     /// widened to absorb the image-attachment rewrite and the pasted-content
-    /// wrapper) is left with the two announcements made *here*, before any
-    /// line has been ingested. [`SessionEvent::TurnStarted`] needs it: it names
-    /// a matched uuid, and only a prompt that still reads as the send's own
-    /// text can be paired with one this early. The `additionalContext` locator
-    /// quote (and the branch-entry note) is keyed on the same verdict — so a
+    /// wrapper) is left with what is decided *here*, before any line has been
+    /// ingested: whether `TurnStarted` can name a matched uuid (only a prompt
+    /// that still reads as the send's own text can be paired with one this
+    /// early), and the `additionalContext` locator quote (and the branch-entry
+    /// note), keyed on the same verdict — so a
     /// prompt rewritten in a shape `prompt_echoes_send` does not recognize
     /// reaches Claude without its quote frame, even though the line it produces
     /// is still attributed to the send's branch.
@@ -126,8 +139,8 @@ where
             .filter(|_| !self.state.is_resuming())
             .cloned();
         // RECOGNITION, by text: the transcript fold attributes the send's lines
-        // by position, but the turn announcement made here names a matched uuid
-        // and so still needs the prompt to read as the send's own text. The
+        // by position, but the matched uuid the turn announcement names here
+        // still needs the prompt to read as the send's own text. The
         // locator-quote note below is keyed on the same verdict. The rewrites
         // `prompt_echoes_send` recognizes still count as the send's own text:
         // the `[Image #N]` attachment placeholder, and the
@@ -201,53 +214,81 @@ where
         // moves to `InFlight` either way; which send (if any) it credits with
         // the turn is the positional decision made above, carried as the
         // input's `send_id`.
-        self.apply_turn_input(TurnInput::PromptSubmitted {
-            send_id: consumed.as_ref().map(|send| send.id),
-        })
-        .await?;
+        let turn = self
+            .apply_turn_input(TurnInput::PromptSubmitted {
+                send_id: consumed.as_ref().map(|send| send.id),
+            })
+            .await?;
 
-        match &consumed {
-            Some(_) => {
-                // Announce the turn only when the text also resolved the send:
-                // `TurnStarted` carries the matched uuid and the thread to
-                // light up, both of them attribution facts. If the send's user
-                // line was attributed in this very sync, announce now;
-                // otherwise the line was not in the JSONL yet (the common
-                // timing case) and the later `Stop` sync attributes it, with
-                // `TurnCompleted` driving the UI refetch.
-                if let Some(attributed) = &attributed {
-                    if let Some(uuid) = match_uuid_for_prompt(&new_messages, &hook.prompt) {
-                        events.push(SessionEvent::TurnStarted {
-                            session_id: hook.session_id.clone(),
-                            send_id: attributed.id,
-                            // The dispatched send carries the thread it was
-                            // composed for, so the running indicator lights on
-                            // that exact thread (main or a branch) rather than
-                            // the session.
-                            thread_id: attributed.thread_id,
-                            matched_uuid: uuid,
-                        });
-                    }
-                }
-            }
-            None => {
-                // This prompt consumed no send, so it really is input from
-                // outside Delta — except a background-task notification, which
-                // the harness injects as a prompt submission rather than typing
-                // it into the pane, so it must not surface as external input.
-                if !claude_format::is_task_notification(&hook.prompt) {
-                    events.push(SessionEvent::ExternalInput {
-                        session_id: hook.session_id.clone(),
-                        // The browser shows this text in its external-input
-                        // notice, so a paste into the pane drops the
-                        // pasted-content wrapper here as its stored human
-                        // line does.
-                        prompt: claude_format::unwrap_pasted_content(&hook.prompt).into_owned(),
-                    });
-                }
-            }
+        // Announce the turn whenever the machine is now `InFlight` — every
+        // prompt, Delta's or not, since `PromptSubmitted` always lands there.
+        // It is announced again for a prompt submitted mid-turn (a
+        // background-task notification while the machine is already
+        // `InFlight`): the browser's handling is idempotent, and "the hook
+        // left the machine `InFlight`" is a simpler rule than tracking the
+        // previous state.
+        if matches!(turn, TurnState::InFlight { .. }) {
+            events.push(
+                self.turn_started(&hook, consumed.as_ref(), attributed.as_ref(), &new_messages)
+                    .await?,
+            );
+        }
+
+        // A prompt that consumed no send really is input from outside Delta —
+        // except a background-task notification, which the harness injects as
+        // a prompt submission rather than typing it into the pane, so it must
+        // not surface as external input.
+        if consumed.is_none() && !claude_format::is_task_notification(&hook.prompt) {
+            events.push(SessionEvent::ExternalInput {
+                session_id: hook.session_id.clone(),
+                // The browser shows this text in its external-input notice, so
+                // a paste into the pane drops the pasted-content wrapper here
+                // as its stored human line does.
+                prompt: claude_format::unwrap_pasted_content(&hook.prompt).into_owned(),
+            });
         }
 
         Ok((events, additional_context))
+    }
+
+    /// The [`SessionEvent::TurnStarted`] for the turn this prompt just put in
+    /// flight.
+    ///
+    /// A consumed send names the turn: its id, and the thread it was composed
+    /// for (main or a branch), so the running indicator lights on that exact
+    /// thread. The matched uuid is known only when the prompt still reads
+    /// as the send's own text AND the send's user line was ingested in this
+    /// hook's sync; otherwise the line is not in the JSONL yet (the common
+    /// timing case) or was rewritten, and the later sync binds it.
+    ///
+    /// A prompt that consumed no send (pane typing, a background-task
+    /// notification, a prompt inside the resume window) has no send to name,
+    /// so its thread is resolved by [`SessionStore::in_progress_turn_thread`]
+    /// after the sync — the resolution `Stop` and the live-state query use —
+    /// so the start and the end of the turn name the same thread, and a line
+    /// already ingested is attributed.
+    async fn turn_started(
+        &self,
+        hook: &UserPromptSubmitHook,
+        consumed: Option<&Send>,
+        attributed: Option<&Send>,
+        new_messages: &[Message],
+    ) -> Result<SessionEvent> {
+        let session_id = hook.session_id.clone();
+        Ok(match consumed {
+            Some(send) => SessionEvent::TurnStarted {
+                session_id,
+                send_id: Some(send.id),
+                thread_id: send.thread_id,
+                matched_uuid: attributed
+                    .and_then(|_| match_uuid_for_prompt(new_messages, &hook.prompt)),
+            },
+            None => SessionEvent::TurnStarted {
+                thread_id: self.store.in_progress_turn_thread(&hook.session_id).await?,
+                session_id,
+                send_id: None,
+                matched_uuid: None,
+            },
+        })
     }
 }
