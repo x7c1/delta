@@ -98,13 +98,16 @@ pub enum SessionEvent {
         /// that one — so the field is a convenience, not the recovery path.
         text: String,
     },
-    /// A turn started: a `UserPromptSubmit` left the turn machine `InFlight`.
+    /// A turn started: the turn machine went `InFlight`.
     ///
-    /// Announced for every prompt, whoever submitted it — a Delta send, a
+    /// On a pane-backed session the producer is the `UserPromptSubmit` hook,
+    /// and it announces every prompt, whoever submitted it — a Delta send, a
     /// prompt typed into the pane, a background-task notification the harness
     /// injects after the previous turn's `Stop` — and again for a prompt
-    /// submitted mid-turn (the browser's handling is idempotent), so a session
-    /// that is not open still shows its turn running.
+    /// submitted mid-turn (the browser's handling is idempotent). On an
+    /// adapter-backed session, which has no prompt hook, the producer is the
+    /// adapter's `turn/start` acknowledgement, once per turn. Either way a
+    /// session that is not open still shows its turn running.
     ///
     /// `thread_id` is the thread that took the turn, so the browser can light
     /// the running indicator on that exact thread (main or a branch) rather
@@ -114,12 +117,12 @@ pub enum SessionEvent {
     /// end of a turn name the same thread.
     ///
     /// `send_id` names the send the prompt consumed, `None` when it consumed
-    /// none. `matched_uuid` is the send's user line, known only when the
-    /// prompt still reads as the send's own text and that line was already in
-    /// the transcript when the hook ran; `None` otherwise.
-    ///
-    /// Pane-backed sessions only, too: an adapter-backed session has no prompt
-    /// hook to fire.
+    /// none; an adapter-backed turn always names its send. `matched_uuid` is
+    /// the id the send row is matched with: on a pane-backed session the
+    /// send's user line, known only when the prompt still reads as the send's
+    /// own text and that line was already in the transcript when the hook ran
+    /// (`None` otherwise); on an adapter-backed session the provider's turn id
+    /// the row was matched with at the acknowledgement.
     TurnStarted {
         session_id: SessionId,
         send_id: Option<i64>,

@@ -1,5 +1,6 @@
 //! Enqueue use-case tests.
 
+mod a_codex_turn_announces_its_start;
 mod a_failed_launch_keeps_its_undelivered_text_on_the_row;
 mod a_local_command_send_frees_the_session_at_its_short_deadline;
 mod a_slow_launch_does_not_retype_its_first_prompt;

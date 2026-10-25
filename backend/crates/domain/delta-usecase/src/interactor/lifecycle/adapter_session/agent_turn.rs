@@ -20,7 +20,13 @@
 //! leaves the open/`dispatched` set immediately rather than lingering. Claude's
 //! FSM table is untouched.
 //!
+//! The same acknowledgement is where the turn is announced to the browser: an
+//! adapter-backed session has no prompt hook to emit
+//! [`SessionEvent::TurnStarted`], so [`SessionContext::start_agent_turn`] emits
+//! it once per turn, naming the send and its thread.
+//!
 //! [`TurnInput::PromptSubmitted`]: crate::turn::TurnInput::PromptSubmitted
+//! [`SessionEvent::TurnStarted`]: crate::ports::SessionEvent::TurnStarted
 
 use std::sync::Arc;
 
@@ -29,7 +35,7 @@ use delta_model::{MessageUuid, Send, ThreadId};
 use crate::agent::{AgentAdapter, AgentSessionHandle, SendRequest};
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -104,6 +110,17 @@ where
     ///    echo: mark it matched to the provider's turn id (falling back to the
     ///    provider session id when the ack carried none), so it leaves the
     ///    open/`dispatched` set immediately.
+    /// 5. Announce the turn with [`SessionEvent::TurnStarted`], so a session
+    ///    that is not open still shows its turn running. It names this send and
+    ///    the send's own thread — the thread `in_progress_turn_thread` resolves
+    ///    at the turn end, so the start and the end name the same thread — and
+    ///    carries the id the row was just marked matched with as
+    ///    `matched_uuid`, so a consumer that mirrors the event onto the send row
+    ///    (the frontend's mock backend) agrees with what `/sends` reports for
+    ///    it. It leaves on the async seam because the opening turn runs inside
+    ///    the launch, after the request that accepted it has returned. This is
+    ///    the turn's only start announcement: the provider's own
+    ///    `AgentEvent::TurnStarted` is not re-announced.
     ///
     /// The turn's assistant frames arrive asynchronously through the event pump
     /// spawned at bind time — this returns as soon as the turn has started.
@@ -128,13 +145,19 @@ where
         };
         self.apply_turn_input(crate::turn::TurnInput::PromptSubmitted { send_id: None })
             .await?;
-        let matched = receipt
-            .provider_message_id
-            .filter(|id| !id.is_empty())
-            .unwrap_or_else(|| handle.provider_session_id.clone());
-        self.store
-            .mark_send_matched(send_id, &MessageUuid::from(matched))
-            .await?;
+        let matched = MessageUuid::from(
+            receipt
+                .provider_message_id
+                .filter(|id| !id.is_empty())
+                .unwrap_or_else(|| handle.provider_session_id.clone()),
+        );
+        self.store.mark_send_matched(send_id, &matched).await?;
+        self.emit_async_event(SessionEvent::TurnStarted {
+            session_id: self.id.clone(),
+            send_id: Some(send_id),
+            thread_id,
+            matched_uuid: Some(matched),
+        });
         Ok(())
     }
 }

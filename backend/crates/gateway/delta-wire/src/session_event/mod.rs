@@ -55,11 +55,14 @@ pub enum WireSessionEvent {
         send_id: i64,
         text: String,
     },
-    /// A turn started: sent for every prompt submission, a Delta send or not.
-    /// `thread_id` is the thread that took the turn, so the running indicator
-    /// lights on the exact thread rather than the whole session. `send_id` is
-    /// the send the prompt consumed and `matched_uuid` that send's user line;
-    /// each is `null` when not known (a prompt typed into the pane or a
+    /// A turn started: sent for every prompt submission on a pane-backed
+    /// session, a Delta send or not, and once per turn on an adapter-backed
+    /// session, at the provider's acknowledgement of the send. `thread_id` is
+    /// the thread that took the turn, so the running indicator lights on the
+    /// exact thread rather than the whole session. `send_id` is the send the
+    /// prompt consumed and `matched_uuid` the id that send is matched with
+    /// (its user line, or an adapter-backed provider's turn id); each is
+    /// `null` when not known (a prompt typed into the pane or a
     /// background-task notification has no send; a send's line may not be in
     /// the transcript yet).
     TurnStarted {

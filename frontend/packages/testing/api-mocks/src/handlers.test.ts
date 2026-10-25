@@ -5,14 +5,13 @@ import type {
   GitBranchesResponse,
   GitRepoResponse,
   LaunchOption,
-  PromptTemplate,
-  PromptTemplatesResponse,
   SendResponse,
   SendsResponse,
   SessionEvent,
   SessionsResponse,
 } from '@delta/wire-gen';
 import { createHandlers, createMockApi } from './handlers';
+import { runGet, runPost } from './handlerTestRequests';
 import { MOCK_CLOSED_WHILE_STARTING_REASON } from './sessionHandlers';
 import { mockSpawnSessionId } from './fixtures';
 import {
@@ -137,16 +136,6 @@ describe('GET /api/sessions mock pagination', () => {
   });
 });
 
-/** Run a POST handler selected by a path suffix, returning the raw response. */
-async function runPost(
-  handlers: HttpHandler[],
-  pathSuffix: string,
-  url: string,
-  body?: unknown,
-): Promise<Response> {
-  return runWithMethod(handlers, 'POST', pathSuffix, url, body);
-}
-
 describe('resume-unavailable session mock', () => {
   it('refuses to open the resume-unavailable session with 409 resume_unavailable', async () => {
     const handlers = createHandlers() as HttpHandler[];
@@ -187,26 +176,6 @@ describe('resume-unavailable session mock', () => {
     expect(response.status).toBe(204);
   });
 });
-
-/** Run a GET handler selected by a path pattern suffix. */
-async function runGet(
-  handlers: HttpHandler[],
-  pathSuffix: string,
-  url: string,
-): Promise<Response> {
-  const handler = handlers.find(
-    (h) => h.info.method === 'GET' && String(h.info.path).endsWith(pathSuffix),
-  );
-  if (!handler) {
-    throw new Error(`GET handler ending in ${pathSuffix} not found`);
-  }
-  const result = await handler.run({ request: new Request(url), requestId: 'test' });
-  const response = result?.response;
-  if (!response) {
-    throw new Error('handler did not produce a response');
-  }
-  return response;
-}
 
 /** A session's open sends via the mock `GET /api/sessions/{id}/sends`. */
 async function getOpenSends(
@@ -311,6 +280,42 @@ describe('GET /api/sessions/{id}/sends mock', () => {
       state: 'idle',
       send_id: null,
       thread_id: null,
+    });
+  });
+
+  it('drops the in-flight send when a mid-turn turn_started names none', async () => {
+    // A background-task notification can start a prompt while the turn runs.
+    // That prompt takes the turn over, so the real server's turn machine
+    // stops naming the send that started it, and the mock follows.
+    const { handlers, applyEvent } = createMockApi();
+    const httpHandlers = handlers as HttpHandler[];
+
+    const posted = (await (
+      await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+        thread_id: MAIN_THREAD_ID,
+        text: 'drive a turn',
+      })
+    ).json()) as SendResponse;
+
+    applyEvent({
+      kind: 'turn_started',
+      session_id: SESSION_ID,
+      send_id: posted.send.id,
+      thread_id: MAIN_THREAD_ID,
+      matched_uuid: 'uuid-m1',
+    });
+    applyEvent({
+      kind: 'turn_started',
+      session_id: SESSION_ID,
+      send_id: null,
+      thread_id: MAIN_THREAD_ID,
+      matched_uuid: null,
+    });
+    const envelope = await getOpenSends(httpHandlers, SESSION_ID);
+    expect(envelope.turn).toEqual({
+      state: 'in_flight',
+      send_id: null,
+      thread_id: MAIN_THREAD_ID,
     });
   });
 
@@ -800,173 +805,6 @@ describe('clone-root mock canonicalisation', () => {
       '/api/clone-roots',
       'http://localhost/api/clone-roots',
       { path: 'home/dev/projects' },
-    );
-    expect(response.status).toBe(400);
-  });
-});
-
-/**
- * Run a handler selected by method and path suffix, returning the raw response.
- * Backs {@link runPost}; {@link runGet} stays separate because a GET carries no
- * body and no content-type.
- */
-async function runWithMethod(
-  handlers: HttpHandler[],
-  method: 'POST' | 'PATCH' | 'DELETE',
-  pathSuffix: string,
-  url: string,
-  body?: unknown,
-): Promise<Response> {
-  const handler = handlers.find(
-    (h) => h.info.method === method && String(h.info.path).endsWith(pathSuffix),
-  );
-  if (!handler) {
-    throw new Error(`${method} handler ending in ${pathSuffix} not found`);
-  }
-  const request = new Request(url, {
-    method,
-    headers: { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const result = await handler.run({ request, requestId: 'test' });
-  const response = result?.response;
-  if (!response) {
-    throw new Error('handler did not produce a response');
-  }
-  return response;
-}
-
-/** The registered prompt templates via the mock `GET /api/prompt-templates`. */
-async function getPromptTemplates(
-  handlers: HttpHandler[],
-): Promise<PromptTemplate[]> {
-  const response = await runGet(
-    handlers,
-    '/api/prompt-templates',
-    'http://localhost/api/prompt-templates',
-  );
-  expect(response.status).toBe(200);
-  const body = (await response.json()) as PromptTemplatesResponse;
-  return body.prompt_templates;
-}
-
-/**
- * The prompt-template mock reproduces the real server's CRUD contract, so the
- * Settings editor and the composer's insert menu can be driven end to end with
- * no backend: oldest-first ordering, a verbatim body, the blank-field 400, an
- * in-place edit that re-stamps `updated_at`, and an idempotent delete.
- */
-describe('prompt-template mock CRUD', () => {
-  it('seeds two templates, one of them long and multi-line', async () => {
-    const templates = await getPromptTemplates(
-      createHandlers() as HttpHandler[],
-    );
-
-    expect(templates).toHaveLength(2);
-    // Oldest first, as the server returns them.
-    expect(templates.map((t) => t.id)).toEqual([1, 2]);
-    // One seed is realistic list-rendering material rather than a one-liner:
-    // several paragraphs and well past 200 characters.
-    const long = templates[1];
-    expect(long.text.length).toBeGreaterThan(200);
-    expect(long.text.split('\n').length).toBeGreaterThan(3);
-  });
-
-  it('creates, lists, edits in place, and deletes a template', async () => {
-    const handlers = createHandlers() as HttpHandler[];
-
-    // The body deliberately ends with a newline: the mock stores it verbatim,
-    // as the server does.
-    const created = await runPost(
-      handlers,
-      '/api/prompt-templates',
-      'http://localhost/api/prompt-templates',
-      { label: 'Ship it', text: 'Merge, then update the plan doc.\n' },
-    );
-    expect(created.status).toBe(201);
-    const template = (await created.json()) as PromptTemplate;
-    expect(template.text).toBe('Merge, then update the plan doc.\n');
-    expect(template.updated_at).toBe(template.created_at);
-
-    expect(await getPromptTemplates(handlers)).toHaveLength(3);
-
-    const updated = await runWithMethod(
-      handlers,
-      'PATCH',
-      '/api/prompt-templates/:id',
-      `http://localhost/api/prompt-templates/${template.id}`,
-      { label: 'Ship it carefully', text: 'Merge once green.' },
-    );
-    expect(updated.status).toBe(200);
-    const edited = (await updated.json()) as PromptTemplate;
-    expect(edited.id).toBe(template.id);
-    expect(edited.label).toBe('Ship it carefully');
-    expect(edited.created_at).toBe(template.created_at);
-
-    // The edit replaced the row rather than adding one.
-    const listed = await getPromptTemplates(handlers);
-    expect(listed).toHaveLength(3);
-    expect(listed.find((t) => t.id === template.id)?.label).toBe(
-      'Ship it carefully',
-    );
-
-    const deleted = await runWithMethod(
-      handlers,
-      'DELETE',
-      '/api/prompt-templates/:id',
-      `http://localhost/api/prompt-templates/${template.id}`,
-    );
-    expect(deleted.status).toBe(204);
-    expect(await getPromptTemplates(handlers)).toHaveLength(2);
-
-    // Deleting it again is an idempotent no-op, like the real server.
-    const again = await runWithMethod(
-      handlers,
-      'DELETE',
-      '/api/prompt-templates/:id',
-      `http://localhost/api/prompt-templates/${template.id}`,
-    );
-    expect(again.status).toBe(204);
-  });
-
-  it.each([
-    ['blank label', { label: '   ', text: 'body' }],
-    ['blank text', { label: 'Label', text: '\n\t ' }],
-  ])('rejects a create with a %s with 400', async (_label, body) => {
-    const handlers = createHandlers() as HttpHandler[];
-    const response = await runPost(
-      handlers,
-      '/api/prompt-templates',
-      'http://localhost/api/prompt-templates',
-      body,
-    );
-    expect(response.status).toBe(400);
-    expect(await getPromptTemplates(handlers)).toHaveLength(2);
-  });
-
-  it('answers 404 when editing an unknown id', async () => {
-    const handlers = createHandlers() as HttpHandler[];
-    const response = await runWithMethod(
-      handlers,
-      'PATCH',
-      '/api/prompt-templates/:id',
-      'http://localhost/api/prompt-templates/9999',
-      { label: 'Label', text: 'text' },
-    );
-    expect(response.status).toBe(404);
-  });
-
-  it('answers 400 rather than 404 when a blank edit names an unknown id', async () => {
-    // The server validates in the use case, before the store is consulted, so
-    // the blank field wins over the missing row. The mock must agree, or a test
-    // written against it would expect the wrong status from the real server.
-    const handlers = createHandlers() as HttpHandler[];
-    const response = await runWithMethod(
-      handlers,
-      'PATCH',
-      '/api/prompt-templates/:id',
-      'http://localhost/api/prompt-templates/9999',
-      { label: '   ', text: 'text' },
     );
     expect(response.status).toBe(400);
   });
