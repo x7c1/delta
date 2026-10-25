@@ -44,7 +44,7 @@ impl From<SessionEvent> for WireSessionEvent {
                 session_id: session_id.0,
                 send_id,
                 thread_id: thread_id.0,
-                matched_uuid: matched_uuid.0,
+                matched_uuid: matched_uuid.map(|uuid| uuid.0),
             },
             SessionEvent::ExternalInput { session_id, prompt } => Self::ExternalInput {
                 session_id: session_id.0,

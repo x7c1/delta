@@ -7,9 +7,9 @@ fn turn_events_keep_their_payload_fields_on_the_wire() {
     assert_eq!(
         json(&WireSessionEvent::from(SessionEvent::TurnStarted {
             session_id: SessionId::from("sess-1"),
-            send_id: 42,
+            send_id: Some(42),
             thread_id: ThreadId(2),
-            matched_uuid: MessageUuid::from("uuid-1"),
+            matched_uuid: Some(MessageUuid::from("uuid-1")),
         })),
         serde_json::json!({
             "kind": "turn_started",
@@ -17,6 +17,23 @@ fn turn_events_keep_their_payload_fields_on_the_wire() {
             "send_id": 42,
             "thread_id": 2,
             "matched_uuid": "uuid-1",
+        }),
+    );
+    // A turn no send was consumed for (pane typing, a background-task
+    // notification) names neither a send nor a matched line.
+    assert_eq!(
+        json(&WireSessionEvent::from(SessionEvent::TurnStarted {
+            session_id: SessionId::from("sess-1"),
+            send_id: None,
+            thread_id: ThreadId(1),
+            matched_uuid: None,
+        })),
+        serde_json::json!({
+            "kind": "turn_started",
+            "session_id": "sess-1",
+            "send_id": null,
+            "thread_id": 1,
+            "matched_uuid": null,
         }),
     );
     assert_eq!(

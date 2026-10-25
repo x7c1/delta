@@ -1,6 +1,9 @@
 //! Claude Code hook handler tests.
 
+mod a_prompt_typed_into_the_pane_announces_its_start;
 mod a_rewritten_prompt_is_logged_without_its_text;
+mod a_send_whose_line_is_not_written_yet_announces_its_start;
+mod a_task_notification_turn_after_stop_announces_its_start;
 mod answering_a_question_injects_keys_into_the_pane;
 mod ask_user_question_drives_a_question_notice;
 mod ask_user_question_never_outlives_its_turn;

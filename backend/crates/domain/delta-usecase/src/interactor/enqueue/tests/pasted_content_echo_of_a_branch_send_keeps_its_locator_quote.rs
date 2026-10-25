@@ -55,9 +55,9 @@ async fn pasted_content_echo_of_a_branch_send_keeps_its_locator_quote() {
         events.iter().any(|e| matches!(
             e,
             SessionEvent::TurnStarted { send_id, thread_id, matched_uuid, .. }
-                if *send_id == send.id
+                if *send_id == Some(send.id)
                     && *thread_id == send.thread_id
-                    && *matched_uuid == MessageUuid::from("uuid-1")
+                    && *matched_uuid == Some(MessageUuid::from("uuid-1"))
         )),
         "the wrapped echo announces the send's turn; got {events:?}"
     );

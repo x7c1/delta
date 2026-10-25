@@ -66,9 +66,9 @@ describe('liveStore turn tracking', () => {
   });
 
   it('drains the tracked local send on turn_interrupted, even without turn_started', () => {
-    // The common timing case: the user line was not ingested in the
-    // UserPromptSubmit sync, so turn_started never fired. The turn-end event
-    // must still clear the tracked send.
+    // A turn whose turn_started this client never saw (it arrived while the
+    // live stream was down). The turn-end event must still clear the tracked
+    // send.
     useLiveStore.getState().recordLocalSend(localSend());
 
     useLiveStore.getState().applyEvent({

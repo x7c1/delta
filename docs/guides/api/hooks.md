@@ -93,9 +93,10 @@ Request:
 ### `POST /hooks/user-prompt-submit`
 
 Fires just before a prompt is processed. The first such hook registers the
-session if `SessionStart` has not already. The prompt is matched against the head
-of the pending-send FIFO: on a hit the send is marked matched and a
-`turn_started` event is broadcast; on a miss it is treated as `external_input`.
+session if `SessionStart` has not already. The prompt consumes the one
+outstanding (`dispatched`) send, if any. Every prompt broadcasts a `turn_started`
+event; one that consumed no send is also reported as `external_input`, unless it
+is a background-task notification the harness submitted.
 
 Request:
 

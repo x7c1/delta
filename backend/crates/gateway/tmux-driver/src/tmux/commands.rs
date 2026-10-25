@@ -107,7 +107,7 @@ pub(super) const SUBMIT_ENTER_DELAY: std::time::Duration = std::time::Duration::
 /// message itself: the line breaks the user wrote never reach Claude. It also
 /// fails the verbatim check on every multi-line send, which logs each one as a
 /// rewritten prompt and withholds the extras keyed on that verdict (the
-/// locator-quote frame, the `TurnStarted` naming the matched uuid). Wrapping
+/// locator-quote frame, the matched uuid on `TurnStarted`). Wrapping
 /// the payload in `ESC [ 200 ~` … `ESC [ 201 ~` tells the TUI "this is a
 /// paste", which preserves embedded LFs verbatim and makes the hook echo match.
 pub(super) fn input_commands(pane: &str, text: &str) -> Vec<Vec<String>> {

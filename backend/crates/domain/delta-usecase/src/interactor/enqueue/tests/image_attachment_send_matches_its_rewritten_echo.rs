@@ -47,7 +47,7 @@ async fn image_attachment_send_matches_its_rewritten_echo() {
         events.iter().any(|e| matches!(
             e,
             SessionEvent::TurnStarted { send_id, thread_id, .. }
-                if *send_id == send.id && *thread_id == main
+                if *send_id == Some(send.id) && *thread_id == main
         )),
         "the attachment send's turn is attributed to it; got {events:?}"
     );
