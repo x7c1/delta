@@ -79,55 +79,19 @@ impl From<SessionListing> for WireSessionListItem {
 mod tests {
     use super::*;
 
-    use delta_model::{AgentProvider, Session, SessionId, SessionStatus, Thread, ThreadId};
+    use delta_model::ThreadId;
     use delta_usecase::{RunningSubagent, TurnState};
 
-    fn listing(turn: TurnState, in_progress_thread: Option<ThreadId>) -> SessionListing {
-        SessionListing {
-            session: Session {
-                id: SessionId::from("sess-1"),
-                cwd: "/work".into(),
-                transcript_path: None,
-                title: None,
-                status: SessionStatus::Active,
-                created_at: "2026-01-01T00:00:00Z".into(),
-                branch_at_launch: None,
-                repo_root: None,
-                requested_workdir: None,
-                repository_display_name: None,
-                provider: AgentProvider::Codex,
-                provider_session_id: None,
-                provider_thread_id: None,
-                pull_request_number: None,
-                failure_reason: None,
-                closed_reason: None,
-            },
-            open: true,
-            pane_starting: false,
-            hooks_unreachable: false,
-            main_thread_id: ThreadId(1),
-            threads: vec![Thread {
-                id: ThreadId(1),
-                session_id: SessionId::from("sess-1"),
-                title: "main".into(),
-                parent_thread_id: None,
-                root_message_uuid: None,
-                created_at: "2026-01-01T00:00:00Z".into(),
-                last_activity_at: None,
-            }],
-            last_activity_at: None,
-            turn,
-            in_progress_thread,
-            running_subagents: Vec::new(),
-        }
-    }
+    use crate::testing;
 
     /// A row with a turn in flight carries it in the sends envelope's `turn`
     /// shape, naming the thread it runs on, and its running subagents in the
     /// envelope's `running_subagents` shape.
     #[test]
     fn a_list_item_carries_its_turn_in_flight_and_running_subagents() {
-        let mut row = listing(TurnState::InFlight { send_id: Some(7) }, Some(ThreadId(2)));
+        let mut row = testing::listing();
+        row.turn = TurnState::InFlight { send_id: Some(7) };
+        row.in_progress_thread = Some(ThreadId(2));
         row.running_subagents = vec![RunningSubagent {
             thread_id: ThreadId(2),
             tool_use_id: "toolu_01".to_owned(),
@@ -156,8 +120,7 @@ mod tests {
     /// An idle row reports the idle turn with no thread, and no subagents.
     #[test]
     fn an_idle_list_item_carries_the_idle_turn() {
-        let value = serde_json::to_value(WireSessionListItem::from(listing(TurnState::Idle, None)))
-            .unwrap();
+        let value = serde_json::to_value(WireSessionListItem::from(testing::listing())).unwrap();
         assert_eq!(
             value["turn"],
             serde_json::json!({ "state": "idle", "send_id": null, "thread_id": null }),

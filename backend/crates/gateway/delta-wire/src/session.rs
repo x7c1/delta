@@ -111,29 +111,20 @@ impl From<Session> for WireSession {
 mod tests {
     use super::*;
 
-    use delta_model::{AgentProvider, SessionStatus};
+    use delta_model::{AgentProvider, SessionId};
 
-    use delta_model::SessionId;
+    use crate::testing;
 
     #[test]
     fn session_serializes_with_the_rest_field_names() {
         let session = Session {
-            id: SessionId::from("sess-1"),
             cwd: "/work/delta".into(),
             transcript_path: Some("/tmp/t.jsonl".into()),
-            title: None,
-            status: SessionStatus::Active,
-            created_at: "2026-01-01T00:00:00Z".into(),
             branch_at_launch: Some("main".into()),
             repo_root: Some("/work/delta".into()),
-            requested_workdir: None,
             repository_display_name: Some("x7c1/delta".into()),
-            provider: AgentProvider::Claude,
-            provider_session_id: None,
-            provider_thread_id: None,
             pull_request_number: Some(138),
-            failure_reason: None,
-            closed_reason: None,
+            ..testing::session()
         };
         assert_eq!(
             serde_json::to_value(WireSession::from(session)).unwrap(),
@@ -162,20 +153,10 @@ mod tests {
         let session = Session {
             id: SessionId::from("sess-2"),
             cwd: "/work/delta".into(),
-            transcript_path: None,
-            title: None,
-            status: SessionStatus::Active,
-            created_at: "2026-01-01T00:00:00Z".into(),
-            branch_at_launch: None,
-            repo_root: None,
-            requested_workdir: None,
-            repository_display_name: None,
             provider: AgentProvider::Codex,
             provider_session_id: Some("thr_abc".into()),
             provider_thread_id: Some("thr_abc".into()),
-            pull_request_number: None,
-            failure_reason: None,
-            closed_reason: None,
+            ..testing::session()
         };
         let value = serde_json::to_value(WireSession::from(session)).unwrap();
         assert_eq!(value["provider"], serde_json::json!("codex"));

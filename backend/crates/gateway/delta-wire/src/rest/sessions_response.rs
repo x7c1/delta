@@ -22,49 +22,13 @@ pub struct WireSessionsResponse {
 mod tests {
     use super::*;
 
-    use delta_usecase::{SessionListing, TurnState};
-
-    use delta_model::{AgentProvider, Session, SessionId, SessionStatus, Thread, ThreadId};
+    use crate::testing;
 
     #[test]
     fn a_page_serializes_with_the_rest_field_names() {
-        let listing = SessionListing {
-            session: Session {
-                id: SessionId::from("sess-1"),
-                cwd: "/work".into(),
-                transcript_path: Some("/tmp/t.jsonl".into()),
-                title: Some("title".into()),
-                status: SessionStatus::Active,
-                created_at: "2026-01-01T00:00:00Z".into(),
-                branch_at_launch: None,
-                repo_root: None,
-                requested_workdir: None,
-                repository_display_name: None,
-                provider: AgentProvider::Claude,
-                provider_session_id: None,
-                provider_thread_id: None,
-                pull_request_number: None,
-                failure_reason: None,
-                closed_reason: None,
-            },
-            open: true,
-            pane_starting: false,
-            hooks_unreachable: false,
-            main_thread_id: ThreadId(1),
-            threads: vec![Thread {
-                id: ThreadId(1),
-                session_id: SessionId::from("sess-1"),
-                title: "main".into(),
-                parent_thread_id: None,
-                root_message_uuid: None,
-                created_at: "2026-01-01T00:00:00Z".into(),
-                last_activity_at: None,
-            }],
-            last_activity_at: None,
-            turn: TurnState::Idle,
-            in_progress_thread: None,
-            running_subagents: Vec::new(),
-        };
+        let mut listing = testing::listing();
+        listing.session.transcript_path = Some("/tmp/t.jsonl".into());
+        listing.session.title = Some("title".into());
         assert_eq!(
             serde_json::to_value(WireSessionsResponse {
                 sessions: vec![listing.into()],
