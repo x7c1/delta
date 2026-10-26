@@ -60,6 +60,8 @@ mod status_snapshot;
 pub use status_snapshot::WireStatusSnapshot;
 mod rate_limit_window;
 pub use rate_limit_window::WireRateLimitWindow;
+#[cfg(test)]
+mod testing;
 mod thread;
 pub use thread::WireThread;
 

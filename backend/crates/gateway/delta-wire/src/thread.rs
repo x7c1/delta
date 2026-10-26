@@ -45,18 +45,19 @@ impl From<Thread> for WireThread {
 mod tests {
     use super::*;
 
-    use delta_model::{MessageUuid, SessionId, ThreadId};
+    use delta_model::{MessageUuid, ThreadId};
+
+    use crate::testing;
 
     #[test]
     fn thread_serializes_with_the_rest_field_names() {
         let thread = Thread {
             id: ThreadId(2),
-            session_id: SessionId::from("sess-1"),
             title: "branch".into(),
             parent_thread_id: Some(ThreadId(1)),
             root_message_uuid: Some(MessageUuid::from("uuid-root")),
-            created_at: "2026-01-01T00:00:00Z".into(),
             last_activity_at: Some("2026-01-02T03:04:05Z".into()),
+            ..testing::main_thread()
         };
         assert_eq!(
             serde_json::to_value(WireThread::from(thread)).unwrap(),
