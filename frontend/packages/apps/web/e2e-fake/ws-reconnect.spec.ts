@@ -26,6 +26,9 @@ import { fetchMessageCount, fetchSends, latestSession } from './support/rest';
  *   regression guard: pending sends are a server resource, so a reconnect is
  *   a refetch, never a wipe) and the running indicator is re-seeded from the
  *   queryable turn state;
+ * - a running session that is not focused keeps its spinner, re-seeded from
+ *   the session list's per-session `turn` (the sends envelope covers only the
+ *   focused session);
  * - a pending permission notice survives the reconnect, exactly once;
  * - a permission raised entirely DURING the outage appears after reconnect,
  *   re-seeded from the sends envelope's queryable `permission` field (the
@@ -204,6 +207,64 @@ test('a queued send keeps its chip and the running state is re-seeded across a r
   await expect(messages).toHaveCount(5, { timeout: 20_000 });
   await expect(pending).toHaveCount(0);
   await expect(running).toHaveCount(0);
+});
+
+test('a running session that is not focused keeps its spinner across a reconnect', async ({
+  page,
+}) => {
+  await interceptLiveSocket(page);
+  await page.goto('/');
+  // Scenario `ws-reconnect-busy`: the first turn replies, then holds open
+  // until the test interrupts it (Escape via the embedded terminal).
+  await startNewSession(page, 'ws-reconnect-busy hold this turn open');
+  await expect(page.getByTestId('message-item')).toHaveCount(2);
+  const busy = await latestSession(page);
+  await expect(async () => {
+    expect((await fetchSends(page, busy.id)).turn.state).toBe('in_flight');
+  }).toPass({ timeout: 10_000 });
+
+  const busyCard = page.locator(
+    `[data-testid="session-card"][data-session-id="${busy.id}"]`,
+  );
+  const busyRunning = busyCard.getByTestId('session-running');
+  await expect(busyRunning).toBeVisible();
+
+  // Move focus to another session (scenario `ws-reconnect`: an echo loop), so
+  // the busy one is no longer the session whose sends envelope is fetched.
+  await startNewSession(page, 'ws-reconnect a second session');
+  await expect(page.getByTestId('message-item')).toHaveCount(2);
+  await expect(busyCard.getByTestId('session-node')).not.toHaveAttribute(
+    'aria-current',
+    'true',
+  );
+  await expect(busyRunning).toBeVisible();
+
+  // Drop and reconnect. The resync drops every session's event-built running
+  // flag; the busy session's `turn_started` is long gone, and it is not the
+  // focused session, so only the refetched session list can light it again.
+  await dropLiveSocket(page);
+  await expect(page.getByTestId('connection-indicator')).not.toHaveAttribute(
+    'data-connection',
+    'open',
+  );
+  await restoreLiveSocket(page);
+  await expectReconnected(page);
+  await expect(busyRunning).toBeVisible({ timeout: 15_000 });
+  expect((await fetchSends(page, busy.id)).turn.state).toBe('in_flight');
+
+  // End the held turn from the busy session's terminal: its spinner goes out.
+  await busyCard.getByTestId('session-node').click();
+  await expect(busyCard.getByTestId('session-node')).toHaveAttribute(
+    'aria-current',
+    'true',
+  );
+  const xtermInput = shownTerminal(page).locator('.xterm-helper-textarea');
+  await expect(xtermInput).toBeAttached();
+  await expect(async () => {
+    await xtermInput.focus();
+    await xtermInput.press('Escape');
+    await expect(busyRunning).toHaveCount(0, { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
 });
 
 test('a pending permission notice survives a reconnect, exactly once', async ({

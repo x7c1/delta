@@ -92,15 +92,16 @@ export interface MockStore {
     /**
      * The subagents (`Agent`/`Task` tool) currently running, mirrored from the
      * scripted `subagent_started`/`subagent_finished` events so the sends
-     * envelope reports the running set the way the real server does (see
-     * `applyEvent`). Absent/empty means none is running.
+     * envelope and the session list report the running set the way the real
+     * server does (see `applyEvent`). Absent/empty means none is running.
      */
     runningSubagents?: RunningSubagent[];
     /**
      * The turn currently in flight, mirrored from the scripted
      * `turn_started` event (cleared by `turn_completed`/`turn_interrupted`)
-     * so the sends envelope reports `in_flight` for the whole running turn
-     * the way the real server does (see `applyEvent`). Without it the
+     * so the sends envelope and the session list report `in_flight` for the
+     * whole running turn the way the real server does (see `applyEvent`).
+     * Without it the
      * envelope would fall back to `idle` as soon as the send is `matched`,
      * and the app's authoritative turn re-seed would wipe the running flag
      * the event just set. Absent means no turn is in flight.

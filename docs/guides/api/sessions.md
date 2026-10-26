@@ -69,7 +69,9 @@ Response:
         "hooks_unreachable": false,
         "main_thread_id": 1,
         "threads": [ /* Thread, ... */ ],
-        "last_activity_at": "2026-01-01T00:01:01Z"
+        "last_activity_at": "2026-01-01T00:01:01Z",
+        "turn": { "state": "in_flight", "send_id": 7, "thread_id": 2 },
+        "running_subagents": [ /* RunningSubagent, ... */ ]
       }
     ],
     "next_cursor": null
@@ -97,7 +99,14 @@ Response:
   the list alone. The server reads the threads of the whole page in one query.
   `last_activity_at` is the ISO-8601 UTC timestamp of the session's
   most recent message (`MAX(message.created_at)`), or `null` when the session has
-  no messages yet. `next_cursor` is an opaque token to fetch the following page,
+  no messages yet. `turn` and `running_subagents` are the session's current
+  turn and running subagents, in the shapes and with the values
+  [`GET /api/sessions/{id}/sends`](sends.md#get-apisessionsidsends) reports
+  them (the same live state, so `turn.thread_id` names the thread the turn
+  events name). They let a client that starts from nothing — a reload, or a
+  reconnect that dropped its event-built running indicators — restore every
+  running session's indicator from the list, not only the open session's. A
+  session that is not live reports the idle turn and no subagents. `next_cursor` is an opaque token to fetch the following page,
   or `null` on the last page — it advances through the closed sessions, since
   the live group rides on the first page alone.
 

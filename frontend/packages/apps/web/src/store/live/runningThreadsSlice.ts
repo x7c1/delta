@@ -39,16 +39,20 @@ export interface RunningThreadsSlice {
    * separate thread→session map to keep in step. The server sends
    * `turn_started` for every prompt submission — a Delta send, pane typing, a
    * background-task notification — so this is the live signal for every
-   * session, open or not. Absence here still does not prove idleness: an event
-   * missed while the live stream was down leaves the flag unset until a
-   * `/sends` fetch re-seeds it.
+   * session, open or not. Absence here still does not prove idleness: a
+   * store that starts empty (a reload) or was reset (a reconnect) leaves the
+   * flag unset until a fresh read re-seeds it — the session list for every
+   * listed session (`useSeedRunningFromSessionList`), and `/sends` for the open
+   * one (`useSendActivity`).
    */
   runningThreads: Record<SessionId, Record<ThreadId, true>>;
 
   /**
    * Seed a session's running-thread flag from the server's queryable turn state
-   * (the `turn` field of `GET /api/sessions/{id}/sends`), which carries the
-   * in-flight turn's `thread_id` so the flag lands on the exact thread.
+   * — the `turn` of a `GET /api/sessions` row (every listed session) or of
+   * `GET /api/sessions/{id}/sends` (the open session), which report the same
+   * fact — carrying the in-flight turn's `thread_id` so the flag lands on the
+   * exact thread.
    *
    * Two modes, picked by `authoritative`:
    *

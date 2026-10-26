@@ -30,7 +30,12 @@ import {
   mockThreads4,
 } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
-import type { SessionEvent, Thread } from '@delta/wire-gen';
+import type {
+  RunningSubagent,
+  SessionEvent,
+  Thread,
+  Turn,
+} from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { applySessionEvent } from '../../data/applySessionEvent';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
@@ -284,6 +289,8 @@ interface SingleSessionState {
   status?: 'active' | 'spawning' | 'failed';
   paneStarting?: boolean;
   hooksUnreachable?: boolean;
+  turn?: Turn;
+  runningSubagents?: RunningSubagent[];
 }
 
 /** A `GET /api/sessions` body listing exactly one session. */
@@ -300,6 +307,8 @@ export function singleSessionList(
     status = 'active',
     paneStarting = false,
     hooksUnreachable = false,
+    turn = { state: 'idle', send_id: null, thread_id: null },
+    runningSubagents = [],
   }: SingleSessionState = {},
 ) {
   return {
@@ -323,6 +332,8 @@ export function singleSessionList(
         open,
         pane_starting: paneStarting,
         hooks_unreachable: hooksUnreachable,
+        turn,
+        running_subagents: runningSubagents,
         main_thread_id: mainThreadId,
         threads: listedThreads(id, mainThreadId),
         last_activity_at: '2026-01-01T00:00:02Z',

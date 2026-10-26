@@ -2,6 +2,9 @@
 
 use delta_model::{Session, Thread, ThreadId};
 
+use crate::turn::TurnState;
+use crate::RunningSubagent;
+
 /// A stored session plus the runtime facts the browser needs to render it.
 ///
 /// `list_sessions_page` returns these so the navigator can show every
@@ -58,4 +61,22 @@ pub struct SessionListing {
     /// so the session list orders within each open/closed group by it without
     /// recomputing recency per row.
     pub last_activity_at: Option<String>,
+    /// The session's turn phase, as its actor holds it — the same fact the
+    /// sends envelope reports as `turn`. Carried on the row so a browser that
+    /// starts from nothing (a reload, or a reconnect that dropped its
+    /// event-built running flags) can light every running session's spinner
+    /// from the list alone, not only the one it has open. A session that is
+    /// not live is idle by definition (it has no actor holding a turn).
+    pub turn: TurnState,
+    /// The thread the in-flight turn runs on, resolved by
+    /// [`SessionStore::in_progress_turn_thread`] exactly as the sends envelope
+    /// and the turn events resolve it, so all three name the same thread.
+    /// `None` while idle.
+    ///
+    /// [`SessionStore::in_progress_turn_thread`]: crate::ports::SessionStore::in_progress_turn_thread
+    pub in_progress_thread: Option<ThreadId>,
+    /// The subagents currently running in the session, oldest first — the
+    /// sends envelope's `running_subagents`, carried here for the same reason
+    /// as `turn`. Empty for a session that is not live.
+    pub running_subagents: Vec<RunningSubagent>,
 }

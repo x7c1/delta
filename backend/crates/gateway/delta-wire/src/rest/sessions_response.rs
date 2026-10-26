@@ -22,7 +22,7 @@ pub struct WireSessionsResponse {
 mod tests {
     use super::*;
 
-    use delta_usecase::SessionListing;
+    use delta_usecase::{SessionListing, TurnState};
 
     use delta_model::{AgentProvider, Session, SessionId, SessionStatus, Thread, ThreadId};
 
@@ -61,6 +61,9 @@ mod tests {
                 last_activity_at: None,
             }],
             last_activity_at: None,
+            turn: TurnState::Idle,
+            in_progress_thread: None,
+            running_subagents: Vec::new(),
         };
         assert_eq!(
             serde_json::to_value(WireSessionsResponse {
@@ -101,6 +104,8 @@ mod tests {
                         "last_activity_at": null,
                     }],
                     "last_activity_at": null,
+                    "turn": { "state": "idle", "send_id": null, "thread_id": null },
+                    "running_subagents": [],
                 }],
                 "next_cursor": "abc",
             }),

@@ -177,6 +177,8 @@ describe('WorkspaceScreen multi-session', () => {
                 pull_request_number: null,
               },
               open: true,
+              turn: { state: 'idle', send_id: null, thread_id: null },
+              running_subagents: [],
               main_thread_id: MAIN_THREAD_ID,
               threads: listedThreads(SESSION_ID, MAIN_THREAD_ID),
               last_activity_at: '2026-01-01T00:00:02Z',

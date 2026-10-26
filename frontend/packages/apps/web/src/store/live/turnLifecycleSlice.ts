@@ -99,12 +99,17 @@ export interface TurnLifecycleSlice {
    * live-stream reconnect: the turn-end / `permission_resolved` events that
    * would have drained these were broadcast while the socket was down and are
    * not replayed, so they can no longer be reconciled from events. They all
-   * recover from the refetched sends envelope — the open-send list by refetch,
-   * the running-thread flag via {@link RunningThreadsSlice.seedActiveTurn}, the
-   * permission notice via {@link NoticesSlice.seedPermission}, and the question
-   * notice via {@link NoticesSlice.seedQuestion}. Other notice kinds stay: they
-   * cannot be re-seeded, and each has a non-event escape hatch (a user dismiss
-   * or a lifecycle trigger).
+   * recover from the reconnect's refetch. Every listed session's running-thread
+   * flag and running subagents come back from the refetched session list (via
+   * {@link RunningThreadsSlice.seedActiveTurn} and
+   * {@link SubagentsSlice.seedRunningSubagents}, see
+   * `useSeedRunningFromSessionList`). The open session's sends envelope seeds
+   * the same two again, and also brings back the open-send list by refetch, the
+   * permission notice via {@link NoticesSlice.seedPermission} and the question
+   * notice via {@link NoticesSlice.seedQuestion}. Those two notices come back
+   * for the open session only. Other notice kinds stay: they cannot be
+   * re-seeded, and each has a non-event escape hatch (a user dismiss or a
+   * lifecycle trigger).
    */
   resetTurnEphemera: () => void;
 }
@@ -148,8 +153,9 @@ export const createTurnLifecycleSlice: StateCreator<
         runningThreads: {},
         notices,
         streamingMessages: {},
-        // The running-subagent set is re-seeded authoritatively from the sends
-        // envelope's `running_subagents` on the resync refetch (see
+        // The running-subagent set is re-seeded authoritatively from the
+        // session list's (and the open session's sends envelope's)
+        // `running_subagents` on the resync refetch (see
         // {@link seedRunningSubagents}), so drop the event-reconstructed copy —
         // a `subagent_started`/`subagent_finished` missed during the outage is
         // not replayed.
