@@ -339,6 +339,9 @@ export const SessionNode = memo(function SessionNode({
     >
       <div
         data-testid="session-card"
+        // Names the card's session, so a test can address one session's card
+        // among several without depending on its title or list position.
+        data-session-id={item.session.id}
         className={cn(
           'rounded-md border bg-surface shadow-[shadow:var(--delta-card-shadow)]',
           isFocused

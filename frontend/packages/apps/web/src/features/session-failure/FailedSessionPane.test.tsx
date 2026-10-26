@@ -49,6 +49,8 @@ function failedSession(overrides: Partial<Session> = {}): SessionListItem {
     open: false,
     pane_starting: false,
     hooks_unreachable: false,
+    turn: { state: 'idle', send_id: null, thread_id: null },
+    running_subagents: [],
     main_thread_id: 7,
     threads: [
       {

@@ -26,10 +26,13 @@ import { createMockEventSource } from './mockEventControl';
  * event-reconstructed turn ephemera (tracked local sends, active-turn flags,
  * permission notices), whose turn-end / resolution drains may have been missed
  * and cannot be recovered by any refetch; otherwise a stuck "in progress" chip
- * or a stale permission card would linger until a reload. The active-turn flag
- * and the permission notice are then re-seeded from the refetched sends
- * envelope (see `useSendActivity`), so state the server still holds — a turn
- * in flight, a dialog raised entirely during the outage — comes back.
+ * or a stale permission card would linger until a reload. State the server
+ * still holds then comes back from the refetch: every listed session's running
+ * flags (its running thread and subagents) from the session list (see
+ * `useSeedRunningFromSessionList`), and the open session's permission and
+ * question notices from its sends envelope (see `useSendActivity`). So a turn
+ * still in flight, a dialog raised entirely during the outage, and a running
+ * session that is not open all survive the reconnect.
  */
 export function useSessionEvents(): void {
   const queryClient = useQueryClient();

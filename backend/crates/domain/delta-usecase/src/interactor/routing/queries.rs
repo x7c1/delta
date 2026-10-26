@@ -122,8 +122,10 @@ where
     ///
     /// Public because the REST surface reports it (the sends envelope
     /// carries `turn` and `permission`, so the browser can rebuild its
-    /// in-progress indicator and permission notice after a reconnect). A
-    /// session with no actor is idle with nothing pending by definition.
+    /// in-progress indicator and permission notice after a reconnect). The
+    /// session list reads it too, for each live row's `turn` and running
+    /// subagents, so the two surfaces report one fact. A session with no actor
+    /// is idle with nothing pending by definition.
     pub async fn live_state_for(&self, id: &SessionId) -> SessionLiveState {
         // Resolved inline (rather than through `query`) so each outcome can be
         // logged: a captured debug log must distinguish a state the live actor

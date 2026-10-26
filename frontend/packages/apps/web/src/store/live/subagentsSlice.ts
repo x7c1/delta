@@ -18,9 +18,10 @@ type SubagentsState = Pick<SubagentsSlice, 'runningSubagents'>;
  * conversation tail.
  *
  * Added by `subagent_started`, removed by the matching `subagent_finished`
- * (correlated by {@link toolUseId}), and re-seeded from the sends envelope's
- * `running_subagents` after a reconnect, so a missed start/finish event heals
- * from a plain refetch.
+ * (correlated by {@link toolUseId}), and re-seeded from the `running_subagents`
+ * of the session list (every listed session) and of the sends envelope (the
+ * open session) after a reload or a reconnect, so a missed start/finish event
+ * heals from a plain refetch.
  *
  * The {@link background} flag drives the turn-end sweep. A FOREGROUND subagent
  * is swept when the turn ends / the session closes (it cannot outlive its
@@ -67,14 +68,16 @@ export interface SubagentsSlice {
    * forked skill is one) outlives the turn that launched it. Added by
    * `subagent_started`, removed by the matching `subagent_finished`, swept on
    * turn end / close (foreground entries only), and re-seeded from
-   * the sends envelope after a reconnect (see {@link SubagentActivity}). A
+   * the session list and the sends envelope after a reload or a reconnect (see
+   * {@link SubagentActivity}). A
    * session with none running has no entry (the empty list is dropped).
    */
   runningSubagents: Record<SessionId, SubagentActivity[]>;
 
   /**
    * Seed a session's running-subagent set from the server's queryable list
-   * (the `running_subagents` field of `GET /api/sessions/{id}/sends`).
+   * (the `running_subagents` of a `GET /api/sessions` row or of
+   * `GET /api/sessions/{id}/sends`).
    *
    * Unlike the permission/question seeds (which are set-only because a notice
    * can be user-dismissed), the running set carries no per-entry user state, so

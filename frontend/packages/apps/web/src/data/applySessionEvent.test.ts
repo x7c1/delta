@@ -17,7 +17,7 @@ import {
 describe('applySessionEvent', () => {
   beforeEach(resetApplySessionEventState);
 
-  it('invalidates the focused active thread, its session threads, and its open sends on turn_started', () => {
+  it('invalidates the focused active thread, its session threads, its open sends and the session list on turn_started', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
@@ -42,6 +42,9 @@ describe('applySessionEvent', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['session-sends', FOCUSED],
     });
+    // The list's `turn` moved too, and it re-seeds the running flags: a list
+    // requested before the event must be superseded, not landed.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessions });
   });
 
   it('invalidates the named thread on turn_started even before the freshly-spawned session has bound focus + active thread', () => {
@@ -145,7 +148,7 @@ describe('applySessionEvent', () => {
     expect(useLiveStore.getState().runningThreads).toEqual({});
   });
 
-  it('refetches the open sends on a subagent start and finish', () => {
+  it('refetches the open sends and the session list on a subagent start and finish', () => {
     // Closes the race an in-flight open-sends envelope would otherwise win,
     // wiping the subagent this event just recorded — see the
     // `subagent_started` case in `applySessionEvent` for the mechanism.
@@ -169,6 +172,7 @@ describe('applySessionEvent', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['session-sends', FOCUSED],
     });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessions });
     expect(useLiveStore.getState().runningSubagents[FOCUSED]).toHaveLength(1);
 
     invalidate.mockClear();
@@ -185,6 +189,7 @@ describe('applySessionEvent', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['session-sends', FOCUSED],
     });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessions });
     expect(useLiveStore.getState().runningSubagents[FOCUSED]).toBeUndefined();
   });
 

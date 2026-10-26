@@ -48,7 +48,9 @@ the open sends plus the queryable live state (turn phase and thread, the pending
 permission queue's head and depth, pending question, running subagents), and from
 [`GET /api/sessions`](sessions.md#get-apisessions), whose per-session `open` flag
 says what a missed `session_registered` / `session_opened` / `session_closed`
-would have said — and whose *contents* say what a missed `session_removed` would
+would have said, whose per-session `turn` and `running_subagents` say what a
+missed `turn_*` / `subagent_*` would have said for every live session (not
+only the one whose open sends the client refetches), and whose *contents* say what a missed `session_removed` would
 have: the removed session is simply no longer listed, so a client that was
 focused on it resolves that focus against the refetched list, as it must after
 any gap. What no refetch can rebuild is the little that is never
@@ -471,7 +473,8 @@ which frames arrive, and a client must handle each event whenever it lands.
   catch-up. The re-adoption at boot restores entries too, but runs before the
   server accepts connections, so its events reach no client; a client that
   connects after any re-adoption sees the restored entries only in the sends
-  envelope.
+  envelope and in the session's `running_subagents` on
+  [`GET /api/sessions`](sessions.md#get-apisessions).
 - `subagent_finished` — the subagent correlated by `tool_use_id` finished. It
   carries no thread; the client maps the id back to the `subagent_started` that
   named one. A finish for an id that was never tracked, or was already cleared,

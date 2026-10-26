@@ -73,6 +73,13 @@ export function useSendActivity(
   // `permission_requested` that set them may have been missed), and the
   // resync refetches this query — so both heal here without any event.
   //
+  // The running flags (the active turn and the running subagents) are also
+  // re-seeded for every listed session, this one included, from the session
+  // list (`useSeedRunningFromSessionList`). The two seeds read the same live
+  // state on the server and the same turn and subagent events invalidate both
+  // queries, so they agree; this one keeps the open session's flags current
+  // between list refetches.
+  //
   // The active-turn seed is authoritative ONLY on a settled fetch, and a
   // set-only no-op while a refetch is in flight (`fetchStatus !== 'idle'`).
   // Re-focusing a session serves its stale cached sends envelope first — still

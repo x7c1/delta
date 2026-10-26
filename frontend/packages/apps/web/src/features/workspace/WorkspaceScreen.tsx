@@ -14,6 +14,7 @@ import type {
 import { Button, ErrorBoundary } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useSessionEvents } from '../../data/useSessionEvents';
+import { useSeedRunningFromSessionList } from '../../data/useSeedRunningFromSessionList';
 import {
   NEW_SESSION_FOCUS,
   isTerminalOpen,
@@ -144,6 +145,15 @@ export function WorkspaceScreen() {
   const sessions = useMemo(
     () => sessionsQuery.data?.pages.flatMap((page) => page.sessions) ?? [],
     [sessionsQuery.data],
+  );
+
+  // Restore every listed session's running spinner from the list — not only
+  // the open session's, which `/sends` re-seeds — so a reload (empty store) or
+  // a reconnect (flags reset) does not leave a running session looking idle.
+  useSeedRunningFromSessionList(
+    sessions,
+    sessionsQuery.dataUpdatedAt,
+    sessionsQuery.fetchStatus === 'idle',
   );
 
   // Load the next page without cancelling a refetch already in flight. The

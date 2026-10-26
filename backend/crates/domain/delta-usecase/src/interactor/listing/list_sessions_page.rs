@@ -7,6 +7,7 @@ use crate::ports::{GitWorktree, SessionPageRow, SessionStore, TmuxDriver, Transc
 use crate::session_listing::SessionListing;
 use crate::session_page::SessionPage;
 use crate::session_page_cursor::SessionPageCursor;
+use crate::turn::TurnState;
 use crate::Interactor;
 
 impl<T, X, S, W, G> Interactor<T, X, S, W, G>
@@ -123,7 +124,8 @@ where
         let mut listings = Vec::with_capacity(rows.len());
         for row in rows {
             let threads = threads_by_session.remove(&row.0.id).unwrap_or_default();
-            listings.push(self.listing_for(row, threads).await?);
+            let is_live = live.contains(&row.0.id);
+            listings.push(self.listing_for(row, threads, is_live).await?);
         }
 
         Ok(SessionPage { listings, next })
@@ -143,10 +145,19 @@ where
     /// Both runtime facts come from one actor query
     /// ([`Interactor::listing_state_for`]), not a round-trip each, so the pair
     /// the row carries is a consistent snapshot.
+    ///
+    /// A live row (`is_live`) also carries its turn and running subagents, read
+    /// through the same live-state query the sends envelope uses
+    /// ([`Interactor::live_state_for`]), so the list, `/sends` and the turn
+    /// events all name the same turn and thread. A closed row is idle with
+    /// nothing running by definition, so it costs no second actor query — the
+    /// extra round-trips are bounded by the number of live panes, as the live
+    /// head itself is.
     async fn listing_for(
         &self,
         row: SessionPageRow,
         threads: Vec<Thread>,
+        is_live: bool,
     ) -> Result<SessionListing> {
         let (session, last_activity_at) = row;
         let main_thread_id = Thread::trunk_of(&threads)
@@ -158,6 +169,12 @@ where
                 ))
             })?;
         let state = self.listing_state_for(&session.id).await;
+        let (turn, in_progress_thread, running_subagents) = if is_live {
+            let live = self.live_state_for(&session.id).await;
+            (live.turn, live.in_progress_thread, live.running_subagents)
+        } else {
+            (TurnState::Idle, None, Vec::new())
+        };
         Ok(SessionListing {
             session,
             open: state.open,
@@ -166,6 +183,9 @@ where
             main_thread_id,
             threads,
             last_activity_at,
+            turn,
+            in_progress_thread,
+            running_subagents,
         })
     }
 }

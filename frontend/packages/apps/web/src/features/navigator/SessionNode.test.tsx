@@ -127,6 +127,8 @@ const item: SessionListItem = {
   open: true,
   pane_starting: false,
   hooks_unreachable: false,
+  turn: { state: 'idle', send_id: null, thread_id: null },
+  running_subagents: [],
   main_thread_id: 1,
   threads: [
     {

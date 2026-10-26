@@ -8,6 +8,52 @@ import type {
 } from '@delta/wire-gen';
 import { SESSIONS_PAGE_SIZE } from './sessionFixtures';
 import type { HandlerContext } from './handlerContext';
+import type { MockStore } from './fixtures';
+
+type SessionEntry = MockStore['sessions'][number];
+type MockSend = MockStore['sends'][number];
+
+/**
+ * A session's turn the way the server reports it — on the session list's rows
+ * and on the sends envelope alike, so the two can never disagree:
+ * `turn_started` (mirrored into `activeTurn`) began an in-flight turn that
+ * lasts until its completion/interruption; otherwise a `dispatched` send is the
+ * one outstanding dispatch awaiting its echo; with neither, the session is
+ * idle. Without the `activeTurn` phase the envelope would report `idle` for the
+ * whole running turn (its send is already `matched`), and the app's
+ * authoritative re-seed (`seedActiveTurn`) would wipe the running flag the
+ * `turn_started` event just set — a real-server divergence that surfaced as a
+ * flaky running-indicator e2e.
+ *
+ * A session that is not live (neither open nor still `spawning`) is idle, as
+ * the server reports a session with no actor. Closing does not clear
+ * `activeTurn`, and the session list re-seeds every row authoritatively, so
+ * without this a session closed mid-turn would light its spinner again on the
+ * list refetch that `session_closed` triggers.
+ */
+function sessionTurn(entry: SessionEntry, sends: readonly MockSend[]): Turn {
+  if (!entry.open && entry.session.status !== 'spawning') {
+    return { state: 'idle', send_id: null, thread_id: null };
+  }
+  if (entry.activeTurn) {
+    return {
+      state: 'in_flight',
+      send_id: entry.activeTurn.sendId,
+      thread_id: entry.activeTurn.threadId,
+    };
+  }
+  const outstanding = sends.find(
+    (send) =>
+      send.session_id === entry.session.id && send.status === 'dispatched',
+  );
+  return outstanding
+    ? {
+        state: 'awaiting_echo',
+        send_id: outstanding.id,
+        thread_id: outstanding.thread_id,
+      }
+    : { state: 'idle', send_id: null, thread_id: null };
+}
 
 /**
  * The response the real server gives when a closed session cannot be resumed
@@ -64,6 +110,11 @@ export function sessionHandlers({
         // each session's threads in that route's shape and order.
         threads: entry.threads,
         last_activity_at: lastActivityAt(entry.threads.map((t) => t.id)),
+        // The live state the sends envelope reports, from the same store
+        // fields, so a reload in mock mode restores every running session's
+        // spinner from the list the way it does against the real server.
+        turn: sessionTurn(entry, store.sends),
+        running_subagents: entry.runningSubagents ?? [],
       }));
       // Open-first, mirroring the backend: every live session leads, then the
       // closed ones. "Live" is wider than `open` — a still-`spawning` row counts
@@ -222,29 +273,7 @@ export function sessionHandlers({
             (send.status === 'queued' || send.status === 'dispatched'),
         )
         .sort((a, b) => a.id - b.id);
-      // Derive the turn state the way the server reports it: `turn_started`
-      // (mirrored into `activeTurn`) began an in-flight turn that lasts until
-      // its completion/interruption; otherwise a `dispatched` send is the one
-      // outstanding dispatch awaiting its echo; with neither, the session is
-      // idle. Without the `activeTurn` phase the envelope would report `idle`
-      // for the whole running turn (its send is already `matched`), and the
-      // app's authoritative re-seed (`seedActiveTurn`) would wipe the running
-      // flag the `turn_started` event just set — a real-server divergence that
-      // surfaced as a flaky running-indicator e2e.
-      const outstanding = sends.find((send) => send.status === 'dispatched');
-      const turn: Turn = entry.activeTurn
-        ? {
-            state: 'in_flight',
-            send_id: entry.activeTurn.sendId,
-            thread_id: entry.activeTurn.threadId,
-          }
-        : outstanding
-          ? {
-              state: 'awaiting_echo',
-              send_id: outstanding.id,
-              thread_id: outstanding.thread_id,
-            }
-          : { state: 'idle', send_id: null, thread_id: null };
+      const turn = sessionTurn(entry, sends);
       const body: SendsResponse = {
         sends,
         turn,

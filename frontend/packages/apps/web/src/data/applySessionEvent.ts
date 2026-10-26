@@ -23,7 +23,9 @@ import { useNotificationStore } from '../store/notificationStore';
  *   refetches the freshly-ingested transcript lines. Send-affecting events
  *   (the turn lifecycle, transcript growth, a close) also invalidate the
  *   session's open-send list — the server-side truth behind the send-activity
- *   strip.
+ *   strip. The turn and subagent events invalidate the session list too: its
+ *   rows carry each session's turn and running subagents, which re-seed the
+ *   navigator's running indicators.
  *   Lifecycle events (`session_registered`/`session_opened`/`session_closed`,
  *   `spawn_failed` for a launch that never bound, and `session_removed` for a
  *   session the user removed) invalidate the session list so a starting,
@@ -108,6 +110,13 @@ export function applySessionEvent(
       // background session's send-activity strip is correct the moment it is
       // viewed.
       invalidateSessionSends(queryClient, event.session_id);
+      // The turn also moved the session list's `turn`, which re-seeds every
+      // session's running flag authoritatively (`useSeedRunningFromSessionList`).
+      // A list the server assembled BEFORE this event, still in flight when it
+      // lands, would undo it — bring back the spinner a `turn_completed` just
+      // cleared (and never put it out), or clear the one a `turn_started` just
+      // lit. Refetching supersedes that request, as for the sends below.
+      invalidateSessions(queryClient);
       // A turn finishing on a thread the user is not currently viewing produced
       // something unseen, so bump THAT thread's unread — the navigator shows it
       // on the thread (and OR-aggregates it onto the collapsed session row).
@@ -311,7 +320,12 @@ export function applySessionEvent(
       // closes that race from both ends: the in-flight request is superseded
       // (its stale result dropped rather than applied), and the response that
       // does land was computed after the server recorded the change.
+      //
+      // The session list carries the same `running_subagents` and re-seeds
+      // every session from it the same way, so it is refetched for the same
+      // reason.
       invalidateSessionSends(queryClient, event.session_id);
+      invalidateSessions(queryClient);
       break;
     case 'assistant_streaming':
       // The live preview is held in the store (appended above by
