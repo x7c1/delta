@@ -105,6 +105,6 @@ gap. Confirm it while working, and fix it the same way if so.
 
 ### Before merge (verified outside the check command)
 
-- [ ] In `make dev`, a session that is not focused and is mid-turn keeps its
+- [x] In `make dev`, a session that is not focused and is mid-turn keeps its
       running spinner across a page reload, without clicking it, and the
       spinner goes out when the turn ends.
