@@ -5,6 +5,7 @@ import {
   firstOtherSessionId,
   invalidateRepositoriesAndPullRequests,
   invalidateSessions,
+  invalidateSessionsCoalesced,
   invalidateSessionSends,
   invalidateSessionThreads,
   invalidateThreadMessages,
@@ -23,9 +24,13 @@ import { useNotificationStore } from '../store/notificationStore';
  *   refetches the freshly-ingested transcript lines. Send-affecting events
  *   (the turn lifecycle, transcript growth, a close) also invalidate the
  *   session's open-send list — the server-side truth behind the send-activity
- *   strip. The turn and subagent events invalidate the session list too: its
- *   rows carry each session's turn and running subagents, which re-seed the
- *   navigator's running indicators.
+ *   strip. The turn and subagent events and `transcript_updated` invalidate
+ *   the session list too: its rows carry each session's turn and running
+ *   subagents, which re-seed the navigator's running indicators, and its last
+ *   activity, which orders it. These come in bursts, so they go through
+ *   `invalidateSessionsCoalesced`: the list fetch in flight is discarded at
+ *   once, but the refetch waits for the burst to end (bounded by a maximum
+ *   wait) and answers all of it.
  *   Lifecycle events (`session_registered`/`session_opened`/`session_closed`,
  *   `spawn_failed` for a launch that never bound, and `session_removed` for a
  *   session the user removed) invalidate the session list so a starting,
@@ -33,7 +38,10 @@ import { useNotificationStore } from '../store/notificationStore';
  *   and open flag stay in sync. `spawn_pane_ready` invalidates the list too:
  *   the row reads `spawning` on both sides of it, but its `pane_starting` flag
  *   — the browser's only durable record that the launch's pane can be attached
- *   to — flips with it.
+ *   to — flips with it. These are rare and refetch at once through
+ *   `invalidateSessions` (the workspace's focus reconciliation reads
+ *   `isFetching` right after them), which also runs any coalesced refetch
+ *   still waiting.
  * - **Nav store** (Zustand): the one event whose session stops existing, and
  *   only when it was the focused one. A `session_removed` hands focus to the
  *   first other session in the list cache, falling back to the new-session
@@ -115,8 +123,10 @@ export function applySessionEvent(
       // A list the server assembled BEFORE this event, still in flight when it
       // lands, would undo it — bring back the spinner a `turn_completed` just
       // cleared (and never put it out), or clear the one a `turn_started` just
-      // lit. Refetching supersedes that request, as for the sends below.
-      invalidateSessions(queryClient);
+      // lit. That request is discarded here, at the event; the refetch that
+      // replaces it is coalesced with the rest of the burst (a turn's end
+      // brings a `transcript_updated` with it).
+      invalidateSessionsCoalesced(queryClient);
       // A turn finishing on a thread the user is not currently viewing produced
       // something unseen, so bump THAT thread's unread — the navigator shows it
       // on the thread (and OR-aggregates it onto the collapsed session row).
@@ -216,10 +226,11 @@ export function applySessionEvent(
       //
       // New lines also move the session's last activity — and with it its place
       // in the session list's recency order inside its open/closed group — so
-      // refresh the list too. An ingested user line is what matches a dispatched send
-      // (terminal — it leaves the open list), so the session's open-send list
-      // refetches here as well.
-      invalidateSessions(queryClient);
+      // refresh the list too — coalesced, since a streaming session sends these
+      // in quick succession. An ingested user line is what matches a dispatched
+      // send (terminal — it leaves the open list), so the session's open-send
+      // list refetches here as well.
+      invalidateSessionsCoalesced(queryClient);
       invalidateSessionSends(queryClient, event.session_id);
       for (const threadId of event.thread_ids) {
         invalidateThreadMessages(queryClient, threadId);
@@ -322,10 +333,11 @@ export function applySessionEvent(
       // does land was computed after the server recorded the change.
       //
       // The session list carries the same `running_subagents` and re-seeds
-      // every session from it the same way, so it is refetched for the same
-      // reason.
+      // every session from it the same way, so its in-flight request is
+      // discarded for the same reason; the refetch is coalesced with the turn
+      // and transcript events around it.
       invalidateSessionSends(queryClient, event.session_id);
-      invalidateSessions(queryClient);
+      invalidateSessionsCoalesced(queryClient);
       break;
     case 'assistant_streaming':
       // The live preview is held in the store (appended above by

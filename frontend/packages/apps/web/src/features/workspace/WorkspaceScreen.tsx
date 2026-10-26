@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
+  hasPendingSessionsRefetch,
   invalidateThreadMessages,
   useProvidersQuery,
   useSessionsQuery,
@@ -126,6 +127,7 @@ function pickInitialFocus(sessions: SessionListItem[]): FocusedSession {
  */
 export function WorkspaceScreen() {
   const client = useApiClient();
+  const queryClient = useQueryClient();
   useSessionEvents();
 
   const sessionsQuery = useSessionsQuery(client);
@@ -165,10 +167,15 @@ export function WorkspaceScreen() {
   // the consistency the comment above relies on; once it lands the navigator
   // re-renders and asks again. A failed page surfaces through the query state
   // (`isError`), so the returned promise needs no handler.
+  // A coalesced refetch still waiting on its timer will re-walk the pages the
+  // same way, so the navigator waits for it too.
   const { fetchNextPage } = sessionsQuery;
   const loadMoreSessions = useCallback(() => {
+    if (hasPendingSessionsRefetch(queryClient)) {
+      return;
+    }
     void fetchNextPage({ cancelRefetch: false });
-  }, [fetchNextPage]);
+  }, [fetchNextPage, queryClient]);
 
   // Drop localStorage entries for sessions that no longer exist — preferences
   // keyed by session id (e.g. the timeline footer's expand/collapse) leak one
@@ -387,7 +394,14 @@ export function WorkspaceScreen() {
       // the response still on the wire. Reconciling off the stale pages would
       // bounce focus onto some other session in the instant before the row it
       // is waiting for arrives — and nothing would bounce it back.
-      if (focusedSessionId !== null && sessionsQuery.isFetching) {
+      // A coalesced refetch still waiting on its timer is the same case: a
+      // turn or transcript event that followed the registration discarded the
+      // refetch in flight (see `invalidateSessionsCoalesced`), and the one that
+      // will list the row has not started yet.
+      if (
+        focusedSessionId !== null &&
+        (sessionsQuery.isFetching || hasPendingSessionsRefetch(queryClient))
+      ) {
         return;
       }
       reconcileFocusedSession(pickInitialFocus(sessions));
@@ -401,6 +415,7 @@ export function WorkspaceScreen() {
     focusedSessionId,
     isNewSessionFocus,
     reconcileFocusedSession,
+    queryClient,
   ]);
 
   // Reconcile the active thread against the focused session's threads. Default
@@ -480,7 +495,6 @@ export function WorkspaceScreen() {
   // whole of what the client hears until the turn ends). Flushing again when
   // the session leaves `spawning` gives that empty first answer a second
   // reading, taken once the launch is genuinely up.
-  const queryClient = useQueryClient();
   useEffect(() => {
     if (activeThreadId !== null) {
       invalidateThreadMessages(queryClient, activeThreadId);

@@ -157,6 +157,7 @@ describe('WorkspaceScreen running spinners from the session list', () => {
   it('does not bring the spinner back from a list requested before the turn completed', async () => {
     // First answer: the second session's turn is in flight.
     let answer: 'running' | 'stale' | 'idle' = 'running';
+    let idleAnswers = 0;
     let releaseStale: () => void = () => {};
     const staleGate = new Promise<void>((resolve) => {
       releaseStale = resolve;
@@ -174,6 +175,7 @@ describe('WorkspaceScreen running spinners from the session list', () => {
           await staleGate;
           return HttpResponse.json(twoSessionList(IN_FLIGHT));
         }
+        idleAnswers += 1;
         return HttpResponse.json(twoSessionList(IDLE));
       }),
     );
@@ -213,6 +215,22 @@ describe('WorkspaceScreen running spinners from the session list', () => {
         queryClient.getQueryState(queryKeys.sessions)?.fetchStatus,
       ).toBe('idle');
     });
+    expect(
+      within(card('codex session')).queryByTestId('session-running'),
+    ).not.toBeInTheDocument();
+    expect(useLiveStore.getState().runningThreads[SESSION_ID_2]).toBeUndefined();
+
+    // The event's own refetch is coalesced: it goes out once the quiet window
+    // has passed, reads the finished turn, and lands without a spinner.
+    await waitFor(
+      () => {
+        expect(idleAnswers).toBe(1);
+        expect(
+          queryClient.getQueryState(queryKeys.sessions)?.fetchStatus,
+        ).toBe('idle');
+      },
+      { timeout: 2_000 },
+    );
     expect(
       within(card('codex session')).queryByTestId('session-running'),
     ).not.toBeInTheDocument();

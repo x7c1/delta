@@ -15,9 +15,9 @@ import { queryKeys } from './query-keys';
 /**
  * Cache patchers driven by WebSocket events. They mutate the same query cache
  * entries keyed by {@link queryKeys} so live updates stay consistent with the
- * REST-loaded data. Every invalidation here goes through
+ * REST-loaded data. Every refetch here goes through
  * {@link invalidateDiscardingInFlight} so an event that races a query's first
- * fetch is not lost.
+ * fetch is not lost; {@link invalidateSessionsCoalesced} only delays its own.
  */
 
 /**
@@ -79,16 +79,132 @@ function invalidateDiscardingInFlight(
  * answer as fresh data.
  */
 export function invalidateAll(queryClient: QueryClient): void {
+  // The empty key refetches the session list too, which is the refetch a
+  // pending coalesced one was waiting to make.
+  cancelPendingSessionsRefetch(queryClient);
   invalidateDiscardingInFlight(queryClient, []);
 }
 
 /**
- * Mark the session list stale so it refetches. Used on lifecycle events
- * (`session_registered`/`session_opened`/`session_closed`) so a newly-spawned,
- * resumed, or closed session's open flag and presence stay in sync with the UI.
+ * How long the session list waits for the live events to go quiet before the
+ * coalesced refetch ({@link invalidateSessionsCoalesced}) starts. Events come in
+ * bursts that are a few milliseconds apart — a turn's end brings
+ * `transcript_updated` and `turn_completed` together, and several open sessions
+ * each bring their own — so a quarter of a second takes in a whole burst, while
+ * staying short enough that the navigator still looks live.
+ */
+export const SESSIONS_REFETCH_QUIET_MS = 250;
+
+/**
+ * The longest the coalesced refetch is put off after the first event it
+ * absorbs. A session streaming its transcript produces `transcript_updated`
+ * more often than {@link SESSIONS_REFETCH_QUIET_MS}, so the quiet window alone
+ * would never close; a second bounds how stale its row's recency and running
+ * state can get.
+ */
+export const SESSIONS_REFETCH_MAX_WAIT_MS = 1_000;
+
+type PendingSessionsRefetch = {
+  quiet: ReturnType<typeof setTimeout>;
+  deadline: ReturnType<typeof setTimeout>;
+};
+
+/**
+ * The coalesced session-list refetch each query client has waiting, if any.
+ * Keyed by the client it refetches, so the timers live and die with that
+ * client: two clients (or two tests) never share one.
+ */
+const pendingSessionsRefetches = new WeakMap<
+  QueryClient,
+  PendingSessionsRefetch
+>();
+
+function cancelPendingSessionsRefetch(queryClient: QueryClient): void {
+  const pending = pendingSessionsRefetches.get(queryClient);
+  if (pending === undefined) {
+    return;
+  }
+  clearTimeout(pending.quiet);
+  clearTimeout(pending.deadline);
+  pendingSessionsRefetches.delete(queryClient);
+}
+
+/**
+ * Whether a coalesced session-list refetch ({@link invalidateSessionsCoalesced})
+ * is waiting on its timer. In that window the list is neither fetching nor
+ * current: the rows on hand predate the event, and the answer that reflects it
+ * has not been requested yet. A reader that takes "not fetching" to mean "the
+ * pages in hand are the latest" (the workspace's focus reconciliation, or a
+ * load-more that would append a fresh page to stale ones) must treat this as
+ * a fetch still to come.
+ *
+ * Not reactive on its own, but it never needs to be: it turns on only as the
+ * list fetch in flight is cancelled (or while none is), and off only as the
+ * refetch starts, and both of those notify the list's observers.
+ */
+export function hasPendingSessionsRefetch(queryClient: QueryClient): boolean {
+  return pendingSessionsRefetches.has(queryClient);
+}
+
+/**
+ * Mark the session list stale and refetch it at once, superseding any list
+ * fetch in flight and any coalesced refetch still waiting (it is the same
+ * refetch, so nothing is left on a timer).
+ *
+ * Used on the lifecycle events (`session_registered`, `session_opened`,
+ * `session_closed`, `session_removed`, `spawn_pane_ready`, `spawn_failed`),
+ * which move a session's presence, status, open flag or pane: they are rare,
+ * and the workspace's focus reconciliation reads `isFetching` right after them,
+ * so the refetch must start in the same tick (see
+ * {@link invalidateDiscardingInFlight}). Also used after a user action whose
+ * response shows the list is stale (a send that launched a session, a refusal
+ * naming a lost hook connection or an already-answered prompt): one refetch
+ * per action, so there is nothing to coalesce.
  */
 export function invalidateSessions(queryClient: QueryClient): void {
+  cancelPendingSessionsRefetch(queryClient);
   invalidateDiscardingInFlight(queryClient, queryKeys.sessions);
+}
+
+/**
+ * Mark the session list stale and discard any list fetch in flight now, but
+ * start the refetch only once no further such call has arrived for
+ * {@link SESSIONS_REFETCH_QUIET_MS}, and at most
+ * {@link SESSIONS_REFETCH_MAX_WAIT_MS} after the first one.
+ *
+ * Used on the high-frequency events (`transcript_updated`, `turn_started`,
+ * `turn_completed`, `turn_interrupted`, `subagent_started`,
+ * `subagent_finished`). They arrive in bursts, and each list fetch re-reads
+ * every loaded page and every live session's live state on the server —
+ * cancelling a request on the client does not stop the server from assembling
+ * it — so a burst is answered by one trailing refetch instead of one each.
+ *
+ * Only the new fetch waits. The in-flight one is discarded at the event,
+ * because the server assembled it before the event: landing it would, say,
+ * bring back the running spinner a `turn_completed` just cleared (see
+ * `useSeedRunningFromSessionList`). Cancelling reverts a query with data to
+ * that data (and a first fetch to `pending` with none), so nothing older than
+ * the event is applied, and the trailing refetch reads the post-event state.
+ */
+export function invalidateSessionsCoalesced(queryClient: QueryClient): void {
+  const filters = { queryKey: queryKeys.sessions };
+  // The cancel reverts the state synchronously, so the invalidation after it
+  // is not undone by the revert.
+  void queryClient.cancelQueries(filters);
+  void queryClient.invalidateQueries({ ...filters, refetchType: 'none' });
+
+  // Whichever timer fires first clears the other along with the entry.
+  const refetch = () => invalidateSessions(queryClient);
+  const pending = pendingSessionsRefetches.get(queryClient);
+  if (pending !== undefined) {
+    clearTimeout(pending.quiet);
+    pending.quiet = setTimeout(refetch, SESSIONS_REFETCH_QUIET_MS);
+    return;
+  }
+  pendingSessionsRefetches.set(queryClient, {
+    quiet: setTimeout(refetch, SESSIONS_REFETCH_QUIET_MS),
+    deadline: setTimeout(refetch, SESSIONS_REFETCH_MAX_WAIT_MS),
+  });
 }
 
 /**
