@@ -4,7 +4,14 @@
  *
  * Shared fixtures live in applySessionEvent.testkit.ts.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type MockInstance,
+  vi,
+} from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@delta/api-client';
 import { applySessionEvent } from './applySessionEvent';
@@ -13,6 +20,20 @@ import {
   FOCUSED,
   resetApplySessionEventState,
 } from './applySessionEvent.testkit';
+
+/**
+ * The session list was marked stale for a coalesced refetch
+ * (`invalidateSessionsCoalesced`) rather than refetched at once.
+ */
+function expectCoalescedListRefetch(
+  invalidate: MockInstance<QueryClient['invalidateQueries']>,
+): void {
+  expect(invalidate).toHaveBeenCalledWith({
+    queryKey: queryKeys.sessions,
+    refetchType: 'none',
+  });
+  expect(invalidate).not.toHaveBeenCalledWith({ queryKey: queryKeys.sessions });
+}
 
 describe('applySessionEvent', () => {
   beforeEach(resetApplySessionEventState);
@@ -43,8 +64,9 @@ describe('applySessionEvent', () => {
       queryKey: ['session-sends', FOCUSED],
     });
     // The list's `turn` moved too, and it re-seeds the running flags: a list
-    // requested before the event must be superseded, not landed.
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessions });
+    // requested before the event must be discarded, not landed. The refetch
+    // that replaces it is coalesced with the rest of the burst.
+    expectCoalescedListRefetch(invalidate);
   });
 
   it('invalidates the named thread on turn_started even before the freshly-spawned session has bound focus + active thread', () => {
@@ -172,7 +194,7 @@ describe('applySessionEvent', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['session-sends', FOCUSED],
     });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessions });
+    expectCoalescedListRefetch(invalidate);
     expect(useLiveStore.getState().runningSubagents[FOCUSED]).toHaveLength(1);
 
     invalidate.mockClear();
@@ -189,7 +211,7 @@ describe('applySessionEvent', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['session-sends', FOCUSED],
     });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.sessions });
+    expectCoalescedListRefetch(invalidate);
     expect(useLiveStore.getState().runningSubagents[FOCUSED]).toBeUndefined();
   });
 
@@ -412,6 +434,9 @@ describe('applySessionEvent', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['session-sends', FOCUSED],
     });
+    // The session's recency moved, so the list refetches, coalesced: a
+    // streaming session sends these in quick succession.
+    expectCoalescedListRefetch(invalidate);
 
     // No unread mutation for this event.
     expect(useLiveStore.getState().unread[2]).toBe(1);

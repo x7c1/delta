@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
-import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  InfiniteQueryObserver,
+  QueryClient,
+  QueryObserver,
+} from '@tanstack/react-query';
 import type {
   Message,
   MessagesResponse,
@@ -8,8 +12,13 @@ import type {
   ThreadsResponse,
 } from '@delta/wire-gen';
 import {
+  hasPendingSessionsRefetch,
   invalidateAll,
+  invalidateSessions,
+  invalidateSessionsCoalesced,
   invalidateThreadMessages,
+  SESSIONS_REFETCH_MAX_WAIT_MS,
+  SESSIONS_REFETCH_QUIET_MS,
   seedSessionThreads,
 } from './cache';
 import { queryKeys } from './query-keys';
@@ -151,6 +160,247 @@ describe('invalidateAll', () => {
 
     unsubscribe();
     queryClient.clear();
+  });
+});
+
+describe('invalidateSessionsCoalesced', () => {
+  type SessionsData = { pages: SessionsResponse[]; pageParams: unknown[] };
+
+  function listPage(title: string): SessionsResponse {
+    return {
+      sessions: [
+        {
+          session: {
+            id: 's',
+            cwd: '/work',
+            transcript_path: '/work/transcript.jsonl',
+            title,
+            status: 'active',
+            created_at: '2026-01-01T00:00:00Z',
+            branch_at_launch: null,
+            repo_root: null,
+            repository_display_name: null,
+            provider: 'claude',
+            provider_session_id: null,
+            provider_thread_id: null,
+            pull_request_number: null,
+            failure_reason: null,
+            closed_reason: null,
+          },
+          open: true,
+          pane_starting: false,
+          hooks_unreachable: false,
+          turn: { state: 'idle', send_id: null, thread_id: null },
+          running_subagents: [],
+          main_thread_id: 1,
+          threads: [],
+          last_activity_at: null,
+        },
+      ],
+      next_cursor: null,
+    };
+  }
+
+  /**
+   * A query client whose session list is watched, as the navigator holds it,
+   * with its first fetch in flight. Every list request is recorded and answered
+   * by hand.
+   */
+  function listObserver() {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
+    });
+    const requests: Deferred<SessionsResponse>[] = [];
+    const observer = new InfiniteQueryObserver<
+      SessionsResponse,
+      Error,
+      SessionsData,
+      typeof queryKeys.sessions,
+      string | null
+    >(queryClient, {
+      queryKey: queryKeys.sessions,
+      queryFn: () => {
+        const answer = deferred<SessionsResponse>();
+        requests.push(answer);
+        return answer.promise;
+      },
+      initialPageParam: null,
+      getNextPageParam: () => undefined,
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    const titles = () =>
+      observer
+        .getCurrentResult()
+        .data?.pages.flatMap((p) => p.sessions.map((i) => i.session.title));
+    return {
+      queryClient,
+      observer,
+      requests,
+      titles,
+      dispose: () => {
+        unsubscribe();
+        queryClient.clear();
+      },
+    };
+  }
+
+  /**
+   * {@link listObserver} with the first fetch answered (titled `loaded`) and
+   * dropped from `requests`, so `requests` holds only the refetches.
+   */
+  async function watchedList() {
+    const list = listObserver();
+    list.requests[0].resolve(listPage('loaded'));
+    await vi.waitFor(() =>
+      expect(list.observer.getCurrentResult().status).toBe('success'),
+    );
+    list.requests.shift();
+    return list;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('coalesces a burst of invalidations into one request issued after the quiet window', async () => {
+    const { queryClient, observer, requests, dispose } = await watchedList();
+
+    // A turn's end and the transcript lines it wrote, plus another session's.
+    invalidateSessionsCoalesced(queryClient);
+    await vi.advanceTimersByTimeAsync(50);
+    invalidateSessionsCoalesced(queryClient);
+    await vi.advanceTimersByTimeAsync(50);
+    invalidateSessionsCoalesced(queryClient);
+
+    // Stale at once, but nothing is requested while the burst goes on.
+    expect(queryClient.getQueryState(queryKeys.sessions)?.isInvalidated).toBe(
+      true,
+    );
+    expect(observer.getCurrentResult().isFetching).toBe(false);
+    await vi.advanceTimersByTimeAsync(SESSIONS_REFETCH_QUIET_MS - 1);
+    expect(requests).toHaveLength(0);
+
+    // The window closes after the last one: exactly one request goes out.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(requests).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(SESSIONS_REFETCH_MAX_WAIT_MS);
+    expect(requests).toHaveLength(1);
+
+    dispose();
+  });
+
+  it('discards a list fetch in flight at the event instead of applying it', async () => {
+    const { queryClient, observer, requests, titles, dispose } =
+      await watchedList();
+
+    // A refetch goes out and is assembled from the server's state before the
+    // event, then the event lands while it is still on the wire.
+    void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+    expect(requests).toHaveLength(1);
+    const stale = requests.shift()!;
+    invalidateSessionsCoalesced(queryClient);
+    expect(observer.getCurrentResult().isFetching).toBe(false);
+
+    stale.resolve(listPage('before the event'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(titles()).toEqual(['loaded']);
+
+    // The trailing refetch reads the post-event state, and that one lands.
+    await vi.advanceTimersByTimeAsync(SESSIONS_REFETCH_QUIET_MS);
+    expect(requests).toHaveLength(1);
+    requests[0].resolve(listPage('after the event'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(titles()).toEqual(['after the event']);
+
+    dispose();
+  });
+
+  it('discards a first fetch in flight at the event and fetches again after the window', async () => {
+    const { queryClient, observer, requests, titles, dispose } =
+      listObserver();
+
+    // The list's first fetch is still in flight when the event lands.
+    expect(requests).toHaveLength(1);
+    invalidateSessionsCoalesced(queryClient);
+    requests[0].resolve(listPage('before the event'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(observer.getCurrentResult().data).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(SESSIONS_REFETCH_QUIET_MS);
+    expect(requests).toHaveLength(2);
+    requests[1].resolve(listPage('after the event'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(titles()).toEqual(['after the event']);
+
+    dispose();
+  });
+
+  it('refetches once the maximum wait has passed under a steady stream of events', async () => {
+    const { queryClient, requests, dispose } = await watchedList();
+
+    // A streaming session: events closer together than the quiet window, so
+    // the window alone would never close.
+    const interval = SESSIONS_REFETCH_QUIET_MS / 2;
+    let elapsed = 0;
+    invalidateSessionsCoalesced(queryClient);
+    while (elapsed + interval < SESSIONS_REFETCH_MAX_WAIT_MS) {
+      await vi.advanceTimersByTimeAsync(interval);
+      elapsed += interval;
+      invalidateSessionsCoalesced(queryClient);
+    }
+    expect(requests).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(SESSIONS_REFETCH_MAX_WAIT_MS - elapsed);
+    expect(requests).toHaveLength(1);
+
+    // The stream goes on; the next refetch is bounded the same way.
+    invalidateSessionsCoalesced(queryClient);
+    await vi.advanceTimersByTimeAsync(SESSIONS_REFETCH_QUIET_MS);
+    expect(requests).toHaveLength(2);
+
+    dispose();
+  });
+
+  it('runs a pending coalesced refetch at once on an immediate invalidation and leaves none pending', async () => {
+    const { queryClient, observer, requests, dispose } = await watchedList();
+
+    invalidateSessionsCoalesced(queryClient);
+    expect(requests).toHaveLength(0);
+    expect(hasPendingSessionsRefetch(queryClient)).toBe(true);
+
+    // A lifecycle event: the refetch starts in the same tick, for callers
+    // that read `isFetching` right after it.
+    invalidateSessions(queryClient);
+    expect(observer.getCurrentResult().isFetching).toBe(true);
+    expect(requests).toHaveLength(1);
+
+    // It was the coalesced refetch too: no timer fires another one.
+    await vi.advanceTimersByTimeAsync(SESSIONS_REFETCH_MAX_WAIT_MS * 2);
+    expect(requests).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(hasPendingSessionsRefetch(queryClient)).toBe(false);
+
+    dispose();
+  });
+
+  it('keeps the timers of each query client to itself', async () => {
+    const first = await watchedList();
+    const second = await watchedList();
+
+    invalidateSessionsCoalesced(first.queryClient);
+    invalidateSessions(second.queryClient);
+    expect(second.requests).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(SESSIONS_REFETCH_QUIET_MS);
+    expect(first.requests).toHaveLength(1);
+    expect(second.requests).toHaveLength(1);
+
+    first.dispose();
+    second.dispose();
   });
 });
 

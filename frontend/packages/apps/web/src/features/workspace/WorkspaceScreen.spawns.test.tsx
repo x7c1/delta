@@ -16,7 +16,12 @@ import {
 } from 'vitest';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { SESSION_ID, SESSION_ID_2, MAIN_THREAD_ID } from '@delta/api-mocks';
+import {
+  MAIN_THREAD_ID,
+  SESSION_2_MAIN_THREAD_ID,
+  SESSION_ID,
+  SESSION_ID_2,
+} from '@delta/api-mocks';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useLiveStore } from '../../store/liveStore';
 import {
@@ -29,6 +34,7 @@ import {
   SECOND_SPAWN_ID,
   SENDER_LABEL,
   server,
+  singleSessionList,
   stubMatchMedia,
   trackedSpawn,
   UNLISTED_SPAWN_ID,
@@ -416,6 +422,71 @@ describe('WorkspaceScreen multi-session', () => {
 
     await waitFor(() => expect(useLiveStore.getState().spawns).toHaveLength(0));
     expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID_2);
+  });
+
+  it('keeps focus on a registered session while a coalesced list refetch is waiting', async () => {
+    // The launch bound, but the first page that lists it is held on the wire.
+    let listed = false;
+    let releaseList: () => void = () => {};
+    server.use(
+      http.get('*/api/sessions', async () => {
+        if (!listed) {
+          return HttpResponse.json(singleSessionList(SESSION_ID, 'claude', MAIN_THREAD_ID));
+        }
+        await new Promise<void>((resolve) => {
+          releaseList = resolve;
+        });
+        return HttpResponse.json(
+          singleSessionList(
+            UNLISTED_SPAWN_ID,
+            'claude',
+            SESSION_2_MAIN_THREAD_ID,
+          ),
+        );
+      }),
+    );
+    useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    useLiveStore.setState({ spawns: [trackedSpawn(UNLISTED_SPAWN_ID)] });
+
+    const { queryClient } = renderScreen();
+    await waitFor(() =>
+      expect(screen.getAllByTestId('session-node').length).toBeGreaterThan(0),
+    );
+    expect(useNavStore.getState().focusedSessionId).toBe(UNLISTED_SPAWN_ID);
+
+    // `session_registered` drops the tracked spawn and refetches the list; the
+    // turn that starts right after discards that refetch (it predates the turn)
+    // and waits for the burst to end before asking again. In between, the list
+    // is neither fetching nor current, and the row is still unlisted.
+    listed = true;
+    deliverEvent(queryClient, {
+      kind: 'session_registered',
+      session_id: UNLISTED_SPAWN_ID,
+    });
+    deliverEvent(queryClient, {
+      kind: 'turn_started',
+      session_id: UNLISTED_SPAWN_ID,
+      thread_id: SESSION_2_MAIN_THREAD_ID,
+      send_id: 1,
+      matched_uuid: 'uuid-1',
+    });
+    await waitFor(() => {
+      expect(useLiveStore.getState().spawns).toHaveLength(0);
+      expect(queryClient.getQueryState(['sessions'])?.fetchStatus).toBe('idle');
+    });
+    expect(useNavStore.getState().focusedSessionId).toBe(UNLISTED_SPAWN_ID);
+
+    // The coalesced refetch lists the row, and focus is still on it.
+    await waitFor(() =>
+      expect(queryClient.getQueryState(['sessions'])?.fetchStatus).toBe(
+        'fetching',
+      ),
+    );
+    releaseList();
+    await waitFor(() =>
+      expect(screen.getAllByTestId('session-node')).toHaveLength(1),
+    );
+    expect(useNavStore.getState().focusedSessionId).toBe(UNLISTED_SPAWN_ID);
   });
 
   it('keeps focus on the focused session when its spawn fails', async () => {

@@ -88,9 +88,11 @@ export { useProvidersQuery } from './provider-queries';
 export {
   appendSessionSend,
   firstOtherSessionId,
+  hasPendingSessionsRefetch,
   invalidateAll,
   invalidateRepositoriesAndPullRequests,
   invalidateSessions,
+  invalidateSessionsCoalesced,
   invalidateSessionThreads,
   invalidateSessionSends,
   invalidateThreadMessages,
