@@ -1,5 +1,6 @@
 import { test, expect, type Page } from './support/fixtures';
 import {
+  focusedSessionNode,
   sendMessage,
   shownTerminal,
   startNewSession,
@@ -68,6 +69,15 @@ test('a turn that completes during a socket outage is resynced on reconnect', as
   await expect(messages).toHaveCount(2);
   await expect(pending).toHaveCount(0);
   await expect(indicator).toHaveAttribute('data-connection', 'open');
+  // The session list must have caught up with the launch before going dark:
+  // the row leaving `starting` makes the workspace re-read the transcript (see
+  // `focusedSpawning` in WorkspaceScreen), and the list refetch that reports
+  // it is coalesced with the turn's events, so it can land a moment after the
+  // reply does. Re-read during the outage, the transcript would already show
+  // the outage turn and the staleness this test relies on would be gone.
+  await expect(
+    focusedSessionNode(page).getByRole('status', { name: 'Open', exact: true }),
+  ).toBeVisible();
   const session = await latestSession(page);
 
   // Drop the live socket; the indicator leaves `open` (closed, then cycling
