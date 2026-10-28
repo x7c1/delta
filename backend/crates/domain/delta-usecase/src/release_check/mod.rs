@@ -9,7 +9,7 @@
 //!
 //! The release's tag must be `v<semver>`, and only a version strictly greater
 //! than this build's by SemVer precedence counts. Precedence ignores build
-//! metadata, so a debug build (`0.5.0+dev.<sha>`) is told about a release only
+//! metadata, so a local build (`0.5.0+dev.<sha>`) is told about a release only
 //! when its base version is behind one.
 //!
 //! # Which page it may point to

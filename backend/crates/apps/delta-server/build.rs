@@ -1,10 +1,10 @@
 //! Build-time git sha probe.
 //!
-//! Records the short git sha of the current checkout into `DELTA_GIT_SHA` so
-//! debug builds can embed it in the version string surfaced to the browser
-//! (`v0.2.1+dev.a1b2c3d`). Falls back to the literal `unknown` if `git
-//! rev-parse` is unavailable (e.g. a tarball extract) so a source-only build
-//! never fails here.
+//! Records the short git sha of the current checkout into `DELTA_GIT_SHA`, in
+//! every profile, so `local` builds (by build origin) can embed it in the
+//! version string surfaced to the browser (`v0.2.1+dev.a1b2c3d`). Falls back
+//! to the literal `unknown` if `git rev-parse` is unavailable (e.g. a tarball
+//! extract) so a source-only build never fails here.
 //!
 //! Both the repository's `HEAD` file and its HEAD reflog (`logs/HEAD`) are
 //! registered as `rerun-if-changed` inputs. `HEAD` alone is not enough: it

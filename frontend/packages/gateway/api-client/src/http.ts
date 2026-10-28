@@ -730,7 +730,7 @@ export class ApiClient {
 
   /**
    * `GET /api/version` — the Delta workspace version string for the navigator
-   * footer. Pre-formatted server-side (`v0.2.1` or, on debug builds,
+   * footer. Pre-formatted server-side (`v0.2.1` or, on local builds,
    * `v0.2.1+dev.<sha>`), so the browser renders it verbatim.
    */
   getVersion(): Promise<VersionResponse> {

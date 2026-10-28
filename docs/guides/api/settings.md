@@ -421,7 +421,8 @@ Remove a registered prompt template.
 
 Return the Delta workspace version, pre-formatted for the browser footer. The
 server owns the format so the browser never has to parse the base version and
-the commit apart: release builds answer `v<version>`, debug builds
+the commit apart: by [build origin](../development/README.md#build-origin), a
+`release` build answers `v<version>` and a `local` build, in any profile,
 `v<version>+dev.<short-sha>` (`+dev` is SemVer build metadata, deliberately not
 the `-dev` pre-release form).
 
@@ -442,7 +443,7 @@ itself never reaches GitHub.
 
 A release counts as newer only when its tag is `v<semver>` and that version is
 strictly greater, by SemVer precedence, than the server's base version (build
-metadata dropped, so a debug build `v0.5.0+dev.<sha>` is told only about a
+metadata dropped, so a local build `v0.5.0+dev.<sha>` is told only about a
 release above `0.5.0`). `version` is rendered like a release build's
 [`GET /api/version`](#get-apiversion) (`v0.6.0`); `url` is the release's page,
 always under `https://github.com/x7c1/delta/releases/`.
