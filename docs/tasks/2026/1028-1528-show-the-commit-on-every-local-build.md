@@ -80,7 +80,7 @@ other build (`make desktop`, `make desktop-dev`, `make dev`, `cargo build`). See
 
 ### Before merge (verified outside the check command)
 
-- [ ] A release-profile `delta-server` built without `DELTA_BUILD_ORIGIN`
+- [x] A release-profile `delta-server` built without `DELTA_BUILD_ORIGIN`
       (as `make desktop-build` builds it), started on a spare port with a
       throwaway data directory, answers `GET /api/version` with
       `v<version>+dev.<sha>` carrying the sha of the built commit.
