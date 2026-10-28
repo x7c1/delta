@@ -336,8 +336,8 @@ export function NavigatorPane({
   onLoadMoreSessions,
 }: NavigatorPaneProps) {
   const client = useApiClient();
-  // Delta workspace version. Pre-formatted server-side (`v0.2.1` on release,
-  // `v0.2.1+dev.<sha>` on debug — see `crate::version::display_version`), held
+  // Delta workspace version. Pre-formatted server-side (`v0.2.1` on a release
+  // build, `v0.2.1+dev.<sha>` on a local one — see `crate::version`), held
   // in-memory only (no localStorage) — the query is cached for the page
   // lifetime and only re-fetched on reload, which is the only path that can
   // change the running server's version.

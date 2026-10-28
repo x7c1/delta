@@ -7,7 +7,8 @@ use ts_rs::TS;
 /// displays.
 ///
 /// `version` is a pre-formatted string that already carries the leading `v`
-/// and, on debug builds, the `+dev.<short-sha>` SemVer build-metadata suffix
+/// and, on `local` builds (by build origin, whatever the profile), the
+/// `+dev.<short-sha>` SemVer build-metadata suffix
 /// (see `delta_server::version::display_version` for the format contract).
 /// The browser renders it verbatim — the server owns the format so a UI
 /// change never needs to know how to parse the base version and sha apart.

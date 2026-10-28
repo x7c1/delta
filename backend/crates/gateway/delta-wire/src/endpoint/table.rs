@@ -272,7 +272,9 @@ declare_endpoints! {
     DeletePromptTemplate: DELETE "/api/prompt-templates/{id}";
 
     /// The Delta workspace version for the browser footer. Pre-formatted
-    /// server-side, so the browser never has to know how to render `+dev.<sha>`.
+    /// server-side (`v<version>` on a `release` build, `v<version>+dev.<sha>`
+    /// on a `local` one), so the browser never has to know how to render
+    /// `+dev.<sha>`.
     GetVersion: GET "/api/version", response = WireVersionResponse;
 
     /// A published release newer than the running server, from the last

@@ -6,9 +6,10 @@ import { MOCK_VERSION } from './releaseFixtures';
 export function releaseHandlers(): RequestHandler[] {
   return [
     // Delta workspace version for the navigator footer. The real server owns
-    // the format contract (`v<version>` on release, `v<version>+dev.<sha>` on
-    // debug); the mock returns a fixed dev-shaped string so mock-mode e2e can
-    // assert on it without depending on the host's git sha.
+    // the format contract (`v<version>` on a release build,
+    // `v<version>+dev.<sha>` on a local one); the mock returns the fixed
+    // `MOCK_VERSION` so mock-mode e2e can assert on it without depending on
+    // the host's git sha.
     http.get('*/api/version', () => HttpResponse.json({ version: MOCK_VERSION })),
     // No newer release by default, and the browser version's offer (none),
     // so the mock app's footer shows only the version; a test that wants the

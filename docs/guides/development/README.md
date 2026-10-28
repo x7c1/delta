@@ -334,6 +334,12 @@ step) sets it to `release`; `make desktop-build`, `make desktop-dev`,
 `release` by asking for it. The value is read when compiling, never at run
 time, and changing it rebuilds `delta-server`.
 
+The build origin decides the version
+[`GET /api/version`](../api/settings.md#get-apiversion) answers, and so the
+navigator footer shows: `v<version>` for a `release` build, and
+`v<version>+dev.<short-sha>` for a `local` build in any profile, so a desktop
+app rebuilt locally shows the commit it was built from.
+
 With the launcher — the desktop shell builds its configuration through
 `config_from_env_for`, the CLI through `config_from_env` — it decides what
 [`GET /api/latest-release`](../api/settings.md#get-apilatest-release) offers
