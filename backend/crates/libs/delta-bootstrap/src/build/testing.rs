@@ -15,6 +15,7 @@ pub(crate) fn test_config(dir: &tempfile::TempDir) -> Config {
         hook_endpoint_change: crate::HookEndpointChange::Unchanged,
         launch: delta_usecase::LaunchConfig::default(),
         child_env: Vec::new(),
+        launch_activation: crate::NoActivationToken::arc(),
         release_feed_url: None,
         launcher: delta_usecase::Launcher::Cli,
         build_origin: delta_usecase::BuildOrigin::Local,

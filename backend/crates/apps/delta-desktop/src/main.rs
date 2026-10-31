@@ -65,7 +65,11 @@
 //! `tauri-plugin-single-instance`, over the session D-Bus; on macOS it is the
 //! shell's own socket in the user's temporary directory (`single_instance`).
 //! On Linux the second launch passes its activation token on, so a Wayland
-//! compositor lets the window come to the front (`activation_token.rs`).
+//! compositor lets the window come to the front, and the shell mints a token
+//! for each app it starts — the browser a link opens in, the editor "Open in VS
+//! Code" starts — so that app's window comes to the front too
+//! (`activation_token.rs`). The server asks for the latter through
+//! the configuration's `launch_activation`.
 //!
 //! Closing the window ends the process and the server with it. The tmux server
 //! on Delta's socket is left running, so the Claude Code sessions open in it
@@ -413,6 +417,10 @@ fn start_server(
 ) -> anyhow::Result<Started> {
     let mut config = config::config_from_env_for(identifier, secrets)?;
     config.child_env = child_env;
+    #[cfg(target_os = "linux")]
+    {
+        config.launch_activation = Arc::new(activation_token::LaunchTokens::new(handle.clone()));
+    }
     tracing::info!(
         identifier = %config.identifier,
         data_dir = %config.data_dir,
@@ -529,6 +537,8 @@ fn restart_into_update(handle: &AppHandle, app: &InstalledApp) {
 fn open_window(app: &App, started_server: Arc<StartedServer>) -> anyhow::Result<()> {
     let url = placeholder::url()?;
     let navigation_server = Arc::clone(&started_server);
+    let navigation_handle = app.handle().clone();
+    let new_window_handle = app.handle().clone();
     let builder = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::CustomProtocol(url))
         .title(WINDOW_TITLE)
         .inner_size(
@@ -536,12 +546,13 @@ fn open_window(app: &App, started_server: Arc<StartedServer>) -> anyhow::Result<
             window_size::FALLBACK_SIZE.height,
         )
         .min_inner_size(window_size::MIN_SIZE.width, window_size::MIN_SIZE.height)
-        .on_navigation(move |url| load_in_window(url, &navigation_server))
+        .on_navigation(move |url| load_in_window(url, &navigation_server, &navigation_handle))
         .on_new_window(move |url, _features| {
             open_in_browser(
                 &url,
                 links::classify(&url, started_server.port()),
                 started_server.opener_env(),
+                &new_window_handle,
             );
             NewWindowResponse::Deny
         });
@@ -571,7 +582,7 @@ fn open_window(app: &App, started_server: Arc<StartedServer>) -> anyhow::Result<
 
 /// Whether a navigation stays in the window; one that does not is opened in the
 /// default browser or refused.
-fn load_in_window(url: &Url, started_server: &StartedServer) -> bool {
+fn load_in_window(url: &Url, started_server: &StartedServer, handle: &AppHandle) -> bool {
     let port = started_server.port();
     if placeholder::is_return_after_start(url, port) {
         tracing::info!(url = %url, "refused to go back to the placeholder page");
@@ -581,19 +592,29 @@ fn load_in_window(url: &Url, started_server: &StartedServer) -> bool {
     if kind == links::LinkKind::OwnOrigin {
         return true;
     }
-    open_in_browser(url, kind, started_server.opener_env());
+    open_in_browser(url, kind, started_server.opener_env(), handle);
     false
 }
 
 /// Open a web link in the default browser; refuse and log anything else,
-/// including the placeholder page, which only the window can show.
-fn open_in_browser(url: &Url, kind: links::LinkKind, opener_env: &[(String, String)]) {
+/// including the placeholder page, which only the window can show. On Linux
+/// the opener is handed an activation token minted for the window.
+fn open_in_browser(
+    url: &Url,
+    kind: links::LinkKind,
+    opener_env: &[(String, String)],
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] handle: &AppHandle,
+) {
     match kind {
         links::LinkKind::OwnOrigin if placeholder::is_placeholder(url) => {
             tracing::warn!(url = %url, "refused to open the placeholder page in the browser");
         }
         links::LinkKind::OwnOrigin | links::LinkKind::Web => {
-            links::open_externally(url, opener_env)
+            #[cfg(target_os = "linux")]
+            let token = activation_token::token_for_launch(handle, links::OPENER);
+            #[cfg(not(target_os = "linux"))]
+            let token: Option<String> = None;
+            links::open_externally(url, opener_env, token.as_deref())
         }
         links::LinkKind::NotWeb => {
             tracing::warn!(url = %url, "refused to open a link that is not a web link");

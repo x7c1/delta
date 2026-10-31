@@ -103,6 +103,7 @@ async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
             ..LaunchConfig::default()
         },
         child_env: Vec::new(),
+        launch_activation: delta_bootstrap::NoActivationToken::arc(),
         release_feed_url: None,
         launcher: delta_bootstrap::Launcher::Cli,
         build_origin: delta_bootstrap::BuildOrigin::Local,

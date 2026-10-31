@@ -847,6 +847,7 @@ name = "delta-desktop"
 version = "0.6.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "delta-bootstrap",
  "delta-server",

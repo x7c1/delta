@@ -1,5 +1,6 @@
-//! The activation token a launcher hands Delta on Linux, and how a second
-//! launch passes it on so the running window can come to the front.
+//! Activation tokens on Linux: the one a launcher hands Delta, how a second
+//! launch passes it on so the running window can come to the front, and the
+//! ones Delta mints for the apps it starts so their windows can.
 //!
 //! Wayland compositors only let a window take focus with an activation token
 //! (focus-stealing prevention). The launcher — GNOME Shell's app grid, a
@@ -32,15 +33,36 @@
 //! instance gives its token to GDK itself ([`claim`]), which is what GTK
 //! would otherwise have done with `DESKTOP_STARTUP_ID`, and discards the file
 //! it left.
+//!
+//! The other way round, an app Delta starts — the browser a web link opens in
+//! (`links.rs`), the editor "Open in VS Code" starts — would meet the same
+//! refusal and end in an "`<app>` is ready" notification. While the user
+//! clicks, though, Delta's window has focus, and the compositor grants a token
+//! to the focused surface. So Delta mints a fresh one for each launch
+//! ([`token_for_launch`]) and sets it on the child as both variables, as a
+//! launcher would. GTK does the minting, in its launch context's startup
+//! notify ID: on Wayland it asks `xdg_activation_v1` for a token for the
+//! focused surface with the latest input serial, on X11 it starts a startup
+//! notification. That has to happen on the main thread, where GTK runs; the
+//! server asks for it from its runtime through [`LaunchTokens`] and waits only
+//! briefly ([`MINT_TIMEOUT`]). A launch with no token — none granted, the
+//! display neither Wayland nor X11, the main thread too slow — goes ahead
+//! without one, as it did before.
 
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
+use std::sync::mpsc;
+use std::time::Duration;
+
+use async_trait::async_trait;
+use delta_bootstrap::ActivationTokenSource;
+use tauri::{AppHandle, Manager};
 
 /// The variables a launcher passes the token in, the xdg-activation one first.
-const TOKEN_VARS: [&str; 2] = ["XDG_ACTIVATION_TOKEN", "DESKTOP_STARTUP_ID"];
+const TOKEN_VARS: [&str; 2] = delta_bootstrap::ACTIVATION_TOKEN_VARS;
 
 /// Take the launcher's activation token out of this process's environment.
 ///
@@ -251,6 +273,143 @@ fn set_startup_notification_id(token: &str) {
             raw_display.cast(),
             token.0,
         );
+    }
+}
+
+/// How long a launch asked for off the main thread waits for its token. Minting
+/// is one round trip to the compositor, so this is ample unless the main
+/// thread is busy; the launch then goes ahead without a token.
+pub const MINT_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// A fresh activation token for launching `command` from Delta's window, or
+/// `None` when there is none to be had. Callable from any thread: on the main
+/// thread it mints at once, elsewhere it asks the main thread and waits at most
+/// [`MINT_TIMEOUT`].
+pub fn token_for_launch(handle: &AppHandle, command: &str) -> Option<String> {
+    if gtk::is_initialized_main_thread() {
+        return mint(handle, command);
+    }
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let minting = handle.clone();
+    let minted_for = command.to_owned();
+    let asked = handle.run_on_main_thread(move || {
+        // The waiter may have given up and gone; the token is then unused.
+        let _ = sender.send(mint(&minting, &minted_for));
+    });
+    if let Err(err) = asked {
+        tracing::warn!(
+            command,
+            "could not ask the main thread for an activation token: {err}"
+        );
+        return None;
+    }
+    match receiver.recv_timeout(MINT_TIMEOUT) {
+        Ok(token) => token,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            tracing::debug!(
+                command,
+                timeout = ?MINT_TIMEOUT,
+                "no activation token in time; launching without one"
+            );
+            None
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            tracing::warn!(
+                command,
+                "the main thread dropped the request for an activation token"
+            );
+            None
+        }
+    }
+}
+
+/// Mint a token for launching `command` on the display of Delta's window. Runs
+/// on the main thread.
+fn mint(handle: &AppHandle, command: &str) -> Option<String> {
+    use gtk::gio;
+    use gtk::prelude::*;
+
+    let Some(window) = handle.get_webview_window(crate::WINDOW_LABEL) else {
+        tracing::debug!(command, "no window to mint an activation token for");
+        return None;
+    };
+    let display = match window.gtk_window() {
+        Ok(gtk_window) => gtk_window.display(),
+        Err(err) => {
+            tracing::warn!(
+                command,
+                "could not mint an activation token: no GTK window: {err}"
+            );
+            return None;
+        }
+    };
+    let Some(context) = display.app_launch_context() else {
+        tracing::warn!(
+            command,
+            "could not mint an activation token: no launch context"
+        );
+        return None;
+    };
+    // The X11 startup notification names the app it waits for; Wayland's
+    // token ignores it. The command line is only described, never run.
+    let info = match gio::AppInfo::create_from_commandline(
+        command,
+        None,
+        gio::AppInfoCreateFlags::SUPPORTS_STARTUP_NOTIFICATION,
+    ) {
+        Ok(info) => info,
+        Err(err) => {
+            tracing::warn!(command, "could not mint an activation token: {err}");
+            return None;
+        }
+    };
+    match context.startup_notify_id(&info, &[]) {
+        Some(token) if !token.is_empty() => Some(token.into()),
+        _ => {
+            let display_type = display.type_();
+            tracing::debug!(
+                command,
+                %display_type,
+                "the display grants no activation token; launching without one"
+            );
+            None
+        }
+    }
+}
+
+/// The [`ActivationTokenSource`] the desktop shell hands the server, so the
+/// apps the server starts ("Open in VS Code") get a token minted for Delta's
+/// window ([`token_for_launch`]).
+#[derive(Clone)]
+pub struct LaunchTokens {
+    handle: AppHandle,
+}
+
+impl LaunchTokens {
+    pub fn new(handle: AppHandle) -> Self {
+        Self { handle }
+    }
+}
+
+impl std::fmt::Debug for LaunchTokens {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LaunchTokens").finish_non_exhaustive()
+    }
+}
+
+#[async_trait]
+impl ActivationTokenSource for LaunchTokens {
+    async fn activation_token(&self, command: &str) -> Option<String> {
+        // The wait for the main thread blocks, so it is kept off the runtime's
+        // worker threads.
+        let tokens = self.clone();
+        let command = command.to_owned();
+        tokio::task::spawn_blocking(move || token_for_launch(&tokens.handle, &command))
+            .await
+            .unwrap_or_else(|err| {
+                tracing::warn!("could not mint an activation token: {err}");
+                None
+            })
     }
 }
 

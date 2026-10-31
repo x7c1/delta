@@ -20,6 +20,14 @@
 //!
 //! While the server is still starting its port is unknown, so no `http` URL is
 //! the app's own yet: every one goes to the browser.
+//!
+//! On Linux the opener is handed an activation token minted for Delta's window
+//! (`activation_token::token_for_launch`), so a Wayland compositor lets the
+//! browser's window come to the front rather than announce it in a
+//! notification. The webview's new-window and navigation handlers run on the
+//! GTK main thread (WebKitGTK's policy decisions), where the token is minted
+//! at once; minting on any other thread would ask the main thread for it.
+//! Without a token the link opens as before.
 
 use std::process::{Command, Stdio};
 
@@ -58,24 +66,19 @@ pub fn classify(url: &Url, port: Option<u16>) -> LinkKind {
 
 /// The operating system's command that opens a URL in the default browser.
 #[cfg(target_os = "macos")]
-const OPENER: &str = "open";
+pub const OPENER: &str = "open";
 #[cfg(not(target_os = "macos"))]
-const OPENER: &str = "xdg-open";
+pub const OPENER: &str = "xdg-open";
 
 /// Open `url` with the operating system's default opener without blocking.
 ///
 /// The opener runs as a child with the URL as its only argument, never through
 /// a shell, with `env` (the login shell's `PATH` and locale) set on top of the
-/// inherited environment. A waiter thread reaps it and logs a non-zero exit; a
-/// failed spawn is logged here.
-pub fn open_externally(url: &Url, env: &[(String, String)]) {
-    let spawned = Command::new(OPENER)
-        .arg(url.as_str())
-        .envs(env.iter().map(|(name, value)| (name, value)))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+/// inherited environment, and the activation `token` when there is one. A
+/// waiter thread reaps it and logs a non-zero exit; a failed spawn is logged
+/// here.
+pub fn open_externally(url: &Url, env: &[(String, String)], token: Option<&str>) {
+    let spawned = opener_command(url, env, token).spawn();
     let mut child = match spawned {
         Ok(child) => child,
         Err(err) => {
@@ -83,7 +86,12 @@ pub fn open_externally(url: &Url, env: &[(String, String)]) {
             return;
         }
     };
-    tracing::info!(opener = OPENER, url = %url, "opened link in the default browser");
+    tracing::info!(
+        opener = OPENER,
+        url = %url,
+        activation_token = token.is_some(),
+        "opened link in the default browser"
+    );
     let url = url.clone();
     std::thread::spawn(move || match child.wait() {
         Ok(status) if status.success() => {}
@@ -96,9 +104,77 @@ pub fn open_externally(url: &Url, env: &[(String, String)]) {
     });
 }
 
+/// The opener command for `url`: the URL its only argument, `env` and the
+/// activation `token` (in both [`delta_bootstrap::ACTIVATION_TOKEN_VARS`]) set, stdio
+/// suppressed.
+fn opener_command(url: &Url, env: &[(String, String)], token: Option<&str>) -> Command {
+    let mut command = Command::new(OPENER);
+    command
+        .arg(url.as_str())
+        .envs(env.iter().map(|(name, value)| (name, value)));
+    if let Some(token) = token {
+        command.envs(delta_bootstrap::ACTIVATION_TOKEN_VARS.map(|name| (name, token)));
+    }
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The variables set on the opener command for a link, sorted by name.
+    fn opener_env(token: Option<&str>) -> Vec<(String, Option<String>)> {
+        let url: Url = "https://example.com/".parse().unwrap();
+        let env = [("LANG".to_owned(), "C".to_owned())];
+        let command = opener_command(&url, &env, token);
+        let mut envs: Vec<_> = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        envs.sort();
+        envs
+    }
+
+    #[test]
+    fn the_opener_carries_the_activation_token() {
+        assert_eq!(
+            opener_env(Some("token-1")),
+            [
+                ("DESKTOP_STARTUP_ID".to_owned(), Some("token-1".to_owned())),
+                ("LANG".to_owned(), Some("C".to_owned())),
+                (
+                    "XDG_ACTIVATION_TOKEN".to_owned(),
+                    Some("token-1".to_owned())
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn without_a_token_the_opener_carries_no_activation_variables() {
+        assert_eq!(
+            opener_env(None),
+            [("LANG".to_owned(), Some("C".to_owned()))]
+        );
+    }
+
+    #[test]
+    fn the_opener_is_given_the_url_alone() {
+        let url: Url = "https://example.com/a b".parse().unwrap();
+        let command = opener_command(&url, &[], None);
+        assert_eq!(command.get_program(), OPENER);
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args, [url.as_str()]);
+    }
 
     const PORT: u16 = 51234;
 

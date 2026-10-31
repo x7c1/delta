@@ -135,6 +135,7 @@ pub(super) fn test_config() -> Config {
         hook_endpoint_change: delta_bootstrap::HookEndpointChange::Unchanged,
         launch: delta_usecase::LaunchConfig::default(),
         child_env: Vec::new(),
+        launch_activation: delta_bootstrap::NoActivationToken::arc(),
         release_feed_url: None,
         launcher: delta_bootstrap::Launcher::Cli,
         build_origin: delta_bootstrap::BuildOrigin::Local,

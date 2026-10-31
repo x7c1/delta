@@ -76,7 +76,9 @@ pub(crate) mod testing;
 /// Child environment: [`Config::child_env`] is handed to every gateway that
 /// spawns a process — the tmux driver, git, gh, the external opener and the
 /// Codex app-server launch — and its `PATH` to the binary detector, so no
-/// spawn site reads global state for it.
+/// spawn site reads global state for it. The external opener also gets
+/// [`Config::launch_activation`], the activation token it hands each app it
+/// starts.
 ///
 /// [`SendStore::restore_all_dispatched`]: delta_usecase::SendStore::restore_all_dispatched
 /// [`launch_option_catalog`]: crate::launch_option_catalog()
@@ -108,8 +110,10 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     let workspace = FsWorkspace::new();
     let git_worktree = Git::new(config.child_env.clone());
     let gh_cli: Arc<dyn GhCli> = Arc::new(Gh::new(config.child_env.clone()));
-    let external_opener: Arc<dyn ExternalOpener> =
-        Arc::new(SystemOpener::new(config.child_env.clone()));
+    let external_opener: Arc<dyn ExternalOpener> = Arc::new(SystemOpener::new(
+        config.child_env.clone(),
+        Arc::clone(&config.launch_activation),
+    ));
     // The factory carries only Codex launch config, so this spawns no `codex
     // app-server` process at startup — a machine without Codex still boots
     // normally; the spawn is deferred to the first Codex session's `connect()`.

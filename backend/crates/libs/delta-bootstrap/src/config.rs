@@ -1,6 +1,9 @@
 //! Runtime configuration for the composition root.
 
+use std::sync::Arc;
+
 use delta_usecase::{BuildOrigin, HookEndpointChange, Launcher};
+use external_opener::ActivationTokenSource;
 
 use crate::data_layout::DataLayout;
 use crate::secret::Secret;
@@ -139,6 +142,17 @@ pub struct Config {
     /// implicitly. A user who wants an agent to see a variable sets it
     /// explicitly, never by accident.
     pub child_env: Vec<(String, String)>,
+    /// Where the external opener gets the activation token it hands each app
+    /// it starts ("Open in VS Code"), so a Wayland compositor lets that app's
+    /// window come to the front.
+    ///
+    /// [`NoActivationToken`] by default: a server with no window of its own
+    /// (the CLI server, `make dev`) has no token to give, and starts the app
+    /// without one. Only the desktop shell supplies a source, which mints a
+    /// token for its focused window.
+    ///
+    /// [`NoActivationToken`]: external_opener::NoActivationToken
+    pub launch_activation: Arc<dyn ActivationTokenSource>,
     /// Where the release check asks for the newest published release
     /// (`DELTA_RELEASE_FEED_URL`, default [`DEFAULT_RELEASE_FEED_URL`]), or
     /// `None` when the check is turned off: the server then never asks, and
@@ -206,6 +220,7 @@ mod tests {
             hook_endpoint_change: HookEndpointChange::Unchanged,
             launch: delta_usecase::LaunchConfig::default(),
             child_env: Vec::new(),
+            launch_activation: external_opener::NoActivationToken::arc(),
             release_feed_url: None,
             launcher: Launcher::Cli,
             build_origin: BuildOrigin::Local,

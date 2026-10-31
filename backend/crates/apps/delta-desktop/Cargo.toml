@@ -51,7 +51,11 @@ update-installer = { workspace = true }
 # A second launch's activation token is handed to GDK on the display it runs
 # on (src/activation_token.rs): `gdkx11` for X11, and `gdkwayland-sys` for
 # Wayland, which has no safe binding.
+#
+# `async-trait` implements the server's source of the activation token handed
+# to each app it starts (`LaunchTokens` in src/activation_token.rs).
 [target.'cfg(target_os = "linux")'.dependencies]
+async-trait = { workspace = true }
 gdkwayland-sys = "0.18"
 gdkx11 = "0.18"
 glib = "0.18"

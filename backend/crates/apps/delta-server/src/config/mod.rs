@@ -205,6 +205,7 @@ fn config_from_vars_for(
         hook_endpoint_change: HookEndpointChange::Unchanged,
         launch: launch_from_vars(&text),
         child_env: Vec::new(),
+        launch_activation: delta_bootstrap::NoActivationToken::arc(),
         release_feed_url: release_feed_url(text(RELEASE_FEED_URL_VAR), build_origin()),
         launcher,
         build_origin: build_origin(),

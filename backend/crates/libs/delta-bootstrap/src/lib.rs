@@ -74,6 +74,11 @@ pub use delta_usecase::{BuildOrigin, Launcher};
 // without depending on the use-case crate directly.
 pub use delta_usecase::HookEndpointChange;
 
+// Re-exported so a shell can supply `Config::launch_activation`, and anything
+// else that builds a configuration can name the default, without depending on
+// the gateway crate directly.
+pub use external_opener::{ActivationTokenSource, NoActivationToken, ACTIVATION_TOKEN_VARS};
+
 // Re-exported so the desktop shell can start the app an update was installed
 // as (`ServerStopped::Restart`) without depending on the use-case crate
 // directly.
