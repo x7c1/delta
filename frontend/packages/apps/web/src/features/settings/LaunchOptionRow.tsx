@@ -187,7 +187,7 @@ export function LaunchOptionRow({
         // cannot make one row dominate the list. `break-all` because a JSON
         // blob or a path has no spaces to wrap at.
         <pre
-          className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-surface-sunken px-2 py-1 font-mono text-code text-fg"
+          className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-sm bg-surface-sunken px-2 py-1 font-mono text-code text-fg"
           data-testid={`launch-option-value-${option.id}`}
         >
           {option.value}

@@ -12,4 +12,4 @@
  * token definition in src/index.css.
  */
 export const FLOATING_CARD_CLASS =
-  'rounded-md border border-border-default bg-surface shadow-[shadow:var(--delta-card-shadow)]';
+  'rounded-md border border-border-default bg-surface shadow-(--delta-card-shadow)';

@@ -82,7 +82,7 @@ export function LaunchTrustDialog() {
                   </span>
                   {change.diff.length > 0 && (
                     <pre
-                      className="max-h-80 overflow-auto rounded border border-border-default bg-surface-sunken p-2 font-mono text-code text-fg-muted"
+                      className="max-h-80 overflow-auto rounded-sm border border-border-default bg-surface-sunken p-2 font-mono text-code text-fg-muted"
                       data-testid="launch-trust-diff"
                     >
                       {change.diff}

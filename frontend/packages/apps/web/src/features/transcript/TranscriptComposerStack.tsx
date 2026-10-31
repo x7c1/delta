@@ -130,7 +130,7 @@ export function TranscriptComposerStack({
         >
           {showClosedNotice && (
             <div
-              className="flex items-center gap-2 rounded border border-border-default bg-surface-elevated px-2 py-1 text-caption text-fg-subtle"
+              className="flex items-center gap-2 rounded-sm border border-border-default bg-surface-elevated px-2 py-1 text-caption text-fg-subtle"
               data-testid="readonly-notice"
             >
               <Badge tone="neutral">closed</Badge>
@@ -144,7 +144,7 @@ export function TranscriptComposerStack({
 
           {showHooksUnreachable && (
             <div
-              className="flex items-center gap-2 rounded border border-danger/30 bg-danger/10 px-2 py-1 text-caption text-danger"
+              className="flex items-center gap-2 rounded-sm border border-danger/30 bg-danger/10 px-2 py-1 text-caption text-danger"
               data-testid="hooks-unreachable-notice"
               role="alert"
             >
@@ -161,13 +161,13 @@ export function TranscriptComposerStack({
 
           {showExternalInput && activeThread && (
             <div
-              className="flex items-start gap-2 rounded border border-info/30 bg-info/10 px-2 py-1 text-caption"
+              className="flex items-start gap-2 rounded-sm border border-info/30 bg-info/10 px-2 py-1 text-caption"
               data-testid="external-input-notice"
             >
               <Badge className="shrink-0" tone="info">
                 external input
               </Badge>
-              <span className="min-w-0 flex-1 line-clamp-2 break-words text-fg-muted">
+              <span className="min-w-0 flex-1 line-clamp-2 wrap-break-word text-fg-muted">
                 {externalInput.prompt}
               </span>
               <Button
@@ -183,7 +183,7 @@ export function TranscriptComposerStack({
 
           {showSendParked && activeThread && sendParked && (
             <div
-              className="flex items-start gap-2 rounded border border-danger/30 bg-danger/10 px-2 py-1 text-caption"
+              className="flex items-start gap-2 rounded-sm border border-danger/30 bg-danger/10 px-2 py-1 text-caption"
               data-testid="send-parked-notice"
               role="alert"
             >
@@ -196,7 +196,7 @@ export function TranscriptComposerStack({
                   text and carries the Send and Cancel actions. This notice
                   only has to explain WHY it is waiting — hence no copy of the
                   text, and no "copy it and try again". */}
-              <span className="min-w-0 flex-1 break-words text-fg-muted">
+              <span className="min-w-0 flex-1 wrap-break-word text-fg-muted">
                 A message never reached the session — the terminal swallowed
                 it twice, so Delta stopped re-sending it. It is waiting in
                 the queue below: send it again once the terminal is ready, or

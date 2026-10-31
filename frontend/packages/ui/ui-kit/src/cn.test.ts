@@ -40,4 +40,13 @@ describe('cn', () => {
       'text-fg-muted font-mono text-code',
     );
   });
+
+  // Tailwind v4 spellings: the `(--var)` shorthand for an arbitrary CSS
+  // variable and the renamed radius scale must still dedup against their
+  // plain counterparts.
+  it('dedups Tailwind v4 variable shorthands and renamed scales', () => {
+    expect(cn('shadow-md', 'shadow-(--delta-card-shadow)')).toBe('shadow-(--delta-card-shadow)');
+    expect(cn('top-0', 'top-(--shell-top-inset,0px)')).toBe('top-(--shell-top-inset,0px)');
+    expect(cn('rounded-sm', 'rounded-xs')).toBe('rounded-xs');
+  });
 });

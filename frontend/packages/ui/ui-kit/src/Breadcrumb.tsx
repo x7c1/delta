@@ -39,7 +39,7 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
                 // lighter than the old indigo-600 (the accent token is
                 // indigo-500 in light), which is acceptable since navigation
                 // links read by hue rather than exact shade.
-                className="rounded px-1 text-accent hover:bg-accent/10 hover:underline"
+                className="rounded-sm px-1 text-accent hover:bg-accent/10 hover:underline"
               >
                 {item.label}
               </button>

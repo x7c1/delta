@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { bundleBudget } from './bundle-budget';
 
 // The Delta server the dev server proxies to. DELTA_PORT lets a non-default
@@ -42,7 +43,7 @@ const contentSecurityPolicy =
 const BUNDLE_BUDGET_KB = 1200;
 
 export default defineConfig({
-  plugins: [react(), bundleBudget(BUNDLE_BUDGET_KB)],
+  plugins: [react(), tailwindcss(), bundleBudget(BUNDLE_BUDGET_KB)],
   build: {
     chunkSizeWarningLimit: BUNDLE_BUDGET_KB,
   },

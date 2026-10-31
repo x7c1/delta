@@ -125,7 +125,7 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
             onClick={() => openCwd(cwd)}
             title={`Open in ${DEFAULT_OPEN_CWD_HANDLER_LABEL}`}
             aria-label={`Open ${cwd} in ${DEFAULT_OPEN_CWD_HANDLER_LABEL}`}
-            className="cursor-pointer rounded-sm text-right text-inherit hover:bg-surface-sunken focus-visible:bg-surface-sunken focus-visible:outline-none"
+            className="cursor-pointer rounded-xs text-right text-inherit hover:bg-surface-sunken focus-visible:bg-surface-sunken focus-visible:outline-hidden"
           >
             {formatDir(cwd)}
           </button>

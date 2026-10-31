@@ -119,7 +119,7 @@ export function ConfirmPanel({
       ref={panelRef}
       role="alertdialog"
       aria-labelledby={messageId}
-      className="flex flex-col gap-2 rounded border border-border-default bg-surface-sunken px-3 py-2"
+      className="flex flex-col gap-2 rounded-sm border border-border-default bg-surface-sunken px-3 py-2"
       data-testid={testId}
     >
       <div id={messageId} className="flex flex-col gap-2 text-caption text-fg">

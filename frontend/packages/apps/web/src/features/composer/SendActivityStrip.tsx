@@ -35,7 +35,7 @@ export interface SendActivityStripProps {
  * only place a queued send appears until it dispatches, and a queued send has
  * no edit control — the user reads it, copies it, cancels the row and composes
  * again. A clipped row makes all of that impossible, so `whitespace-pre-wrap`
- * keeps the line breaks the user typed and `break-words` wraps a long unbroken
+ * keeps the line breaks the user typed and `wrap-break-word` wraps a long unbroken
  * token instead of letting it overflow the row.
  *
  * `max-h-40 overflow-y-auto` caps the height so a very long prompt scrolls
@@ -48,7 +48,7 @@ export interface SendActivityStripProps {
  * nothing scrolls it back into view.
  */
 const pendingTextClass =
-  'max-h-40 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words text-fg';
+  'max-h-40 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap wrap-break-word text-fg';
 
 /**
  * The one exception: a `local` row stands for a send already echoed into the
@@ -60,7 +60,7 @@ const pendingTextClass =
  * `truncate` class the strip's spans used to carry, and the clamp box does the
  * same job — the typed line breaks collapse into one ellipsised line.
  */
-const clampedTextClass = 'min-w-0 flex-1 line-clamp-1 break-words text-fg';
+const clampedTextClass = 'min-w-0 flex-1 line-clamp-1 wrap-break-word text-fg';
 
 /**
  * The send-activity strip above the composer: the sends the user is still
@@ -168,7 +168,7 @@ export function SendActivityStrip({
     // bordered card would repaint that card's own top edge in the neutral
     // token and leave it mismatched with its other three sides.
     <li key={key} className="py-1" data-testid="pending-item">
-      <div className="space-y-1 rounded border border-danger/30 bg-danger/10 px-2 py-1.5">
+      <div className="space-y-1 rounded-sm border border-danger/30 bg-danger/10 px-2 py-1.5">
         <div className="flex items-start gap-2">
           <Badge className="shrink-0" tone="warning">
             failed
@@ -180,7 +180,7 @@ export function SendActivityStrip({
         <p className="text-danger">{message}</p>
         {reason && (
           <p
-            className="break-words text-muted"
+            className="wrap-break-word text-muted"
             data-testid="pending-fail-reason"
           >
             {reason}
@@ -217,7 +217,7 @@ export function SendActivityStrip({
   );
 
   return (
-    <div className="space-y-1 rounded border border-warning/30 bg-warning/10 px-2 py-1.5 text-caption">
+    <div className="space-y-1 rounded-sm border border-warning/30 bg-warning/10 px-2 py-1.5 text-caption">
       <div className="flex items-center gap-2 font-medium text-warning">
         <span>In progress</span>
         {hasActiveWork && (

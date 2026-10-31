@@ -56,7 +56,7 @@ function ShellTitleBarStrip() {
     <div
       aria-hidden="true"
       data-testid="shell-title-bar"
-      className="pointer-events-none h-[var(--shell-top-inset)] shrink-0"
+      className="pointer-events-none h-(--shell-top-inset) shrink-0"
     />
   );
 }

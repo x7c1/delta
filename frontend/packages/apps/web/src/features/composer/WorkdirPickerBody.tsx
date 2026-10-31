@@ -194,7 +194,7 @@ export function WorkdirPickerBody({
                   onClick={() => pick(item.path)}
                   aria-pressed={candidate === item.path}
                   className={cn(
-                    'flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-code hover:bg-surface-elevated-hover',
+                    'flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1 text-left font-mono text-code hover:bg-surface-elevated-hover',
                     candidate === item.path
                       ? 'bg-accent/10 text-accent ring-1 ring-accent/30'
                       : 'text-fg',
@@ -231,7 +231,7 @@ export function WorkdirPickerBody({
 
         {listError && (
           <div
-            className="space-y-2 rounded border border-danger/30 bg-danger/10 px-2 py-2 text-caption text-danger"
+            className="space-y-2 rounded-sm border border-danger/30 bg-danger/10 px-2 py-2 text-caption text-danger"
             data-testid="workdir-error"
             role="alert"
           >
@@ -262,7 +262,7 @@ export function WorkdirPickerBody({
               onClick={() => pick(listing.path)}
               aria-pressed={candidate === listing.path}
               className={cn(
-                'w-full truncate rounded px-2 py-1 text-left font-mono text-code hover:bg-surface-elevated-hover',
+                'w-full truncate rounded-sm px-2 py-1 text-left font-mono text-code hover:bg-surface-elevated-hover',
                 candidate === listing.path
                   ? 'bg-accent/10 text-accent ring-1 ring-accent/30'
                   : 'text-fg',
@@ -285,7 +285,7 @@ export function WorkdirPickerBody({
                   <button
                     type="button"
                     onClick={() => navigateTo(listing.parent)}
-                    className="flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-code text-fg hover:bg-surface-elevated-hover"
+                    className="flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1 text-left font-mono text-code text-fg hover:bg-surface-elevated-hover"
                     data-testid="workdir-parent"
                   >
                     <ParentDirIcon className="h-4 w-4 shrink-0" />
@@ -298,7 +298,7 @@ export function WorkdirPickerBody({
                   <button
                     type="button"
                     onClick={() => navigateTo(entry.path)}
-                    className="flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-code text-fg hover:bg-surface-elevated-hover"
+                    className="flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1 text-left font-mono text-code text-fg hover:bg-surface-elevated-hover"
                     title={entry.path}
                   >
                     <FolderIcon className="h-4 w-4 shrink-0" />

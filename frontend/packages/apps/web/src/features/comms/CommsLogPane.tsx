@@ -215,7 +215,7 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
           onClick={() => setCommsOpen(false)}
           aria-label="Close communication log"
           title="Close communication log"
-          className="pointer-events-auto absolute right-2 top-2 z-10 rounded bg-terminal-overlay/60 px-1.5 py-0.5 text-secondary leading-none text-terminal-fg opacity-60 transition hover:bg-terminal-overlay-hover hover:text-terminal-fg-strong hover:opacity-100 focus-visible:opacity-100"
+          className="pointer-events-auto absolute right-2 top-2 z-10 rounded-sm bg-terminal-overlay/60 px-1.5 py-0.5 text-secondary leading-none text-terminal-fg opacity-60 transition hover:bg-terminal-overlay-hover hover:text-terminal-fg-strong hover:opacity-100 focus-visible:opacity-100"
         >
           »
         </button>

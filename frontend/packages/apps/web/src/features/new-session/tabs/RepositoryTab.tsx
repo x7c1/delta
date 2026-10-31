@@ -142,7 +142,7 @@ export function RepositoryTab() {
   if (repositoriesQuery.isError) {
     return (
       <div
-        className="rounded border border-danger/30 bg-danger/10 px-3 py-2 text-caption text-danger"
+        className="rounded-sm border border-danger/30 bg-danger/10 px-3 py-2 text-caption text-danger"
         data-testid="repository-tab-error"
         role="alert"
       >
@@ -203,7 +203,7 @@ export function RepositoryTab() {
                     onClick={() => setSelected(clone.path)}
                     aria-pressed={isPicked}
                     className={cn(
-                      'flex w-full min-w-0 items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-caption hover:bg-surface-elevated-hover',
+                      'flex w-full min-w-0 items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left text-caption hover:bg-surface-elevated-hover',
                       isPicked
                         ? 'bg-accent/10 text-accent ring-1 ring-accent-disabled'
                         : 'text-fg',
@@ -221,7 +221,7 @@ export function RepositoryTab() {
                     </span>
                     {clone.last_branch && (
                       <span
-                        className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 font-mono text-code text-fg-subtle"
+                        className="shrink-0 rounded-sm bg-surface-elevated px-1.5 py-0.5 font-mono text-code text-fg-subtle"
                         title={clone.last_branch}
                       >
                         {displayBranch(clone.last_branch)}
@@ -255,7 +255,7 @@ function RepoRow({ repo, isSelected, onSelect }: RepoRowProps) {
       onClick={onSelect}
       aria-pressed={isSelected}
       className={cn(
-        'flex w-full min-w-0 items-center justify-between gap-3 rounded px-2 py-1.5 text-left hover:bg-surface-elevated-hover',
+        'flex w-full min-w-0 items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left hover:bg-surface-elevated-hover',
         isSelected
           ? 'bg-accent/10 text-accent ring-1 ring-accent-disabled'
           : 'text-fg',
@@ -269,12 +269,12 @@ function RepoRow({ repo, isSelected, onSelect }: RepoRowProps) {
         </div>
       </div>
       {isPathKey && (
-        <span className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 text-caption uppercase tracking-wide text-fg-subtle">
+        <span className="shrink-0 rounded-sm bg-surface-elevated px-1.5 py-0.5 text-caption uppercase tracking-wide text-fg-subtle">
           local
         </span>
       )}
       {repo.clones.length > 1 && (
-        <span className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 text-caption text-fg-muted">
+        <span className="shrink-0 rounded-sm bg-surface-elevated px-1.5 py-0.5 text-caption text-fg-muted">
           {repo.clones.length} clones
         </span>
       )}

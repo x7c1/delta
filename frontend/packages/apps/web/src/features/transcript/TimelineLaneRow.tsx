@@ -170,7 +170,7 @@ export function TimelineLaneRow({
         // span (a flex item that may shrink below its content
         // width because it clips its overflow); the full name
         // stays in the `title` tooltip.
-        className={`flex h-full items-center overflow-hidden whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-code ${
+        className={`flex h-full items-center overflow-hidden whitespace-nowrap rounded-xs py-0.5 pl-1 pr-2 font-mono text-code ${
           lane.isMain ? 'text-fg' : 'text-fg-muted'
         } ${labelHighlightClasses}`}
         style={{
@@ -195,7 +195,7 @@ export function TimelineLaneRow({
         // floor (no-content rows still respect the lane
         // height) rather than a fixed `height` cap that
         // would defeat the stretch.
-        className={`relative h-full rounded-sm ${highlightClasses}`}
+        className={`relative h-full rounded-xs ${highlightClasses}`}
         style={{
           width:
             LANE_LEFT_PAD_PX +

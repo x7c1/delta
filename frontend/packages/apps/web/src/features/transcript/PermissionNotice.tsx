@@ -258,7 +258,7 @@ export function PermissionNoticeCard({
       <p className="break-all text-caption font-medium text-warning">
         {guarded && (
           <span
-            className="mr-1.5 rounded-sm bg-warning/20 px-1 font-semibold"
+            className="mr-1.5 rounded-xs bg-warning/20 px-1 font-semibold"
             data-testid="permission-notice-new-request"
           >
             New request

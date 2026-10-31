@@ -181,7 +181,7 @@ export function SettingsView() {
                 onClick={() => setActiveCategory(category.id)}
                 data-parent={category.parent}
                 className={cn(
-                  'rounded py-1.5 pr-3 text-left text-caption font-medium transition',
+                  'rounded-sm py-1.5 pr-3 text-left text-caption font-medium transition',
                   // A child category's label sits one step in from its parent's.
                   category.parent === undefined ? 'pl-3' : 'pl-6',
                   selected

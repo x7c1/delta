@@ -294,7 +294,7 @@ export function LaunchOptionsSection({ active }: { active: boolean }) {
         <div
           role="radiogroup"
           aria-label="Launch options provider"
-          className="flex gap-1 rounded border border-border-default bg-surface p-1"
+          className="flex gap-1 rounded-sm border border-border-default bg-surface p-1"
           data-testid="launch-option-provider-selector"
         >
           {PROVIDER_OPTIONS.map((option) => {
@@ -303,7 +303,7 @@ export function LaunchOptionsSection({ active }: { active: boolean }) {
               <label
                 key={option.value}
                 className={cn(
-                  'flex flex-1 cursor-pointer items-center justify-center gap-2 rounded px-3 py-1.5 text-secondary transition',
+                  'flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-sm px-3 py-1.5 text-secondary transition',
                   selected
                     ? 'bg-accent/10 text-fg ring-1 ring-accent/30'
                     : 'text-fg-muted hover:bg-surface-elevated',
@@ -341,7 +341,7 @@ export function LaunchOptionsSection({ active }: { active: boolean }) {
             value={label}
             onChange={(event) => setLabel(event.target.value)}
             placeholder="My plugins"
-            className="rounded border border-border-default bg-surface px-2 py-1 text-secondary text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
+            className="rounded-sm border border-border-default bg-surface px-2 py-1 text-secondary text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-hidden"
           />
         </div>
         <div className="flex flex-col gap-1">
@@ -355,7 +355,7 @@ export function LaunchOptionsSection({ active }: { active: boolean }) {
             onChange={(event) => setName(event.target.value)}
             placeholder={copy.nameExample}
             required
-            className="rounded border border-border-default bg-surface px-2 py-1 text-secondary text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
+            className="rounded-sm border border-border-default bg-surface px-2 py-1 text-secondary text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-hidden"
           />
         </div>
         <div className="flex flex-col gap-1">
@@ -377,7 +377,7 @@ export function LaunchOptionsSection({ active }: { active: boolean }) {
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder={copy.valueExample}
-            className="resize-y overflow-auto rounded border border-border-default bg-surface px-2 py-1 font-mono text-code text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
+            className="resize-y overflow-auto rounded-sm border border-border-default bg-surface px-2 py-1 font-mono text-code text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-hidden"
           />
         </div>
         <label className="flex items-center gap-2 text-caption font-medium text-fg-muted">

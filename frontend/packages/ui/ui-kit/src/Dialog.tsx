@@ -91,7 +91,7 @@ export function Dialog({
   // scrim never covers the window's own controls.
   return createPortal(
     <div
-      className="fixed inset-x-0 bottom-0 top-[var(--shell-top-inset,0px)] z-50 flex items-center justify-center bg-scrim/40 p-4"
+      className="fixed inset-x-0 bottom-0 top-(--shell-top-inset,0px) z-50 flex items-center justify-center bg-scrim/40 p-4"
       data-testid="dialog-backdrop"
       onClick={dismissable ? onClose : undefined}
     >
@@ -104,7 +104,7 @@ export function Dialog({
         // A click inside the panel must not bubble to the backdrop's close.
         onClick={(event) => event.stopPropagation()}
         className={cn(
-          'flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-lg bg-surface-elevated shadow-xl focus:outline-none',
+          'flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-lg bg-surface-elevated shadow-xl focus:outline-hidden',
           className,
         )}
       >

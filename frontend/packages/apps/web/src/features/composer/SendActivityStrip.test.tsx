@@ -138,7 +138,7 @@ describe('SendActivityStrip server sends', () => {
     const span = screen.getByTestId('pending-text');
     expect(span.textContent).toBe(text);
     expect(span).not.toHaveClass('truncate');
-    expect(span).toHaveClass('whitespace-pre-wrap', 'break-words');
+    expect(span).toHaveClass('whitespace-pre-wrap', 'wrap-break-word');
     expect(span).toHaveClass('max-h-40', 'overflow-y-auto');
   });
 
@@ -171,7 +171,7 @@ describe('SendActivityStrip server sends', () => {
     expect(span).not.toHaveClass('truncate');
     expect(span).toHaveClass(
       'whitespace-pre-wrap',
-      'break-words',
+      'wrap-break-word',
       'max-h-40',
       'overflow-y-auto',
     );

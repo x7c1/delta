@@ -6,10 +6,10 @@ const SEGMENT_CLASS: Record<TextSegment['kind'], string | undefined> = {
   text: undefined,
   // An escape stands for a character the user could not otherwise see, so it
   // is marked in the warning colour rather than read as part of the value.
-  escape: 'rounded-sm bg-warning/15 text-warning',
+  escape: 'rounded-xs bg-warning/15 text-warning',
   // A marker is not part of the value at all: it describes what was collapsed
   // or left out, so it is dimmed and set apart.
-  marker: 'rounded-sm bg-surface-sunken px-1 text-fg-subtle',
+  marker: 'rounded-xs bg-surface-sunken px-1 text-fg-subtle',
 };
 
 export interface VerbatimTextProps {

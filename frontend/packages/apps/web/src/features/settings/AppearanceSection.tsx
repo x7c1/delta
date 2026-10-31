@@ -79,7 +79,7 @@ export function AppearanceSection() {
             <label
               key={option.value}
               className={cn(
-                'flex cursor-pointer items-center gap-3 rounded border px-3 py-2 text-secondary transition',
+                'flex cursor-pointer items-center gap-3 rounded-sm border px-3 py-2 text-secondary transition',
                 selected
                   ? 'border-accent bg-accent/10 text-fg ring-1 ring-accent/30'
                   : 'border-border-default text-fg hover:bg-surface',
@@ -127,7 +127,7 @@ export function AppearanceSection() {
             <label
               key={option.value}
               className={cn(
-                'flex cursor-pointer items-center gap-3 rounded border px-3 py-2 text-secondary transition',
+                'flex cursor-pointer items-center gap-3 rounded-sm border px-3 py-2 text-secondary transition',
                 selected
                   ? 'border-accent bg-accent/10 text-fg ring-1 ring-accent/30'
                   : 'border-border-default text-fg hover:bg-surface',
