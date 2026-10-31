@@ -67,7 +67,7 @@ jobs:
         include:
           # Apple silicon only: Intel Macs are not supported.
           - name: macos-aarch64
-            runner: macos-14
+            runner: macos-26
             target: aarch64-apple-darwin
             bundles: dmg
           - name: linux-x86_64
