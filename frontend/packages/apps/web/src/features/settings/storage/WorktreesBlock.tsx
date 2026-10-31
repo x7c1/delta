@@ -288,7 +288,7 @@ function WorktreeRow({
                   aria-label="Directory name to confirm"
                   autoComplete="off"
                   spellCheck={false}
-                  className="rounded border border-border-default bg-surface px-2 py-1 font-mono text-code text-fg focus:border-accent-hover focus:outline-none"
+                  className="rounded-sm border border-border-default bg-surface px-2 py-1 font-mono text-code text-fg focus:border-accent-hover focus:outline-hidden"
                 />
               </label>
             </>

@@ -14,7 +14,7 @@ import {
  * the same block of the composer card — only their contents differ.
  */
 const SECTION_CLASS =
-  'space-y-1.5 rounded border border-border-default bg-surface-elevated px-2 py-1.5 text-caption';
+  'space-y-1.5 rounded-sm border border-border-default bg-surface-elevated px-2 py-1.5 text-caption';
 
 /**
  * The section's headline, identical in both modes: the checkbox's label when the
@@ -444,7 +444,7 @@ function RemoteBranchPicker({
           value={selectedName}
           onChange={(event) => onSelect(event.target.value)}
           placeholder="origin branch (e.g. feature/x)"
-          className="rounded border border-border-default bg-surface px-2 py-1 font-mono text-code text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
+          className="rounded-sm border border-border-default bg-surface px-2 py-1 font-mono text-code text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-hidden"
           data-testid="remote-branch-input"
         />
       </label>
@@ -453,7 +453,7 @@ function RemoteBranchPicker({
 
       {!query.isLoading && query.isError && (
         <p
-          className="rounded border border-danger/30 bg-danger/10 px-2 py-1 text-danger"
+          className="rounded-sm border border-danger/30 bg-danger/10 px-2 py-1 text-danger"
           role="alert"
           data-testid="remote-branch-error"
         >
@@ -470,7 +470,7 @@ function RemoteBranchPicker({
                 onClick={() => onSelect(name)}
                 aria-pressed={selectedName === name}
                 className={cn(
-                  'w-full truncate rounded px-2 py-1 text-left font-mono text-code hover:bg-surface-elevated-hover',
+                  'w-full truncate rounded-sm px-2 py-1 text-left font-mono text-code hover:bg-surface-elevated-hover',
                   selectedName === name
                     ? 'bg-accent/10 text-accent ring-1 ring-accent/30'
                     : 'text-fg',

@@ -105,7 +105,7 @@ export function PruneSessionsBlock({ active }: { active: boolean }) {
             value={daysText}
             onChange={(event) => changeCriteria(() => setDaysText(event.target.value))}
             aria-label="Days since last activity"
-            className="w-16 rounded border border-border-default bg-surface px-2 py-1 text-secondary text-fg focus:border-accent-hover focus:outline-none"
+            className="w-16 rounded-sm border border-border-default bg-surface px-2 py-1 text-secondary text-fg focus:border-accent-hover focus:outline-hidden"
           />
           days
         </label>
@@ -117,7 +117,7 @@ export function PruneSessionsBlock({ active }: { active: boolean }) {
               changeCriteria(() => setChoice(event.target.value as StatusChoice))
             }
             aria-label="Which closed sessions"
-            className="rounded border border-border-default bg-surface px-2 py-1 text-secondary text-fg focus:border-accent-hover focus:outline-none"
+            className="rounded-sm border border-border-default bg-surface px-2 py-1 text-secondary text-fg focus:border-accent-hover focus:outline-hidden"
           >
             {Object.entries(STATUS_CHOICES).map(([value, { label }]) => (
               <option key={value} value={value}>
@@ -186,7 +186,7 @@ const SKIP_REASON_TEXT: Record<SkippedSession['reason'], string> = {
 function PruneResult({ result }: { result: PruneSessionsResponse }) {
   return (
     <div
-      className="flex flex-col gap-1 rounded border border-border-default px-3 py-2 text-caption text-fg"
+      className="flex flex-col gap-1 rounded-sm border border-border-default px-3 py-2 text-caption text-fg"
       data-testid="storage-prune-result"
       role="status"
     >

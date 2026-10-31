@@ -1,10 +1,254 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
 
 /*
- * Design-token values. Utility names for these live in tailwind.config.js
- * (`theme.extend`), and src/theme.ts reads them at runtime for the consumers
+ * Scan the ui-kit sources too, so the utility classes used by shared
+ * components are generated. Tailwind detects the app's own sources (this
+ * package, minus .gitignore'd paths) automatically.
+ */
+@source '../../../ui/ui-kit/src';
+
+/*
+ * Tailwind v4 wraps `hover:` in `@media (hover: hover)`, so it never applies
+ * on a device whose primary pointer cannot hover. Keep v3's plain `:hover`:
+ * the desktop shells' WebViews decide that media query from the primary
+ * pointer, and a touch-capable laptop must not lose every hover state.
+ */
+@custom-variant hover (&:hover);
+
+/*
+ * ---------------------------------------------------------------------------
+ * Design tokens
+ *
+ * The `@theme` blocks below are the single definition of the app's font
+ * stacks, and they name the layout/color tokens whose *values* live as CSS
+ * custom properties in the `:root` blocks further down. The plain `:root`
+ * block carries default fallback values; `:root[data-theme="..."]` blocks
+ * redefine the same names per theme so swapping the attribute on `<html>`
+ * swaps every utility's resolved color atomically (see useTheme.ts).
+ * Utilities defined here resolve through those variables, so a later
+ * user-facing stylesheet can override a token in one place and every
+ * consumer — Tailwind utilities and the runtime readers in `src/theme.ts`
+ * (xterm) alike — follows. See `src/theme.ts` for the token overview.
+ * ---------------------------------------------------------------------------
+ */
+
+/*
+ * Font stacks. Tailwind's default `sans` cascade ends Latin-only
+ * (`ui-sans-serif`, `system-ui`, then a generic `sans-serif`). On Linux,
+ * `sans-serif` with no `lang` tag resolves to the Latin `Noto Sans`, which
+ * carries *some* CJK punctuation but not all — so `）`(U+FF09) and `。`
+ * (U+3002) get split across `Noto Sans` and the per-glyph CJK fallback,
+ * landing with mismatched metrics (the `。` looks shoved off after a
+ * full-width `）`). Slot an explicit proportional CJK face (Linux Noto, macOS
+ * Hiragino) *before* the generic `sans-serif` so all CJK resolves from one
+ * font; Latin still wins on the preceding `ui-sans-serif`/`system-ui`, and
+ * the emoji faces stay at the tail.
+ *
+ * `mono` is the twin of that fix. Tailwind's default `mono` stack is
+ * Latin-only and ends in a generic `monospace`, which the browser resolves
+ * for CJK to a *proportional* face — drawing punctuation (`、` U+3001 / `。`)
+ * shoved into the left of the cell instead of centered. Keep the default
+ * Latin cascade, then slot an explicit *monospaced* CJK face before the
+ * generic `monospace`. Preflight resolves `code`/`kbd`/`samp`/`pre` from this
+ * variable, so this also fixes the conversation pane's `<pre>` blocks and
+ * Markdown code.
+ *
+ * Both stacks restate Tailwind's default Latin cascade verbatim (v4 has no
+ * JavaScript `defaultTheme` to splice from): only the CJK entries are ours.
+ * Re-check them against `--font-sans` / `--font-mono` in
+ * `tailwindcss/theme.css` when upgrading Tailwind.
+ *
+ * `terminal` is the embedded terminal's stack (consumed by xterm via
+ * `--delta-font-terminal` — see `src/theme.ts`). font-family falls back per
+ * character, so the list must lead with a *monospaced* Latin face for each
+ * OS — otherwise Latin glyphs themselves fall through to the CJK face, and
+ * when that face is *proportional* (macOS `Hiragino Sans`) the variable-width
+ * letters get crammed into xterm's fixed cells and the whole grid looks
+ * ragged. With a real mono face first (macOS `Menlo`, Windows `Consolas`,
+ * Linux `DejaVu Sans Mono`), Latin stays monospaced and only CJK drops to the
+ * shared monospaced CJK tail. Deliberately not the `mono` stack: that one
+ * leads with `ui-monospace`/`SFMono-Regular`, which xterm's cell-metric
+ * measurement was not tuned against — this list is the one proven to keep
+ * the grid aligned.
+ *
+ * This block is a plain `@theme` (not `inline`) so the stacks exist as
+ * variables at runtime: preflight reads `--font-sans`/`--font-mono`, and the
+ * `:root` block below re-exposes `--font-terminal` for xterm.
+ */
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, 'Noto Sans CJK JP', 'Hiragino Sans', sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', 'Noto Sans Mono CJK JP', 'Hiragino Sans', monospace;
+  --font-terminal:
+    Menlo, Consolas, 'DejaVu Sans Mono', 'Noto Sans Mono CJK JP',
+    'Hiragino Sans', monospace;
+}
+
+/*
+ * The remaining tokens only name utilities after variables defined in the
+ * `:root` blocks below. `inline` makes each utility reference the
+ * `--delta-*` variable directly, so it resolves on
+ * the element it styles instead of through an intermediate theme variable.
+ */
+@theme inline {
+  /*
+   * Semantic font-size scale. Values live as CSS custom properties below
+   * (`--delta-text-*`, which also documents how call sites pick a token by
+   * role); each utility here references its variable so the value layer
+   * stays in one place — a later user-facing stylesheet can override a
+   * token on `:root` and every `text-*` utility (plus xterm, via
+   * src/theme.ts reading `--delta-text-terminal`) follows. Each entry pairs
+   * the size with an explicit line-height. `terminal` is consumed only by
+   * xterm through src/theme.ts, but is exposed here for symmetry. The names
+   * are registered with tailwind-merge in ui-kit's `cn.ts`; keep the two in
+   * sync.
+   */
+  --text-body: var(--delta-text-body);
+  --text-body--line-height: 1.5rem;
+  --text-secondary: var(--delta-text-secondary);
+  --text-secondary--line-height: 1.375rem;
+  /* Pairs the 14px caption (the 12px era paired 1rem); dense rows that must
+   * stay tight carry their own leading-* overrides. */
+  --text-caption: var(--delta-text-caption);
+  --text-caption--line-height: 1.25rem;
+  /* Same line-height as caption so mono spans inline with caption text share
+   * one line box (rationale for the smaller size: the `:root` block). */
+  --text-code: var(--delta-text-code);
+  --text-code--line-height: 1.25rem;
+  --text-terminal: var(--delta-text-terminal);
+  --text-terminal--line-height: 1.25rem;
+
+  /*
+   * Theme-fixed semantic color tokens. The RGB triple is identical in light
+   * and dark themes (declared in every theme block below all the same so the
+   * contract stays uniform).
+   *
+   * `terminal-*` overlay the embedded xterm canvas, which is itself
+   * theme-fixed dark — flipping them per theme would render the chrome
+   * illegible in light mode. `terminal-bg` is also read at runtime by
+   * src/theme.ts and handed to xterm, so the panel chrome and the canvas can
+   * never disagree.
+   *
+   * `highlight-wash` is the landing-flash color used by the thread-timeline
+   * jump animation (`@keyframes delta-timeline-jump-highlight-fade` below).
+   */
+  --color-terminal-bg: rgb(var(--delta-color-terminal-bg));
+  --color-terminal-fg: rgb(var(--delta-color-terminal-fg));
+  --color-terminal-fg-strong: rgb(var(--delta-color-terminal-fg-strong));
+  --color-terminal-overlay: rgb(var(--delta-color-terminal-overlay));
+  --color-terminal-overlay-hover: rgb(var(--delta-color-terminal-overlay-hover));
+  --color-highlight-wash: rgb(var(--delta-color-highlight-wash));
+
+  /*
+   * Semantic color tokens. Values come from the active
+   * `:root[data-theme="..."]` block below; the same names resolve through
+   * every theme, so swapping `data-theme` swaps all of these atomically.
+   * `border-default` (not `border`) and `accent-fg` / similar dashed names
+   * avoid clashing with Tailwind's built-in single-token utilities
+   * (`border`, `text-fg` already lands cleanly because `fg` is not a
+   * built-in palette).
+   *
+   * Each variable stores its color as a space-separated `R G B` triple and is
+   * wrapped here as `rgb(var(--X))`. Slash-opacity utilities (`bg-scrim/40`,
+   * `bg-info/15`, `bg-accent/10`, …) work on these as on any color: Tailwind
+   * v4 applies the modifier with `color-mix()`.
+   *
+   * The per-provider hues are consumed by ProviderBadge (ui-kit). Like the
+   * status colors the value comes from the active theme block, so the badge
+   * follows a theme switch; the badge pairs `text-provider-*` with a
+   * low-alpha `bg-provider-*` wash.
+   */
+  --color-surface: rgb(var(--delta-color-surface));
+  --color-surface-elevated: rgb(var(--delta-color-surface-elevated));
+  --color-surface-elevated-hover: rgb(var(--delta-color-surface-elevated-hover));
+  --color-surface-sunken: rgb(var(--delta-color-surface-sunken));
+  --color-surface-sunken-hover: rgb(var(--delta-color-surface-sunken-hover));
+  --color-fg: rgb(var(--delta-color-fg));
+  --color-fg-muted: rgb(var(--delta-color-fg-muted));
+  --color-fg-subtle: rgb(var(--delta-color-fg-subtle));
+  --color-border-default: rgb(var(--delta-color-border));
+  --color-border-strong: rgb(var(--delta-color-border-strong));
+  --color-accent: rgb(var(--delta-color-accent));
+  --color-accent-fg: rgb(var(--delta-color-accent-fg));
+  --color-accent-hover: rgb(var(--delta-color-accent-hover));
+  --color-accent-disabled: rgb(var(--delta-color-accent-disabled));
+  --color-danger: rgb(var(--delta-color-danger));
+  --color-warning: rgb(var(--delta-color-warning));
+  --color-info: rgb(var(--delta-color-info));
+  --color-success: rgb(var(--delta-color-success));
+  --color-provider-claude: rgb(var(--delta-color-provider-claude));
+  --color-provider-codex: rgb(var(--delta-color-provider-codex));
+  --color-scrim: rgb(var(--delta-color-scrim));
+
+  /*
+   * Overlay layout tokens. The floating-card inset and the scroll-body
+   * padding that reserves space for the composer card derive from the same
+   * variables, so they cannot drift apart. The breadcrumb used to have its
+   * own reserve when it floated as a card; it is now an in-flow element at
+   * the top of the body, so no top reserve token is needed.
+   */
+  --spacing-overlay-inset: var(--delta-overlay-inset);
+  --spacing-composer-reserve: var(--delta-composer-body-reserve);
+
+  /*
+   * A hard on/off blink for the live-streaming caret. The `steps(1, end)`
+   * timing snaps between the two keyframe stops with no tween, so it reads
+   * as a text cursor blinking rather than a soft pulse.
+   */
+  --animate-caret-blink: caret-blink 1.1s steps(1, end) infinite;
+
+  @keyframes caret-blink {
+    0%,
+    49% {
+      opacity: 1;
+    }
+    50%,
+    100% {
+      opacity: 0;
+    }
+  }
+}
+
+/*
+ * Tailwind v3 Preflight defaults that v4 dropped, restated so the UI renders
+ * as it did. Each one stays until every call site that depends on it states
+ * its own utility.
+ *
+ * - Borders: v3 defaulted `border-color` to its gray-200 (#e5e7eb); v4 uses
+ *   `currentcolor`, which would turn every `border` without a color utility
+ *   into a text-colored line.
+ * - Placeholders: v3 painted them in its gray-400 (#9ca3af); v4 uses the
+ *   text color at 50% opacity. Inputs with a `placeholder:` utility are
+ *   unaffected either way.
+ * - Buttons: v3 gave them `cursor: pointer`; v4 leaves the browser's
+ *   `default`.
+ */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: #e5e7eb;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af;
+  }
+
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/*
+ * Design-token values. Utility names for these live in the `@theme` blocks
+ * above, and src/theme.ts reads them at runtime for the consumers
  * Tailwind cannot reach (xterm). Custom properties are the value layer so a
  * later user-facing stylesheet can override a token here and every consumer
  * follows. Keep this block and the two consumers in sync via the token names.
@@ -73,22 +317,20 @@
    * also kill functional overlay shadows — dropdown menus, tooltips, dialogs).
    * Only the session card (SessionNode) and the transcript's floating cards
    * (TranscriptPane's FLOATING_CARD_CLASS) consume it via
-   * `shadow-[shadow:var(--delta-card-shadow)]` (the `shadow:` type hint keeps
-   * Tailwind from parsing the bare `var()` as a shadow *color*). The default
-   * value is Tailwind's
+   * `shadow-(--delta-card-shadow)`. The default value is Tailwind's
    * `shadow-md`; `[data-effects='flat']` overrides it to a transparent shadow
    * (see the visual-effects block near the bottom of this file).
    */
   --delta-card-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1),
     0 2px 4px -2px rgb(0 0 0 / 0.1);
 
-  /* The terminal font stack, defined once in tailwind.config.js
-   * (fontFamily.terminal) and exposed here for xterm (src/theme.ts). */
-  --delta-font-terminal: theme(fontFamily.terminal);
+  /* The terminal font stack, defined once in the `@theme` block above
+   * (`--font-terminal`) and exposed here for xterm (src/theme.ts). */
+  --delta-font-terminal: var(--font-terminal);
 
   /*
    * Semantic font-size tokens. These are the value layer for the app's type
-   * scale; tailwind.config.js (theme.extend.fontSize) maps utility names onto
+   * scale; the `@theme inline` block above maps utility names onto
    * them (`text-body`, `text-secondary`, `text-caption`) with paired
    * line-heights, and src/theme.ts reads `--delta-text-terminal` at runtime
    * for xterm (which takes its font size as a JavaScript number, not a class).
@@ -138,12 +380,9 @@
    * light values.
    *
    * Values are stored as space-separated `R G B` triples (not `rgb(...)` or
-   * hex), so the matching `tailwind.config.js` entries can wrap them as
-   * `rgb(var(--delta-color-X) / <alpha-value>)` and Tailwind's slash-opacity
-   * utilities (`bg-scrim/40`, `bg-info/15`, …) resolve. Tailwind v3 requires
-   * the `<alpha-value>` placeholder for any color whose value lives in a CSS
-   * variable; see
-   * https://tailwindcss.com/docs/customizing-colors#using-css-variables.
+   * hex). The `@theme inline` block above wraps each as
+   * `rgb(var(--delta-color-X))`, as do the hand-written rules in this file,
+   * and src/theme.ts parses the triple for xterm.
    */
   --delta-color-surface: 255 255 255;
   --delta-color-surface-elevated: 248 250 252;
@@ -189,8 +428,8 @@
  * Theme switching is performed by toggling the `data-theme` attribute on
  * `<html>` (see useTheme.ts in src/hooks/). Each block below redefines the
  * same set of CSS custom properties — the variable *names* form the contract
- * shared by every theme, and the Tailwind utility classes in
- * `tailwind.config.js` (theme.extend.colors) read these variables, so every
+ * shared by every theme, and the Tailwind color utilities named in the
+ * `@theme inline` block above read these variables, so every
  * styled element follows whichever block matches the current attribute.
  *
  * To add a new theme:
@@ -300,7 +539,7 @@
  * now overrides it — see the contract at the top of this file). The
  * embedded `terminal-*` overlay stays on its theme-fixed dark values. Token
  * values are space-separated `R G B` triples to match the contract Tailwind
- * utilities rely on (`rgb(var(--…) / <alpha-value>)`).
+ * utilities rely on (`rgb(var(--…))`).
  */
 :root[data-theme='sepia'] {
   color-scheme: light;

@@ -104,7 +104,7 @@ function NotificationItem({ notification }: { notification: AppNotification }) {
       // pick it up without extra ARIA plumbing.
       role="alert"
       className={cn(
-        'pointer-events-auto flex items-start gap-2 rounded border bg-surface-elevated px-3 py-2 text-caption shadow-lg',
+        'pointer-events-auto flex items-start gap-2 rounded-sm border bg-surface-elevated px-3 py-2 text-caption shadow-lg',
         notification.tone === 'error'
           ? 'border-danger/40'
           : 'border-border-default',
@@ -131,7 +131,7 @@ function NotificationItem({ notification }: { notification: AppNotification }) {
           {notification.title}
         </p>
         {notification.detail && (
-          <p className="mt-0.5 break-words text-fg-muted">
+          <p className="mt-0.5 wrap-break-word text-fg-muted">
             {notification.detail}
           </p>
         )}
@@ -141,7 +141,7 @@ function NotificationItem({ notification }: { notification: AppNotification }) {
           type="button"
           aria-label={labels.ariaLabel}
           onClick={() => runAction(action)}
-          className="shrink-0 rounded px-1.5 py-0.5 font-medium text-fg hover:bg-surface-sunken"
+          className="shrink-0 rounded-sm px-1.5 py-0.5 font-medium text-fg hover:bg-surface-sunken"
         >
           {labels.text}
         </button>
@@ -150,7 +150,7 @@ function NotificationItem({ notification }: { notification: AppNotification }) {
         type="button"
         aria-label="Dismiss notification"
         onClick={() => dismissNotification(notification.id)}
-        className="shrink-0 rounded p-0.5 text-fg-subtle hover:bg-surface-sunken hover:text-fg"
+        className="shrink-0 rounded-sm p-0.5 text-fg-subtle hover:bg-surface-sunken hover:text-fg"
       >
         {/* Simple close glyph; inline so no icon-font dependency. */}
         <svg

@@ -120,7 +120,7 @@ describe('Menu', () => {
   });
 
   it('keeps each item label on a single line', () => {
-    // `Copy session ID` is wider than the panel's `min-w-[8rem]`, so without
+    // `Copy session ID` is wider than the panel's `min-w-32`, so without
     // `whitespace-nowrap` it wraps to a second line. The class is the contract.
     render(
       <Menu

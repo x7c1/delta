@@ -343,7 +343,7 @@ export const SessionNode = memo(function SessionNode({
         // among several without depending on its title or list position.
         data-session-id={item.session.id}
         className={cn(
-          'rounded-md border bg-surface shadow-[shadow:var(--delta-card-shadow)]',
+          'rounded-md border bg-surface shadow-(--delta-card-shadow)',
           isFocused
             ? 'border-accent-disabled bg-accent/10 ring-1 ring-accent-disabled'
             : 'border-border-default hover:border-border-strong',

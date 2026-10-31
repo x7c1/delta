@@ -7,7 +7,7 @@
 
 /** The bordered, elevated frame both cards sit in. */
 export const CARD_FRAME_CLASS =
-  'rounded border border-border-default bg-surface-elevated';
+  'rounded-sm border border-border-default bg-surface-elevated';
 
 /**
  * The one-line caption row above the body. `Collapsible` renders it as a

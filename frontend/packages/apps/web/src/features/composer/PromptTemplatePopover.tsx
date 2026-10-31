@@ -122,7 +122,7 @@ export function PromptTemplatePopover({
       // the composer card. Wide enough for prose, never wider than that card:
       // this pane is one column of a multi-pane workspace and can be a good deal
       // narrower than the window.
-      className="absolute bottom-full left-0 z-20 mb-1 flex w-[38rem] max-w-full flex-col overflow-hidden rounded-md border border-border-default bg-surface-elevated text-left shadow-lg"
+      className="absolute bottom-full left-0 z-20 mb-1 flex w-152 max-w-full flex-col overflow-hidden rounded-md border border-border-default bg-surface-elevated text-left shadow-lg"
     >
       {query.isPending ? (
         <div className="flex justify-center py-6">
@@ -188,7 +188,7 @@ export function PromptTemplatePopover({
             role="note"
             aria-label="Prompt template preview"
             data-testid="prompt-templates-popover-preview"
-            className="min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-body text-fg-muted scrollbar-hover"
+            className="min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap wrap-break-word px-3 py-2 text-body text-fg-muted scrollbar-hover"
           >
             {preview}
           </div>

@@ -327,7 +327,7 @@ export function QuestionCard({
                             ? toggleMulti(qi, oi)
                             : chooseSingle(qi, oi)
                         }
-                        className={`flex min-w-0 items-start gap-2 rounded border px-2 py-1 text-left transition-colors disabled:opacity-60 ${
+                        className={`flex min-w-0 items-start gap-2 rounded-sm border px-2 py-1 text-left transition-colors disabled:opacity-60 ${
                           opt.preview ? 'w-80 shrink-0' : 'w-full'
                         } ${
                           selected
@@ -369,7 +369,7 @@ export function QuestionCard({
                       {opt.preview && (
                         <pre
                           data-testid={`question-option-preview-${qi}-${oi}`}
-                          className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded border border-border-default bg-surface-elevated px-2 py-1 font-mono text-code text-fg-muted"
+                          className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded-sm border border-border-default bg-surface-elevated px-2 py-1 font-mono text-code text-fg-muted"
                         >
                           {opt.preview}
                         </pre>

@@ -37,7 +37,7 @@ export function ReopenScreen({ reason }: { reason: ReopenReason }) {
         when it started, or print a new one without restarting the server:
       </p>
       <pre
-        className="overflow-auto whitespace-pre-wrap break-all rounded bg-surface-sunken px-2 py-1 font-mono text-code text-fg"
+        className="overflow-auto whitespace-pre-wrap break-all rounded-sm bg-surface-sunken px-2 py-1 font-mono text-code text-fg"
         data-testid="reopen-command"
       >
         {command}

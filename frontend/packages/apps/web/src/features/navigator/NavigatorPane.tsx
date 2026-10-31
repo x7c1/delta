@@ -710,7 +710,7 @@ export function NavigatorPane({
     >
       {focusedSessionId === NEW_SESSION_FOCUS && (
         <div
-          className="mx-2 mb-1.5 mt-1.5 rounded-lg border border-accent-disabled bg-accent/10 px-2 py-2 text-caption text-accent shadow-sm ring-1 ring-accent-disabled"
+          className="mx-2 mb-1.5 mt-1.5 rounded-lg border border-accent-disabled bg-accent/10 px-2 py-2 text-caption text-accent shadow-xs ring-1 ring-accent-disabled"
           data-testid="new-session-node"
         >
           New session — send the first message to start it.

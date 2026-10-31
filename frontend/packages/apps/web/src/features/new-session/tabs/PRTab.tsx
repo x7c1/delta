@@ -232,7 +232,7 @@ export function PRTab() {
   if (isAnyError) {
     return (
       <div
-        className="rounded border border-danger/30 bg-danger/10 px-3 py-2 text-caption text-danger"
+        className="rounded-sm border border-danger/30 bg-danger/10 px-3 py-2 text-caption text-danger"
         data-testid="pr-tab-error"
         role="alert"
       >
@@ -478,7 +478,7 @@ function PrRow({ pr, onPick, isSelected, clone }: PrRowProps) {
             : pr.url
         }
         className={cn(
-          'flex w-full min-w-0 flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-caption',
+          'flex w-full min-w-0 flex-col items-start gap-0.5 rounded-sm px-2 py-1.5 text-left text-caption',
           showSelected
             ? 'bg-accent/10 text-accent ring-1 ring-accent-disabled'
             : 'text-fg hover:bg-surface-elevated-hover',
@@ -494,7 +494,7 @@ function PrRow({ pr, onPick, isSelected, clone }: PrRowProps) {
           <span className="min-w-0 flex-1 truncate">{pr.title}</span>
           {busy && <Spinner label="Cloning…" />}
           {pr.draft && (
-            <span className="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 text-caption uppercase tracking-wide text-warning">
+            <span className="shrink-0 rounded-sm bg-warning/10 px-1.5 py-0.5 text-caption uppercase tracking-wide text-warning">
               draft
             </span>
           )}
@@ -514,7 +514,7 @@ function PrRow({ pr, onPick, isSelected, clone }: PrRowProps) {
             data-testid="pr-tab-row-no-clone-hint"
           >
             No local clone — click to clone{' '}
-            <code className="rounded bg-surface-sunken px-1 font-mono text-code">
+            <code className="rounded-sm bg-surface-sunken px-1 font-mono text-code">
               {pr.repo_owner}/{pr.repo_name}
             </code>
             .
@@ -583,7 +583,7 @@ function ClonePanel({
 
   return (
     <div
-      className="mt-1 space-y-2 rounded border border-border-default bg-surface-sunken px-2 py-2"
+      className="mt-1 space-y-2 rounded-sm border border-border-default bg-surface-sunken px-2 py-2"
       data-testid="pr-tab-clone-panel"
     >
       {needsRegistration ? (
@@ -598,13 +598,13 @@ function ClonePanel({
             placeholder="/home/dev/projects"
             spellCheck={false}
             data-testid="pr-tab-clone-root-input"
-            className="w-full rounded border border-border-default bg-surface px-2 py-1 font-mono text-code text-fg"
+            className="w-full rounded-sm border border-border-default bg-surface px-2 py-1 font-mono text-code text-fg"
           />
         </label>
       ) : clone.roots.length === 1 ? (
         <p className="text-caption text-fg-subtle" data-testid="pr-tab-clone-root-single">
           Clone into{' '}
-          <code className="rounded bg-surface px-1 font-mono text-code text-fg">
+          <code className="rounded-sm bg-surface px-1 font-mono text-code text-fg">
             {clone.roots[0]}
           </code>
         </p>
@@ -621,7 +621,7 @@ function ClonePanel({
               value={selectedRoot}
               onChange={(event) => setPickedRoot(event.target.value)}
               data-testid="pr-tab-clone-root-select"
-              className="w-full appearance-none rounded border border-border-default bg-surface py-1 pl-2 pr-7 font-mono text-code text-fg"
+              className="w-full appearance-none rounded-sm border border-border-default bg-surface py-1 pl-2 pr-7 font-mono text-code text-fg"
             >
               {clone.roots.map((root) => (
                 <option key={root} value={root}>
@@ -692,7 +692,7 @@ function GhUnavailableHint() {
       data-testid="pr-tab-gh-unavailable"
     >
       Run{' '}
-      <code className="rounded bg-surface-sunken px-1 py-0.5 font-mono text-code text-fg">
+      <code className="rounded-sm bg-surface-sunken px-1 py-0.5 font-mono text-code text-fg">
         gh auth login
       </code>{' '}
       to enable this tab.

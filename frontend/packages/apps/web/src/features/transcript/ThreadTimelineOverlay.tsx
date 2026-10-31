@@ -92,7 +92,7 @@ export const TIMELINE_TOGGLE_BUTTON_CLASS =
  * affordance.
  */
 export const TIMELINE_JUMP_BUTTON_CLASS =
-  'inline-flex items-center justify-center rounded p-1 text-fg-subtle transition-colors hover:bg-surface-elevated-hover hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed';
+  'inline-flex items-center justify-center rounded-sm p-1 text-fg-subtle transition-colors hover:bg-surface-elevated-hover hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed';
 
 /**
  * The timeline in the transcript's top region (`TranscriptTopRegion`): a

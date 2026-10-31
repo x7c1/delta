@@ -18,7 +18,7 @@ describe('App title-bar inset', () => {
     render(<App auth={{ kind: 'ready' }} />);
 
     const strip = screen.getByTestId('shell-title-bar');
-    expect(strip).toHaveClass('h-[var(--shell-top-inset)]');
+    expect(strip).toHaveClass('h-(--shell-top-inset)');
     expect(strip).toHaveAttribute('aria-hidden', 'true');
     // The strip comes first in the root column, so the workspace is laid out
     // below it rather than under the native title bar.

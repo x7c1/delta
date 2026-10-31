@@ -327,7 +327,7 @@ function ProblemBox({
   return (
     <div
       className={cn(
-        'flex flex-col gap-2 rounded border px-2 py-1.5 text-caption text-fg-muted',
+        'flex flex-col gap-2 rounded-sm border px-2 py-1.5 text-caption text-fg-muted',
         tone === 'danger'
           ? 'border-danger/30 bg-danger/5'
           : 'border-warning/30 bg-warning/5',
@@ -446,7 +446,7 @@ function ReleasePageLink({ newer }: { newer: NewerRelease }) {
 
 /** A long path or command in a sunken well where it wraps anywhere rather than widening the column, and stays selectable. */
 const WELL =
-  'block select-text break-all rounded border border-border-default bg-surface-sunken px-1.5 py-1 font-mono text-code text-fg';
+  'block select-text break-all rounded-sm border border-border-default bg-surface-sunken px-1.5 py-1 font-mono text-code text-fg';
 
 /**
  * The way out when the app cannot install the update, with copy buttons

@@ -128,7 +128,7 @@ export function FailedSessionPane({ item }: FailedSessionPaneProps) {
               `src/index.css`: mono reads optically larger than the sans at the
               same nominal size). */}
           <p
-            className="whitespace-pre-wrap break-words font-mono text-code text-fg-muted"
+            className="whitespace-pre-wrap wrap-break-word font-mono text-code text-fg-muted"
             data-testid="failed-session-reason"
           >
             {item.session.failure_reason ??
@@ -167,7 +167,7 @@ export function FailedSessionPane({ item }: FailedSessionPaneProps) {
                 {undelivered.map((send) => (
                   <li
                     key={send.id}
-                    className="whitespace-pre-wrap break-words rounded border border-border-default bg-surface-elevated px-2 py-1.5 text-caption text-fg"
+                    className="whitespace-pre-wrap wrap-break-word rounded-sm border border-border-default bg-surface-elevated px-2 py-1.5 text-caption text-fg"
                     data-testid="failed-session-prompt"
                   >
                     {send.text}

@@ -5,10 +5,10 @@
  *
  * - **Values** — CSS custom properties on `:root` in `src/index.css`
  *   (overlay layout constants, the terminal background) plus the font stacks
- *   in `tailwind.config.js` (`theme.extend.fontFamily`), which the same
- *   `:root` block re-exposes as variables via `theme()`.
- * - **Utilities** — `tailwind.config.js` maps utility names onto the
- *   variables (`bg-terminal-bg`, `pb-composer-reserve`, `inset-x-overlay-inset`,
+ *   in the same file's `@theme` block (`--font-*`), which the `:root` block
+ *   re-exposes for the runtime readers (`--delta-font-terminal`).
+ * - **Utilities** — the `@theme inline` block in `src/index.css` maps
+ *   utility names onto the variables (`bg-terminal-bg`, `pb-composer-reserve`, `inset-x-overlay-inset`,
  *   …), so styled markup resolves through the variables too.
  * - **Runtime readers** — this module, for the consumers Tailwind cannot
  *   reach: xterm takes its `fontFamily`, `fontSize`, and theme colors as
@@ -29,9 +29,9 @@ function readToken(name: string): string {
 
 /**
  * The embedded terminal's font stack (`--delta-font-terminal`), defined in
- * `tailwind.config.js` as `fontFamily.terminal`. xterm measures its cell grid
- * from this list, so it deliberately differs from the prose `mono` stack —
- * see the config for the per-OS reasoning.
+ * the `@theme` block of `src/index.css` as `--font-terminal`. xterm measures
+ * its cell grid from this list, so it deliberately differs from the prose
+ * `mono` stack — see that block for the per-OS reasoning.
  */
 export function terminalFontFamily(): string {
   return readToken('--delta-font-terminal');
@@ -83,9 +83,8 @@ export function terminalFontSize(): number {
  * shared with the `bg-terminal-bg` utility so the panel chrome and the xterm
  * canvas can never disagree.
  *
- * The custom property stores a space-separated `R G B` triple (so Tailwind
- * can wrap it as `rgb(var(--…) / <alpha-value>)`), but xterm expects a CSS
- * color string for `theme.background`. Parse the three components and emit
+ * The custom property stores a space-separated `R G B` triple (which the
+ * stylesheet wraps as `rgb(var(--…))`), but xterm expects a CSS color string for `theme.background`. Parse the three components and emit
  * a `#RRGGBB` hex literal. If the property is unset, malformed, or the
  * stylesheet has not loaded yet, fall back to slate-900 (`#0f172a`, the
  * canonical value defined in src/index.css) so xterm never sees an empty

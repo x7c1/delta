@@ -277,7 +277,7 @@ export function Menu({
           // (slate-200 exact). The hover text shifts to `text-fg`: slate-700
           // sat between fg-muted (slate-600) and fg (slate-900); fg matches
           // the interactive-content convention.
-          'inline-flex h-6 w-6 items-center justify-center rounded text-fg-subtle transition-colors',
+          'inline-flex h-6 w-6 items-center justify-center rounded-sm text-fg-subtle transition-colors',
           'hover:bg-surface-sunken hover:text-fg',
           'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-subtle',
           triggerClassName,
@@ -296,7 +296,7 @@ export function Menu({
           // should read as raised over the page in every theme. The light
           // shift from white to slate-50 is imperceptible at the panel's
           // actual size.
-          className="absolute right-0 top-full z-10 mt-1 min-w-[8rem] overflow-hidden rounded border border-border-default bg-surface-elevated py-1 shadow-md"
+          className="absolute right-0 top-full z-10 mt-1 min-w-32 overflow-hidden rounded-sm border border-border-default bg-surface-elevated py-1 shadow-md"
         >
           {items.map((item, index) => (
             <button
@@ -310,7 +310,7 @@ export function Menu({
               }}
               className={cn(
                 // `whitespace-nowrap` keeps each label on a single line; without
-                // it a label longer than the panel's `min-w-[8rem]` (e.g. `Copy
+                // it a label longer than the panel's `min-w-32` (e.g. `Copy
                 // session ID`) wrapped to a second line. The panel itself has no
                 // max width, so it now grows to fit the longest label naturally.
                 'block w-full whitespace-nowrap px-3 py-1.5 text-left text-secondary transition-colors',

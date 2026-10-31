@@ -149,7 +149,7 @@ export function LaunchOptionsPicker() {
 
   return (
     <section
-      className="space-y-1 rounded border border-border-default bg-surface-elevated px-2 py-1.5 text-caption"
+      className="space-y-1 rounded-sm border border-border-default bg-surface-elevated px-2 py-1.5 text-caption"
       data-testid="launch-options-picker"
     >
       <h3 className="font-semibold uppercase tracking-wide text-fg-muted">
@@ -267,7 +267,7 @@ function ChoiceGroup({
       </span>
       <ul className="space-y-0.5 pl-3">
         <li>
-          <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-surface-elevated-hover">
+          <label className="flex cursor-pointer items-center gap-2 rounded-sm px-1 py-0.5 hover:bg-surface-elevated-hover">
             <input
               type="radio"
               name={name}
@@ -309,7 +309,7 @@ function OptionLabel({
 }) {
   return (
     <label
-      className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-surface-elevated-hover"
+      className="flex cursor-pointer items-center gap-2 rounded-sm px-1 py-0.5 hover:bg-surface-elevated-hover"
       title={
         option.value === null ? option.name : `${option.name} ${option.value}`
       }

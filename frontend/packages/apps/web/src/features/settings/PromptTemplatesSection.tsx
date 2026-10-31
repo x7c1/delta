@@ -235,7 +235,7 @@ export function PromptTemplatesSection({ active }: { active: boolean }) {
               }
               placeholder="Review checklist"
               required
-              className="rounded border border-border-default bg-surface px-2 py-1 text-secondary text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
+              className="rounded-sm border border-border-default bg-surface px-2 py-1 text-secondary text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-hidden"
             />
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-1">
@@ -259,7 +259,7 @@ export function PromptTemplatesSection({ active }: { active: boolean }) {
               }
               placeholder="Review the diff on this branch with a critic's eye…"
               required
-              className="min-h-0 flex-1 resize-none rounded border border-border-default bg-surface px-2 py-1.5 text-body text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none scrollbar-hover"
+              className="min-h-0 flex-1 resize-none rounded-sm border border-border-default bg-surface px-2 py-1.5 text-body text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-hidden scrollbar-hover"
             />
           </div>
           {saveError !== null && (

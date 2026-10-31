@@ -597,7 +597,7 @@ export function TranscriptPane({
   if (resumeUnavailable && !newSession) {
     bottomContent = (
       <div
-        className="flex items-center gap-2 rounded border border-danger/30 bg-danger/10 px-2 py-1 text-caption text-danger"
+        className="flex items-center gap-2 rounded-sm border border-danger/30 bg-danger/10 px-2 py-1 text-caption text-danger"
         data-testid="resume-unavailable-notice"
         role="alert"
       >
