@@ -52,10 +52,11 @@ test('a browser prompt round-trips through the real claude and survives reload',
   await expect(pending).toHaveCount(0, { timeout: 30_000 });
 
   // Persistent state, not browser memory, is the source of truth: the same
-  // conversation renders after a reload.
+  // conversation renders after a reload. The prompt is looked for inside the
+  // transcript's message items only: a new session's embedded terminal is
+  // open on the large-screen layout, and the real claude's TUI echoes the
+  // prompt there too, as text the xterm DOM renderer exposes.
   await page.reload();
-  await expect(page.getByTestId('message-item')).toHaveCount(2, {
-    timeout: 30_000,
-  });
-  await expect(page.getByText(prompt)).toBeVisible();
+  await expect(items).toHaveCount(2, { timeout: 30_000 });
+  await expect(items.filter({ hasText: prompt })).toBeVisible();
 });
