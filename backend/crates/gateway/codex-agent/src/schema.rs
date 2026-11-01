@@ -12,7 +12,7 @@
 /// against the vendored copy; when re-vendoring against a newer Codex
 /// (`make vendor-codex-schema`, which rewrites the files under
 /// `vendor/app-server-schema/`), bump this in the same change.
-pub const VENDORED_CODEX_VERSION: &str = "0.153.4";
+pub const VENDORED_CODEX_VERSION: &str = "0.160.0";
 
 /// Path, relative to this crate's manifest directory, of the combined v2 schema
 /// document — the client-request + notification surface Delta pins. v1 is a
