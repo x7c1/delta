@@ -10,7 +10,7 @@ import {
   interceptLiveSocket,
   restoreLiveSocket,
 } from './support/liveSocket';
-import { fetchMessageCount, fetchSends, latestSession } from './support/rest';
+import { fetchMessageCount, fetchSends, focusedSession } from './support/rest';
 
 /**
  * Reconnect resync: after a dropped `/ws` socket the client reconnects on its
@@ -78,7 +78,7 @@ test('a turn that completes during a socket outage is resynced on reconnect', as
   await expect(
     focusedSessionNode(page).getByRole('status', { name: 'Open', exact: true }),
   ).toBeVisible();
-  const session = await latestSession(page);
+  const session = await focusedSession(page);
 
   // Drop the live socket; the indicator leaves `open` (closed, then cycling
   // through blocked reconnect attempts).
@@ -149,7 +149,7 @@ test('a queued send keeps its chip and the running state is re-seeded across a r
   // The first send already matched its transcript line but its turn has not
   // ended, so its in-progress chip is up.
   await expect(pending).toHaveCount(1);
-  const session = await latestSession(page);
+  const session = await focusedSession(page);
 
   // Gate the follow-up POST on the SERVER's own busy signal, not the client
   // `running` indicator. Whether the server parks a send `queued` vs dispatches
@@ -228,7 +228,7 @@ test('a running session that is not focused keeps its spinner across a reconnect
   // until the test interrupts it (Escape via the embedded terminal).
   await startNewSession(page, 'ws-reconnect-busy hold this turn open');
   await expect(page.getByTestId('message-item')).toHaveCount(2);
-  const busy = await latestSession(page);
+  const busy = await focusedSession(page);
   await expect(async () => {
     expect((await fetchSends(page, busy.id)).turn.state).toBe('in_flight');
   }).toPass({ timeout: 10_000 });
@@ -328,7 +328,7 @@ test('a permission raised entirely during the outage appears after reconnect', a
   const notice = page.getByTestId('permission-notice');
   await expect(messages).toHaveCount(2);
   await expect(notice).toHaveCount(0);
-  const session = await latestSession(page);
+  const session = await focusedSession(page);
 
   // Drop the socket, then send the permission-raising prompt while dark: the
   // `permission_requested` broadcast is lost with the socket, so the notice
