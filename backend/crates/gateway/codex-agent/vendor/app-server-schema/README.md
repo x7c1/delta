@@ -13,7 +13,7 @@ against: later work diffs Delta's own types (in `codex-agent`'s `wire`,
 
 | Field | Value |
 | ----- | ----- |
-| Codex CLI | `codex-cli 0.153.4` |
+| Codex CLI | `codex-cli 0.160.0` |
 | Generated with | `make vendor-codex-schema` |
 
 The version is also encoded in code as
@@ -71,7 +71,7 @@ The generator emits two protocol versions:
   the structured conversation protocol. It is intentionally **not vendored**
   here beyond this note.
 - **v2** — the real conversation protocol: `thread/*`, `turn/*`, `item/*`, and
-  server/client notifications; 265 individual files plus the combined document.
+  server/client notifications; 275 individual files plus the combined document.
   Delta pins **v2** for the client-request + notification surface.
 
 ### The v2 combined document OMITS the server → client request registry
