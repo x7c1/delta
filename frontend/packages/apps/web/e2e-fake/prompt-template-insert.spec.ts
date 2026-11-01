@@ -1,6 +1,6 @@
 import { test, expect } from './support/fixtures';
 import { composerInput, startNewSession } from './support/app';
-import { fetchMessageCount, latestSession } from './support/rest';
+import { fetchMessageCount, focusedSession } from './support/rest';
 
 /**
  * Inserting a prompt template from the composer rail, end to end against the
@@ -67,7 +67,7 @@ test('a prompt template is inserted into the draft at the caret, and nothing is 
   await expect(page.getByText('done thinking')).toBeVisible({
     timeout: 15_000,
   });
-  const session = await latestSession(page);
+  const session = await focusedSession(page);
   const before = await fetchMessageCount(page, session.mainThreadId);
   expect(before).toBeGreaterThan(0);
 

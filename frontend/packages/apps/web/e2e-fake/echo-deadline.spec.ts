@@ -1,6 +1,6 @@
 import { test, expect } from './support/fixtures';
 import { startNewSession, sendMessage } from './support/app';
-import { fetchSends, latestSession } from './support/rest';
+import { fetchSends, focusedSession } from './support/rest';
 
 /**
  * A send whose keystrokes are swallowed with NO signal at all is retried once
@@ -54,7 +54,7 @@ test('a send swallowed without a trace is retried once, then parked in the queue
   await expect(page.getByText('session opened')).toBeVisible({
     timeout: 15_000,
   });
-  const session = await latestSession(page);
+  const session = await focusedSession(page);
 
   // Send the message the dialog eats. The fake consumes the keystrokes and
   // fires nothing at all, so the row is `dispatched` behind a missing echo —

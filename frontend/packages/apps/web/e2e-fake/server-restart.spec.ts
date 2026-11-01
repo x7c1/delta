@@ -1,6 +1,6 @@
 import { test, expect } from './support/fixtures';
 import { sendMessage, startNewSession } from './support/app';
-import { fetchSends, latestSession, sessionIsOpen } from './support/rest';
+import { fetchSends, focusedSession, sessionIsOpen } from './support/rest';
 
 /**
  * Server restart with a `dispatched` send in flight — the full restore/release
@@ -45,7 +45,7 @@ test('a dispatched send survives a server restart as a restored row and is relea
   // The positional first prompt is auto-submitted; the fake replies and stops,
   // so the session is idle before the dispatched-but-swallowed step.
   await expect(page.getByText('session opened')).toBeVisible({ timeout: 15_000 });
-  const session = await latestSession(page);
+  const session = await focusedSession(page);
   await expect(async () => {
     expect((await fetchSends(page, session.id)).turn.state).toBe('idle');
   }).toPass({ timeout: 15_000 });

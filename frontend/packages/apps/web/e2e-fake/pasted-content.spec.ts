@@ -6,7 +6,7 @@ import {
   shownTerminal,
   startNewSession,
 } from './support/app';
-import { fetchSends, latestSession } from './support/rest';
+import { fetchSends, focusedSession } from './support/rest';
 
 /**
  * Claude Code's `<pasted_content>` wrapper, end to end.
@@ -116,7 +116,7 @@ test('a long send is matched to its pasted-content echo and shown without the ta
   await expect(page.getByText(OPEN_TAG)).toHaveCount(0);
 
   // The echo consumed the send: nothing stays open and the turn is idle.
-  const session = await latestSession(page);
+  const session = await focusedSession(page);
   await expect
     .poll(async () => {
       const sends = await fetchSends(page, session.id);

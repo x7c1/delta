@@ -4,6 +4,7 @@ import type {
   SendsResponse,
   SessionsResponse,
 } from '@delta/wire-gen';
+import { focusedSessionNode } from './app';
 
 /**
  * REST observation helpers for the fake-mode suite.
@@ -23,16 +24,32 @@ export interface SessionHandle {
 }
 
 /**
- * The most recently active session — the one the calling spec just started
- * (the suite runs specs serially, each against its own fresh session, and
- * `GET /api/sessions` orders by recent activity).
+ * The session the page is focused on — the one the calling spec just started,
+ * since `startNewSession` returns only once the workspace has focused it.
+ *
+ * The id is read from the focused navigator card, never inferred from the
+ * server's ordering. The suite shares one server, and a session an earlier
+ * spec left running keeps producing activity after that spec ends (e.g. the
+ * `first-send` scenario's reply, scripted 1.5 s after its prompt, lands while
+ * the next spec is already running). `GET /api/sessions` orders by most recent
+ * activity, so its first row can be another spec's session, whose REST state
+ * then never changes the way the calling spec waits for.
  */
-export async function latestSession(page: Page): Promise<SessionHandle> {
+export async function focusedSession(page: Page): Promise<SessionHandle> {
+  const card = page
+    .getByTestId('session-card')
+    .filter({ has: focusedSessionNode(page) });
+  await expect(card).toHaveAttribute('data-session-id', /.+/);
+  const id = await card.getAttribute('data-session-id');
+  // The first page of the list carries every live session, and the session
+  // a spec just started is live.
   const response = await page.request.get('/api/sessions');
   expect(response.ok()).toBe(true);
   const body = (await response.json()) as SessionsResponse;
-  expect(body.sessions.length).toBeGreaterThan(0);
-  const item = body.sessions[0];
+  const item = body.sessions.find((entry) => entry.session.id === id);
+  if (item === undefined) {
+    throw new Error(`the focused session ${id} is not in the session list`);
+  }
   return { id: item.session.id, mainThreadId: item.main_thread_id };
 }
 

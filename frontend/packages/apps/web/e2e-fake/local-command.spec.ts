@@ -1,6 +1,6 @@
 import { test, expect } from "./support/fixtures";
 import { startNewSession, sendMessage } from "./support/app";
-import { fetchSends, latestSession } from "./support/rest";
+import { fetchSends, focusedSession } from "./support/rest";
 
 /**
  * A local slash command that Claude Code records nothing for still frees the
@@ -56,7 +56,7 @@ test("a local slash command frees the session and the queued follow-up dispatche
   await expect(page.getByText("session opened")).toBeVisible({
     timeout: 15_000,
   });
-  const session = await latestSession(page);
+  const session = await focusedSession(page);
 
   // Run the command. Nothing will ever be heard about it, so it stays in
   // progress while its short deadline runs.
