@@ -132,6 +132,19 @@ pub struct SessionRuntime {
     /// [`Self::is_empty`]: it is only ever `Some` alongside a non-idle turn,
     /// which already pins the actor alive.
     awaiting_echo_since: Option<Instant>,
+    /// Set when the user stopped the in-flight turn from the browser (see the
+    /// `stop_turn` interactor module): the transcript may still carry the
+    /// `[Request interrupted by user]` marker Claude Code writes for that
+    /// Escape, and the turn it would end is already over. The next ingested
+    /// interrupt marker consumes this instead of ending a turn a second time.
+    ///
+    /// Cleared by the next prompt submission (whose hook syncs the transcript
+    /// first, so a marker written before that prompt has been consumed by
+    /// then), by a close, and by [`SessionRuntime::forget_turn`]; see
+    /// [`SessionRuntime::expect_stopped_turn_marker`]. NOT part of
+    /// [`Self::is_empty`]: it only means something while the session's pane
+    /// is open, which already pins the actor alive.
+    stopped_turn_marker_expected: bool,
     /// Oneshot waiters for permission requests the browser may decide, keyed
     /// by request-row id. Registered by the `PermissionRequest` hook (whose
     /// response blocks on the receiver), resolved by a browser decision, and

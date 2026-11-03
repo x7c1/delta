@@ -330,6 +330,30 @@ export function useReleaseSendMutation(
   });
 }
 
+/**
+ * Stop a Claude session's in-flight turn
+ * (`POST /api/sessions/{id}/stop-turn`): the server presses Escape in the pane
+ * and ends the turn without waiting for an interrupt marker. Refresh the
+ * session's open-send list either way: on success the `turn_interrupted` and
+ * `send_dispatched` events move the strip, and the refetch confirms where the
+ * queued send went; a `409` (`turn_not_stoppable`) means the turn was already
+ * over (or never ours to stop), so the refetch reconciles. Error
+ * *presentation* is the call site's job, as with {@link useCancelSendMutation}.
+ */
+export function useStopTurnMutation(
+  client: ApiClient,
+): UseMutationResult<void, Error, SessionId> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: SessionId) => client.stopTurn(sessionId),
+    onSettled: (_data, _error, sessionId) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessionSends(sessionId),
+      });
+    },
+  });
+}
+
 export function useCreateSendMutation(
   client: ApiClient,
 ): UseMutationResult<SendResponse, Error, SendRequest> {

@@ -91,7 +91,9 @@ pub(super) fn step(
 ) {
     match mode {
         Mode::Normal => match byte {
-            0x15 => {
+            // The real TUI clears the cursor's line on `C-u` and the whole
+            // composer on `C-c`; the fake empties its buffer for either.
+            0x15 | 0x03 => {
                 buffer.clear();
             }
             0x7f | 0x08 => {
@@ -280,6 +282,22 @@ mod tests {
         assert_eq!(
             decode(&bytes),
             vec![Decoded::Prompt("next message".to_owned())]
+        );
+    }
+
+    #[test]
+    fn ctrl_c_after_an_escape_discards_the_restored_prompt() {
+        // Delta's Stop: Escape, then Ctrl+C as its own keystroke, then the
+        // next send. The prompt left in the buffer must not prefix it.
+        let mut bytes = b"restored prompt".to_vec();
+        bytes.extend([0x1b, 0x03]);
+        bytes.extend(b"next message\r");
+        assert_eq!(
+            decode(&bytes),
+            vec![
+                Decoded::Interrupt,
+                Decoded::Prompt("next message".to_owned())
+            ]
         );
     }
 

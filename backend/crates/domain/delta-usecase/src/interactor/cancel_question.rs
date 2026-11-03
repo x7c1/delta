@@ -16,9 +16,10 @@
 //! stale / no live pane → fall back to the terminal" handling, same single
 //! `send_keys` injection — it differs only in the key sequence (a lone `Escape`)
 //! and in needing no selection payload.
+//!
+//! [`cancel_keys`]: crate::interactor::question_keys::cancel_keys
 
 use crate::error::{Error, Result};
-use crate::interactor::question_keys::cancel_keys;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
@@ -75,10 +76,7 @@ where
             return Err(Error::QuestionNotPending(request_id));
         };
 
-        let keys = cancel_keys();
-        let names: Vec<&str> = keys.iter().map(|key| key.tmux_name()).collect();
         self.state.mark_question_answered(request_id);
-        self.tmux.send_keys(&pane, &names).await?;
-        Ok(())
+        self.press_escape(&pane).await
     }
 }

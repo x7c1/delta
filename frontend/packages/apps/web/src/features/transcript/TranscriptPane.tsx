@@ -619,6 +619,7 @@ export function TranscriptPane({
         closedReason={closedReason}
         composerMode={composerMode}
         sendActivity={sendActivity}
+        providerHasTerminal={providerHasTerminal}
       />
     );
   }

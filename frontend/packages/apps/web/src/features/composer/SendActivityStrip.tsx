@@ -1,11 +1,13 @@
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import type { SessionId } from '@delta/model';
 import { Badge, Button, Spinner } from '@delta/ui-kit';
 import {
   ApiError,
   invalidateSessions,
   useCancelSendMutation,
   useReleaseSendMutation,
+  useStopTurnMutation,
 } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
@@ -24,7 +26,26 @@ export interface SendActivityStripProps {
    * `false` — a surface that never starts a session.
    */
   sessionSpawning?: boolean;
+  /**
+   * The session the surface shows, or `null` (the default) on the new-session
+   * screen. Needed for the "Stop" control, which acts on the session's turn
+   * rather than on a row.
+   */
+  sessionId?: SessionId | null;
+  /**
+   * Whether the session's provider runs in an attachable terminal
+   * (`ProviderCapabilities.has_terminal` — Claude). Only such a session gets
+   * "Stop", which presses Escape in that terminal; a terminal-less provider is
+   * interrupted through its own wire. `undefined` (not known yet) hides the
+   * control.
+   */
+  providerHasTerminal?: boolean;
 }
+
+/** The "Stop" control's tooltip. */
+const STOP_TOOLTIP =
+  'Interrupt Claude, like pressing Escape in the terminal. ' +
+  'Queued messages then go out.';
 
 /**
  * How a pending send's text renders in the rows where the strip holds the only
@@ -104,10 +125,23 @@ const clampedTextClass = 'min-w-0 flex-1 line-clamp-1 wrap-break-word text-fg';
  * whatever is eating it. Such a row renders with a neutral "Held — send or
  * cancel" label and an explicit Send action (the release endpoint) alongside
  * the usual Cancel.
+ *
+ * The header carries a "Stop" control for a running Claude turn: the server
+ * presses Escape in the session's pane (then Ctrl+C to empty its composer) and
+ * ends the turn without waiting for Claude Code to confirm it. That also recovers a turn Delta still shows
+ * running after Claude ended it without a signal (Escape pressed in the pane
+ * before any reply streamed fires no `Stop` hook and writes no interrupt
+ * marker), which would otherwise hold every queued send back forever. It is
+ * shown only while the session's turn is running, which a dispatched send
+ * still awaiting its echo has not started — that row keeps its own Cancel. The
+ * server's `turn_interrupted` then clears the spinner and the next queued send
+ * dispatches.
  */
 export function SendActivityStrip({
   entries,
   sessionSpawning = false,
+  sessionId = null,
+  providerHasTerminal,
 }: SendActivityStripProps) {
   const client = useApiClient();
   const queryClient = useQueryClient();
@@ -118,6 +152,13 @@ export function SendActivityStrip({
   const retrySpawn = useNewSessionSend();
   const cancelSend = useCancelSendMutation(client);
   const releaseSend = useReleaseSendMutation(client);
+  const stopTurn = useStopTurnMutation(client);
+  // Whether the session has a turn in flight: the per-thread running flag
+  // `turn_started` sets and `turn_completed` / `turn_interrupted` clear (and
+  // the sends envelope re-seeds after a reconnect).
+  const turnRunning = useLiveStore((state) =>
+    sessionId === null ? false : state.runningThreads[sessionId] !== undefined,
+  );
 
   if (entries.length === 0) {
     return null;
@@ -137,6 +178,19 @@ export function SendActivityStrip({
       entry.kind === 'local' ||
       (entry.kind === 'sending' && entry.item.status !== 'failed'),
   );
+
+  // The session whose turn "Stop" would stop, or `null` when the control is
+  // hidden: a Claude session whose turn is running (the strip's spinner is
+  // up). A dispatched send still awaiting its echo has no running turn yet —
+  // the flag is set by `turn_started`, i.e. the echo — so that row is left to
+  // its own Cancel. The `dispatched` status alone does not say the echo is
+  // still awaited: a send stays `dispatched` after its echo until its
+  // transcript line is ingested, and in that state its Cancel is refused
+  // (`send_not_cancellable`), so Stop must stay available.
+  const stopSession =
+    providerHasTerminal === true && hasActiveWork && turnRunning
+      ? sessionId
+      : null;
 
   /**
    * A row the user has to answer: a submit the server rejected, with the
@@ -226,6 +280,44 @@ export function SendActivityStrip({
         {queuedCount > 0 && (
           <Badge tone="warning">{queuedCount} queued</Badge>
         )}
+        {stopSession !== null && (
+          <Button
+            className="ml-auto"
+            size="sm"
+            variant="ghost"
+            title={STOP_TOOLTIP}
+            disabled={stopTurn.isPending}
+            onClick={() => {
+              // On success the server's `turn_interrupted` clears the spinner
+              // and drains the turn's local row, and its `send_dispatched`
+              // moves the queued send; the mutation's refetch reconciles
+              // either way. A refusal means Delta saw the turn end (or a send
+              // dispatch) meanwhile, so it is explained, not left looking
+              // like a dead button.
+              stopTurn.mutate(stopSession, {
+                onError: (err: unknown) => {
+                  const title = 'Could not stop the turn';
+                  if (
+                    err instanceof ApiError &&
+                    err.code === 'turn_not_stoppable'
+                  ) {
+                    showError(
+                      title,
+                      'The turn is no longer in progress, or a message is still being delivered to the session.',
+                    );
+                    return;
+                  }
+                  showError(
+                    title,
+                    err instanceof Error ? err.message : 'The request failed.',
+                  );
+                },
+              });
+            }}
+          >
+            Stop
+          </Button>
+        )}
       </div>
       {/*
         A hairline between rows, not just a gap: now that a row can be many
@@ -290,10 +382,15 @@ export function SendActivityStrip({
                           ) {
                             // The server refused: the send already left the
                             // cancellable window (its prompt submitted or
-                            // its turn is running).
+                            // its turn is running). For a Claude session the
+                            // turn is the thing to stop now, so point at the
+                            // header's Stop rather than leave the user with
+                            // no next step.
                             showError(
                               title,
-                              'The send is no longer cancellable — its prompt has already been submitted.',
+                              providerHasTerminal === true
+                                ? 'The send is no longer cancellable — its prompt has already been submitted. Use Stop to interrupt Claude.'
+                                : 'The send is no longer cancellable — its prompt has already been submitted.',
                             );
                             return;
                           }

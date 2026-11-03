@@ -59,7 +59,7 @@ pub(crate) use session_prune::{preview_prune_sessions, prune_sessions};
 mod sessions;
 pub(crate) use sessions::{
     close_session, delete_session, interrupt, list_sends, list_sessions, list_threads,
-    open_session, thread_messages,
+    open_session, stop_turn, thread_messages,
 };
 mod storage;
 pub(crate) use storage::get_storage;

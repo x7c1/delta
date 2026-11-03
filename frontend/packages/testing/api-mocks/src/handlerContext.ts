@@ -22,4 +22,10 @@ export interface HandlerContext {
     statuses: readonly PruneStatus[],
   ) => MockStore['sessions'];
   emitServerEvent: (event: SessionEvent) => void;
+  /**
+   * Hand an event to the subscribers WITHOUT mirroring it into the store, for a
+   * handler that already moved the store itself because the generic
+   * {@link MockApi.applyEvent} mirror of that event models a different path.
+   */
+  announceServerEvent: (event: SessionEvent) => void;
 }

@@ -297,7 +297,10 @@ which frames arrive, and a client must handle each event whenever it lands.
   It also ends the degenerate turn of a slash command Claude Code ran
   client-side, which fires no `Stop` either: when the transcript records the
   command's own line, or when a slash-command send's echo deadline passes in
-  silence (see [sends.md](sends.md)).
+  silence (see [sends.md](sends.md)). Finally, the user can stop a running
+  Claude turn from the browser, which ends it even when Claude Code leaves no
+  signal at all
+  ([`POST /api/sessions/{id}/stop-turn`](sessions.md#post-apisessionsidstop-turn)).
   `thread_id` is the interrupted turn's thread, `null` only when no thread is
   resolvable.
 - `transcript_updated` — the background tail ingested new transcript lines

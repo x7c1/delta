@@ -72,6 +72,7 @@ fn api_router(state: AppState) -> Router {
         .bind(endpoint::PreviewPruneSessions, api::preview_prune_sessions)
         .bind(endpoint::PruneSessions, api::prune_sessions)
         .bind(endpoint::InterruptSession, api::interrupt)
+        .bind(endpoint::StopTurn, api::stop_turn)
         .bind(endpoint::ListThreads, api::list_threads)
         .bind(endpoint::ListSends, api::list_sends)
         .bind(endpoint::ListThreadMessages, api::thread_messages)

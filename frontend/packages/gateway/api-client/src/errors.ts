@@ -68,6 +68,12 @@
  * since been cancelled. Callers surface the refusal like a refused cancel and
  * let the send-activity strip reconcile from the next refetch.
  *
+ * `turn_not_stoppable` means a Stop request found no turn to stop, and nothing
+ * was sent to the pane: the session's turn is not in flight (it is idle, or a
+ * dispatched send still awaits its echo), the session is not open, or it is
+ * terminal-less. Callers surface the refusal and let the send-activity strip
+ * reconcile from the next refetch.
+ *
  * `clone_root_duplicate` means a clone root was registered twice with the same
  * path. The Settings dialog shows an inline "already registered" hint on this
  * code instead of a generic failure toast.
@@ -125,6 +131,7 @@ export type ApiErrorCode =
   | 'question_blocked_by_permission'
   | 'send_not_cancellable'
   | 'send_not_releasable'
+  | 'turn_not_stoppable'
   | 'clone_root_duplicate'
   | 'clone_root_not_registered'
   | 'clone_dest_exists'

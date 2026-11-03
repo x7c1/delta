@@ -575,6 +575,17 @@ describe('ApiClient', () => {
     } satisfies Partial<ApiError>);
   });
 
+  it('stops a turn, posting to the session-scoped stop-turn route', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(noContent());
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await expect(client.stopTurn('sess-1')).resolves.toBeUndefined();
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('http://localhost/api/sessions/sess-1/stop-turn');
+    expect(init.method).toBe('POST');
+  });
+
   it('raises ApiError carrying the status and server error message', async () => {
     const fetchFn = vi
       .fn()

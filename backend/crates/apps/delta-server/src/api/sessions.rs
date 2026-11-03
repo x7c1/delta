@@ -173,6 +173,28 @@ pub(crate) async fn interrupt(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `POST /api/sessions/{id}/stop-turn` — stop a Claude session's in-flight
+/// turn.
+///
+/// Injects `Escape` into the session's pane (interrupting Claude, like pressing
+/// it in the terminal) and ends Delta's turn at once, without waiting for an
+/// interrupt marker — Claude Code leaves none when the user cancelled before
+/// any reply streamed, and fires no `Stop` hook either. The next queued send
+/// dispatches.
+///
+/// Broadcasts the returned events — `TurnInterrupted` for the stopped turn,
+/// then `SendDispatched` when a queued send went out — like the other
+/// actor-routed endpoints. Refused with `409` (`turn_not_stoppable`) when the
+/// session holds no in-flight turn of a live pane; an unknown id is a `404`.
+pub(crate) async fn stop_turn(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let events = state.interactor().stop_turn(&SessionId::from(id)).await?;
+    state.broadcast(events);
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// `GET /api/sessions/{id}/threads` — a session's thread tree for the navigator.
 pub(crate) async fn list_threads(
     State(state): State<AppState>,

@@ -115,3 +115,41 @@ async fn release_send_replies_conflict_with_the_stable_code_when_not_releasable(
         Some("send_not_releasable"),
     );
 }
+
+#[tokio::test]
+async fn stop_turn_replies_conflict_with_the_stable_code_when_no_turn_is_in_flight() {
+    // The route exists and `TurnNotStoppable` surfaces as a 409 carrying the
+    // stable `turn_not_stoppable` code the frontend branches on. A session
+    // known to the store but with no live pane (here: never opened in this
+    // process) is one of the refusals; the others — idle, awaiting an echo,
+    // Codex — are pinned at the interactor level.
+    let state = test_state().await;
+    state
+        .interactor()
+        .store()
+        .register_session(delta_usecase::NewSession {
+            id: "sess-closed".into(),
+            cwd: "/tmp/delta-stop-turn-test".to_owned(),
+            transcript_path: "/tmp/sess-closed.jsonl".to_owned(),
+            branch_at_launch: None,
+            repo_root: None,
+            repository_display_name: None,
+        })
+        .await
+        .unwrap();
+
+    let (status, body) =
+        request_json(&state, "POST", "/api/sessions/sess-closed/stop-turn", None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        body.get("code").and_then(serde_json::Value::as_str),
+        Some("turn_not_stoppable"),
+    );
+}
+
+#[tokio::test]
+async fn stop_turn_of_an_unknown_session_is_not_found() {
+    let state = test_state().await;
+    let (status, _) = request_json(&state, "POST", "/api/sessions/ghost/stop-turn", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

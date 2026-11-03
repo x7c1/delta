@@ -130,6 +130,11 @@ declare_endpoints! {
     /// Interrupts the session's in-flight turn.
     InterruptSession: POST "/api/sessions/{id}/interrupt";
 
+    /// Stops a Claude session's in-flight turn: injects Escape into its pane
+    /// and ends Delta's turn without waiting for an interrupt marker; refused
+    /// unless the turn is in flight.
+    StopTurn: POST "/api/sessions/{id}/stop-turn";
+
     /// The session's threads, in creation order (ascending `id`).
     ListThreads: GET "/api/sessions/{id}/threads", response = WireThreadsResponse;
 

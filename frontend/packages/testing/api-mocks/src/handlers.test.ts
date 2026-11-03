@@ -283,6 +283,44 @@ describe('GET /api/sessions/{id}/sends mock', () => {
     });
   });
 
+  it('stops an in-flight turn once, announcing turn_interrupted', async () => {
+    // `POST /api/sessions/{id}/stop-turn` ends the in-flight turn the way
+    // the real server does: the envelope reads idle again and the turn's end is
+    // announced. A second stop finds nothing in flight and is refused with
+    // the server's stable code.
+    const { handlers, applyEvent, onServerEvent } = createMockApi();
+    const httpHandlers = handlers as HttpHandler[];
+    const announced: SessionEvent[] = [];
+    onServerEvent((event) => announced.push(event));
+    const stopUrl = `http://localhost/api/sessions/${SESSION_ID}/stop-turn`;
+
+    const posted = (await (
+      await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+        thread_id: MAIN_THREAD_ID,
+        text: 'drive a turn',
+      })
+    ).json()) as SendResponse;
+    applyEvent({
+      kind: 'turn_started',
+      session_id: SESSION_ID,
+      send_id: posted.send.id,
+      thread_id: MAIN_THREAD_ID,
+      matched_uuid: 'uuid-m1',
+    });
+
+    const stopped = await runPost(httpHandlers, '/stop-turn', stopUrl);
+    expect(stopped.status).toBe(204);
+    expect(announced).toEqual([
+      { kind: 'turn_interrupted', session_id: SESSION_ID, thread_id: MAIN_THREAD_ID },
+    ]);
+    const envelope = await getOpenSends(httpHandlers, SESSION_ID);
+    expect(envelope.turn.state).toBe('idle');
+
+    const refused = await runPost(httpHandlers, '/stop-turn', stopUrl);
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ code: 'turn_not_stoppable' });
+  });
+
   it('drops the in-flight send when a mid-turn turn_started names none', async () => {
     // A background-task notification can start a prompt while the turn runs.
     // That prompt takes the turn over, so the real server's turn machine
