@@ -52,10 +52,12 @@ where
     /// - [`SessionEvent::TurnInterrupted`]: emitted in two cases, both of which
     ///   end a turn without firing Claude's `Stop` hook. (1) A `[Request
     ///   interrupted by user...]` marker line: the user aborted the in-flight
-    ///   turn. (2) A synthetic `isApiErrorMessage` assistant line: the turn ended
-    ///   on an API error (a usage/session limit, a rate limit, or any other API
-    ///   failure). In either case this is the hook-independent signal that clears
-    ///   the stuck send. They differ only in the turn-machine input fed (an
+    ///   turn (unless the marker belongs to a turn the browser's Stop already
+    ///   ended — see `SessionRuntime::expect_stopped_turn_marker`). (2) A
+    ///   synthetic `isApiErrorMessage` assistant line: the turn ended on an API
+    ///   error (a usage/session limit, a rate limit, or any other API failure).
+    ///   In either case this is the hook-independent signal that clears the
+    ///   stuck send. They differ only in the turn-machine input fed (an
     ///   interrupt vs. a genuine stop), not in the browser signal.
     ///
     /// The caller is responsible for broadcasting these events.
@@ -140,6 +142,19 @@ where
                         };
                         events.extend(reduce_permission_event(self.state, session_id, &event));
                     }
+                }
+                Effect::TurnInterrupted if self.state.take_stopped_turn_marker() => {
+                    // The marker Claude Code wrote for the Escape a browser
+                    // Stop injected: the stop already ended that turn and
+                    // announced it, and the machine may since have moved on
+                    // to the next queued send. Feeding it an interrupt now
+                    // would requeue that send, so it is not fed.
+                    tracing::info!(
+                        session_id = %session_id,
+                        turn = ?self.state.turn(),
+                        "ingested the interrupt marker of a turn the user already \
+                         stopped; the turn machine is left as it is"
+                    );
                 }
                 Effect::TurnInterrupted => {
                     // Recover the interrupted turn's thread BEFORE the machine

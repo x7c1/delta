@@ -414,12 +414,55 @@ For a terminal-less (Codex) session this drives the adapter's interrupt on the
 provider's wire; the resulting `turn_interrupted` settles over the WebSocket
 event stream, so nothing is reported synchronously here. For a pane-backed
 (Claude) session, a closed session, or an unknown id this is a well-defined
-no-op: Claude's turn interrupt is TUI-driven (`Escape` in the pane) and this
-route deliberately does not duplicate it.
+no-op: Claude's turn interrupt is TUI-driven (`Escape` in the pane), which
+[`/stop-turn`](#post-apisessionsidstop-turn) injects, and this route
+deliberately does not duplicate it.
 
 - **204 No Content** — the interrupt was delivered, or there was nothing to
   interrupt.
 - **500** — the provider's transport failed while delivering the interrupt.
+
+### `POST /api/sessions/{id}/stop-turn`
+
+Stop a Claude session's running turn. Delta injects `Escape` into the session's
+pane — the same keystroke the user would press in the terminal, and the one a
+dispatched send's cancel injects — then `Ctrl+C` to empty the composer, and
+then ends the turn on its own side at once, without waiting for Claude Code to
+confirm it.
+
+Not waiting is the point. When Claude is streaming a reply, the Escape
+interrupts it and Claude Code writes a `[Request interrupted by user]` marker
+to the transcript. But when the prompt had submitted and no reply had streamed
+yet, Claude Code drops the prompt and leaves no trace of the cancel — no `Stop`
+hook (it fires none on a user interrupt) and no interrupt marker — so nothing
+would ever end the turn and every later send would wait `queued` behind it.
+That happens whether the Escape comes from this endpoint or from the user in
+the pane, so this endpoint is also how a turn left "in progress" that way is
+recovered: the keys then land on an idle composer.
+
+The `Ctrl+C` is there because Claude Code puts a prompt it dropped that way back
+into the composer, and the next send typed there would be spliced into it.
+`Ctrl+C` clears the composer whole. On a composer that is already empty, Claude
+Code instead shows "Press Ctrl-C again to exit" for about two seconds; the next
+send typed into the pane dismisses it.
+
+The turn ends exactly as an ingested interrupt marker would end it: the turn
+returns to idle, a send the turn carried is settled as delivered, and
+`turn_interrupted` is broadcast for the turn's thread. The oldest `queued` send
+then dispatches at once, broadcast as `send_dispatched`. An interrupt marker
+Claude Code writes afterwards for the same Escape is recognised as this stop's
+and does not end the next turn or broadcast a second `turn_interrupted`.
+
+- **204 No Content** — the keys were injected and the turn ended.
+- **404** — no session with that id.
+- **409** (body `code: "turn_not_stoppable"`) — Delta holds no turn to stop,
+  and nothing was sent to the pane: no turn is in progress; a dispatched send
+  is still awaiting its echo (cancel that send instead, see
+  [sends.md](sends.md)); the session is not open; or the session is
+  terminal-less (Codex), which is stopped with
+  [`/interrupt`](#post-apisessionsidinterrupt).
+- **500** — the keys could not be injected into the pane. The turn is left
+  in progress, since Claude may not have been stopped.
 
 ## Threads and messages
 

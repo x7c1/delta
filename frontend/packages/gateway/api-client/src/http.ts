@@ -362,6 +362,25 @@ export class ApiClient {
   }
 
   /**
+   * `POST /api/sessions/{id}/stop-turn` — stop a Claude session's in-flight
+   * turn (204): the server presses Escape in the session's pane, like the user
+   * would in the terminal, and ends the turn without waiting for an interrupt
+   * marker — Claude Code leaves none (and fires no `Stop` hook) when the prompt
+   * was cancelled before any reply streamed, so later sends would otherwise
+   * wait `queued` behind it forever. On success the server broadcasts
+   * `turn_interrupted`, then `send_dispatched` when a queued send went out. A
+   * `409` (`turn_not_stoppable`) fires when the session has no in-flight turn
+   * of a live pane (idle, still awaiting a dispatched send's echo, closed, or
+   * terminal-less), surfaced as {@link ApiError}.
+   */
+  stopTurn(sessionId: SessionId): Promise<void> {
+    return this.requestNoContent(
+      `/api/sessions/${encodeURIComponent(sessionId)}/stop-turn`,
+      { method: 'POST' },
+    );
+  }
+
+  /**
    * `POST /api/open-cwd` — launch an external tool (currently only VS Code)
    * against a session's cwd. The request `path` must be a path Delta has
    * already surfaced (a `session.cwd`, `session.requested_workdir`, or

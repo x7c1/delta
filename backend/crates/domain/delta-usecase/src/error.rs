@@ -7,6 +7,7 @@
 use thiserror::Error;
 
 use crate::ports::TranscriptError;
+use crate::turn_stop_refusal::TurnStopRefusal;
 
 /// Errors raised while executing a use case.
 #[derive(Debug, Error)]
@@ -159,6 +160,19 @@ pub enum Error {
     /// the next refetch.
     #[error("send {0} is not awaiting a release")]
     SendNotReleasable(i64),
+
+    /// The user asked Delta to stop a session's running turn, but Delta holds
+    /// no turn it may stop: the turn machine is not `InFlight`, the session has
+    /// no live pane, or the session is terminal-less (Codex is stopped through
+    /// `interrupt`). Nothing was sent to the pane. Surfaced as `409` so the
+    /// browser explains the refusal and reconciles from the next refetch.
+    #[error("session {session_id} has no turn to stop: {reason}")]
+    TurnNotStoppable {
+        /// The session the stop named.
+        session_id: String,
+        /// Why the stop was refused.
+        reason: TurnStopRefusal,
+    },
 
     /// A clone root was registered twice with the same path. Surfaced as `409`
     /// so the Settings dialog can show an inline "already registered" hint

@@ -86,6 +86,7 @@ export function sessionHandlers({
   store,
   lastActivityAt,
   emitServerEvent,
+  announceServerEvent,
 }: HandlerContext): RequestHandler[] {
   return [
     http.get('*/api/sessions', ({ request }) => {
@@ -216,6 +217,59 @@ export function sessionHandlers({
         return new HttpResponse(null, { status: 204 });
       }
       entry.open = false;
+      return new HttpResponse(null, { status: 204 });
+    }),
+
+    // Stop a running Claude turn. The real server first presses Escape in the
+    // pane, which the mock has none of. It refuses (`409` `turn_not_stoppable`)
+    // unless the session is open on a pane and its turn is in flight — the
+    // mock's `activeTurn` — so an idle session, one still awaiting a dispatched
+    // send's echo, a closed one and a Codex one all refuse here too. On success
+    // it ends the turn the way an interrupt marker does and dispatches the
+    // oldest unheld queued send. The generic
+    // `turn_interrupted` mirror models a different path (it cancels every open
+    // send), so the store is moved here and the events are only announced.
+    http.post('*/api/sessions/:id/stop-turn', ({ params }) => {
+      const entry = store.sessions.find((s) => s.session.id === params.id);
+      if (!entry) {
+        return HttpResponse.json({ error: 'unknown session' }, { status: 404 });
+      }
+      const turn = entry.activeTurn;
+      if (!entry.open || entry.session.provider !== 'claude' || !turn) {
+        return HttpResponse.json(
+          {
+            error: `session ${entry.session.id} has no turn to stop`,
+            code: 'turn_not_stoppable',
+          },
+          { status: 409 },
+        );
+      }
+      entry.activeTurn = undefined;
+      const carried = store.sends.find((s) => s.id === turn.sendId);
+      if (carried?.status === 'dispatched') {
+        carried.status = 'matched';
+      }
+      const next = store.sends.find(
+        (s) =>
+          s.session_id === entry.session.id &&
+          s.status === 'queued' &&
+          s.held_at === null,
+      );
+      if (next) {
+        next.status = 'dispatched';
+      }
+      announceServerEvent({
+        kind: 'turn_interrupted',
+        session_id: entry.session.id,
+        thread_id: turn.threadId ?? entry.mainThreadId,
+      });
+      if (next) {
+        announceServerEvent({
+          kind: 'send_dispatched',
+          session_id: entry.session.id,
+          send_id: next.id,
+        });
+      }
       return new HttpResponse(null, { status: 204 });
     }),
 

@@ -32,6 +32,7 @@ mod session_prune;
 mod session_removal;
 mod session_settings_file;
 mod turn;
+mod turn_stop_refusal;
 mod with_causes;
 mod worktree_branch;
 mod worktree_dir;
@@ -102,6 +103,7 @@ pub use session_settings_file::SessionSettingsFile;
 pub use turn::{
     transition, turn_input_for_agent_event, OrphanedSend, Transition, TurnInput, TurnState,
 };
+pub use turn_stop_refusal::TurnStopRefusal;
 pub use with_causes::with_causes;
 pub use worktree_branch::WorktreeBranch;
 pub use worktree_dir::WorktreeDir;

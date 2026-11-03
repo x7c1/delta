@@ -1,0 +1,9 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "await_escape" },
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "answering the queue the stop released" },
+    { "type": "stop" }
+  ]
+}

@@ -222,6 +222,9 @@ where
         SessionInput::Interrupt { reply } => {
             let _ = reply.send(ctx.interrupt().await);
         }
+        SessionInput::StopTurn { reply } => {
+            let _ = reply.send(ctx.stop_turn().await);
+        }
         SessionInput::ClearInput { reply } => {
             let _ = reply.send(ctx.clear_session_input().await);
         }

@@ -80,6 +80,12 @@ const SEND_NOT_CANCELLABLE_CODE: &str = "send_not_cancellable";
 /// strip from the next refetch on this code.
 const SEND_NOT_RELEASABLE_CODE: &str = "send_not_releasable";
 
+/// Stable machine-readable code for a turn stop Delta refused: the session
+/// holds no in-flight turn of a live pane (it is idle, still awaiting a
+/// dispatched send's echo, closed, or terminal-less). The frontend explains the
+/// refusal and reconciles its strip from the next refetch on this code.
+const TURN_NOT_STOPPABLE_CODE: &str = "turn_not_stoppable";
+
 /// Stable machine-readable code for a clone root registered twice with the same
 /// path. The Settings dialog shows an inline "already registered" hint instead
 /// of a generic failure toast on this code.
@@ -351,6 +357,12 @@ impl IntoResponse for ApiError {
                     // Send control and reconciles from the next refetch.
                     Error::SendNotReleasable(_) => {
                         (StatusCode::CONFLICT, Some(SEND_NOT_RELEASABLE_CODE))
+                    }
+                    // The session holds no in-flight turn a stop may end: a
+                    // conflict with its current state, with a stable code so
+                    // the frontend explains the refusal and refetches.
+                    Error::TurnNotStoppable { .. } => {
+                        (StatusCode::CONFLICT, Some(TURN_NOT_STOPPABLE_CODE))
                     }
                     // A clone root registered twice: a conflict with current
                     // state, with a stable code so the Settings dialog shows an

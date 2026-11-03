@@ -8,7 +8,8 @@
 //! events the same way). So the fake's "TUI input box" is a byte-level line
 //! editor over stdin:
 //!
-//! - `0x15` (`C-u`) clears the pending buffer,
+//! - `0x15` (`C-u`) clears the pending buffer, and so does `0x03` (`C-c`),
+//!   which Delta's Stop presses after its Escape to empty the composer,
 //! - `0x7f`/`0x08` (backspace) deletes one byte,
 //! - `0x0d` (Enter) submits the buffer as a prompt (an empty submit is
 //!   ignored, mirroring a TUI ignoring Enter on an empty input),

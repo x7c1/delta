@@ -172,6 +172,13 @@ pub(in crate::interactor) enum SessionInput {
     ///
     /// [`AgentAdapter::interrupt`]: crate::agent::AgentAdapter::interrupt
     Interrupt { reply: Reply<()> },
+    /// The user stopped the session's in-flight turn from the browser: press
+    /// `Escape` in the pane, feed the turn machine the same interrupt an
+    /// ingested interrupt marker feeds it, then dispatch the next queued send.
+    /// Replies with the events to broadcast; refused when Delta holds no
+    /// in-flight turn of a pane-backed session (see
+    /// `SessionContext::stop_turn`).
+    StopTurn { reply: Reply<Vec<SessionEvent>> },
     /// Wipe the residual input of the session's pane, if open.
     ClearInput { reply: Reply<()> },
 

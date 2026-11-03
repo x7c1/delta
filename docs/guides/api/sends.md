@@ -437,7 +437,9 @@ No event is broadcast: the browser refetches
 - **409** (body `code: "send_not_cancellable"`) — the send no longer exists, is
   already terminal (matched or cancelled), or is `dispatched` with its echo
   already arrived, so the turn carries it in flight and interrupting the turn is
-  the right control instead: `Escape` in the TUI for a pane-backed session,
+  the right control instead:
+  [`POST /api/sessions/{id}/stop-turn`](sessions.md#post-apisessionsidstop-turn)
+  for a pane-backed session,
   [`POST /api/sessions/{id}/interrupt`](sessions.md#post-apisessionsidinterrupt)
   for an adapter-backed one (the route is a well-defined no-op on pane-backed
   sessions).

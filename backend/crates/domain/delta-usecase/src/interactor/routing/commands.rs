@@ -6,11 +6,12 @@
 use delta_model::SessionId;
 use tokio::sync::oneshot;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::interactor::session_actor::input::SessionInput;
 use crate::interactor::Interactor;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::session_removal::SessionRemoval;
+use crate::turn_stop_refusal::TurnStopRefusal;
 
 impl<T, X, S, W, G> Interactor<T, X, S, W, G>
 where
@@ -102,6 +103,41 @@ where
             return Ok(());
         }
         rx.await.unwrap_or(Ok(()))
+    }
+
+    /// Stop a Claude session's in-flight turn: inject `Escape` into its pane,
+    /// then end the turn on Delta's side without waiting for an interrupt
+    /// marker. See `interactor::stop_turn` for why and for the full rule.
+    ///
+    /// Returns the events to broadcast: [`SessionEvent::TurnInterrupted`] for
+    /// the stopped turn, then a [`SessionEvent::SendDispatched`] when a queued
+    /// send went out.
+    ///
+    /// An unknown id is a [`Error::SessionNotFound`]. Every other session
+    /// without an in-flight turn of a live pane — closed (with or without an
+    /// actor), still starting, Codex, idle, or still awaiting a dispatched
+    /// send's echo — is refused with [`Error::TurnNotStoppable`] (`409`). A
+    /// failed Escape injection surfaces as its own error, the turn untouched.
+    pub async fn stop_turn(&self, id: &SessionId) -> Result<Vec<SessionEvent>> {
+        if self.store.session(id).await?.is_none() {
+            return Err(Error::SessionNotFound(id.as_str().to_owned()));
+        }
+        let (tx, rx) = oneshot::channel();
+        if !self
+            .sessions
+            .post_existing(id, SessionInput::StopTurn { reply: tx })
+        {
+            // No actor: the session is closed by definition.
+            return Err(Error::TurnNotStoppable {
+                session_id: id.as_str().to_owned(),
+                reason: TurnStopRefusal::NotOpen,
+            });
+        }
+        rx.await.unwrap_or_else(|_| {
+            Err(Error::Internal(format!(
+                "session {id} actor dropped before replying"
+            )))
+        })
     }
 
     /// Wipe the residual input of a session's pane, if it is open. A no-op

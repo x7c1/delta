@@ -427,6 +427,13 @@ export function createMockApi(): MockApi {
     }
   };
 
+  /** Hand an event to the subscribers without touching the store. */
+  const announceServerEvent = (event: SessionEvent): void => {
+    for (const listener of [...serverEventListeners]) {
+      listener(event);
+    }
+  };
+
   /**
    * Report an event this mock backend produced itself: mirror it into the store
    * first (through the one `applyEvent` switch, so a request-driven event and a
@@ -436,9 +443,7 @@ export function createMockApi(): MockApi {
    */
   const emitServerEvent = (event: SessionEvent): void => {
     applyEvent(event);
-    for (const listener of [...serverEventListeners]) {
-      listener(event);
-    }
+    announceServerEvent(event);
   };
 
   const onServerEvent = (listener: (event: SessionEvent) => void) => {
@@ -456,6 +461,7 @@ export function createMockApi(): MockApi {
     isLive,
     pruneMatches,
     emitServerEvent,
+    announceServerEvent,
   };
   const handlers: RequestHandler[] = [
     ...sessionHandlers(context),

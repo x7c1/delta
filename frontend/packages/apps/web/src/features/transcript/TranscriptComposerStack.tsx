@@ -37,6 +37,11 @@ interface TranscriptComposerStackProps {
   composerMode: ComposerMode;
   /** The send-activity rows shown above the composer. */
   sendActivity: SendActivityEntry[];
+  /**
+   * Whether the focused session's provider runs in an attachable terminal,
+   * relayed to the send-activity strip (see `SendActivityStrip`).
+   */
+  providerHasTerminal?: boolean;
 }
 
 /**
@@ -53,6 +58,7 @@ export function TranscriptComposerStack({
   closedReason,
   composerMode,
   sendActivity,
+  providerHasTerminal,
 }: TranscriptComposerStackProps) {
   const openWorkdirDialog = useComposerStore(
     (state) => state.openWorkdirDialog,
@@ -216,6 +222,12 @@ export function TranscriptComposerStack({
           <SendActivityStrip
             entries={sendActivity}
             sessionSpawning={spawning}
+            sessionId={
+              newSession || activeThread === null
+                ? null
+                : activeThread.session_id
+            }
+            providerHasTerminal={providerHasTerminal}
           />
         </div>
       )}

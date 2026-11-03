@@ -112,6 +112,11 @@ impl SessionRuntime {
             | TurnInput::CommandResolved { send_id } => self.forget_requeues(send_id),
             _ => {}
         }
+        // A new prompt (or the pane going away) ends the window in which a
+        // stopped turn's late interrupt marker may still arrive.
+        if matches!(input, TurnInput::PromptSubmitted { .. } | TurnInput::Close) {
+            self.stopped_turn_marker_expected = false;
+        }
         if result.next == TurnState::Idle {
             self.pending_permissions.clear();
             self.pending_question = None;
@@ -153,6 +158,36 @@ impl SessionRuntime {
         self.pending_post_tool_use_agent_ids.clear();
         self.streaming_cursor = None;
         self.requeues_per_send.clear();
+        self.stopped_turn_marker_expected = false;
+    }
+
+    /// Record that the user stopped the in-flight turn by pressing `Escape` in
+    /// the pane from the browser, and Delta has already ended the turn.
+    ///
+    /// Claude Code may still write a `[Request interrupted by user]` marker for
+    /// that Escape (it does when it was streaming a reply; it writes nothing
+    /// when the prompt had not produced output yet). That marker belongs to the
+    /// turn the stop already ended, so it must not end another one: by the time
+    /// it is ingested the next queued send may already be awaiting its echo,
+    /// and an interrupt there would requeue — and re-type — that send. The
+    /// next ingested marker therefore consumes this expectation
+    /// ([`Self::take_stopped_turn_marker`]) instead of reaching the turn
+    /// machine.
+    ///
+    /// The expectation ends with the next prompt submission: the
+    /// `UserPromptSubmit` hook syncs the transcript before it moves the
+    /// machine, and Claude Code writes the marker before it accepts the next
+    /// prompt, so a marker for the stopped turn has been consumed by then. A
+    /// later marker belongs to the new turn and ends it as usual.
+    pub fn expect_stopped_turn_marker(&mut self) {
+        self.stopped_turn_marker_expected = true;
+    }
+
+    /// Consume the expectation [`Self::expect_stopped_turn_marker`] recorded,
+    /// reporting whether an interrupt marker just ingested belongs to the
+    /// already-stopped turn (and must be ignored).
+    pub fn take_stopped_turn_marker(&mut self) -> bool {
+        std::mem::take(&mut self.stopped_turn_marker_expected)
     }
 
     /// Spend one requeue from `send_id`'s budget, reporting whether the send

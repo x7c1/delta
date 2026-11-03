@@ -36,6 +36,7 @@ export {
   useCreateSendMutation,
   useCancelSendMutation,
   useReleaseSendMutation,
+  useStopTurnMutation,
   useThreadMessagesQuery,
   useThreadsMessagesQueries,
   type ThreadMessagesQueryEntry,

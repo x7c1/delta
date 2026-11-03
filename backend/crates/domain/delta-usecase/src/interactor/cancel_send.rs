@@ -42,10 +42,10 @@
 //! keystrokes are sitting in the pane's composer. Once the echo arrives the
 //! turn moves to [`TurnState::InFlight`] owned by its transcript line, so a
 //! cancel there is rejected as [`Error::SendNotCancellable`] (the browser
-//! reconciles from the refetch, and the user reaches for the existing
-//! in-flight interrupt). The actor's mailbox serializes these checks against
-//! the `UserPromptSubmit` hook that would move the state, so the test is
-//! race-free.
+//! reconciles from the refetch, and the user stops the in-flight turn instead —
+//! [`stop_turn`](super::stop_turn), which injects the same Escape). The actor's
+//! mailbox serializes these checks against the `UserPromptSubmit` hook that
+//! would move the state, so the test is race-free.
 //!
 //! ## Ownerless dispatched rows
 //!
@@ -86,7 +86,6 @@
 use delta_model::SendStatus;
 
 use crate::error::{Error, Result};
-use crate::interactor::question_keys::cancel_keys;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::turn::{TurnInput, TurnState};
@@ -145,8 +144,8 @@ where
     ///   the turn machine back to `Idle` (the path below).
     /// - [`TurnState::InFlight`] carrying `send_id` — the echo already landed
     ///   and the turn is owned by its transcript line; the cancel is rejected
-    ///   and the browser reconciles (the user reaches for the in-flight
-    ///   interrupt instead).
+    ///   and the browser reconciles (the user stops the in-flight turn
+    ///   instead, see [`stop_turn`](super::stop_turn)).
     /// - anything else — the row is *ownerless* (see the module docs): cancel
     ///   it as a pure state transition, no keystrokes, no turn input.
     async fn cancel_dispatched_send(&mut self, send_id: i64) -> Result<()> {
@@ -177,9 +176,7 @@ where
         // Mirror cancel_question: inject the same single Escape keystroke.
         // The TUI treats it as "discard the composer buffer", which is
         // exactly the user gesture we are reproducing on their behalf.
-        let keys = cancel_keys();
-        let names: Vec<&str> = keys.iter().map(|key| key.tmux_name()).collect();
-        self.tmux.send_keys(&pane, &names).await?;
+        self.press_escape(&pane).await?;
 
         // Drive the turn machine: AwaitingEcho{send_id} → Idle with
         // OrphanedSend::Cancel(send_id). The apply layer marks the row

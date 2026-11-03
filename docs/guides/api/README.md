@@ -14,7 +14,7 @@ kinds of traffic, and this directory has one page per area:
   area:
   - **[sessions.md](sessions.md)** — listing, creating, opening, closing,
     removing (one at a time or old ones in bulk) and interrupting sessions,
-    plus reading threads and messages.
+    stopping a running Claude turn, plus reading threads and messages.
   - **[sends.md](sends.md)** — enqueueing and managing sends (with the
     launch-trust check a new worktree session runs first), and answering the
     permission requests and questions the agent raises mid-turn.
@@ -200,7 +200,9 @@ what `delta-server open-url` calls.
     first), `session_hooks_unreachable` (a send into a session re-adopted after
     a restart whose agent's hooks no longer reach the server — close it and
     send again), `permission_not_pending`, `question_not_pending`,
-    `question_blocked_by_permission`, `send_not_cancellable`, `send_not_releasable`, `clone_root_duplicate`,
+    `question_blocked_by_permission`, `send_not_cancellable`, `send_not_releasable`,
+    `turn_not_stoppable` (a turn stop aimed at a session with no in-flight turn
+    of a live pane), `clone_root_duplicate`,
     `clone_dest_exists` (the one path a clone could land on is already taken —
     there is no fallback naming), or `launch_option_builtin` (a delete aimed at
     a launch option Delta ships), or one of the `update_*` codes from

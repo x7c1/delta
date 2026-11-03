@@ -54,7 +54,6 @@
 use std::time::Instant;
 
 use crate::error::Result;
-use crate::interactor::question_keys::cancel_keys;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::turn_input::RequeueOutcome;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
@@ -226,9 +225,7 @@ where
         let Some(pane) = self.state.handle().map(|handle| handle.pane.clone()) else {
             return;
         };
-        let keys = cancel_keys();
-        let names: Vec<&str> = keys.iter().map(|key| key.tmux_name()).collect();
-        if let Err(err) = self.tmux.send_keys(&pane, &names).await {
+        if let Err(err) = self.press_escape(&pane).await {
             tracing::warn!(
                 session_id = %self.id,
                 error = %err,

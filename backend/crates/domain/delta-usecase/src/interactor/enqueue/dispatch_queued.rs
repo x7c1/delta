@@ -42,10 +42,11 @@ where
     /// the session has neither a live pane nor an open adapter (closed) — in
     /// which case the send stays `queued` and is dispatched by the next trigger
     /// that reaches this method: a turn end (Claude's `Stop` hook or an
-    /// adapter's `turn/completed`), an interrupt ingest, a resume settle
-    /// (`dispatch_ready_resume`), a dispatched-send cancellation, a
-    /// held-send release (`release_send`), `enqueue_into_open`'s idle-flush, or
-    /// the flush a fresh spawn runs when it binds
+    /// adapter's `turn/completed`), an interrupt ingest, a browser turn stop
+    /// (`stop_turn`), a resume settle (`dispatch_ready_resume`), a
+    /// dispatched-send cancellation, a held-send release (`release_send`),
+    /// `enqueue_into_open`'s idle-flush, or the flush a fresh spawn runs when
+    /// it binds
     /// ([`Self::flush_queued_send_async`]). *Held* rows — those carrying
     /// `held_at`, whether the boot restore recovered them from a dead process's
     /// `dispatched` state or the echo deadline parked them — are invisible to
