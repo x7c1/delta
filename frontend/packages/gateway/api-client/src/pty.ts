@@ -37,7 +37,7 @@ export interface PtyConnection {
    * Write input into the PTY as a Binary frame. Strings are UTF-8 encoded to
    * bytes; `Uint8Array` is sent as-is. Text frames are reserved for control.
    */
-  send(data: string | Uint8Array): void;
+  send(data: string | Uint8Array<ArrayBuffer>): void;
   /**
    * Tell the server to resize the PTY to `rows`×`cols`, sent as a JSON control
    * message on a Text frame. Dropped if the socket is not open (the caller
