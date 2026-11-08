@@ -43,4 +43,4 @@ Out of scope:
 ### Before merge (verified outside the check command)
 
 - [x] `make audit` passes on the development machine (it needs network access)
-- [ ] The PTY still works end to end: run the server locally, open a session in the browser, type a command and see its output, resize the window and see the shell reflow, and exit the shell and see the session end
+- [x] The PTY still works end to end: run the server locally, open a session in the browser, type a command and see its output, resize the window and see the shell reflow, and exit the shell and see the session end
