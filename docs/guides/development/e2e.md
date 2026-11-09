@@ -18,7 +18,9 @@ pending/running indicator lifecycle, layout restore after reload, terminal
 resize). It lives in `@delta/web` (`packages/apps/web/e2e/`), separate from the
 vitest unit tests.
 
-Install the browser once:
+Install the browser once — on Debian/Ubuntu `scripts/setup-system.sh` does it
+(see [Prerequisites by platform](README.md#prerequisites-by-platform));
+elsewhere:
 
 ```bash
 pnpm --filter @delta/web exec playwright install --with-deps chromium
