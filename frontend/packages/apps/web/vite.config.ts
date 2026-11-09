@@ -36,7 +36,7 @@ const contentSecurityPolicy =
 // only turn one request into two and add a loading state. The bundle is
 // therefore deliberately not split.
 //
-// The budget still guards against regressions: the app is ~943 kB today, a
+// The budget still guards against regressions: the app is ~1125 kB today, a
 // dependency bump will not cross 1200 kB, pulling in one more heavy library
 // will. The one constant feeds both Vite's warning limit and `bundleBudget`,
 // which fails the build above it, so the two cannot drift apart.
