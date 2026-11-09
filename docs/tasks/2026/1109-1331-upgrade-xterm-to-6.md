@@ -44,4 +44,4 @@ Out of scope:
 
 ### Before merge (verified outside the check command)
 
-- [ ] A person confirms the terminal still works end to end in a browser: run the server locally, open a session's terminal, type a command and see its output, resize the window and see the shell reflow, scroll back through output, and exit the shell and see the session end
+- [x] A person confirms the terminal still works end to end in a browser: run the server locally, open a session's terminal, type a command and see its output, resize the window and see the shell reflow, scroll back through output, and exit the shell and see the session end
