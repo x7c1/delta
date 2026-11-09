@@ -39,9 +39,9 @@ by both — see "Portability conventions" below.
 
 | Platform | Prerequisites |
 |----------|---------------|
-| Linux | `tmux`, `lsof`, `jq`, GNU `make`, `bash` — install via the system package manager (e.g. `apt install tmux lsof jq make`). |
+| Linux | `tmux`, `lsof`, `jq`, GNU `make`, `bash`, and the Playwright Chromium the e2e suites launch. On Debian/Ubuntu, `scripts/setup-system.sh` installs all of these together with the desktop shell's libraries below (it installs the Chromium at the version `frontend/pnpm-lock.yaml` pins, so rerun it after a Playwright bump); elsewhere install the tools with the system package manager and the browser as [e2e.md](e2e.md#mock-mode-make-e2e) describes. |
 | macOS | `tmux` and `jq` via Homebrew (`brew install tmux jq`). `lsof`, `make` (GNU make 3.81), `awk`, `bash` 3.2, `date`, and `pkill` ship with the system. Installing the Xcode Command Line Tools (`xcode-select --install`) is the standard way to get `make`. |
-| Linux, desktop shell only | The system libraries Tauri v2 links against, needed only to build `delta-desktop` (`make desktop-dev`, `make desktop`, and `make check`'s `check-desktop-build` and `check-backend-doc`): on Debian/Ubuntu `apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf build-essential file`. macOS needs nothing beyond the Xcode Command Line Tools. |
+| Linux, desktop shell only | The system libraries Tauri v2 links against, needed only to build `delta-desktop` (`make desktop-dev`, `make desktop`, and `make check`'s `check-desktop-build` and `check-backend-doc`); `scripts/setup-system.sh` installs them on Debian/Ubuntu. macOS needs nothing beyond the Xcode Command Line Tools. |
 
 In addition, both platforms need the Rust toolchain (`cargo`) and pnpm (via
 `corepack enable`), plus the agent CLIs you plan to drive: an authenticated
@@ -80,10 +80,10 @@ parts and stay fast, for the inner loop. `make check` is the pre-PR gate: it
 runs the whole thing for both parts at once (build, test, lint, the frontend
 typecheck, the backend's rustdoc, the backend and frontend source-file
 lengths, the generated-bindings freshness check, the vendored Codex schema's
-stored form, the canary gate's, the re-vendor script's and the freshness
-check's own stubbed tests, the workflow pin check and its test) **plus both
-Playwright suites**, so passing it means CI will pass — except CI's dependency
-audit, which needs the network (see
+stored form, the canary gate's, the re-vendor script's, the freshness
+check's and the system setup script's own stubbed tests, the workflow pin
+check and its test) **plus both Playwright suites**, so passing it means CI
+will pass — except CI's dependency audit, which needs the network (see
 [Workflows and dependency audit](#workflows-and-dependency-audit)).
 `make check` needs tmux, because `make e2e-fake` drives the real backend
 through one, and `jq`, which is what the vendored schema's stored form is

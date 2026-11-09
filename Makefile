@@ -190,7 +190,7 @@ lint:
 	cd backend && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — everything CI runs except the network-bound dependency audit (`make audit`): backend fmt/build/test/clippy/rustdoc/file length + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint/file length + the embedded-server build/test (`embed-web`) + the desktop-shell build/test/clippy + both Playwright suites (needs tmux) + the release version check's scratch-repo test + the workflow pin check and its test — plus the canary gate's, the re-vendor script's, gen-check's and the test-residue sweep's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
+## check: full pre-PR gate — everything CI runs except the network-bound dependency audit (`make audit`): backend fmt/build/test/clippy/rustdoc/file length + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint/file length + the embedded-server build/test (`embed-web`) + the desktop-shell build/test/clippy + both Playwright suites (needs tmux) + the release version check's scratch-repo test + the workflow pin check and its test — plus the canary gate's, the re-vendor script's, gen-check's, the test-residue sweep's and the system setup script's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
 # The point of this target is that passing it means CI will pass, so it has to
 # stay a superset of what the workflow runs — including BOTH Playwright suites.
 # The one exception is CI's `audit` job (`make audit`): it fetches advisory
@@ -211,7 +211,7 @@ lint:
 #   { check-backend-build, check-frontend-build } → { check-backend-doc, check-e2e-fake, check-embedded, check-desktop-build }
 #   check-backend-file-length, check-frontend-file-length, vendor-codex-schema-check,
 #   vendor-codex-schema-test, e2e-real-gate-test, sweep-test-residue-test, gen-check-test,
-#   check-version-change-test, check-workflow-pins, check-workflow-pins-test (no prerequisites)
+#   setup-system-test, check-version-change-test, check-workflow-pins, check-workflow-pins-test (no prerequisites)
 #
 # Without -j, make walks the same graph left to right, which is the serial
 # order the gate always had. The cargo steps share backend/target and take
@@ -225,7 +225,7 @@ lint:
 CHECK_STEPS := \
 	check-backend-test check-backend-clippy check-backend-doc check-backend-file-length check-gen \
 	vendor-codex-schema-check vendor-codex-schema-test e2e-real-gate-test sweep-test-residue-test \
-	gen-check-test check-version-change-test check-workflow-pins check-workflow-pins-test \
+	gen-check-test setup-system-test check-version-change-test check-workflow-pins check-workflow-pins-test \
 	check-frontend-typecheck check-frontend-test check-frontend-lint check-frontend-file-length \
 	check-e2e check-e2e-fake check-embedded check-desktop-build
 
@@ -330,7 +330,7 @@ check-embedded: check-backend-build check-frontend-build
 check-desktop-build: check-backend-build check-frontend-build
 	cd backend && unset TAURI_CONFIG && cargo build -p delta-desktop && cargo test -p delta-desktop && cargo clippy -p delta-desktop --all-targets -- -D warnings
 
-## e2e: run the headless Playwright suite (one-time: `pnpm --filter @delta/web exec playwright install --with-deps chromium`)
+## e2e: run the headless Playwright suite (one-time browser install: `scripts/setup-system.sh` on Debian/Ubuntu, else `pnpm --filter @delta/web exec playwright install --with-deps chromium`)
 # Pin a dedicated mock-server port so the suite never collides with a dev server
 # on the default 5173 (and never adopts a live, real-backend one — see
 # playwright.config.ts reuseExistingServer).
@@ -362,6 +362,11 @@ e2e-real-gate-test:
 .PHONY: sweep-test-residue-test
 sweep-test-residue-test:
 	bash scripts/tests/sweep-test-residue.test.sh
+
+## setup-system-test: exercise the Debian/Ubuntu system setup script (scripts/setup-system.sh) with stub apt-get, sudo and npx in a throwaway tree (installs nothing; part of `make check`)
+.PHONY: setup-system-test
+setup-system-test:
+	bash scripts/tests/setup-system.test.sh
 
 ## check-version-change-test: exercise the Release workflow's version check (scripts/check-version-change.sh) against scratch git repos with a minimal backend workspace (needs cargo and jq, no network; part of `make check` and of CI's backend job)
 .PHONY: check-version-change-test
