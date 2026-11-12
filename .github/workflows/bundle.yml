@@ -179,31 +179,25 @@ jobs:
         run: cargo build --release -p delta-update-helper
         working-directory: backend
 
-      - name: TEMP wrap actool
+      - name: TEMP actool by cwd and stdin
         if: runner.os == 'macOS'
         run: |
-          shim="$RUNNER_TEMP/actool-shim"; mkdir -p "$shim"
-          cat > "$shim/actool" <<'SH'
-          #!/bin/bash
-          log="$RUNNER_TEMP/actool-calls.log"
-          if [ "$1" = --version ]; then exec /usr/bin/actool "$@"; fi
-          icon="$1"; shift; shift; out="$1"; shift
+          src="$PWD/backend/crates/apps/delta-desktop/icons/icon.icon"
           try() {
-            label="$1"; shift; src="$1"; shift; dst=$(mktemp -d "$RUNNER_TEMP/try.XXXXXX")
-            { echo "=== $label"; "$@" /usr/bin/actool "$src" --compile "$dst" --output-format human-readable-text \
-                --notices --warnings --output-partial-info-plist "$dst/p.plist" --app-icon Icon --include-all-app-icons \
+            label="$1"; dir="$2"; shift 2; d=$(mktemp -d); cp -R "$src" "$d/Icon.icon"; mkdir "$d/out"
+            echo "=== $label"
+            (cd "$dir" && "$@" /usr/bin/actool "$d/Icon.icon" --compile "$d/out" --output-format human-readable-text \
+                --notices --warnings --output-partial-info-plist "$d/out/p.plist" --app-icon Icon --include-all-app-icons \
                 --accent-color AccentColor --enable-on-demand-resources NO --development-region en --target-device mac \
-                --minimum-deployment-target 26.0 --platform macosx 2>&1 | tail -3; echo "rc=${PIPESTATUS[0]}"; ls "$dst"; } >> "$log" 2>&1
+                --minimum-deployment-target 26.0 --platform macosx < /dev/null 2>&1 | tail -2)
+            ls "$d/out"
           }
-          copy=$(mktemp -d "$RUNNER_TEMP/copy.XXXXXX"); cp -R "$icon" "$copy/Icon.icon"
-          try "tauri env, tauri dir" "$icon" env
-          try "tauri env, plain copy" "$copy/Icon.icon" env
-          try "empty env, tauri dir" "$icon" env -i HOME="$HOME" PATH=/usr/bin:/bin TMPDIR="$TMPDIR"
-          { echo "=== ps ancestry"; p=$$; while [ "$p" -gt 1 ]; do ps -o pid=,ppid=,comm= -p "$p"; p=$(ps -o ppid= -p "$p" | tr -d ' '); done; } >> "$log" 2>&1
+          try "cwd repo root" "$PWD" env
+          try "cwd delta-desktop" "$PWD/backend/crates/apps/delta-desktop" env
+          try "cwd backend" "$PWD/backend" env
+          try "cwd icons" "$PWD/backend/crates/apps/delta-desktop/icons" env
+          try "cwd /tmp" /tmp env
           exit 1
-          SH
-          chmod +x "$shim/actool"
-          echo "$shim" >> "$GITHUB_PATH"
 
       # Given no token, releaseId, tagName or releaseName, the action only
       # builds: it can create, change or upload to no Release or tag.
@@ -237,10 +231,6 @@ jobs:
           projectPath: backend/crates/apps/delta-desktop
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           uploadUpdaterJson: false
-
-      - name: TEMP dump actool calls
-        if: always() && runner.os == 'macOS'
-        run: cat "$RUNNER_TEMP/actool-calls.log" || true
 
       # The Tauri CLI compiles icons/icon.icon into Assets.car only with an
       # actool of 26 or later, and otherwise skips it with a warning; the app
