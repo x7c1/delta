@@ -267,6 +267,11 @@ binary is not an `.app` bundle, the Dock and the app switcher show its embedded
 first PNG in the list). The `.icns` (macOS) is deliberately the source shrunk to 80 %
 on a transparent canvas, because the Dock expects that margin and a full-bleed
 icon looks larger than its neighbours; the other formats are full-bleed.
+macOS 26 reads the installed app's tile from `icons/icon.icon` instead, an Icon
+Composer icon that the Tauri CLI compiles with Xcode's `actool` (26 or later)
+into the bundle's `Assets.car`: an app with only an `.icns` gets a glass finish
+drawn over it there, which blurs the triangles' edges. The `.icns` stays for
+macOS before 26, and for the dev build, which is not an `.app` bundle.
 
 `check-desktop-build` builds the shell with `TAURI_CONFIG` unset, i.e. the
 installed app's configuration, into the same `backend/target/debug/delta-desktop`.

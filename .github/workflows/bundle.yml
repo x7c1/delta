@@ -212,6 +212,20 @@ jobs:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           uploadUpdaterJson: false
 
+      # The Tauri CLI compiles icons/icon.icon into Assets.car only with an
+      # actool of 26 or later, and otherwise skips it with a warning; the app
+      # would then fall back to the .icns, which macOS 26 draws blurred. Fail
+      # instead of shipping that.
+      - name: Check the app's Icon Composer icon
+        if: runner.os == 'macOS'
+        env:
+          APP: backend/target/${{ matrix.target }}/release/bundle/macos/Delta.app
+        run: |
+          test -f "$APP/Contents/Resources/Assets.car" || { echo "::error::$APP has no Assets.car"; exit 1; }
+          name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$APP/Contents/Info.plist") \
+            || { echo "::error::$APP's Info.plist has no CFBundleIconName"; exit 1; }
+          echo "CFBundleIconName: $name"
+
       # artifactPaths is a JSON array; upload-artifact takes one path per line.
       - name: List the bundle paths
         id: paths
