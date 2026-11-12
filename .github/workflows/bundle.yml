@@ -179,20 +179,20 @@ jobs:
         run: cargo build --release -p delta-update-helper
         working-directory: backend
 
-      - name: TEMP diagnose actool
+      - name: TEMP wrap actool
         if: runner.os == 'macOS'
-        continue-on-error: true
         run: |
-          which -a actool || true
-          run() {
-            d=$(mktemp -d); mkdir "$d/out"; cp -R backend/crates/apps/delta-desktop/icons/icon.icon "$d/Icon.icon"
-            actool "$d/Icon.icon" --compile "$d/out" --output-format human-readable-text --notices --warnings \
-              --output-partial-info-plist "$d/out/p.plist" --app-icon Icon --include-all-app-icons --accent-color AccentColor \
-              --enable-on-demand-resources NO --development-region en --target-device mac \
-              --minimum-deployment-target 26.0 --platform macosx 2>&1 | tail -3
-          }
-          echo "=== plain actool"; run
-          for t in 10.13 11.0 26.0; do echo "=== MACOSX_DEPLOYMENT_TARGET=$t"; MACOSX_DEPLOYMENT_TARGET=$t run; done
+          shim="$RUNNER_TEMP/actool-shim"; mkdir -p "$shim"
+          cat > "$shim/actool" <<'SH'
+          #!/bin/bash
+          log="$RUNNER_TEMP/actool-calls.log"
+          { echo "=== call: $*"; env | sort; if [ -d "$1" ]; then find "$1" -exec ls -ld {} \; ; cat "$1/icon.json"; fi; } >> "$log" 2>&1
+          /usr/bin/actool "$@" > "$RUNNER_TEMP/actool-out.txt" 2>&1; rc=$?
+          { echo "--- rc=$rc"; cat "$RUNNER_TEMP/actool-out.txt"; } >> "$log"
+          cat "$RUNNER_TEMP/actool-out.txt"; exit $rc
+          SH
+          chmod +x "$shim/actool"
+          echo "$shim" >> "$GITHUB_PATH"
 
       # Given no token, releaseId, tagName or releaseName, the action only
       # builds: it can create, change or upload to no Release or tag.
@@ -226,6 +226,10 @@ jobs:
           projectPath: backend/crates/apps/delta-desktop
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           uploadUpdaterJson: false
+
+      - name: TEMP dump actool calls
+        if: always() && runner.os == 'macOS'
+        run: cat "$RUNNER_TEMP/actool-calls.log" || true
 
       # The Tauri CLI compiles icons/icon.icon into Assets.car only with an
       # actool of 26 or later, and otherwise skips it with a warning; the app
