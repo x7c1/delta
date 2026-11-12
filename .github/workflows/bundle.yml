@@ -67,7 +67,7 @@ jobs:
         include:
           # Apple silicon only: Intel Macs are not supported.
           - name: macos-aarch64
-            runner: xcode-27
+            runner: macos-26
             target: aarch64-apple-darwin
             bundles: dmg
           - name: linux-x86_64
@@ -179,6 +179,21 @@ jobs:
         run: cargo build --release -p delta-update-helper
         working-directory: backend
 
+      - name: TEMP wrap actool
+        if: runner.os == 'macOS'
+        run: |
+          shim="$RUNNER_TEMP/actool-shim"; mkdir -p "$shim"
+          cat > "$shim/actool" <<'SH'
+          #!/bin/bash
+          log="$RUNNER_TEMP/actool-calls.log"
+          { echo "=== call: $1"; for fd in 0 1 2; do printf 'fd %s: ' "$fd"; if [ -e /dev/fd/$fd ]; then ls -lL /dev/fd/$fd 2>&1; else echo closed; fi; done; } >> "$log" 2>&1
+          if [ "$1" = --version ]; then exec /usr/bin/actool "$@"; fi
+          /usr/bin/actool "$@" < /dev/null; rc=$?
+          echo "rc with stdin=/dev/null: $rc" >> "$log"; exit $rc
+          SH
+          chmod +x "$shim/actool"
+          echo "$shim" >> "$GITHUB_PATH"
+
       # Given no token, releaseId, tagName or releaseName, the action only
       # builds: it can create, change or upload to no Release or tag.
       #
@@ -211,6 +226,10 @@ jobs:
           projectPath: backend/crates/apps/delta-desktop
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           uploadUpdaterJson: false
+
+      - name: TEMP dump actool calls
+        if: always() && runner.os == 'macOS'
+        run: cat "$RUNNER_TEMP/actool-calls.log" || true
 
       # The Tauri CLI compiles icons/icon.icon into Assets.car only with an
       # actool of 26 or later, and otherwise skips it with a warning; the app
