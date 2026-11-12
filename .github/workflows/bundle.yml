@@ -223,15 +223,22 @@ jobs:
 
       # The app must carry the Assets.car and name its icon in Info.plist, or
       # macOS 26 falls back to the .icns and draws it blurred. Fail instead of
-      # shipping that.
+      # shipping that. The bundler removes the Delta.app it builds for the
+      # .dmg, so the check reads the app inside the .dmg.
       - name: Check the app's Icon Composer icon
         if: runner.os == 'macOS'
         env:
-          APP: backend/target/${{ matrix.target }}/release/bundle/macos/Delta.app
+          DMG_DIR: backend/target/${{ matrix.target }}/release/bundle/dmg
         run: |
-          test -f "$APP/Contents/Resources/Assets.car" || { echo "::error::$APP has no Assets.car"; exit 1; }
-          name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$APP/Contents/Info.plist") \
-            || { echo "::error::$APP's Info.plist has no CFBundleIconName"; exit 1; }
+          dmgs=("$DMG_DIR"/*.dmg)
+          [ "${#dmgs[@]}" = 1 ] && [ -f "${dmgs[0]}" ] || { echo "::error::expected one .dmg in $DMG_DIR"; exit 1; }
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "${dmgs[0]}" >/dev/null
+          trap 'hdiutil detach "$mnt" >/dev/null' EXIT
+          app="$mnt/Delta.app"
+          test -f "$app/Contents/Resources/Assets.car" || { echo "::error::${dmgs[0]}'s Delta.app has no Assets.car"; exit 1; }
+          name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$app/Contents/Info.plist") \
+            || { echo "::error::${dmgs[0]}'s Delta.app has no CFBundleIconName in Info.plist"; exit 1; }
           echo "CFBundleIconName: $name"
 
       # artifactPaths is a JSON array; upload-artifact takes one path per line.
