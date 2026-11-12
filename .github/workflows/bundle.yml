@@ -183,18 +183,16 @@ jobs:
         if: runner.os == 'macOS'
         continue-on-error: true
         run: |
-          xcodebuild -version
-          xcrun actool --version
-          ls /Applications | grep -i xcode || true
-          for t in 10.13 11.0 26.0; do
+          which -a actool || true
+          run() {
             d=$(mktemp -d); mkdir "$d/out"; cp -R backend/crates/apps/delta-desktop/icons/icon.icon "$d/Icon.icon"
-            echo "=== minimum-deployment-target $t"
-            xcrun actool "$d/Icon.icon" --compile "$d/out" --output-format human-readable-text --notices --warnings \
+            actool "$d/Icon.icon" --compile "$d/out" --output-format human-readable-text --notices --warnings \
               --output-partial-info-plist "$d/out/p.plist" --app-icon Icon --include-all-app-icons --accent-color AccentColor \
               --enable-on-demand-resources NO --development-region en --target-device mac \
-              --minimum-deployment-target "$t" --platform macosx 2>&1 | tail -5
-            ls "$d/out"
-          done
+              --minimum-deployment-target 26.0 --platform macosx 2>&1 | tail -3
+          }
+          echo "=== plain actool"; run
+          for t in 10.13 11.0 26.0; do echo "=== MACOSX_DEPLOYMENT_TARGET=$t"; MACOSX_DEPLOYMENT_TARGET=$t run; done
 
       # Given no token, releaseId, tagName or releaseName, the action only
       # builds: it can create, change or upload to no Release or tag.
