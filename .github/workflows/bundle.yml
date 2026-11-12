@@ -179,6 +179,20 @@ jobs:
         run: cargo build --release -p delta-update-helper
         working-directory: backend
 
+      - name: TEMP actool under a hidden directory
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          for prefix in tmp. .tmp; do
+            d=$(mktemp -d "$TMPDIR/${prefix}XXXXXX"); mkdir "$d/out"; cp -R backend/crates/apps/delta-desktop/icons/icon.icon "$d/Icon.icon"
+            echo "=== $d"
+            /usr/bin/actool "$d/Icon.icon" --compile "$d/out" --output-format human-readable-text --notices --warnings \
+              --output-partial-info-plist "$d/out/p.plist" --app-icon Icon --include-all-app-icons --accent-color AccentColor \
+              --enable-on-demand-resources NO --development-region en --target-device mac \
+              --minimum-deployment-target 26.0 --platform macosx 2>&1 | tail -4
+            echo "rc=${PIPESTATUS[0]}"; ls "$d/out"
+          done
+
       - name: TEMP wrap actool
         if: runner.os == 'macOS'
         run: |
