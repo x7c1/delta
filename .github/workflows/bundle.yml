@@ -67,7 +67,7 @@ jobs:
         include:
           # Apple silicon only: Intel Macs are not supported.
           - name: macos-aarch64
-            runner: macos-26
+            runner: xcode-27
             target: aarch64-apple-darwin
             bundles: dmg
           - name: linux-x86_64
@@ -178,26 +178,6 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo build --release -p delta-update-helper
         working-directory: backend
-
-      - name: TEMP actool by cwd and stdin
-        if: runner.os == 'macOS'
-        run: |
-          src="$PWD/backend/crates/apps/delta-desktop/icons/icon.icon"
-          try() {
-            label="$1"; dir="$2"; shift 2; d=$(mktemp -d); cp -R "$src" "$d/Icon.icon"; mkdir "$d/out"
-            echo "=== $label"
-            (cd "$dir" && "$@" /usr/bin/actool "$d/Icon.icon" --compile "$d/out" --output-format human-readable-text \
-                --notices --warnings --output-partial-info-plist "$d/out/p.plist" --app-icon Icon --include-all-app-icons \
-                --accent-color AccentColor --enable-on-demand-resources NO --development-region en --target-device mac \
-                --minimum-deployment-target 26.0 --platform macosx < /dev/null 2>&1 | tail -2)
-            ls "$d/out"
-          }
-          try "cwd repo root" "$PWD" env
-          try "cwd delta-desktop" "$PWD/backend/crates/apps/delta-desktop" env
-          try "cwd backend" "$PWD/backend" env
-          try "cwd icons" "$PWD/backend/crates/apps/delta-desktop/icons" env
-          try "cwd /tmp" /tmp env
-          exit 1
 
       # Given no token, releaseId, tagName or releaseName, the action only
       # builds: it can create, change or upload to no Release or tag.
