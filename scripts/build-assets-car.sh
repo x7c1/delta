@@ -14,6 +14,20 @@
 # given this prebuilt Assets.car instead (tauri.macos.conf.json lists it in
 # bundle.icon), and the Tauri CLI only copies it.
 #
+# Nothing fails once those issues are fixed, so check them. When the Tauri
+# CLI's actool call succeeds under tauri-action on CI, drop the workaround:
+# - delete this script, its call (and comment) in the Makefile's
+#   desktop-build target, and its path filter and "Build the app's
+#   Assets.car" step in .github/workflows/bundle.yml;
+# - delete backend/crates/apps/delta-desktop/tauri.macos.conf.json and list
+#   icons/icon.icon in bundle.icon of the tauri.conf.json beside it, so that
+#   the Tauri CLI compiles it itself;
+# - update the icon paragraph of docs/guides/development/README.md and the
+#   comment above write_icon_composer in scripts/gen-icons.sh, which both
+#   name this script.
+# Keep the workflow's "Check the app's Icon Composer icon" step, which then
+# checks the CLI's Assets.car.
+#
 # actool hands the work to a long-lived ibtoold daemon, which a broken earlier
 # call can leave unusable; the daemon is stopped first, and actool reads from
 # /dev/null rather than whatever stdin the caller has.
