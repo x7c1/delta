@@ -192,9 +192,10 @@ write_set "$SOURCE" installed "$INSTALLED_DIR"
 
 # macOS 26 draws the tile of an app whose icon is only an .icns in a shape and
 # with a glass finish of its own over the picture, which blurs the triangles'
-# edges in the Dock. An Icon Composer icon (`icon.icon`, a directory the Tauri
-# CLI compiles with Xcode's actool into the bundle's Assets.car and names in
-# Info.plist's CFBundleIconName) is drawn as it is described: here the source's
+# edges in the Dock. An Icon Composer icon (`icon.icon`, a directory that
+# scripts/build-assets-car.sh compiles with Xcode's actool into the Assets.car
+# the bundle carries, named in Info.plist's CFBundleIconName) is drawn as it is
+# described: here the source's
 # background colour as the tile's fill, and the triangles, without the
 # background, as one layer over the whole canvas, with the glass, the specular
 # highlight, the shadow and the translucency turned off, so that it is drawn

@@ -34,6 +34,8 @@ on:
       - backend/Cargo.lock
       - .github/workflows/bundle.yml
       - Makefile
+      # Compiles the Assets.car the macOS bundle carries.
+      - scripts/build-assets-car.sh
       - frontend/**
   workflow_dispatch:
     inputs:
@@ -179,20 +181,12 @@ jobs:
         run: cargo build --release -p delta-update-helper
         working-directory: backend
 
-      - name: TEMP wrap actool
+      # tauri.macos.conf.json takes the app's Assets.car from
+      # backend/target/icon-composer/, as `make desktop-build` builds it: the
+      # Tauri CLI's own actool call fails under this action (see the script).
+      - name: Build the app's Assets.car
         if: runner.os == 'macOS'
-        run: |
-          shim="$RUNNER_TEMP/actool-shim"; mkdir -p "$shim"
-          cat > "$shim/actool" <<'SH'
-          #!/bin/bash
-          log="$RUNNER_TEMP/actool-calls.log"
-          { echo "=== call: $1"; for fd in 0 1 2; do printf 'fd %s: ' "$fd"; if [ -e /dev/fd/$fd ]; then ls -lL /dev/fd/$fd 2>&1; else echo closed; fi; done; } >> "$log" 2>&1
-          if [ "$1" = --version ]; then exec /usr/bin/actool "$@"; fi
-          /usr/bin/actool "$@" < /dev/null; rc=$?
-          echo "rc with stdin=/dev/null: $rc" >> "$log"; exit $rc
-          SH
-          chmod +x "$shim/actool"
-          echo "$shim" >> "$GITHUB_PATH"
+        run: scripts/build-assets-car.sh
 
       # Given no token, releaseId, tagName or releaseName, the action only
       # builds: it can create, change or upload to no Release or tag.
@@ -227,14 +221,9 @@ jobs:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           uploadUpdaterJson: false
 
-      - name: TEMP dump actool calls
-        if: always() && runner.os == 'macOS'
-        run: cat "$RUNNER_TEMP/actool-calls.log" || true
-
-      # The Tauri CLI compiles icons/icon.icon into Assets.car only with an
-      # actool of 26 or later, and otherwise skips it with a warning; the app
-      # would then fall back to the .icns, which macOS 26 draws blurred. Fail
-      # instead of shipping that.
+      # The app must carry the Assets.car and name its icon in Info.plist, or
+      # macOS 26 falls back to the .icns and draws it blurred. Fail instead of
+      # shipping that.
       - name: Check the app's Icon Composer icon
         if: runner.os == 'macOS'
         env:

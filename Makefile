@@ -100,7 +100,7 @@ desktop:
 	fi
 	@echo "Installed. If Delta is running, quit it and start it again to use the new build."
 
-## desktop-build: build the SPA, then bundle the installed app under backend/target/release/bundle/ without installing it (macOS: Delta.app and a .dmg; Linux: the delta-desktop .deb) (one-time: `cargo install tauri-cli --version '^2' --locked`)
+## desktop-build: build the SPA, then bundle the installed app under backend/target/release/bundle/ without installing it (macOS: Delta.app and a .dmg, which needs Xcode 26 or later; Linux: the delta-desktop .deb) (one-time: `cargo install tauri-cli --version '^2' --locked`)
 .PHONY: desktop-build
 # TAURI_CONFIG is unset so an exported value (the dev identifier override, say)
 # cannot leak into the bundle: releases carry tauri.conf.json's identifier.
@@ -108,9 +108,13 @@ desktop:
 # deletes the Delta.app it builds for the .dmg unless "app" is requested too,
 # and `make desktop` installs that Delta.app.
 # On Linux the .deb also carries the update helper, which tauri.linux.conf.json
-# takes from backend/target/release/, so it is built first.
+# takes from backend/target/release/, so it is built first. On macOS the .app
+# carries the Assets.car compiled from icons/icon.icon, which
+# tauri.macos.conf.json takes from backend/target/icon-composer/ (see
+# scripts/build-assets-car.sh for why the Tauri CLI does not compile it).
 desktop-build: web-dist
 	@if [ "$$(uname -s)" = Linux ]; then cd backend && cargo build --release -p delta-update-helper; fi
+	@if [ "$$(uname -s)" = Darwin ]; then scripts/build-assets-car.sh; fi
 	cd backend/crates/apps/delta-desktop && env -u TAURI_CONFIG cargo tauri build
 
 # --- Generated code -----------------------------------------------------------
