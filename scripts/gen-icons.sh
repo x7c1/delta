@@ -12,11 +12,16 @@
 #   backend/crates/apps/delta-desktop/icons/      the installed app (tauri.conf.json)
 #     32x32.png 128x128.png 128x128@2x.png icon.png icon.ico   the source as is
 #     icon.icns                                   the source inset on a
-#                                                 transparent canvas (see INSET_PERCENT)
+#                                                 transparent canvas (see INSET_PERCENT),
+#                                                 for macOS before 26
+#     icon.icon/                                  the Icon Composer icon macOS 26
+#                                                 draws the .app's tile from
+#                                                 (see write_icon_composer)
 #   backend/crates/apps/delta-desktop/icons-dev/  the dev build (scripts/dev.sh
 #                                                 selects it through TAURI_CONFIG):
-#                                                 the same set, from the source
-#                                                 with the "D" badge
+#                                                 the same set but icon.icon,
+#                                                 from the source with the
+#                                                 "D" badge
 #   frontend/packages/apps/web/public/
 #     favicon.svg                                 a copy of the source
 #     favicon-32.png                              its 32 px raster
@@ -184,6 +189,50 @@ write_set() {
 }
 
 write_set "$SOURCE" installed "$INSTALLED_DIR"
+
+# macOS 26 draws the tile of an app whose icon is only an .icns in a shape and
+# with a glass finish of its own over the picture, which blurs the triangles'
+# edges in the Dock. An Icon Composer icon (`icon.icon`, a directory that
+# scripts/build-assets-car.sh compiles with Xcode's actool into the Assets.car
+# the bundle carries, named in Info.plist's CFBundleIconName) is drawn as it is
+# described: here the source's
+# background colour as the tile's fill, and the triangles, without the
+# background, as one layer over the whole canvas, with the glass, the specular
+# highlight, the shadow and the translucency turned off, so that it is drawn
+# flat as the source is. The system gives the tile its own shape. The .icns
+# stays for macOS before 26. Only the installed app gets one: the dev build is
+# not an .app bundle, so macOS shows its embedded .icns instead.
+write_icon_composer() {
+  local out="$1"
+  local fill
+  fill="$(sed -nE "s|.*<rect width=\"$SIZE\" height=\"$SIZE\" rx=\"$SOURCE_RX\" fill=\"#([0-9A-Fa-f]{6})\"/>.*|\1|p" "$SOURCE")"
+  [ -n "$fill" ] || die "$SOURCE: its background <rect> was not found to take the fill from"
+  rm -rf "$out"
+  mkdir -p "$out/Assets"
+  sed -e '/<rect /d' -e "s|width=\"$SIZE\" height=\"$SIZE\"|width=\"$((SIZE * 2))\" height=\"$((SIZE * 2))\"|" \
+    "$SOURCE" >"$out/Assets/delta.svg"
+  python3 - "$fill" "$out/icon.json" <<'PY'
+import json, sys
+fill, path = sys.argv[1], sys.argv[2]
+channels = ",".join(f"{int(fill[i:i + 2], 16) / 255:.5f}" for i in (0, 2, 4))
+icon = {
+    "fill": {"solid": f"srgb:{channels},1.00000"},
+    "groups": [
+        {
+            "layers": [{"glass": False, "image-name": "delta.svg", "name": "delta"}],
+            "shadow": {"kind": "none", "opacity": 0.5},
+            "specular": False,
+            "translucency": {"enabled": False, "value": 0.5},
+        }
+    ],
+    "supported-platforms": {"squares": ["macOS"]},
+}
+open(path, "w").write(json.dumps(icon, indent=2, sort_keys=True) + "\n")
+PY
+  log "wrote ${out#"$REPO_ROOT"/} (Icon Composer)"
+}
+
+write_icon_composer "$INSTALLED_DIR/icon.icon"
 
 write_badged_svg "$SOURCE" "$WORK_DIR/dev.svg"
 write_set "$WORK_DIR/dev.svg" dev "$DEV_DIR"
