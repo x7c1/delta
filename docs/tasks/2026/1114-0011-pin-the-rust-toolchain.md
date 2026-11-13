@@ -77,5 +77,5 @@ What to do:
 
 ### Before merge (verified outside the check command)
 
-- [ ] On the pull request, the required check `all-green` passes and the
+- [x] On the pull request, the required check `all-green` passes and the
       `bundle` workflow's macOS and Linux jobs pass with the new install step
