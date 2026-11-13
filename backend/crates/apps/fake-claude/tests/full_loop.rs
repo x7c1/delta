@@ -139,7 +139,8 @@ async fn drive_loop(app: &axum::Router, workdir: &std::path::Path) -> Result<(),
         "text": "hello fake claude",
         "workdir": workdir.to_string_lossy(),
     });
-    let response = app
+    // The router's error type is `Infallible`, so the call cannot fail.
+    let Ok(response) = app
         .clone()
         .oneshot(
             Request::post("/api/sends")
@@ -152,8 +153,7 @@ async fn drive_loop(app: &axum::Router, workdir: &std::path::Path) -> Result<(),
                 .body(Body::from(send_body.to_string()))
                 .map_err(|e| e.to_string())?,
         )
-        .await
-        .map_err(|e| e.to_string())?;
+        .await;
     if response.status() != StatusCode::CREATED {
         return Err(format!("POST /api/sends returned {}", response.status()));
     }
@@ -195,7 +195,7 @@ async fn wait_for<T>(
     let deadline = Instant::now() + WAIT_DEADLINE;
     let mut last_body = serde_json::Value::Null;
     while Instant::now() < deadline {
-        let response = app
+        let Ok(response) = app
             .clone()
             .oneshot(
                 Request::get(path)
@@ -204,8 +204,7 @@ async fn wait_for<T>(
                     .body(Body::empty())
                     .map_err(|e| e.to_string())?,
             )
-            .await
-            .map_err(|e| e.to_string())?;
+            .await;
         let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .map_err(|e| e.to_string())?;

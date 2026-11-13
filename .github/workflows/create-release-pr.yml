@@ -38,13 +38,25 @@ jobs:
       # [workspace.package] boundaries so sed-style rewrites can't corrupt the
       # file. The version is fixed so a new release cannot change what runs
       # here unreviewed.
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable branch
+      #
+      # rustup takes the toolchain from rust-toolchain.toml, so that file alone
+      # is fetched first, without credentials, into a directory of its own;
+      # the checkout below replaces it.
+      - name: Fetch rust-toolchain.toml
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          toolchain: stable
+          path: toolchain
+          sparse-checkout: rust-toolchain.toml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+        working-directory: toolchain
 
       - name: Install cargo-edit
         run: cargo install cargo-edit@0.13.13 --locked
+        working-directory: toolchain
 
       # Both checkout's credential helper (used by the subsequent `git push`)
       # and the script's `gh pr create` must authenticate as the PAT user, not
