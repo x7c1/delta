@@ -26,7 +26,8 @@ lays out which is which.
   interactive OAuth. If you have not logged in yet, run `claude` once on its own.
 - To drive Codex sessions, an authenticated Codex CLI (`codex`) — the server
   spawns `codex app-server` on demand. Optional if you only use Claude Code.
-- The Rust toolchain (`cargo`) and pnpm (via `corepack enable`).
+- rustup, which installs the pinned Rust toolchain on first use (see
+  [Rust toolchain](README.md#rust-toolchain)), and pnpm (via `corepack enable`).
 
 ## Launch
 

@@ -79,11 +79,10 @@ jobs:
           persist-credentials: false
 
       # cargo metadata reads the manifest, so the toolchain has to be
-      # available even when the version turns out to be unchanged.
+      # available even when the version turns out to be unchanged. rustup
+      # installs the version and components rust-toolchain.toml names.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable branch
-        with:
-          toolchain: stable
+        run: rustup toolchain install
 
       - name: Check if version changed
         if: github.event_name == 'workflow_run'
