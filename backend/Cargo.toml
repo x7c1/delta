@@ -76,7 +76,7 @@ tokio-tungstenite = "0.30"
 include_dir = "0.7"
 # Encodes the `'sha256-…'` sources of the CSP delta-server sends with the
 # embedded page.
-base64 = "0.22"
+base64 = "0.23"
 portable-pty = "0.9"
 rusqlite = { version = "0.41", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
