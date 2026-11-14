@@ -7,7 +7,9 @@ Delta has two top-level parts, treated as equals:
 - `backend/` — Rust `cargo` workspace. Crates live under `crates/` and are
   split by architectural layer: `apps/` (bins), `gateway/` (external I/O),
   `domain/` (model + usecase), `libs/` (shared). Dependency direction is
-  enforced by crate boundaries.
+  enforced by crate boundaries. A new layer directory must be added to
+  `members` and `default-members` in `backend/Cargo.toml` (see the comment
+  there).
 - `frontend/` — TypeScript pnpm workspace. Packages live under `packages/`
   and are split by layer: `apps/`, `ui/`, `gateway/`, `domain/`, `testing/`.
   Dependency direction is enforced by dependency-cruiser.

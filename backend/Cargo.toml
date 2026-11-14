@@ -1,6 +1,15 @@
 [workspace]
 resolver = "2"
-members = ["crates/*/*"]
+# One glob per layer directory, with `*` only as the last path segment:
+# Dependabot does not expand a `*` before the last segment, so it would
+# silently drop crates and fail its update job. A new layer directory under
+# `crates/` needs its own entry here and in `default-members` below.
+members = [
+    "crates/apps/*",
+    "crates/domain/*",
+    "crates/gateway/*",
+    "crates/libs/*",
+]
 # Everything except the desktop shell (`crates/apps/delta-desktop`), so a plain
 # `cargo build` / `cargo test` / `cargo clippy` never pulls in Tauri and its
 # system webview libraries. Build the shell by naming it: `cargo build -p
