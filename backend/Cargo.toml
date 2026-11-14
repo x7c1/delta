@@ -1,6 +1,15 @@
 [workspace]
 resolver = "2"
-members = ["crates/*/*"]
+# One glob per layer directory, with `*` only as the last path segment:
+# Dependabot does not expand a `*` before the last segment, so it would
+# silently drop crates and fail its update job. A new layer directory under
+# `crates/` needs its own entry here and in `default-members` below.
+members = [
+    "crates/apps/*",
+    "crates/domain/*",
+    "crates/gateway/*",
+    "crates/libs/*",
+]
 # Everything except the desktop shell (`crates/apps/delta-desktop`), so a plain
 # `cargo build` / `cargo test` / `cargo clippy` never pulls in Tauri and its
 # system webview libraries. Build the shell by naming it: `cargo build -p
@@ -61,13 +70,13 @@ axum = { version = "0.8", features = ["ws"] }
 futures-util = "0.3"
 # A WebSocket client for tests that drive the server's live sockets over a real
 # connection. The same version axum's `ws` feature already builds on.
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
 # Compiles a directory tree into the binary (delta-server embeds the built web
 # frontend with it under its `embed-web` feature).
 include_dir = "0.7"
 # Encodes the `'sha256-…'` sources of the CSP delta-server sends with the
 # embedded page.
-base64 = "0.22"
+base64 = "0.23"
 portable-pty = "0.9"
 rusqlite = { version = "0.41", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
@@ -98,7 +107,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-platform-verifier = "0.7"
 # Verifies a downloaded release asset against the sha256 digest GitHub states
 # for it, computed while the file streams in.
-sha2 = "0.10"
+sha2 = "0.11"
 # Verifies a release bundle against its minisign (Ed25519) signature: pure
 # Rust, no network, no dependencies of its own (`crates/libs/release-signature`).
 minisign-verify = "=0.3.0"

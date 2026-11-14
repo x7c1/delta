@@ -43,10 +43,25 @@ by both — see "Portability conventions" below.
 | macOS | `tmux` and `jq` via Homebrew (`brew install tmux jq`). `lsof`, `make` (GNU make 3.81), `awk`, `bash` 3.2, `date`, and `pkill` ship with the system. Installing the Xcode Command Line Tools (`xcode-select --install`) is the standard way to get `make`. |
 | Linux, desktop shell only | The system libraries Tauri v2 links against, needed only to build `delta-desktop` (`make desktop-dev`, `make desktop`, and `make check`'s `check-desktop-build` and `check-backend-doc`); `scripts/setup-system.sh` installs them on Debian/Ubuntu. macOS needs nothing beyond the Xcode Command Line Tools. |
 
-In addition, both platforms need the Rust toolchain (`cargo`) and pnpm (via
-`corepack enable`), plus the agent CLIs you plan to drive: an authenticated
-Claude Code (`claude`) and/or Codex (`codex`) — see
-[local-run.md](local-run.md).
+In addition, both platforms need rustup (which provides `cargo`; see
+[Rust toolchain](#rust-toolchain)) and pnpm (via `corepack enable`), plus the
+agent CLIs you plan to drive: an authenticated Claude Code (`claude`) and/or
+Codex (`codex`) — see [local-run.md](local-run.md).
+
+### Rust toolchain
+
+The Rust version is pinned in `rust-toolchain.toml` at the repository root,
+together with the components the checks use (`rustfmt`, `clippy`). Every
+`cargo` call in the repository, in `backend/` or elsewhere, resolves that
+version, and rustup downloads it on first use, so there is nothing to install
+by hand beyond rustup itself. CI installs the same version from the same file
+(`rustup toolchain install`, which reads it when given no toolchain name), so
+the file is the only place the version is written.
+
+A new Rust release therefore never reaches `main` on its own: Dependabot's
+weekly `rust-toolchain` update raises the pinned version in a pull request,
+whose checks show what the new compiler and lints break. Fix those findings in
+that pull request before merging it.
 
 ### `lsof` is assumed
 
@@ -558,9 +573,10 @@ reusable workflows (`./...`) are exempt. It and its test
 (`make check-workflow-pins-test`) are part of `make check` and of CI's
 `workflow-pins` job. Dependabot (`.github/dependabot.yml`) proposes the new
 SHA and comment when an action releases, and weekly updates for the cargo and
-npm dependencies. Minor and patch updates of each ecosystem come as one grouped
-PR; a major update comes as a PR of its own, so a failure names the dependency
-that caused it. Security updates are never grouped.
+npm dependencies and for the pinned Rust toolchain (see
+[Rust toolchain](#rust-toolchain)). Minor and patch updates of each ecosystem
+come as one grouped PR; a major update comes as a PR of its own, so a failure
+names the dependency that caused it. Security updates are never grouped.
 
 CI's `audit` job checks the shipped dependencies for known advisories:
 `cargo deny check advisories` against the RustSec database, configured by
