@@ -3,3 +3,5 @@ packages:
 allowBuilds:
   esbuild: true
   msw: true
+overrides:
+  minimatch: ^11.0.1
