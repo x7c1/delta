@@ -49,6 +49,10 @@ impl Workspace for FsWorkspace {
         Ok(dir.to_string_lossy().into_owned())
     }
 
+    async fn is_existing_dir(&self, path: &str) -> std::result::Result<bool, delta_usecase::Error> {
+        Ok(self.dir_exists(path).await?)
+    }
+
     async fn list_dirs(
         &self,
         path: &str,

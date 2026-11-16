@@ -477,6 +477,13 @@ impl IntoResponse for ApiError {
                     Error::WorktreeNotRegistered(_) => {
                         (StatusCode::CONFLICT, Some(WORKTREE_NOT_REGISTERED_CODE))
                     }
+                    // A launch directory that is gone. From a new launch it
+                    // reaches the browser as a `spawn_failed` event (like the
+                    // launch preparation failures below), but a resume
+                    // (`POST /api/sessions/{id}/open`) of a session whose cwd was
+                    // removed returns it as this response body, with the
+                    // message naming the missing directory.
+                    Error::LaunchDirMissing(_) => (StatusCode::INTERNAL_SERVER_ERROR, None),
                     // Everything else is an internal failure. The launch
                     // preparation failures only land here defensively: they
                     // happen long after the send was accepted, so they reach
