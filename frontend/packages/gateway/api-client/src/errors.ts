@@ -7,6 +7,12 @@
  * Callers branch on this to keep the session closed and show a specific message
  * rather than a generic failure.
  *
+ * `worktree_unrecoverable` means resuming a closed session found its working
+ * directory gone and could not rebuild it as a worktree, because the session
+ * identifies no branch to check out there. Nothing was created; callers show
+ * the server's message, which names the directory and the reason, as they do
+ * for any other failed open.
+ *
  * `session_spawning` means a request named a session whose launch has not bound
  * yet. Two requests meet it: a **branch** send, which has no message to branch
  * from (a plain send to a starting session is instead accepted as a `queued` row
@@ -122,6 +128,7 @@
  */
 export type ApiErrorCode =
   | 'resume_unavailable'
+  | 'worktree_unrecoverable'
   | 'session_spawning'
   | 'session_open'
   | 'session_hooks_unreachable'

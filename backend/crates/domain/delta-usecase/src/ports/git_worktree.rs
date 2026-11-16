@@ -114,6 +114,16 @@ pub trait GitWorktree: Send + Sync {
         branch: &str,
     ) -> Result<Option<String>>;
 
+    /// True iff [`Self::add_worktree_checkout`] has `branch` to check out in
+    /// `repo_root`: the local branch `refs/heads/<branch>` exists, or the
+    /// remote-tracking branch `refs/remotes/origin/<branch>` does.
+    ///
+    /// Runs `git -C <repo_root> show-ref --verify --quiet` for each ref; a
+    /// non-zero exit is the "no such ref" signal, not an error to propagate.
+    /// Lightweight: no fetch, so a branch on `origin` that this clone has never
+    /// fetched reads as absent.
+    async fn has_branch(&self, repo_root: &str, branch: &str) -> Result<bool>;
+
     /// Create a new worktree at `worktree_path` that checks out the existing
     /// local branch `branch` itself (NOT a fresh `delta-<id>` branch).
     ///
@@ -130,6 +140,25 @@ pub trait GitWorktree: Send + Sync {
     /// locked worktrees alone, so a locked stale entry still fails the add.
     /// A `git` failure surfaces its stderr in the error.
     async fn add_worktree_checkout(
+        &self,
+        repo_root: &str,
+        worktree_path: &str,
+        branch: &str,
+    ) -> Result<()>;
+
+    /// Check `branch` out again in a new worktree at `worktree_path` — the
+    /// rebuild of a vanished worktree a closed session is resumed into.
+    ///
+    /// The session's own branch is what is restored, and it may hold commits
+    /// never pushed or be gone from `origin` after its pull request merged, so
+    /// when local branch `branch` exists it is checked out as it is with **no
+    /// fetch** (`git -C <repo_root> worktree add <worktree_path> <branch>`):
+    /// `origin` need not be reachable. When only `origin/<branch>` is left,
+    /// this is [`Self::add_worktree_checkout`] — fetch, then a new local branch
+    /// tracking it — whose fetch failure is the error. Either way the parent of
+    /// `worktree_path` is created and stale worktree registrations are pruned
+    /// first, as there. A `git` failure surfaces its stderr in the error.
+    async fn restore_worktree_checkout(
         &self,
         repo_root: &str,
         worktree_path: &str,
@@ -308,6 +337,10 @@ impl GitWorktree for Box<dyn GitWorktree> {
         (**self).worktree_path_for_branch(repo_root, branch).await
     }
 
+    async fn has_branch(&self, repo_root: &str, branch: &str) -> Result<bool> {
+        (**self).has_branch(repo_root, branch).await
+    }
+
     async fn add_worktree_checkout(
         &self,
         repo_root: &str,
@@ -316,6 +349,17 @@ impl GitWorktree for Box<dyn GitWorktree> {
     ) -> Result<()> {
         (**self)
             .add_worktree_checkout(repo_root, worktree_path, branch)
+            .await
+    }
+
+    async fn restore_worktree_checkout(
+        &self,
+        repo_root: &str,
+        worktree_path: &str,
+        branch: &str,
+    ) -> Result<()> {
+        (**self)
+            .restore_worktree_checkout(repo_root, worktree_path, branch)
             .await
     }
 

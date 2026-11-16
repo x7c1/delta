@@ -1,7 +1,7 @@
 //! In-memory [`Workspace`] fake recording settings writes and modelling a small
 //! set of "existing" directories for the workdir-validation path.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use async_trait::async_trait;
@@ -38,7 +38,9 @@ pub(crate) struct FakeWorkspace {
     /// Directories `is_existing_dir` reports missing. Every other path is
     /// taken to exist, so a launch into a worktree the fake git "built" (or a
     /// canonicalized workdir) proceeds without scripting it.
-    pub(crate) missing_dirs: Mutex<Vec<String>>,
+    /// Shared, so a fake git build can make the directory it creates exist
+    /// (see [`Self::missing_dirs_handle`]).
+    pub(crate) missing_dirs: Arc<Mutex<Vec<String>>>,
 }
 
 impl Default for FakeWorkspace {
@@ -51,7 +53,7 @@ impl Default for FakeWorkspace {
             removed_trees: Mutex::default(),
             non_empty_dirs: Mutex::default(),
             removed_empty_dirs: Mutex::default(),
-            missing_dirs: Mutex::default(),
+            missing_dirs: Arc::default(),
         }
     }
 }
@@ -76,6 +78,13 @@ impl FakeWorkspace {
     pub(crate) fn with_missing_dir(self, dir: &str) -> Self {
         self.missing_dirs.lock().unwrap().push(dir.to_owned());
         self
+    }
+
+    /// The list of directories `is_existing_dir` reports missing, for a fake
+    /// git build to remove the directory it creates from (see
+    /// [`FakeGitWorktree::with_checkouts_creating_dirs_in`](super::FakeGitWorktree::with_checkouts_creating_dirs_in)).
+    pub(crate) fn missing_dirs_handle(&self) -> Arc<Mutex<Vec<String>>> {
+        Arc::clone(&self.missing_dirs)
     }
 
     /// Script `modified_at(path)` to report `at`.

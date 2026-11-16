@@ -102,6 +102,76 @@ impl Git {
         Ok(self.git(repo).args(args).output().await?)
     }
 
+    /// True iff `git -C <repo> show-ref --verify --quiet <full_ref>` exits 0:
+    /// the ref resolves. A non-zero exit is the expected "no such ref" signal,
+    /// not an error to propagate; failing to run `git` at all is one.
+    async fn ref_exists(
+        &self,
+        repo: &str,
+        full_ref: &str,
+    ) -> std::result::Result<bool, delta_usecase::Error> {
+        Ok(self
+            .output(repo, &["show-ref", "--verify", "--quiet", full_ref])
+            .await
+            .map_err(delta_usecase::Error::from)?
+            .status
+            .success())
+    }
+
+    /// Check `branch` out in a new worktree at `worktree_path`: the existing
+    /// local branch when `local` is true, else a new local branch tracking
+    /// `origin/<branch>`. Shared by [`GitWorktree::add_worktree_checkout`] and
+    /// [`GitWorktree::restore_worktree_checkout`], after whatever fetch each
+    /// needs.
+    ///
+    /// The parent of `worktree_path` is created first, and registrations of
+    /// worktrees whose directory is gone are pruned: git still counts the
+    /// branch as checked out in such a worktree, so `worktree add` for it would
+    /// fail until the stale entry is removed. `prune` only removes entries
+    /// whose directory is missing and skips locked ones, so live worktrees are
+    /// untouched; a locked stale entry still makes `worktree add` fail with
+    /// git's error.
+    async fn check_out_in_new_worktree(
+        &self,
+        repo_root: &str,
+        worktree_path: &str,
+        branch: &str,
+        local: bool,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        ensure_worktree_parent_dir(worktree_path)
+            .await
+            .map_err(delta_usecase::Error::from)?;
+        self.run(repo_root, "worktree prune", &["worktree", "prune"])
+            .await
+            .map_err(delta_usecase::Error::from)?;
+        if local {
+            self.run(
+                repo_root,
+                "worktree add <branch>",
+                &["worktree", "add", worktree_path, branch],
+            )
+            .await
+            .map_err(delta_usecase::Error::from)
+        } else {
+            let start_ref = format!("{ORIGIN_PREFIX}{branch}");
+            self.run(
+                repo_root,
+                "worktree add --track -b <branch>",
+                &[
+                    "worktree",
+                    "add",
+                    "--track",
+                    "-b",
+                    branch,
+                    worktree_path,
+                    &start_ref,
+                ],
+            )
+            .await
+            .map_err(delta_usecase::Error::from)
+        }
+    }
+
     /// Run `git -C <repo> <args>`, erroring on a non-zero exit with git's
     /// stderr surfaced. `label` names the command for the error message.
     async fn run(&self, repo: &str, label: &str, args: &[&str]) -> std::result::Result<(), Error> {
@@ -378,6 +448,19 @@ impl GitWorktree for Git {
         Ok(live_worktree_path_for_branch(&listing, branch))
     }
 
+    async fn has_branch(
+        &self,
+        repo_root: &str,
+        branch: &str,
+    ) -> std::result::Result<bool, delta_usecase::Error> {
+        let local = format!("refs/heads/{branch}");
+        if self.ref_exists(repo_root, &local).await? {
+            return Ok(true);
+        }
+        let remote = format!("refs/remotes/{REMOTE}/{branch}");
+        self.ref_exists(repo_root, &remote).await
+    }
+
     async fn add_worktree_checkout(
         &self,
         repo_root: &str,
@@ -395,59 +478,32 @@ impl GitWorktree for Git {
         .await
         .map_err(delta_usecase::Error::from)?;
 
-        ensure_worktree_parent_dir(worktree_path)
+        let local = self
+            .ref_exists(repo_root, &format!("refs/heads/{branch}"))
+            .await?;
+        self.check_out_in_new_worktree(repo_root, worktree_path, branch, local)
             .await
-            .map_err(delta_usecase::Error::from)?;
+    }
 
-        // Drop registrations of worktrees whose directory is gone. git still
-        // counts the branch as checked out in such a worktree, so `worktree
-        // add` for it would fail until the stale entry is removed. `prune`
-        // only removes entries whose directory is missing and skips locked
-        // ones, so live worktrees are untouched; a locked stale entry still
-        // makes `worktree add` below fail with git's error.
-        self.run(repo_root, "worktree prune", &["worktree", "prune"])
-            .await
-            .map_err(delta_usecase::Error::from)?;
-
-        // Does a local branch `<branch>` already exist? `show-ref --verify`
-        // exits 0 when `refs/heads/<branch>` resolves, non-zero otherwise — the
-        // expected "no such local branch" signal, not an error to propagate.
-        let local_ref = format!("refs/heads/{branch}");
-        let exists = self
-            .output(repo_root, &["show-ref", "--verify", "--quiet", &local_ref])
-            .await
-            .map_err(delta_usecase::Error::from)?
-            .status
-            .success();
-
-        if exists {
-            // Check the existing local branch out in the new worktree.
-            self.run(
-                repo_root,
-                "worktree add <branch>",
-                &["worktree", "add", worktree_path, branch],
-            )
-            .await
-            .map_err(delta_usecase::Error::from)
+    async fn restore_worktree_checkout(
+        &self,
+        repo_root: &str,
+        worktree_path: &str,
+        branch: &str,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        // The local branch is what is restored, unpushed commits and all, so
+        // it is checked out as it is, with no fetch: origin may not have it
+        // (never pushed, or deleted after its pull request merged) or may be
+        // out of reach. Only a branch left solely on origin needs the fetch.
+        let local = self
+            .ref_exists(repo_root, &format!("refs/heads/{branch}"))
+            .await?;
+        if local {
+            self.check_out_in_new_worktree(repo_root, worktree_path, branch, true)
+                .await
         } else {
-            // No local branch yet: create one tracking `origin/<branch>` and
-            // check it out in the new worktree.
-            let start_ref = format!("{ORIGIN_PREFIX}{branch}");
-            self.run(
-                repo_root,
-                "worktree add --track -b <branch>",
-                &[
-                    "worktree",
-                    "add",
-                    "--track",
-                    "-b",
-                    branch,
-                    worktree_path,
-                    &start_ref,
-                ],
-            )
-            .await
-            .map_err(delta_usecase::Error::from)
+            self.add_worktree_checkout(repo_root, worktree_path, branch)
+                .await
         }
     }
 

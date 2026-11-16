@@ -355,6 +355,25 @@ pub enum Error {
     #[error("the launch directory {0} does not exist or is not a directory")]
     LaunchDirMissing(String),
 
+    /// A closed session's directory is gone and the worktree it was cannot be
+    /// rebuilt there, because the session does not identify a branch to check
+    /// out: it recorded no repository or no branch at launch, the recorded
+    /// branch name is not a valid one, its repository no longer exists or is
+    /// not a git repository, or the branch exists neither locally nor on
+    /// `origin`. Raised by a resume before anything is
+    /// created, so no worktree and no pane are left behind.
+    ///
+    /// A resume (`POST /api/sessions/{id}/open`) returns it as the response
+    /// body with a stable code; the message names the directory and the
+    /// reason.
+    #[error("the session's directory {dir} is gone and cannot be rebuilt as a worktree: {reason}")]
+    WorktreeUnrecoverable {
+        /// The session's missing working directory.
+        dir: String,
+        /// Why no branch could be checked out there.
+        reason: String,
+    },
+
     /// A freshly-built worktree needs the user's launch confirmation before
     /// Claude Code's trust may be pre-accepted for it — its repository is not
     /// trusted, or its agent configuration differs from the trusted `HEAD` —

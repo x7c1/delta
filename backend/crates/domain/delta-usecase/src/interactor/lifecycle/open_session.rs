@@ -26,11 +26,14 @@ where
     /// token, re-writes the settings file (at Delta's own path, not the session
     /// cwd; the port is idempotent), launches `claude --settings <file> --resume
     /// <id>` in the stored cwd, and binds the new pane to the session
-    /// immediately. Resuming an already-open session is a no-op (the double-open
-    /// guard). A terminal-less **adapter-backed** session (e.g. Codex) takes a
-    /// separate branch at the top: it has no pane to open, so it resumes over
-    /// the adapter (`thread/resume`) when closed and no-ops when live, leaving
-    /// the Claude pane/`--resume` path below byte-for-byte unchanged.
+    /// immediately. A stored cwd that no longer exists is rebuilt first as a
+    /// worktree on the session's branch, at the same path (see the
+    /// `rebuild_worktree` module). Resuming an already-open session is a no-op
+    /// (the double-open guard). A terminal-less **adapter-backed** session
+    /// (e.g. Codex) takes a separate branch at the top: it has no pane to open,
+    /// so it resumes over the adapter (`thread/resume`) when closed and no-ops
+    /// when live, leaving the Claude pane/`--resume` path below byte-for-byte
+    /// unchanged.
     ///
     /// It does **not** dispatch the first prompt here. `claude --resume` needs a
     /// couple of seconds to replay the transcript before its TUI can accept input
@@ -114,9 +117,15 @@ where
             return Err(Error::ResumeUnavailable(id.as_str().to_owned()));
         };
 
-        // A cwd removed while the session was closed would have tmux start
-        // the resumed pane in the home directory; refuse before minting a
-        // token, writing settings, or spawning.
+        // A cwd removed while the session was closed — typically a git
+        // worktree — is checked out again at the same path from the branch
+        // the session records, since `claude --resume` finds the transcript
+        // and the folder trust by that path. A session that names no branch
+        // is refused before anything is created (see `rebuild_worktree`).
+        self.rebuild_vanished_worktree(&session).await?;
+        // Whatever the rebuild did, a cwd that still does not exist would have
+        // tmux start the resumed pane in the home directory; refuse before
+        // minting a token, writing settings, or spawning.
         self.ensure_launch_dir_exists(&session.cwd).await?;
 
         let token = self.minter.mint_free(&self.tmux).await?;
