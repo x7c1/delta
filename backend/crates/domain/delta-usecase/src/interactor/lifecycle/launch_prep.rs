@@ -156,6 +156,8 @@ where
 
     /// The Claude tail of a launch, once the worktree is in place.
     ///
+    /// 0. Confirm the launch directory exists ([`Error::LaunchDirMissing`]
+    ///    otherwise), since tmux would start the pane in the home directory.
     /// 1. Pre-accept Claude Code's workspace-trust dialog for the launch
     ///    directory where the launch-trust rule allows it (see the
     ///    `launch_trust` module): a worktree Delta built under its worktree
@@ -186,6 +188,7 @@ where
         pane: &PaneLaunch,
         self_sender: &mpsc::WeakUnboundedSender<SessionInput>,
     ) -> Result<()> {
+        self.ensure_launch_dir_exists(&launching.workdir).await?;
         // Only a git working tree (`seed_trust`) is a candidate; the
         // launch-trust rule decides the rest, starting with "under Delta's own
         // worktree base" (see [`super::is_under_worktree_base`]).
@@ -199,6 +202,22 @@ where
         self.tmux
             .create_session(launching.token.as_str(), &launching.workdir, &pane.command)
             .await
+    }
+
+    /// Fail with [`Error::LaunchDirMissing`] unless `workdir` is an existing
+    /// directory. Every path that creates a pane (a fresh or pull-request
+    /// launch, a resume) runs this first, so a directory that is gone (a
+    /// reused worktree removed behind git's back, a picked directory or a
+    /// session's cwd deleted since) never reaches tmux.
+    pub(in crate::interactor) async fn ensure_launch_dir_exists(
+        &self,
+        workdir: &str,
+    ) -> Result<()> {
+        if self.workspace.is_existing_dir(workdir).await? {
+            Ok(())
+        } else {
+            Err(Error::LaunchDirMissing(workdir.to_owned()))
+        }
     }
 }
 

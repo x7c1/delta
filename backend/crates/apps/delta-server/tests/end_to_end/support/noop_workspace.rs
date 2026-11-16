@@ -24,6 +24,12 @@ impl Workspace for NoopWorkspace {
         Ok(path.to_owned())
     }
 
+    async fn is_existing_dir(&self, _path: &str) -> delta_usecase::Result<bool> {
+        // No filesystem behind this workspace: every launch directory counts
+        // as present, like the echoed `resolve_existing_dir` above.
+        Ok(true)
+    }
+
     async fn list_dirs(
         &self,
         path: &str,
