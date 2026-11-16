@@ -56,7 +56,20 @@ impl GitWorktree for NoopGitWorktree {
         Ok(None)
     }
 
+    async fn has_branch(&self, _repo_root: &str, _branch: &str) -> delta_usecase::Result<bool> {
+        Ok(false)
+    }
+
     async fn add_worktree_checkout(
+        &self,
+        _repo_root: &str,
+        _worktree_path: &str,
+        _branch: &str,
+    ) -> delta_usecase::Result<()> {
+        Ok(())
+    }
+
+    async fn restore_worktree_checkout(
         &self,
         _repo_root: &str,
         _worktree_path: &str,

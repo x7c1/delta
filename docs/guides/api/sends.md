@@ -232,6 +232,11 @@ Response:
 - **409** — the target's session is closed and cannot be resumed because its
   transcript is gone (body `code: "resume_unavailable"`). No send is enqueued and
   the session stays closed.
+- **409** (body `code: "worktree_unrecoverable"`) — the target's session is
+  closed, its working directory is gone, and it cannot be rebuilt as a
+  worktree (see
+  [`POST /api/sessions/{id}/open`](sessions.md#post-apisessionsidopen)). No
+  send is enqueued and the session stays closed.
 - **409** (body `code: "session_hooks_unreachable"`) — the target session is
   open on a pane re-adopted after a restart whose agent can no longer deliver
   hooks to this server (the session row's `hooks_unreachable`, see
@@ -471,6 +476,9 @@ still `queued`, so the guarded queued cancel already covers it.
   held, is already released, or has since been cancelled.
 - **409** (body `code: "resume_unavailable"`) — the session had to be resumed and
   its transcript is gone. The marker is untouched, so the release can be retried.
+- **409** (body `code: "worktree_unrecoverable"`) — the session had to be
+  resumed and its vanished working directory cannot be rebuilt. The marker is
+  untouched.
 - **409** (body `code: "session_hooks_unreachable"`) — the session is open on a
   pane whose agent can no longer deliver hooks (see the same code under
   [`POST /api/sends`](#post-apisends)). Nothing is typed and the marker is

@@ -22,6 +22,7 @@ mod launch_trust;
 mod open_session;
 mod reap_stale_spawns;
 mod reap_tick;
+mod rebuild_worktree;
 mod record_launched_pane;
 mod refresh_session_settings;
 mod restore_running_subagents;

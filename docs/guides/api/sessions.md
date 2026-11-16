@@ -149,17 +149,37 @@ driven by two `claude` processes. For a terminal-less (Codex) session it
 reconnects the adapter to the provider's thread — there is no pane. Either way
 it broadcasts `session_opened`. Re-opening an already-open session is a no-op.
 
+When a Claude session's working directory no longer exists — typically a git
+worktree removed while the session was closed — the resume rebuilds it before
+launching: it checks the session's `branch_at_launch` out in a new worktree of
+its `repo_root`, **at the original path**, since `claude --resume` finds the
+transcript and the folder's trust by that absolute path. Missing parent
+directories are created, and a stale registration of the vanished worktree is
+pruned first. A local branch is checked out as it is, without fetching, so
+commits never pushed are restored and `origin` need not have the branch or be
+reachable; when only `origin/<branch>` is left, the branch is fetched and a
+local branch tracking it is created. A directory
+that still exists is resumed in as it is, without touching git.
+
 - **204 No Content** — the session is now open.
 - **404** — no session with that id.
 - **409** — the session's transcript is gone and was not found in
   another project directory, so it cannot be resumed (body
   `code: "resume_unavailable"`); it is left closed and no pane is spawned.
+- **409** — the session's working directory is gone and cannot be rebuilt,
+  because the session does not identify a branch to check out there: it
+  recorded no `repo_root` or no `branch_at_launch`, the `branch_at_launch` is
+  not a valid branch name, the `repo_root` no longer exists or is not a git
+  repository, or the branch exists neither locally nor
+  on `origin` (body `code: "worktree_unrecoverable"`). The message names the
+  directory and the reason. Nothing is created and the session stays closed.
 - **500** — for a Claude session, asking tmux whether the remembered pane is
-  still running, rewriting the session settings file, seeding git trust, or
-  starting the tmux session failed; for a Codex session, the
-  adapter's thread-resume call failed. The session's working directory is
-  already known from the original spawn, so there is no working-directory
-  preparation step to fail here.
+  still running, rebuilding a vanished worktree (git refused the checkout —
+  for example, the branch is checked out in another worktree that still
+  exists — or the fetch of a branch left only on `origin` failed; the message
+  carries git's error and the directory stays absent),
+  rewriting the session settings file, seeding git trust, or starting the tmux
+  session failed; for a Codex session, the adapter's thread-resume call failed.
 
 ### `POST /api/sessions/{id}/close`
 
