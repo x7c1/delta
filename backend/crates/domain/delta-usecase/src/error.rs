@@ -343,6 +343,18 @@ pub enum Error {
         built: String,
     },
 
+    /// The directory a session's pane was about to be created in does not
+    /// exist (or is not a directory).
+    ///
+    /// tmux does not refuse such a start directory: it starts the pane in the
+    /// home directory instead, so the agent would run somewhere the user never
+    /// chose. The launch fails before the pane is created. A new launch
+    /// reports it as the `reason` of a
+    /// [`SessionEvent::SpawnFailed`](crate::ports::SessionEvent::SpawnFailed);
+    /// a resume returns it from `open_session`.
+    #[error("the launch directory {0} does not exist or is not a directory")]
+    LaunchDirMissing(String),
+
     /// A freshly-built worktree needs the user's launch confirmation before
     /// Claude Code's trust may be pre-accepted for it — its repository is not
     /// trusted, or its agent configuration differs from the trusted `HEAD` —

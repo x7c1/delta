@@ -30,6 +30,18 @@ impl FsWorkspace {
         Ok(canonical)
     }
 
+    /// Whether `path` is an existing directory, as
+    /// [`delta_usecase::Workspace::is_existing_dir`] describes.
+    pub(super) async fn dir_exists(&self, path: &str) -> Result<bool, Error> {
+        match tokio::fs::metadata(path).await {
+            Ok(meta) => Ok(meta.is_dir()),
+            Err(err) if matches!(err.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {
+                Ok(false)
+            }
+            Err(err) => Err(map_dir_error(path, err, "could not stat the path")),
+        }
+    }
+
     /// List the immediate subdirectories of `path`, sorted by name
     /// (case-insensitive). Files are never listed; dot-directories are listed
     /// only when `include_hidden` is set.
@@ -165,6 +177,30 @@ mod tests {
         assert!(
             matches!(err, delta_usecase::Error::InvalidWorkdir(_)),
             "a regular file is not a directory, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn is_existing_dir_tells_a_directory_from_a_missing_path_or_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a-file");
+        tokio::fs::write(&file, "x").await.unwrap();
+        let ws = FsWorkspace::new();
+
+        assert!(ws
+            .is_existing_dir(dir.path().to_str().unwrap())
+            .await
+            .unwrap());
+        assert!(!ws
+            .is_existing_dir(dir.path().join("missing").to_str().unwrap())
+            .await
+            .unwrap());
+        assert!(!ws.is_existing_dir(file.to_str().unwrap()).await.unwrap());
+        assert!(
+            !ws.is_existing_dir(file.join("below").to_str().unwrap())
+                .await
+                .unwrap(),
+            "a path below a file is missing, not an error"
         );
     }
 

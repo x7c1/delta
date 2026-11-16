@@ -35,6 +35,10 @@ pub(crate) struct FakeWorkspace {
     pub(crate) non_empty_dirs: Mutex<Vec<String>>,
     /// The directories `remove_empty_dir` removed, in order.
     pub(crate) removed_empty_dirs: Mutex<Vec<String>>,
+    /// Directories `is_existing_dir` reports missing. Every other path is
+    /// taken to exist, so a launch into a worktree the fake git "built" (or a
+    /// canonicalized workdir) proceeds without scripting it.
+    pub(crate) missing_dirs: Mutex<Vec<String>>,
 }
 
 impl Default for FakeWorkspace {
@@ -47,6 +51,7 @@ impl Default for FakeWorkspace {
             removed_trees: Mutex::default(),
             non_empty_dirs: Mutex::default(),
             removed_empty_dirs: Mutex::default(),
+            missing_dirs: Mutex::default(),
         }
     }
 }
@@ -64,6 +69,12 @@ impl FakeWorkspace {
             dir.to_owned(),
             names.iter().map(|name| (*name).to_owned()).collect(),
         ));
+        self
+    }
+
+    /// Script `is_existing_dir(dir)` to report that `dir` does not exist.
+    pub(crate) fn with_missing_dir(self, dir: &str) -> Self {
+        self.missing_dirs.lock().unwrap().push(dir.to_owned());
         self
     }
 
@@ -92,6 +103,10 @@ impl Workspace for FakeWorkspace {
                 "{path}: no such directory"
             )))
         }
+    }
+
+    async fn is_existing_dir(&self, path: &str) -> Result<bool> {
+        Ok(!self.missing_dirs.lock().unwrap().iter().any(|d| d == path))
     }
 
     async fn list_dirs(

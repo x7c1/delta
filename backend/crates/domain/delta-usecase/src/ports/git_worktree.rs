@@ -103,6 +103,11 @@ pub trait GitWorktree: Send + Sync {
     /// name. This includes the main working tree, so a branch checked out in
     /// the main tree is reported (and can be reused) just like one in a
     /// secondary worktree. Backs the `UseRemoteBranch` reuse path.
+    ///
+    /// A worktree git marks `prunable` (its directory no longer exists) is
+    /// treated as absent: there is nothing to launch in, so the caller plans a
+    /// fresh worktree instead, and [`Self::add_worktree_checkout`] clears the
+    /// stale registration before checking the branch out again.
     async fn worktree_path_for_branch(
         &self,
         repo_root: &str,
@@ -119,6 +124,10 @@ pub trait GitWorktree: Send + Sync {
     /// origin/<branch>`, creating a local branch tracking the remote one and
     /// checking it out. The parent of `worktree_path` is created first (the
     /// worktree base may not exist yet), mirroring [`Self::create_worktree`].
+    /// Before `worktree add`, `git worktree prune` drops registrations whose
+    /// directory is gone: git still counts the branch as checked out in such a
+    /// worktree and would refuse to check it out again. `prune` leaves live and
+    /// locked worktrees alone, so a locked stale entry still fails the add.
     /// A `git` failure surfaces its stderr in the error.
     async fn add_worktree_checkout(
         &self,

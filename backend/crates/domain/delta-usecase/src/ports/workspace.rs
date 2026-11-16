@@ -43,6 +43,15 @@ pub trait Workspace: Send + Sync {
     /// directory is rejected, not minted.
     async fn resolve_existing_dir(&self, path: &str) -> Result<String>;
 
+    /// Whether `path` exists and is a directory (symbolic links followed).
+    ///
+    /// A missing path, or one that is not a directory, is `Ok(false)`; only a
+    /// failure to tell (a permission error on the way, say) is an error.
+    /// Checked right before a session's pane is created, so an agent is never
+    /// started in a directory that is not there: tmux would silently start
+    /// the pane in the home directory instead.
+    async fn is_existing_dir(&self, path: &str) -> Result<bool>;
+
     /// List the immediate subdirectories of `path` for the picker's browse view.
     ///
     /// Returns the canonical `path`, its `parent` (or `None` at a filesystem
@@ -90,6 +99,10 @@ impl Workspace for Box<dyn Workspace> {
 
     async fn resolve_existing_dir(&self, path: &str) -> Result<String> {
         (**self).resolve_existing_dir(path).await
+    }
+
+    async fn is_existing_dir(&self, path: &str) -> Result<bool> {
+        (**self).is_existing_dir(path).await
     }
 
     async fn list_dirs(&self, path: &str, include_hidden: bool) -> Result<DirListing> {

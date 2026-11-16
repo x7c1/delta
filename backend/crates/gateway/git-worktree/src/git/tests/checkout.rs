@@ -78,6 +78,70 @@ async fn worktree_path_for_branch_is_none_when_not_checked_out() {
     );
 }
 
+/// Check the existing local `branch` out in a secondary worktree of
+/// `repo_root`, then delete that worktree's directory without telling git,
+/// leaving a `prunable` registration behind.
+async fn check_out_in_vanished_worktree(repo_root: &str, branch: &str) {
+    let wt_dir = tempfile::tempdir().unwrap();
+    let wt_path = wt_dir.path().join("gone-wt").to_string_lossy().into_owned();
+    git_ok(repo_root, &["worktree", "add", &wt_path, branch]).await;
+    drop(wt_dir);
+    assert!(!std::path::Path::new(&wt_path).exists());
+}
+
+#[tokio::test]
+async fn worktree_path_for_branch_skips_a_worktree_whose_directory_is_gone() {
+    let tmp = tempfile::tempdir().unwrap();
+    init_repo_with_commit(tmp.path()).await;
+    let repo_root = tmp.path().to_str().unwrap().to_owned();
+    git_ok(&repo_root, &["branch", "feature"]).await;
+    check_out_in_vanished_worktree(&repo_root, "feature").await;
+    let git = Git::new(Vec::new());
+
+    let found = git
+        .worktree_path_for_branch(&repo_root, "feature")
+        .await
+        .unwrap();
+    assert!(
+        found.is_none(),
+        "a prunable worktree must not be reported, got {found:?}"
+    );
+}
+
+#[tokio::test]
+async fn add_worktree_checkout_prunes_a_vanished_worktree_holding_the_branch() {
+    let origin = tempfile::tempdir().unwrap();
+    init_repo_with_commit(origin.path()).await;
+    let origin_path = origin.path().to_str().unwrap();
+    git_ok(origin_path, &["branch", "feature"]).await;
+
+    let clone_parent = tempfile::tempdir().unwrap();
+    let clone_path = clone_into(origin_path, clone_parent.path()).await;
+    git_ok(&clone_path, &["branch", "feature", "origin/feature"]).await;
+    check_out_in_vanished_worktree(&clone_path, "feature").await;
+
+    let git = Git::new(Vec::new());
+    let wt_dir = tempfile::tempdir().unwrap();
+    let wt_path = wt_dir
+        .path()
+        .join("feature-wt")
+        .to_string_lossy()
+        .into_owned();
+
+    git.add_worktree_checkout(&clone_path, &wt_path, "feature")
+        .await
+        .unwrap();
+
+    let head = git_ok(&wt_path, &["rev-parse", "--abbrev-ref", "HEAD"]).await;
+    assert_eq!(head, "feature");
+    let found = git
+        .worktree_path_for_branch(&clone_path, "feature")
+        .await
+        .unwrap()
+        .expect("feature is checked out in the new worktree");
+    assert_eq!(canonical(&found).await, canonical(&wt_path).await);
+}
+
 #[tokio::test]
 async fn add_worktree_checkout_uses_an_existing_local_branch() {
     // Origin with `main` and `feature`; the clone fetches both.

@@ -123,6 +123,31 @@ fn command_error(label: &str, output: &std::process::Output) -> Error {
     }
 }
 
+/// The path of the worktree in a `git worktree list --porcelain` `listing`
+/// that has local branch `branch` checked out, skipping worktrees git marks
+/// `prunable` (their directory no longer exists).
+fn live_worktree_path_for_branch(listing: &str, branch: &str) -> Option<String> {
+    let target_ref = format!("refs/heads/{branch}");
+    listing.split("\n\n").find_map(|block| {
+        let mut path = None;
+        let mut on_branch = false;
+        for line in block.lines() {
+            if let Some(p) = line.strip_prefix("worktree ") {
+                path = Some(p);
+            } else if line.strip_prefix("branch ") == Some(target_ref.as_str()) {
+                on_branch = true;
+            } else if line == "prunable" || line.starts_with("prunable ") {
+                return None;
+            }
+        }
+        if on_branch {
+            path.map(str::to_owned)
+        } else {
+            None
+        }
+    })
+}
+
 /// The trimmed stdout of a successful `git` command.
 fn trimmed_stdout(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
@@ -334,11 +359,12 @@ impl GitWorktree for Git {
         repo_root: &str,
         branch: &str,
     ) -> std::result::Result<Option<String>, delta_usecase::Error> {
-        // `worktree list --porcelain` emits a block per worktree: a
-        // `worktree <abs-path>` line, then (for a normal checkout) a
-        // `branch refs/heads/<name>` line; a detached or bare entry has no
-        // branch line. Pair each path with the immediately following branch
-        // line and return the path whose local branch matches `<branch>`. The
+        // `worktree list --porcelain` emits a block per worktree, separated by
+        // a blank line: a `worktree <abs-path>` line, then (for a normal
+        // checkout) a `branch refs/heads/<name>` line; a detached or bare entry
+        // has no branch line. A worktree whose directory no longer exists
+        // carries a `prunable <reason>` line: git still registers it, but there
+        // is nothing to launch in, so such an entry is treated as absent. The
         // main working tree is listed first, so this covers reusing a branch
         // that lives in the main tree as well as in a secondary worktree.
         let output = self
@@ -349,18 +375,7 @@ impl GitWorktree for Git {
             return Err(command_error("worktree list --porcelain", &output).into());
         }
         let listing = trimmed_stdout(&output);
-        let target_ref = format!("refs/heads/{branch}");
-        let mut current_path: Option<&str> = None;
-        for line in listing.lines() {
-            if let Some(path) = line.strip_prefix("worktree ") {
-                current_path = Some(path);
-            } else if let Some(ref_name) = line.strip_prefix("branch ") {
-                if ref_name == target_ref {
-                    return Ok(current_path.map(str::to_owned));
-                }
-            }
-        }
-        Ok(None)
+        Ok(live_worktree_path_for_branch(&listing, branch))
     }
 
     async fn add_worktree_checkout(
@@ -381,6 +396,16 @@ impl GitWorktree for Git {
         .map_err(delta_usecase::Error::from)?;
 
         ensure_worktree_parent_dir(worktree_path)
+            .await
+            .map_err(delta_usecase::Error::from)?;
+
+        // Drop registrations of worktrees whose directory is gone. git still
+        // counts the branch as checked out in such a worktree, so `worktree
+        // add` for it would fail until the stale entry is removed. `prune`
+        // only removes entries whose directory is missing and skips locked
+        // ones, so live worktrees are untouched; a locked stale entry still
+        // makes `worktree add` below fail with git's error.
+        self.run(repo_root, "worktree prune", &["worktree", "prune"])
             .await
             .map_err(delta_usecase::Error::from)?;
 

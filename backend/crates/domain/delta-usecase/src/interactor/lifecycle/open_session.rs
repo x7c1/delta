@@ -114,6 +114,11 @@ where
             return Err(Error::ResumeUnavailable(id.as_str().to_owned()));
         };
 
+        // A cwd removed while the session was closed would have tmux start
+        // the resumed pane in the home directory; refuse before minting a
+        // token, writing settings, or spawning.
+        self.ensure_launch_dir_exists(&session.cwd).await?;
+
         let token = self.minter.mint_free(&self.tmux).await?;
         let workdir = session.cwd.clone();
         // Re-write the settings file before resuming, in case the port is
