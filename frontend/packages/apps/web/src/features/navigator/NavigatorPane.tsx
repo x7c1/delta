@@ -31,6 +31,7 @@ import { SessionNode } from './SessionNode';
 import { useUpdateControl } from './UpdateControl';
 import { launchesFirst } from './launchesFirst';
 import { heldOrder } from './heldOrder';
+import { useSessionSwitchShortcut } from './useSessionSwitchShortcut';
 import { footerRateLimitGroups } from './footerRateLimitGroups';
 import {
   computeBudgetLinePercentage,
@@ -416,6 +417,14 @@ export function NavigatorPane({
   });
 
   const virtualItems = virtualizer.getVirtualItems();
+
+  // Ctrl+Tab / Ctrl+Shift+Tab in the desktop app move the focus through the
+  // rows in the order rendered here — launches pinned on top, and the order
+  // held under the pointer — and scroll the focused card into view.
+  const rowIds = useMemo(() => rows.map((item) => item.session.id), [rows]);
+  useSessionSwitchShortcut(rowIds, (index) =>
+    virtualizer.scrollToIndex(index, { align: 'auto' }),
+  );
 
   // Scroll-triggered page loading, driven off the virtual range rather than a
   // DOM sentinel: once the window reaches the last loaded session, fetch the
