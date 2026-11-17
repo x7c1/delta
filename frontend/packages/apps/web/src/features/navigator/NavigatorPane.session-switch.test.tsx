@@ -38,6 +38,7 @@ function pressCtrlTab(
 ): KeyboardEvent {
   const event = new KeyboardEvent('keydown', {
     key: 'Tab',
+    code: 'Tab',
     ctrlKey: true,
     shiftKey: shift,
     bubbles: true,

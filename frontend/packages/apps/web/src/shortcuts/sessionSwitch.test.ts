@@ -38,13 +38,21 @@ describe('sessionSwitchTarget', () => {
 
 describe('sessionSwitchDirection', () => {
   function press(init: KeyboardEventInit): KeyboardEvent {
-    return new KeyboardEvent('keydown', { key: 'Tab', ...init });
+    return new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', ...init });
   }
 
   it('reads Ctrl+Tab as next and Ctrl+Shift+Tab as previous', () => {
     expect(sessionSwitchDirection(press({ ctrlKey: true }))).toBe('next');
     expect(
       sessionSwitchDirection(press({ ctrlKey: true, shiftKey: true })),
+    ).toBe('previous');
+  });
+
+  it('reads the Tab key from code, as WebKitGTK leaves Ctrl+Shift+Tab without a key', () => {
+    expect(
+      sessionSwitchDirection(
+        press({ key: 'Unidentified', ctrlKey: true, shiftKey: true }),
+      ),
     ).toBe('previous');
   });
 
@@ -62,7 +70,7 @@ describe('sessionSwitchDirection', () => {
 
   it('rejects Ctrl with another key', () => {
     expect(
-      sessionSwitchDirection(press({ key: 'q', ctrlKey: true })),
+      sessionSwitchDirection(press({ key: 'q', code: 'KeyQ', ctrlKey: true })),
     ).toBeNull();
   });
 });

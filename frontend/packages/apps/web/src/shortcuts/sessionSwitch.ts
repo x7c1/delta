@@ -16,11 +16,15 @@ export type SessionSwitchDirection = 'next' | 'previous';
  * The direction a key press asks for, or `null` when it is not the session
  * switch: Ctrl+Tab is `next`, Ctrl+Shift+Tab is `previous`, and any press with
  * Alt or Meta held is not ours.
+ *
+ * The Tab key is read from `code`, not `key`: WebKitGTK, the Linux shell's
+ * WebView, reports Ctrl+Shift+Tab with `key` `"Unidentified"` (GTK names
+ * Shift+Tab `ISO_Left_Tab`), while `code` stays `"Tab"`.
  */
 export function sessionSwitchDirection(
-  event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey'>,
+  event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey'>,
 ): SessionSwitchDirection | null {
-  if (event.key !== 'Tab' || !event.ctrlKey || event.altKey || event.metaKey) {
+  if (event.code !== 'Tab' || !event.ctrlKey || event.altKey || event.metaKey) {
     return null;
   }
   return event.shiftKey ? 'previous' : 'next';
