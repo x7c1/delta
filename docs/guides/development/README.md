@@ -291,6 +291,13 @@ bundles on macOS, and `tauri.macos.conf.json` lists that file, so the Tauri CLI
 copies it rather than running `actool` itself (its own call fails under
 tauri-action on CI; the script says why). The `.icns` stays for macOS before
 26, and for the dev build, which is not an `.app` bundle.
+`icons/128x128@2x.png` is listed by `tauri.macos.conf.json` only, for the macOS
+bundle: Tauri's Debian bundler installs an `@2x` PNG under the hicolor theme as
+`256x256@2`, a 256 px icon for scale 2, which GNOME Shell takes as a 512 px icon
+and scales down from the wrong size, blurring it in the Activities overview and
+the app switcher at fractional scales. So `tauri.conf.json`, which the `.deb`
+uses, leaves it out, and a test in `delta-desktop` (`tests/bundle_icons.rs`)
+refuses an `@2x` PNG there.
 
 `check-desktop-build` builds the shell with `TAURI_CONFIG` unset, i.e. the
 installed app's configuration, into the same `backend/target/debug/delta-desktop`.
