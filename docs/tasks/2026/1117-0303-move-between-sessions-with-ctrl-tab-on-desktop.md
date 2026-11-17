@@ -91,7 +91,7 @@ shortcuts" note there if no such section exists).
 
 ### Before merge (verified outside the check command)
 
-- [ ] On the built desktop app on macOS and on Linux, Ctrl+Tab and
+- [x] On the built desktop app on macOS and on Linux, Ctrl+Tab and
       Ctrl+Shift+Tab move between sessions in the list's order while the
       terminal pane has focus, and the terminal does not receive the key —
       needs a person: it needs the desktop app running on a real display and a
