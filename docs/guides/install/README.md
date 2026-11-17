@@ -167,6 +167,17 @@ To stop everything instead, quit the app and then end its tmux server with
 `tmux -L io.github.x7c1.delta kill-server`. That ends every Claude Code
 session; their conversations stay in Delta and resume on the next send.
 
+## Keyboard shortcuts
+
+- **Ctrl-Tab** focuses the next session in the session list, and
+  **Ctrl-Shift-Tab** the previous one, in the order the list shows them. The
+  ends wrap around, and only the sessions already loaded into the list count.
+  With no session focused (the new-session screen), Ctrl-Tab goes to the first
+  and Ctrl-Shift-Tab to the last. The keys work wherever the focus is,
+  terminal and message box included, and are never passed on to them. On both
+  macOS and Linux this is Ctrl, not Cmd. Browsers keep Ctrl-Tab for their own
+  tabs, so this works in the desktop app only.
+
 ## Removing everything
 
 Start in the app: **Settings → Storage → Erase everything** removes what Delta
