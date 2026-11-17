@@ -211,6 +211,13 @@ const UPDATE_NOT_READY_CODE: &str = "update_not_ready";
 /// no install has ended `installed`.
 const UPDATE_NOT_INSTALLED_CODE: &str = "update_not_installed";
 
+/// Stable machine-readable code for a resume (`POST /api/sessions/{id}/open`)
+/// of a closed session whose directory is gone and cannot be rebuilt as a
+/// worktree, because the session does not identify a branch to check out
+/// there. Nothing was created; the message names the directory and the
+/// reason, and the frontend shows it as it does any other open failure.
+const WORKTREE_UNRECOVERABLE_CODE: &str = "worktree_unrecoverable";
+
 /// An error rendered as an HTTP response.
 ///
 /// This is the single place that maps failures onto status codes, keeping the
@@ -484,6 +491,13 @@ impl IntoResponse for ApiError {
                     // removed returns it as this response body, with the
                     // message naming the missing directory.
                     Error::LaunchDirMissing(_) => (StatusCode::INTERNAL_SERVER_ERROR, None),
+                    // A resume of a session whose directory is gone and that
+                    // names no branch to rebuild it from: a conflict with the
+                    // state of the session and its repository, not a server
+                    // fault, so `409` with a stable code. Nothing was created.
+                    Error::WorktreeUnrecoverable { .. } => {
+                        (StatusCode::CONFLICT, Some(WORKTREE_UNRECOVERABLE_CODE))
+                    }
                     // Everything else is an internal failure. The launch
                     // preparation failures only land here defensively: they
                     // happen long after the send was accepted, so they reach
@@ -628,5 +642,26 @@ mod tests {
             assert_eq!(status, StatusCode::CONFLICT);
             assert_eq!(code.as_deref(), Some(expected));
         }
+    }
+
+    /// A resume whose vanished worktree cannot be rebuilt is a conflict with
+    /// its own stable `worktree_unrecoverable` code, and the message names the
+    /// directory and the reason.
+    #[tokio::test]
+    async fn an_unrecoverable_worktree_renders_a_conflict_with_its_own_code() {
+        let err = delta_usecase::Error::WorktreeUnrecoverable {
+            dir: "/w/gone".into(),
+            reason: "the session recorded no branch at launch".into(),
+        };
+        let response = ApiError::from(err).into_response();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["code"].as_str(), Some("worktree_unrecoverable"));
+        let message = body["error"].as_str().unwrap();
+        assert!(
+            message.contains("/w/gone") && message.contains("no branch at launch"),
+            "the message names the directory and the reason, got {message:?}"
+        );
     }
 }

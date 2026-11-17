@@ -182,6 +182,20 @@ pub(crate) struct FakeGitWorktree {
     pub(crate) branch_lookup_script: Mutex<Vec<(String, VecDeque<Option<String>>)>>,
     /// The `add_worktree_checkout` calls made, in order.
     pub(crate) checked_out: Mutex<Vec<CheckedOutWorktree>>,
+    /// The paths passed to `restore_worktree_checkout`, in order. A restore
+    /// is otherwise modelled as an `add_worktree_checkout` (it is recorded in
+    /// [`Self::checked_out`] too).
+    pub(crate) restored: Mutex<Vec<String>>,
+    /// Branches `has_branch` reports absent (neither local nor on `origin`).
+    /// Every other branch is present.
+    pub(crate) absent_branches: Mutex<Vec<String>>,
+    /// The `(repo_root, branch)` of every `has_branch` call, in order.
+    pub(crate) has_branch_calls: Mutex<Vec<(String, String)>>,
+    /// A [`FakeWorkspace`](super::FakeWorkspace)'s missing directories, shared
+    /// so a successful `add_worktree_checkout` makes its path exist — as a
+    /// real `git worktree add` creates the directory. `None` leaves the
+    /// workspace untouched.
+    pub(crate) workspace_missing_dirs: Option<Arc<Mutex<Vec<String>>>>,
     /// The dirs passed to `ensure_dir_trusted`, in order, so tests can assert
     /// whether (and with what path) trust-seeding was invoked.
     pub(crate) trusted: Mutex<Vec<String>>,
@@ -311,6 +325,30 @@ impl FakeGitWorktree {
             .lock()
             .unwrap()
             .push((branch.to_owned(), answers));
+        self
+    }
+
+    /// Script `has_branch(_, branch)` to report that `branch` exists neither
+    /// locally nor on `origin`.
+    pub(crate) fn with_absent_branch(self, branch: &str) -> Self {
+        self.absent_branches.lock().unwrap().push(branch.to_owned());
+        self
+    }
+
+    /// Make every successful `add_worktree_checkout` create its directory in
+    /// the workspace whose missing directories `missing_dirs` is (see
+    /// [`FakeWorkspace::missing_dirs_handle`](super::FakeWorkspace::missing_dirs_handle)).
+    pub(crate) fn with_checkouts_creating_dirs_in(
+        mut self,
+        missing_dirs: Arc<Mutex<Vec<String>>>,
+    ) -> Self {
+        self.workspace_missing_dirs = Some(missing_dirs);
+        self
+    }
+
+    /// Make every worktree build fail like a real `git worktree add` error.
+    pub(crate) fn with_failing_worktree_add(mut self) -> Self {
+        self.fail_create = true;
         self
     }
 
@@ -548,7 +586,34 @@ impl GitWorktree for FakeGitWorktree {
             worktree_path: worktree_path.to_owned(),
             branch: branch.to_owned(),
         });
+        if let Some(missing) = &self.workspace_missing_dirs {
+            missing.lock().unwrap().retain(|dir| dir != worktree_path);
+        }
         Ok(())
+    }
+
+    async fn restore_worktree_checkout(
+        &self,
+        repo_root: &str,
+        worktree_path: &str,
+        branch: &str,
+    ) -> Result<()> {
+        self.restored.lock().unwrap().push(worktree_path.to_owned());
+        self.add_worktree_checkout(repo_root, worktree_path, branch)
+            .await
+    }
+
+    async fn has_branch(&self, repo_root: &str, branch: &str) -> Result<bool> {
+        self.has_branch_calls
+            .lock()
+            .unwrap()
+            .push((repo_root.to_owned(), branch.to_owned()));
+        Ok(!self
+            .absent_branches
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|absent| absent == branch))
     }
 
     async fn ensure_dir_trusted(&self, dir: &str) -> Result<()> {

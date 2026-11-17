@@ -192,7 +192,11 @@ what `delta-server open-url` calls.
   - `409 Conflict` — the request cannot take effect against current state. The
     body's `code` says which case it is: `resume_unavailable` (the session's
     local transcript file is gone, so `claude --resume <id>` has nothing to
-    replay), `session_spawning` (a *branch* send whose target session was
+    replay), `worktree_unrecoverable` (resuming a session whose working
+    directory is gone, when the session identifies no branch to rebuild it
+    from — see
+    [`POST /api/sessions/{id}/open`](sessions.md#post-apisessionsidopen)),
+    `session_spawning` (a *branch* send whose target session was
     accepted but has not bound yet, so it has ingested no message to branch
     from — a plain send there is accepted as a `queued` row instead; and a
     removal aimed at a session that has not finished starting),
