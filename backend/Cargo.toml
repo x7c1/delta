@@ -60,7 +60,7 @@ async-trait = "0.1"
 # Dates and times, used only inside `crates/libs/delta-time`, which wraps it
 # behind Delta's own types. `std` gives the system clock; the UTC computations
 # need no time zone database.
-jiff = { version = "0.2", default-features = false, features = ["std"] }
+jiff = { version = "1.0", default-features = false, features = ["std"] }
 # The platform data directory (`~/Library/Application Support`, `$XDG_DATA_HOME`
 # or `~/.local/share`), resolved the way Tauri's `app_data_dir()` resolves it —
 # Tauri builds on this same crate — so the server's default data directory is
