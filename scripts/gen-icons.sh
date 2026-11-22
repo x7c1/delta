@@ -10,7 +10,14 @@
 # is rasterised instead:
 #
 #   backend/crates/apps/delta-desktop/icons/      the installed app (tauri.conf.json)
-#     32x32.png 128x128.png 128x128@2x.png icon.png icon.ico   the source as is
+#     32x32.png 128x128.png 128x128@2x.png icon.png icon.ico   the source as is;
+#                                                 128x128@2x.png is listed by
+#                                                 tauri.macos.conf.json only: the
+#                                                 Debian bundler would install an
+#                                                 @2x PNG under hicolor's
+#                                                 256x256@2, which GNOME takes as
+#                                                 a 512 px icon and scales down
+#                                                 from the wrong size (blurred)
 #     icon.icns                                   the source inset on a
 #                                                 transparent canvas (see INSET_PERCENT),
 #                                                 for macOS before 26
