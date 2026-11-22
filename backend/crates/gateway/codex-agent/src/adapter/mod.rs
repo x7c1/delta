@@ -115,7 +115,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 
-use chrono::Utc;
+use delta_time::Instant;
 use serde_json::{json, Value};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
@@ -497,7 +497,7 @@ impl CodexAppServerAdapter {
                 // The prompt is accepted client-side here, before `turn/start`
                 // is issued, so its message time is this send instant — the
                 // Codex server exposes no separate accepted-at for it.
-                at_ms: Some(Utc::now().timestamp_millis()),
+                at_ms: Some(Instant::now().epoch_millis()),
             },
         );
         let params = json!({
