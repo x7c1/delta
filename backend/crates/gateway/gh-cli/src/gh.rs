@@ -1,7 +1,7 @@
 //! [`Gh`]: the concrete [`GhCli`].
 
 use async_trait::async_trait;
-use chrono::{Duration, NaiveDate, Utc};
+use delta_time::Date;
 use tokio::process::Command;
 use tokio::sync::OnceCell;
 
@@ -135,7 +135,7 @@ impl GhCli for Gh {
         // Compute the freshness floor at call time so the cutoff slides with
         // the calendar. The pure builder takes the date as an argument so it
         // stays testable.
-        let cutoff = freshness_cutoff(Utc::now().date_naive());
+        let cutoff = freshness_cutoff(Date::today_utc());
         let search_query = search_query_for(lens, cutoff);
         let q_arg = format!("q={search_query}");
         let doc_arg = format!("query={SEARCH_GRAPHQL}");
@@ -196,8 +196,8 @@ impl GhCli for Gh {
 /// is the same set of qualifiers, just expressed inline. `cutoff_date`
 /// becomes an `updated:>=YYYY-MM-DD` floor so stale PRs (a year or more
 /// without an update) are filtered out at the source.
-fn search_query_for(lens: PullRequestLens, cutoff_date: NaiveDate) -> String {
-    // GitHub search expects `updated:>=YYYY-MM-DD`. `NaiveDate`'s `Display`
+fn search_query_for(lens: PullRequestLens, cutoff_date: Date) -> String {
+    // GitHub search expects `updated:>=YYYY-MM-DD`. `Date`'s `Display`
     // already renders ISO-8601 (`YYYY-MM-DD`), which is the format the search
     // qualifier requires.
     let updated = format!("updated:>={cutoff_date}");
@@ -216,9 +216,11 @@ fn search_query_for(lens: PullRequestLens, cutoff_date: NaiveDate) -> String {
 /// Compute the `updated:>=…` floor for a given reference date by stepping
 /// back [`PR_FRESHNESS_DAYS`] days. Pulled out so the call site stays a
 /// one-liner and tests can pass a fixed `today` without going through
-/// `Utc::now`.
-fn freshness_cutoff(today: NaiveDate) -> NaiveDate {
-    today - Duration::days(PR_FRESHNESS_DAYS)
+/// the system clock.
+fn freshness_cutoff(today: Date) -> Date {
+    today
+        .checked_sub_days(PR_FRESHNESS_DAYS)
+        .expect("a year before a date the system clock reports is a valid date")
 }
 
 #[cfg(test)]
@@ -242,8 +244,8 @@ mod tests {
 
     /// A fixed reference date used across the query-builder tests so
     /// assertions do not depend on the wall clock.
-    fn fixed_today() -> NaiveDate {
-        NaiveDate::from_ymd_opt(2026, 6, 24).expect("valid date")
+    fn fixed_today() -> Date {
+        Date::from_ymd(2026, 6, 24).expect("valid date")
     }
 
     #[test]
@@ -251,10 +253,7 @@ mod tests {
         // 2026 is not a leap year; stepping back 365 days lands one
         // calendar year earlier on the same day.
         let cutoff = freshness_cutoff(fixed_today());
-        assert_eq!(
-            cutoff,
-            NaiveDate::from_ymd_opt(2025, 6, 24).expect("valid date"),
-        );
+        assert_eq!(cutoff, Date::from_ymd(2025, 6, 24).expect("valid date"));
     }
 
     #[test]
@@ -282,7 +281,7 @@ mod tests {
     fn cutoff_renders_as_iso_8601_in_the_query() {
         // A January-1st cutoff exercises zero-padding on month and day,
         // which the `updated:>=…` qualifier requires.
-        let cutoff = NaiveDate::from_ymd_opt(2025, 1, 1).expect("valid date");
+        let cutoff = Date::from_ymd(2025, 1, 1).expect("valid date");
         let query = search_query_for(PullRequestLens::Author, cutoff);
         assert!(query.contains("updated:>=2025-01-01"), "got: {query}");
     }

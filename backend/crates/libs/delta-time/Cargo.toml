@@ -1,0 +1,13 @@
+[package]
+name = "delta-time"
+description = "Delta's dates and times: the UTC instant and calendar date types the other crates compute with, and their fixed string forms"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# The only crate that names `jiff`: no `jiff` type appears in the public API,
+# so the implementation can be replaced without touching the callers.
+[dependencies]
+jiff = { workspace = true }
