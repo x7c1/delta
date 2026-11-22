@@ -51,15 +51,16 @@ claude-agent = { path = "crates/gateway/claude-agent" }
 agent-contract = { path = "crates/libs/agent-contract" }
 delta-bootstrap = { path = "crates/libs/delta-bootstrap" }
 release-signature = { path = "crates/libs/release-signature" }
+delta-time = { path = "crates/libs/delta-time" }
 delta-server = { path = "crates/apps/delta-server" }
 
 # Shared third-party dependencies
 anyhow = "1"
 async-trait = "0.1"
-# Default features include `clock`, which `Utc::now()` needs. No serde / wasm
-# bits required for the current use (computing a date-naive cutoff for gh
-# search queries).
-chrono = "0.4"
+# Dates and times, used only inside `crates/libs/delta-time`, which wraps it
+# behind Delta's own types. `std` gives the system clock; the UTC computations
+# need no time zone database.
+jiff = { version = "0.2", default-features = false, features = ["std"] }
 # The platform data directory (`~/Library/Application Support`, `$XDG_DATA_HOME`
 # or `~/.local/share`), resolved the way Tauri's `app_data_dir()` resolves it —
 # Tauri builds on this same crate — so the server's default data directory is

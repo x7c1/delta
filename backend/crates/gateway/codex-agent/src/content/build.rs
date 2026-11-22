@@ -55,8 +55,7 @@ impl CodexConversationSource {
 /// transcript timestamps already use). An out-of-range value yields `None` rather
 /// than a bogus string.
 fn iso8601_from_epoch_ms(at_ms: i64) -> Option<String> {
-    chrono::DateTime::from_timestamp_millis(at_ms)
-        .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+    delta_time::Instant::from_epoch_millis(at_ms).map(delta_time::Instant::to_rfc3339_millis)
 }
 
 #[cfg(test)]

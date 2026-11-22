@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 
-use chrono::{NaiveDate, Utc};
+use delta_time::Date;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 use super::KEPT_FILES;
@@ -32,7 +32,7 @@ pub struct OwnerOnlyAppender {
     inner: RollingFileAppender,
     dir: PathBuf,
     /// The day whose file was last made owner-only.
-    prepared_for: NaiveDate,
+    prepared_for: Date,
 }
 
 impl OwnerOnlyAppender {
@@ -47,7 +47,7 @@ impl OwnerOnlyAppender {
         if std::fs::symlink_metadata(dir)?.is_dir() {
             std::fs::set_permissions(dir, Permissions::from_mode(LOG_DIR_MODE))?;
         }
-        let today = Utc::now().date_naive();
+        let today = Date::today_utc();
         prepare_file(&dir.join(file_name(today)))?;
         let inner = RollingFileAppender::builder()
             .rotation(Rotation::DAILY)
@@ -66,7 +66,7 @@ impl OwnerOnlyAppender {
     /// day. A failure is reported on stderr: this runs on the log's own worker,
     /// which cannot log through `tracing`.
     fn prepare_today(&mut self) {
-        let today = Utc::now().date_naive();
+        let today = Date::today_utc();
         if today == self.prepared_for {
             return;
         }
@@ -97,8 +97,8 @@ impl Write for OwnerOnlyAppender {
 }
 
 /// The name `tracing-appender` gives the daily file of `day`.
-fn file_name(day: NaiveDate) -> String {
-    format!("{FILE_PREFIX}.{}.{FILE_SUFFIX}", day.format("%Y-%m-%d"))
+fn file_name(day: Date) -> String {
+    format!("{FILE_PREFIX}.{day}.{FILE_SUFFIX}")
 }
 
 /// Create the log file at `path` with [`LOG_FILE_MODE`], or set an existing
@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn the_file_name_is_the_appender_s() {
-        let day = NaiveDate::from_ymd_opt(2026, 3, 7).unwrap();
+        let day = Date::from_ymd(2026, 3, 7).unwrap();
         assert_eq!(file_name(day), "delta-desktop.2026-03-07.log");
     }
 }
