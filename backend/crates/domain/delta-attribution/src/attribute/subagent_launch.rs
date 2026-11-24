@@ -21,4 +21,9 @@ pub struct SubagentLaunch {
     /// Recorded so that a `<task-notification>` whose `<tool-use-id>` element
     /// was stripped can still be matched by its `<task-id>` element.
     pub task_id: Option<String>,
+    /// Whether this launch lit the running-subagent indicator: a subagent tool
+    /// (`Agent`/`Task`) or a forked skill, but not a background `Bash`, which
+    /// is recorded only so its completion is attributed. Only such a launch
+    /// can be finished by its own `tool_result` reporting a foreground run.
+    pub drives_indicator: bool,
 }

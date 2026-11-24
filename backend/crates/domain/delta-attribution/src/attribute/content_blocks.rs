@@ -77,6 +77,21 @@ pub(super) fn process_content_blocks(
                             tool_use_id: tool_use_id.clone(),
                         });
                     }
+                } else if state
+                    .launched_threads
+                    .get(tool_use_id)
+                    .is_some_and(|launch| launch.drives_indicator)
+                    && claude_format::subagent_ran_in_foreground_by_result_content(content)
+                {
+                    // Claude Code ran this subagent in the foreground and it
+                    // has finished, so no `<task-notification>` will follow:
+                    // finish it like the errored launch above. The live
+                    // `PostToolUse(Agent)` hook does the same from the
+                    // structured `status`; finishing is idempotent.
+                    state.launched_threads.remove(tool_use_id);
+                    effects.push(Effect::SubagentCompleted {
+                        tool_use_id: tool_use_id.clone(),
+                    });
                 } else if let Some(launch) = state.launched_threads.get_mut(tool_use_id) {
                     // In-memory state recovery only — no `Effect` is emitted.
                     // The live `PostToolUse(Agent)` hook is responsible for
@@ -124,6 +139,7 @@ pub(super) fn process_content_blocks(
                     SubagentLaunch {
                         thread_id: state.carry_thread,
                         task_id,
+                        drives_indicator: claude_format::is_subagent_tool(name),
                     },
                 );
                 effects.push(Effect::SubagentLaunched {
@@ -146,11 +162,13 @@ pub(super) fn process_content_blocks(
         // indicator (foreground OR background), and is cleared later by the
         // matching `PostToolUse` (foreground) or, for a background one, by
         // whichever completion signal arrives: the harness-injected
-        // `<task-notification>`, or the parent's own `TaskOutput` retrieval
-        // of the result. A NESTED subagent's `Agent`/`Task` tool_use is
-        // written to the SUBAGENT's JSONL, never the parent's, so this
-        // branch is the natural filter: nested launches never produce a
-        // parent indicator and can never get stuck.
+        // `<task-notification>`, the parent's own `TaskOutput` retrieval
+        // of the result, or its own `tool_result` when Claude Code ran it in
+        // the foreground after all (see the `ToolResult` arm). A NESTED
+        // subagent's `Agent`/`Task` tool_use is written to the SUBAGENT's
+        // JSONL, never the parent's, so this branch is the natural filter:
+        // nested launches never produce a parent indicator and can never get
+        // stuck.
         if let ContentBlock::ToolUse { id, name, input } = block {
             if claude_format::is_subagent_tool(name) {
                 let subagent_type =

@@ -4,19 +4,19 @@ use crate::support::*;
 
 #[test]
 fn a_successful_background_launch_result_does_not_complete_the_subagent() {
-    // The negative: a background launch whose `tool_result` is NOT an error
-    // (`is_error: false`) is a normal async launch. It must NOT be completed by
-    // the result — only its later `<task-notification>` completes it. The
-    // errored-launch clear must fire strictly on `is_error: true`, so this
-    // yields no `SubagentCompleted` and the launch entry survives, waiting for
-    // its notification.
+    // The negative: a modern `Agent` launch (no `run_in_background` key) whose
+    // `tool_result` is the async launch acknowledgement is a normal background
+    // launch. It must NOT be completed by the result — only its later
+    // `<task-notification>` completes it — but the `agentId` the
+    // acknowledgement carries is recorded on the launch for that notification
+    // to match by.
     let outcome = attribute_lines(
         &session(),
         MAIN,
         AttributionState::new(MAIN, None),
         vec![
-            background_tool_use_line("a-launch", "toolu-bg"),
-            tool_result_line("u-result", "toolu-bg", false),
+            modern_agent_tool_use_line("a-launch", "toolu-bg", "Agent"),
+            tool_result_with_agent_id_line("u-result", "toolu-bg", "a6a7d31c908cdfa24"),
         ],
     );
 
@@ -25,9 +25,14 @@ fn a_successful_background_launch_result_does_not_complete_the_subagent() {
             .effects
             .iter()
             .any(|e| matches!(e, Effect::SubagentCompleted { .. })),
-        "a non-errored launch result must not complete the subagent, got {:?}",
+        "an async launch acknowledgement must not complete the subagent, got {:?}",
         outcome.effects
     );
     // The launch survives for its `<task-notification>` to consume later.
-    assert!(outcome.state.launched_threads.contains_key("toolu-bg"));
+    let launch = outcome
+        .state
+        .launched_threads
+        .get("toolu-bg")
+        .expect("the launch stays outstanding");
+    assert_eq!(launch.task_id.as_deref(), Some("a6a7d31c908cdfa24"));
 }

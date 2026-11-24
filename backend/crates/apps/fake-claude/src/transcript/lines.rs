@@ -39,14 +39,20 @@ impl TranscriptWriter {
     }
 
     /// Append the `tool_result` carrier: a `role: user` line with no
-    /// author-written text, belonging to the in-flight turn.
-    pub fn tool_result(&mut self, tool_use_id: &str, is_error: bool) -> Result<(), String> {
+    /// author-written text, belonging to the in-flight turn. `content` is the
+    /// text of a successful result; an errored one always reads as a rejection.
+    pub fn tool_result(
+        &mut self,
+        tool_use_id: &str,
+        is_error: bool,
+        content: &str,
+    ) -> Result<(), String> {
         let message = json!({
             "role": "user",
             "content": [{
                 "type": "tool_result",
                 "tool_use_id": tool_use_id,
-                "content": if is_error { "User rejected tool use" } else { "done" },
+                "content": if is_error { "User rejected tool use" } else { content },
                 "is_error": is_error,
             }],
         });

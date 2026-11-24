@@ -185,29 +185,66 @@ pub fn tool_result_line(uuid: &str, tool_use_id: &str, is_error: bool) -> Transc
     }
 }
 
+/// A non-error `tool_result` carrier whose `content` is one text block — the
+/// real Claude shape (an array of `{ "type": "text", "text": ... }` blocks).
+pub fn tool_result_text_line(uuid: &str, tool_use_id: &str, text: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: tool_use_id.into(),
+            content: serde_json::json!([{ "type": "text", "text": text }]),
+            is_error: false,
+        }],
+        ..user_line(uuid, "")
+    }
+}
+
 /// A `tool_result` carrier whose `content` carries the launch ack text that a
 /// background `Agent`/`Task` writes — including the `agentId: <id>` substring
-/// the fold-time recovery is supposed to capture. Mirrors the real Claude
-/// shape (array of `{ "type": "text", "text": ... }` blocks).
+/// the fold-time recovery is supposed to capture.
 pub fn tool_result_with_agent_id_line(
     uuid: &str,
     tool_use_id: &str,
     agent_id: &str,
 ) -> TranscriptMessage {
+    tool_result_text_line(
+        uuid,
+        tool_use_id,
+        &format!(
+            "Async agent launched successfully.\n\
+             agentId: {agent_id} (internal ID - do not mention to user.)\n\
+             The agent is working in the background."
+        ),
+    )
+}
+
+/// A `tool_result` carrier whose `content` is a foreground subagent's final
+/// report: what Claude Code writes when it ran an `Agent`/`Task` call to
+/// completion before returning, instead of the async launch acknowledgement.
+/// The report may carry an `agentId:` line of its own.
+pub fn foreground_subagent_report_line(
+    uuid: &str,
+    tool_use_id: &str,
+    agent_id: &str,
+) -> TranscriptMessage {
+    tool_result_text_line(
+        uuid,
+        tool_use_id,
+        &format!("The page title is \"Example Domain\".\nagentId: {agent_id}"),
+    )
+}
+
+/// An assistant line launching a background `Bash` (`run_in_background: true`).
+pub fn background_bash_tool_use_line(uuid: &str, tool_use_id: &str) -> TranscriptMessage {
     TranscriptMessage {
-        content: vec![ContentBlock::ToolResult {
-            tool_use_id: tool_use_id.into(),
-            content: serde_json::json!([{
-                "type": "text",
-                "text": format!(
-                    "Async agent launched successfully.\n\
-                     agentId: {agent_id} (internal ID - do not mention to user.)\n\
-                     The agent is working in the background."
-                ),
-            }]),
-            is_error: false,
+        content: vec![ContentBlock::ToolUse {
+            id: tool_use_id.into(),
+            name: "Bash".into(),
+            input: serde_json::json!({
+                "command": "sleep 600",
+                "run_in_background": true
+            }),
         }],
-        ..user_line(uuid, "")
+        ..assistant_line(uuid, "")
     }
 }
 
@@ -441,7 +478,8 @@ pub fn branch_send(id: i64, thread: ThreadId, parent: &str, text: &str) -> Outst
 }
 
 /// A seeded `launched_threads` map: one `(tool_use_id -> launching thread)`
-/// entry per element, each with no `task_id` learned yet.
+/// entry per element, each a subagent launch that lit the running indicator,
+/// with no `task_id` learned yet.
 pub fn launches<'a>(
     entries: impl IntoIterator<Item = (&'a str, ThreadId)>,
 ) -> BTreeMap<String, SubagentLaunch> {
@@ -453,6 +491,7 @@ pub fn launches<'a>(
                 SubagentLaunch {
                     thread_id,
                     task_id: None,
+                    drives_indicator: true,
                 },
             )
         })

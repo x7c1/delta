@@ -14,6 +14,7 @@ fn a_background_completion_seeded_from_an_earlier_window_lands_on_its_launch() {
         SubagentLaunch {
             thread_id: CHILD,
             task_id: None,
+            drives_indicator: true,
         },
     );
     let outcome = attribute_lines(

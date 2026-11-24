@@ -78,6 +78,7 @@ pub(super) fn process_forked_skill_launch(
         SubagentLaunch {
             thread_id: state.carry_thread,
             task_id: Some(launch.agent_id.clone()),
+            drives_indicator: true,
         },
     );
     effects.push(Effect::SubagentLaunched {

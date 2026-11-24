@@ -1,3 +1,5 @@
+use delta_attribution::claude_format;
+
 use crate::error::Result;
 use crate::interactor::hooks::{is_subagent_tool, HookTranscript};
 use crate::interactor::session_actor::actor::SessionContext;
@@ -14,9 +16,8 @@ use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcri
 /// response is not an object, the key is missing, or the value is not a
 /// non-empty string, so a malformed/partial response degrades to "no upgrade"
 /// rather than failing the hook.
-fn agent_id_field(tool_response_json: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(tool_response_json)
-        .ok()?
+fn agent_id_field(tool_response: &serde_json::Value) -> Option<String> {
+    tool_response
         .get("agentId")?
         .as_str()
         .filter(|s| !s.is_empty())
@@ -66,6 +67,14 @@ where
     /// indicator moved off the hook path) still gets applied when the sync
     /// later lights the indicator.
     ///
+    /// A subagent recorded as BACKGROUND that Claude Code nevertheless ran in
+    /// the foreground (the tool_use carries no `run_in_background` key, and
+    /// Claude Code decides per subagent type) reports `"status": "completed"`
+    /// in its `tool_response` instead of `"async_launched"`. No
+    /// `<task-notification>` follows such a run, so the entry is finished here,
+    /// its launch row cleared, and [`SessionEvent::SubagentFinished`]
+    /// broadcast.
+    ///
     /// A `PostToolUse` whose `tool_use_id` is not tracked (an unknown id, one
     /// already cleared when the turn ended, or a still-running background entry
     /// for which the upgrade lookup also misses) is a no-op: nothing is removed
@@ -103,6 +112,27 @@ where
             }]);
         }
 
+        // A malformed response degrades to "no information" (`null`): no
+        // foreground-run finish and no `agentId` upgrade, never a failed hook.
+        let tool_response = serde_json::from_str::<serde_json::Value>(tool_response_json)
+            .unwrap_or(serde_json::Value::Null);
+
+        // Recorded as background but run in the foreground (see the doc
+        // above). The fold reaches the same verdict from the `tool_result`
+        // text (cold-start replay, or a hook that never arrived); finishing is
+        // idempotent, so whichever comes second is a no-op.
+        if claude_format::subagent_ran_in_foreground_by_tool_response(&tool_response)
+            && self.state.finish_subagent(tool_use_id)
+        {
+            self.store
+                .clear_subagent_launch(self.id, tool_use_id)
+                .await?;
+            return Ok(vec![SessionEvent::SubagentFinished {
+                session_id: self.id.clone(),
+                tool_use_id: tool_use_id.to_owned(),
+            }]);
+        }
+
         // Background launch ack: the call returned with the subagent's `agentId`
         // in its `tool_result`. Record it against the still-running entry so a
         // later `<task-notification>` missing `<tool-use-id>` can still finish
@@ -123,7 +153,7 @@ where
         // When the in-memory entry IS already present the direct upgrade still
         // wins; the buffer entry is then harmless dead weight (the sync drain
         // finds a runtime value already set).
-        if let Some(task_id) = agent_id_field(tool_response_json) {
+        if let Some(task_id) = agent_id_field(&tool_response) {
             self.state
                 .record_pending_post_tool_use_agent_id(tool_use_id, &task_id);
             if self.state.upgrade_subagent_task_id(tool_use_id, &task_id) {
