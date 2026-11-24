@@ -10,3 +10,5 @@ repository.workspace = true
 # (`ContentBlock::ToolUse.input` / `ToolResult.content`). No serde derives:
 # serialization lives in the gateway crates' wire/record twins.
 serde_json = { workspace = true }
+# The instant a stored timestamp is formatted from (`iso8601_utc`).
+delta-time = { workspace = true }

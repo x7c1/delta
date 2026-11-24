@@ -1,4 +1,4 @@
-use std::time::{Duration, UNIX_EPOCH};
+use delta_time::Instant;
 
 use crate::interactor::testing::*;
 use crate::ports::WorktreeRemoval;
@@ -31,7 +31,7 @@ async fn prune_sessions_settles_a_dirty_or_thrice_shared_worktree() {
         older_than_days: 0,
         statuses: PruneStatus::ALL.to_vec(),
     };
-    let now = UNIX_EPOCH + Duration::from_secs(4_102_444_800); // 2100-01-01
+    let now = Instant::from_epoch_secs(4_102_444_800).expect("in range"); // 2100-01-01
 
     let report = ix.prune_sessions(&criteria, now).await.unwrap();
 

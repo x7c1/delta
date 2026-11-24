@@ -1,11 +1,10 @@
 //! `POST /api/storage/erase` — erasing everything this Delta created on the
 //! machine that holds no work, then stopping the server.
 
-use std::time::SystemTime;
-
 use axum::extract::State;
 use axum::Json;
 
+use delta_time::Instant;
 use delta_wire::rest::WireEraseResponse;
 
 use super::ApiError;
@@ -26,7 +25,7 @@ pub(crate) async fn erase_everything(
     let storage = state.storage();
     let report = match state
         .interactor()
-        .erase_everything(SystemTime::now(), storage.worktree_base_parent())
+        .erase_everything(Instant::now(), storage.worktree_base_parent())
         .await
     {
         Ok(report) => report,

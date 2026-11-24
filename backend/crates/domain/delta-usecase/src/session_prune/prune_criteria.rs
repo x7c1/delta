@@ -1,13 +1,9 @@
 //! Which sessions a bulk removal takes.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use delta_model::SessionStatus;
+use delta_time::Instant;
 
 use super::PruneStatus;
-
-/// Seconds in a day, for turning "older than N days" into a cut-off.
-const SECS_PER_DAY: u64 = 86_400;
 
 /// The sessions a bulk removal takes: those whose most recent activity is at
 /// least `older_than_days` days old and that ended one of the `statuses`
@@ -23,14 +19,14 @@ pub struct PruneCriteria {
 
 impl PruneCriteria {
     /// The latest recency a session may have to be old enough at `now`, as an
-    /// ISO-8601 UTC timestamp comparable with the stored ones.
-    pub fn cutoff(&self, now: SystemTime) -> String {
-        let age = Duration::from_secs(u64::from(self.older_than_days) * SECS_PER_DAY);
-        let secs = now
-            .checked_sub(age)
-            .and_then(|cutoff| cutoff.duration_since(UNIX_EPOCH).ok())
-            .map_or(0, |since_epoch| since_epoch.as_secs());
-        delta_model::iso8601_utc(secs)
+    /// ISO-8601 UTC timestamp comparable with the stored ones. A cut-off that
+    /// reaches before the Unix epoch, or past the supported range, reads as
+    /// the epoch.
+    pub fn cutoff(&self, now: Instant) -> String {
+        let cutoff = now
+            .checked_sub_days(i64::from(self.older_than_days))
+            .unwrap_or(Instant::UNIX_EPOCH);
+        delta_model::iso8601_utc(cutoff)
     }
 
     /// The row statuses [`Self::statuses`] cover, each once.
@@ -55,7 +51,7 @@ mod tests {
 
     #[test]
     fn the_cutoff_is_that_many_days_before_now() {
-        let now = UNIX_EPOCH + Duration::from_secs(1_609_459_200); // 2021-01-01
+        let now = Instant::from_epoch_secs(1_609_459_200).unwrap(); // 2021-01-01
         let criteria = PruneCriteria {
             older_than_days: 31,
             statuses: PruneStatus::ALL.to_vec(),
@@ -74,7 +70,23 @@ mod tests {
             older_than_days: 10,
             statuses: Vec::new(),
         };
-        assert_eq!(criteria.cutoff(UNIX_EPOCH), "1970-01-01T00:00:00Z");
+        assert_eq!(criteria.cutoff(Instant::UNIX_EPOCH), "1970-01-01T00:00:00Z");
+        // 2020-01-01: 20,000 days back lands before the epoch.
+        let now = Instant::from_epoch_secs(1_577_836_800).unwrap();
+        let older = PruneCriteria {
+            older_than_days: 20_000,
+            ..criteria
+        };
+        assert_eq!(older.cutoff(now), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn a_cutoff_past_the_supported_range_clamps_to_the_epoch() {
+        let criteria = PruneCriteria {
+            older_than_days: u32::MAX,
+            statuses: Vec::new(),
+        };
+        assert_eq!(criteria.cutoff(Instant::now()), "1970-01-01T00:00:00Z");
     }
 
     #[test]

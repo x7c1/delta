@@ -1,9 +1,8 @@
 //! Erasing everything Delta created on this machine that holds no work: every
 //! session, Delta's tmux server, and the worktrees under the worktree base.
 
-use std::time::SystemTime;
-
 use delta_model::{SessionId, SessionStatus};
+use delta_time::Instant;
 
 use crate::erase_report::EraseReport;
 use crate::error::{Error, Result};
@@ -68,7 +67,7 @@ where
     /// stops right after this, and every browser with it.
     pub async fn erase_everything(
         &self,
-        now: SystemTime,
+        now: Instant,
         base_parent: Option<&str>,
     ) -> Result<EraseReport> {
         self.close_every_session(now).await?;
@@ -90,7 +89,7 @@ where
 
     /// Step 1: close every session that is live (open, or with a launch in
     /// flight), and every row a restart left `spawning`.
-    async fn close_every_session(&self, now: SystemTime) -> Result<()> {
+    async fn close_every_session(&self, now: Instant) -> Result<()> {
         let mut ids = self.live_session_ids().await;
         for id in self
             .store
@@ -116,7 +115,7 @@ where
     }
 
     /// Step 3: remove every stored session through the single removal.
-    async fn remove_every_session(&self, now: SystemTime, report: &mut EraseReport) -> Result<()> {
+    async fn remove_every_session(&self, now: Instant, report: &mut EraseReport) -> Result<()> {
         let ids: Vec<SessionId> = self
             .store
             .list_prunable_sessions(&every_session_until(now), &EVERY_STATUS)
@@ -192,7 +191,7 @@ where
 
 /// The recency cut-off that takes every session stored at `now`, whatever
 /// its age.
-fn every_session_until(now: SystemTime) -> String {
+fn every_session_until(now: Instant) -> String {
     PruneCriteria {
         older_than_days: 0,
         statuses: Vec::new(),
