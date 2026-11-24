@@ -1,8 +1,7 @@
 //! Listing the directories under the worktree base for Settings → Storage.
 
-use std::time::UNIX_EPOCH;
-
 use delta_model::SessionId;
+use delta_time::Instant;
 
 use crate::error::{Error, Result};
 use crate::interactor::InteractorCore;
@@ -82,7 +81,8 @@ where
 
     /// When the directory at `path` was last modified, as an ISO-8601 UTC
     /// timestamp, or `None` — with a warning — when its metadata cannot be
-    /// read: the age only helps the user decide, so a directory without one
+    /// read or its time is before the Unix epoch or outside the supported
+    /// range: the age only helps the user decide, so a directory without one
     /// is still listed.
     async fn modified_at(&self, path: &str) -> Option<String> {
         let modified = match self.workspace.modified_at(path).await {
@@ -92,12 +92,19 @@ where
                 return None;
             }
         };
-        match modified.duration_since(UNIX_EPOCH) {
-            Ok(since_epoch) => Some(delta_model::iso8601_utc(since_epoch.as_secs())),
-            Err(_) => {
+        match Instant::from_system_time(modified) {
+            Some(at) if at >= Instant::UNIX_EPOCH => Some(delta_model::iso8601_utc(at)),
+            Some(_) => {
                 tracing::warn!(
                     path,
                     "a worktree directory's modification time is before the Unix epoch"
+                );
+                None
+            }
+            None => {
+                tracing::warn!(
+                    path,
+                    "a worktree directory's modification time is outside the supported range"
                 );
                 None
             }

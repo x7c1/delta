@@ -1,6 +1,5 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use delta_model::{SessionId, SessionStatus};
+use delta_time::Instant;
 
 use crate::interactor::testing::*;
 use crate::ports::WorktreeRemoval;
@@ -13,8 +12,8 @@ use super::removal_support::{closed_session, worktree_path, REPO_ROOT};
 
 /// A fixed "now" far past every fixture's timestamp, so the 30-day cut-off
 /// lands after all of them and only the one session dated later is too new.
-fn far_future() -> SystemTime {
-    UNIX_EPOCH + Duration::from_secs(4_102_444_800) // 2100-01-01
+fn far_future() -> Instant {
+    Instant::from_epoch_secs(4_102_444_800).expect("in range") // 2100-01-01
 }
 
 /// The bulk removal is the single removal applied to each old closed session:

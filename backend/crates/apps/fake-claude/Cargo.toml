@@ -10,6 +10,8 @@ repository.workspace = true
 # program, so it speaks the same wire types the server parses but never
 # touches Delta's domain internals.
 delta-wire = { workspace = true }
+# The transcript lines' timestamps.
+delta-time = { workspace = true }
 libc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

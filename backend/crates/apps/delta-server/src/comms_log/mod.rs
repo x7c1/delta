@@ -38,10 +38,10 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::broadcast;
 
+use delta_time::Instant;
 use delta_usecase::{CommsEntry, CommsLogSink};
 use delta_wire::WireCommsFrame;
 
@@ -181,10 +181,7 @@ impl CommsLogSink for CommsLogHub {
 /// Now, as Unix milliseconds. A clock before the epoch is not a case worth
 /// carrying an error for, so it reads as 0.
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|since| since.as_millis() as i64)
-        .unwrap_or_default()
+    Instant::now().epoch_millis().max(0)
 }
 
 #[cfg(test)]

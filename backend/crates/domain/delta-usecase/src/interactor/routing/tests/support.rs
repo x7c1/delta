@@ -1,8 +1,7 @@
 //! Shared setup for the erase tests.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use delta_model::SessionId;
+use delta_time::Instant;
 
 use crate::interactor::testing::*;
 use crate::ports::NewSession;
@@ -16,8 +15,8 @@ pub(super) const REPO_ROOT: &str = "/repos/delta";
 pub(super) const BASE_PARENT: &str = "/home/u/.delta";
 
 /// A fixed "now" past every fixture's timestamp.
-pub(super) fn now() -> SystemTime {
-    UNIX_EPOCH + Duration::from_secs(4_102_444_800) // 2100-01-01
+pub(super) fn now() -> Instant {
+    Instant::from_epoch_secs(4_102_444_800).expect("in range") // 2100-01-01
 }
 
 /// The path of `name` under the test worktree base.

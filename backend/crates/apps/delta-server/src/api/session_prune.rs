@@ -1,12 +1,11 @@
 //! `GET` and `POST /api/sessions/prune` — previewing and running the bulk
 //! removal of old closed sessions.
 
-use std::time::SystemTime;
-
 use axum::extract::{Query, State};
 use axum::Json;
 use serde::Deserialize;
 
+use delta_time::Instant;
 use delta_usecase::{PruneCriteria, PruneStatus, SessionEvent};
 use delta_wire::rest::{
     WirePrunePreviewResponse, WirePruneSessionsRequest, WirePruneSessionsResponse, WirePruneStatus,
@@ -57,7 +56,7 @@ pub(crate) async fn preview_prune_sessions(
     let criteria = query.criteria()?;
     let candidates = state
         .interactor()
-        .prune_candidates(&criteria, SystemTime::now())
+        .prune_candidates(&criteria, Instant::now())
         .await?;
     Ok(Json(WirePrunePreviewResponse::new(
         candidates.iter().map(|id| id.as_str().to_owned()).collect(),
@@ -74,7 +73,7 @@ pub(crate) async fn prune_sessions(
     let criteria = PruneCriteria::from(request);
     let report = state
         .interactor()
-        .prune_sessions(&criteria, SystemTime::now())
+        .prune_sessions(&criteria, Instant::now())
         .await?;
     tracing::info!(
         removed = report.removed.len(),

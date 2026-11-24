@@ -1,8 +1,7 @@
 //! Removing old closed sessions in bulk, one routed removal per session.
 
-use std::time::SystemTime;
-
 use delta_model::SessionId;
+use delta_time::Instant;
 
 use crate::error::{Error, Result};
 use crate::interactor::Interactor;
@@ -29,7 +28,7 @@ where
     pub async fn prune_candidates(
         &self,
         criteria: &PruneCriteria,
-        now: SystemTime,
+        now: Instant,
     ) -> Result<Vec<SessionId>> {
         let matching = self.matching_sessions(criteria, now).await?;
         let live = self.live_session_ids().await;
@@ -60,7 +59,7 @@ where
     pub async fn prune_sessions(
         &self,
         criteria: &PruneCriteria,
-        now: SystemTime,
+        now: Instant,
     ) -> Result<PruneReport> {
         let matching = self.matching_sessions(criteria, now).await?;
         Ok(self.remove_sessions(matching, &mut Vec::new()).await)
@@ -148,7 +147,7 @@ where
     async fn matching_sessions(
         &self,
         criteria: &PruneCriteria,
-        now: SystemTime,
+        now: Instant,
     ) -> Result<Vec<SessionId>> {
         self.store
             .list_prunable_sessions(&criteria.cutoff(now), &criteria.row_statuses())

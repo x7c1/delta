@@ -16,6 +16,9 @@ embed-web = ["dep:include_dir", "dep:tower", "dep:sha2", "dep:base64"]
 delta-usecase = { workspace = true }
 delta-bootstrap = { workspace = true }
 delta-wire = { workspace = true }
+# The current instant the bulk removal and the erase cut off at, and the comms
+# log's Unix milliseconds.
+delta-time = { workspace = true }
 anyhow = { workspace = true }
 dirs = { workspace = true }
 axum = { workspace = true }

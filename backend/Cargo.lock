@@ -885,6 +885,7 @@ dependencies = [
 name = "delta-model"
 version = "0.7.0"
 dependencies = [
+ "delta-time",
  "serde_json",
 ]
 
@@ -900,6 +901,7 @@ dependencies = [
  "delta-bootstrap",
  "delta-model",
  "delta-sqlite",
+ "delta-time",
  "delta-transcript",
  "delta-usecase",
  "delta-wire",
@@ -931,6 +933,7 @@ dependencies = [
  "async-trait",
  "delta-attribution",
  "delta-model",
+ "delta-time",
  "delta-usecase",
  "rusqlite",
  "serde",
@@ -988,6 +991,7 @@ dependencies = [
  "async-trait",
  "delta-attribution",
  "delta-model",
+ "delta-time",
  "release-signature",
  "semver",
  "serde_json",
@@ -1297,6 +1301,7 @@ dependencies = [
  "axum",
  "delta-bootstrap",
  "delta-server",
+ "delta-time",
  "delta-wire",
  "libc",
  "serde",

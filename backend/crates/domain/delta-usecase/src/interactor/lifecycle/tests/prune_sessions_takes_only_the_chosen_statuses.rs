@@ -1,6 +1,5 @@
-use std::time::{Duration, SystemTime};
-
 use delta_model::SessionStatus;
+use delta_time::Instant;
 
 use crate::interactor::testing::*;
 use crate::{PruneCriteria, PruneStatus};
@@ -11,7 +10,7 @@ use super::removal_support::closed_session;
 /// nothing removes nothing.
 #[tokio::test]
 async fn prune_sessions_takes_only_the_chosen_statuses() {
-    let now = SystemTime::now() + Duration::from_secs(10 * 365 * 86_400);
+    let now = Instant::from_epoch_secs(4_102_444_800).expect("in range"); // 2100-01-01
     let ix = interactor();
     let ran = closed_session(&ix, "ran", "/scratch/a", None, None).await;
     let failed = closed_session(&ix, "failed", "/scratch/b", None, None).await;

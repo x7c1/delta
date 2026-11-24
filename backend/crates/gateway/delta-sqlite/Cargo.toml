@@ -9,6 +9,8 @@ repository.workspace = true
 delta-attribution = { workspace = true }
 delta-model = { workspace = true }
 delta-usecase = { workspace = true }
+# The current instant every stored timestamp is formatted from.
+delta-time = { workspace = true }
 async-trait = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
