@@ -112,10 +112,13 @@ impl Engine {
             .last_tool_use
             .as_ref()
             .ok_or("post_tool_use step without a preceding tool_use")?;
+        // The real response also carries `status: "async_launched"`, which
+        // tells a background launch apart from a subagent Claude Code ran in
+        // the foreground (`status: "completed"`).
         let tool_response = tool_use
             .task_id
             .as_deref()
-            .map(|task_id| json!({ "agentId": task_id }))
+            .map(|task_id| json!({ "status": "async_launched", "agentId": task_id }))
             .unwrap_or(Value::Null);
         self.fire(
             "PostToolUse",
@@ -185,13 +188,27 @@ impl Engine {
     }
 
     /// `tool_result`: write the most recent tool call's result.
+    ///
+    /// A background `Agent`/`Task` launch's result is the async launch
+    /// acknowledgement the real `claude` writes, carrying the minted
+    /// `agentId`: Delta tells it apart from a foreground subagent's final
+    /// report by its `Async agent launched` marker, and finishes the running
+    /// entry on anything else. Every other call's result reads `done`.
     pub(super) fn tool_result(&mut self, is_error: bool) -> Result<(), String> {
-        let id = self
+        let tool_use = self
             .last_tool_use
             .as_ref()
-            .map(|t| t.id.clone())
             .ok_or("tool_result step without a preceding tool_use")?;
-        self.transcript.tool_result(&id, is_error)
+        let content = match (tool_use.name.as_str(), tool_use.task_id.as_deref()) {
+            ("Agent" | "Task", Some(task_id)) => format!(
+                "Async agent launched successfully.\n\
+                 agentId: {task_id} (internal ID - do not mention to user.)\n\
+                 The agent is working in the background."
+            ),
+            _ => "done".to_owned(),
+        };
+        let id = tool_use.id.clone();
+        self.transcript.tool_result(&id, is_error, &content)
     }
 
     /// `task_notification`: write the background task's completion line.

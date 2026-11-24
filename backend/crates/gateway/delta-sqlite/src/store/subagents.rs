@@ -78,7 +78,7 @@ impl SqliteStore {
         let conn = self.conn.lock().await;
         let mut stmt = conn
             .prepare(
-                "SELECT tool_use_id, thread_id, task_id \
+                "SELECT tool_use_id, thread_id, task_id, drives_indicator \
                  FROM subagent_launch WHERE session_id = ?1",
             )
             .map_err(Error::from)?;
@@ -89,6 +89,7 @@ impl SqliteStore {
                     SubagentLaunch {
                         thread_id: ThreadId(row.get::<_, i64>(1)?),
                         task_id: row.get::<_, Option<String>>(2)?,
+                        drives_indicator: row.get::<_, bool>(3)?,
                     },
                 ))
             })

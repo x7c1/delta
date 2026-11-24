@@ -16,6 +16,7 @@ fn a_task_output_retrieval_folded_after_its_tool_use_window_still_completes() {
         SubagentLaunch {
             thread_id: CHILD,
             task_id: Some("agent-xyz".to_owned()),
+            drives_indicator: true,
         },
     );
     let outcome = attribute_lines(

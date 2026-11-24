@@ -19,17 +19,25 @@ impl FakeStore {
         thread_id: ThreadId,
     ) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
-        // Mirrors the SQL UPSERT: the `task_id` of an already-upgraded row is
-        // preserved across a re-record (the launching thread refreshes; the
-        // separately-learned task id does not). A brand-new row starts with
-        // `task_id: None` until `upgrade_subagent_task_id` runs.
+        // Mirrors the SQL UPSERT: the `task_id` and `drives_indicator` of an
+        // already-recorded row are preserved across a re-record (the launching
+        // thread refreshes; the separately-learned fields do not). A brand-new
+        // row starts with `task_id: None` until `upgrade_subagent_task_id`
+        // runs, and `drives_indicator: false` until `record_subagent_indicator`
+        // marks it.
         let key = (session_id.clone(), tool_use_id.to_owned());
-        let task_id = g
+        let (task_id, drives_indicator) = g
             .subagent_launches
             .get(&key)
-            .and_then(|l| l.task_id.clone());
-        g.subagent_launches
-            .insert(key, SubagentLaunch { thread_id, task_id });
+            .map_or((None, false), |l| (l.task_id.clone(), l.drives_indicator));
+        g.subagent_launches.insert(
+            key,
+            SubagentLaunch {
+                thread_id,
+                task_id,
+                drives_indicator,
+            },
+        );
         Ok(())
     }
 
@@ -89,12 +97,13 @@ impl FakeStore {
         let mut g = self.inner.lock().unwrap();
         // Mirrors the SQL targeted UPDATE: an unknown launch is a no-op, and
         // re-marking one refreshes its details in place (keeping its order).
-        if !g
+        let Some(launch) = g
             .subagent_launches
-            .contains_key(&(session_id.clone(), tool_use_id.to_owned()))
-        {
+            .get_mut(&(session_id.clone(), tool_use_id.to_owned()))
+        else {
             return Ok(());
-        }
+        };
+        launch.drives_indicator = true;
         let marked = FakeSubagentIndicator {
             session_id: session_id.clone(),
             tool_use_id: tool_use_id.to_owned(),

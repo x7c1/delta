@@ -50,10 +50,11 @@ pub struct AttributionState {
     /// this survives across sync windows by being seeded from a persisted
     /// store at batch start and mutated through effects: a launch is recorded
     /// ([`Effect::SubagentLaunched`]) when first seen and cleared
-    /// ([`Effect::SubagentCompleted`]) by whichever of its three completion
+    /// ([`Effect::SubagentCompleted`]) by whichever of its four completion
     /// signals is folded: the harness-injected `<task-notification>`, the
     /// parent's own `TaskOutput` retrieval of the result, or the launching
-    /// `tool_result` reporting the launch never started at all.
+    /// `tool_result` reporting the launch never started at all or that the
+    /// subagent ran in the foreground and has finished.
     /// `BTreeMap` keeps the seed-from-store ↔ fold round-trip deterministic.
     ///
     /// [`Effect::SubagentLaunched`]: crate::Effect::SubagentLaunched
