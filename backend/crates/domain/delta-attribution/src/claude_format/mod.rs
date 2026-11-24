@@ -27,6 +27,7 @@ pub use prompt_echo::prompt_echoes_send;
 mod subagent_launch;
 pub use subagent_launch::{
     agent_id_from_tool_result_content, is_subagent_tool, launches_in_background,
+    subagent_ran_in_foreground_by_result_content, subagent_ran_in_foreground_by_tool_response,
     SUBAGENT_TOOL_NAMES,
 };
 

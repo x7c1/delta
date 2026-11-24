@@ -223,7 +223,10 @@ background launch — whose call returns immediately, so this fires long before 
 work ends — instead has the `agentId` from its `tool_response` recorded as the
 fallback correlation key its completion is matched by: the `<task-id>` of a
 `<task-notification>`, or the `<task_id>` of a `TaskOutput` retrieval report
-when the parent collects the result itself (no notification fires then). Every
+when the parent collects the result itself (no notification fires then). A
+launch recorded as background whose `tool_response` carries `"status":
+"completed"` ran in the foreground after all (Claude Code decides per subagent
+type), so it is finished like a foreground one. Every
 other tool's `PostToolUse` changes no runtime state.
 
 Request:

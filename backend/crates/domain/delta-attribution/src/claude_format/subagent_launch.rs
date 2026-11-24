@@ -40,6 +40,63 @@ fn extract_agent_id_from_text(text: &str) -> Option<&str> {
     }
 }
 
+/// The text Claude Code opens a background subagent launch's `tool_result`
+/// with (`Async agent launched successfully.\nagentId: <id> ...`).
+const ASYNC_LAUNCH_MARKER: &str = "Async agent launched";
+
+/// The `status` Claude Code writes into a subagent call's structured result
+/// (the JSONL sibling `toolUseResult`, which is also the `PostToolUse` hook's
+/// `tool_response`) when the subagent ran in the foreground and has finished.
+/// A background launch writes `async_launched` instead.
+const COMPLETED_RUN_STATUS: &str = "completed";
+
+/// Whether the `content` of a subagent call's `tool_result` reports that the
+/// subagent ran in the foreground and has finished, rather than acknowledging
+/// a background launch.
+///
+/// The `Agent`/`Task` tool_use does not say which way Claude Code will run it
+/// (it decides per subagent type, and the `run_in_background` key is gone from
+/// the schema), so the launch is recorded as background and its result decides.
+/// A background launch's result is the immediate acknowledgement opening with
+/// `Async agent launched`; a foreground run's result is the subagent's final
+/// report — arbitrary text, possibly with an `agentId: <id>` line of its own.
+/// The structural `toolUseResult.status` is not preserved in
+/// `ContentBlock::ToolResult`, so the fold decides from the text: anything that
+/// is not the acknowledgement is a finished run.
+///
+/// `Async agent launched` counts only where a text block OPENS with it, as the
+/// acknowledgement does. A report that merely quotes it mid-text (a subagent
+/// summarising code or a transcript that contains it) is still a finished run;
+/// reading it as an acknowledgement would leave that entry running forever.
+///
+/// Meaningful only for a non-error result of a subagent tool
+/// ([`is_subagent_tool`]): a background `Bash` acknowledges its launch with
+/// other text and must not be read through this.
+pub fn subagent_ran_in_foreground_by_result_content(content: &serde_json::Value) -> bool {
+    scan_tool_result_text(content, |text| {
+        text.trim_start()
+            .starts_with(ASYNC_LAUNCH_MARKER)
+            .then_some(text)
+    })
+    .is_none()
+}
+
+/// Whether a subagent call's structured result — the `PostToolUse` hook's
+/// `tool_response` — reports that the subagent ran in the foreground and has
+/// finished (`"status": "completed"`), rather than a background launch
+/// (`"status": "async_launched"`).
+///
+/// The hook-side counterpart of [`subagent_ran_in_foreground_by_result_content`]:
+/// the hook sees the structured object, so it reads the `status` field instead
+/// of the text. A response that is not an object, or carries no string
+/// `status`, degrades to `false` (keep the running entry).
+pub fn subagent_ran_in_foreground_by_tool_response(tool_response: &serde_json::Value) -> bool {
+    tool_response
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        == Some(COMPLETED_RUN_STATUS)
+}
+
 /// Whether a tool_use launches the tool in the background — i.e. returns
 /// immediately while the actual work continues, with a later
 /// `<task-notification>` user line reporting its completion. The launching
@@ -116,6 +173,60 @@ mod tests {
             agent_id_from_tool_result_content(&serde_json::json!({ "type": "text" })),
             None
         );
+    }
+
+    #[test]
+    fn an_async_launch_acknowledgement_is_not_a_foreground_run() {
+        let content = serde_json::json!([
+            {
+                "type": "text",
+                "text": "Async agent launched successfully.\n\
+                         agentId: a6a7d31c908cdfa24 (internal ID - do not mention to user.)",
+            }
+        ]);
+        assert!(!subagent_ran_in_foreground_by_result_content(&content));
+        assert!(!subagent_ran_in_foreground_by_result_content(
+            &serde_json::json!("Async agent launched successfully.")
+        ));
+    }
+
+    #[test]
+    fn a_subagent_report_is_a_foreground_run() {
+        // A foreground run's result is the subagent's report, which may carry
+        // an `agentId:` line of its own — only the acknowledgement marker
+        // tells a background launch apart.
+        let content = serde_json::json!([
+            { "type": "text", "text": "The page says hello.\nagentId: abc123" }
+        ]);
+        assert!(subagent_ran_in_foreground_by_result_content(&content));
+    }
+
+    #[test]
+    fn a_subagent_report_quoting_the_acknowledgement_is_a_foreground_run() {
+        // Only a text block that opens with the marker is the acknowledgement;
+        // a report that quotes it mid-text has still finished.
+        let content = serde_json::json!([{
+            "type": "text",
+            "text": "The fixture's launch result reads \
+                     `Async agent launched successfully.` before the agentId line.",
+        }]);
+        assert!(subagent_ran_in_foreground_by_result_content(&content));
+    }
+
+    #[test]
+    fn a_completed_tool_response_is_a_foreground_run() {
+        assert!(subagent_ran_in_foreground_by_tool_response(
+            &serde_json::json!({ "status": "completed", "agentId": "abc123" })
+        ));
+        assert!(!subagent_ran_in_foreground_by_tool_response(
+            &serde_json::json!({ "status": "async_launched", "agentId": "abc123" })
+        ));
+        assert!(!subagent_ran_in_foreground_by_tool_response(
+            &serde_json::json!({ "agentId": "abc123" })
+        ));
+        assert!(!subagent_ran_in_foreground_by_tool_response(
+            &serde_json::Value::Null
+        ));
     }
 
     #[test]

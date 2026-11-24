@@ -463,7 +463,10 @@ which frames arrive, and a client must handle each event whenever it lands.
   background — returns immediately at launch and finishes only when its
   completion is folded during transcript sync (its `<task-notification>`, or
   the parent's own `TaskOutput` retrieval of the result, which suppresses the
-  notification), so the client must not sweep it at turn end.
+  notification), so the client must not sweep it at turn end. An `Agent`/`Task`
+  call without a `run_in_background` key is announced as `background: true`;
+  if Claude Code runs it in the foreground after all, it finishes when its
+  result arrives.
   It is also **sent again after a re-adoption**: when a send reaches a closed
   session whose Claude pane survived a server restart, the server re-adopts the
   pane and emits one `subagent_started` (always `background: true`) for each

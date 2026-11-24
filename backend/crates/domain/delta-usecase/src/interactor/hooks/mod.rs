@@ -30,21 +30,13 @@ mod tests;
 /// reference it — no magic-string drift.
 pub(in crate::interactor) const ASK_USER_QUESTION: &str = "AskUserQuestion";
 
-/// The tool names that spawn a subagent.
-///
-/// The current Claude Code build (probed on v2.1.177) names this tool `Agent`;
-/// older builds named it `Task`. The hook contract is a drift surface, so both
-/// are matched defensively. A subagent's own nested tool calls (e.g. its
-/// `Bash`) reach the same `PreToolUse`/`PostToolUse` hooks but carry their own
-/// tool names, so matching strictly against this set is what keeps an internal
-/// tool from flipping the running indicator.
-pub(in crate::interactor) const SUBAGENT_TOOL_NAMES: [&str; 2] = ["Agent", "Task"];
-
-/// Whether `tool_name` names a subagent-spawning tool (see
-/// [`SUBAGENT_TOOL_NAMES`]).
-pub(in crate::interactor) fn is_subagent_tool(tool_name: &str) -> bool {
-    SUBAGENT_TOOL_NAMES.contains(&tool_name)
-}
+/// Whether `tool_name` names a subagent-spawning tool (`Agent`, or the older
+/// `Task`). A subagent's own nested tool calls (e.g. its `Bash`) reach the same
+/// `PreToolUse`/`PostToolUse` hooks but carry their own tool names, so matching
+/// strictly against this set is what keeps an internal tool from flipping the
+/// running indicator. The one definition lives with the other Claude Code
+/// conventions in [`delta_attribution::claude_format`].
+pub(in crate::interactor) use delta_attribution::claude_format::is_subagent_tool;
 
 pub use on_permission_request::PermissionWait;
 
