@@ -58,10 +58,3 @@ Update the doc comment of `sessionSwitchTarget` and the user-facing note in
       keydowns are `defaultPrevented`.
 - [x] No remaining mention of wrapping around in the shortcut's code comments
       or in `docs/guides/install/README.md`.
-
-### Before merge (verified outside the check command)
-
-- [ ] On the built desktop app, Ctrl+Shift+Tab on the top session and Ctrl+Tab
-      on the bottom loaded session leave the focus where it is — needs a
-      person: it needs the desktop app running on a real display and a physical
-      keyboard, which no agent in this environment can reach.
