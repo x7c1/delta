@@ -89,14 +89,18 @@ describe.each([
     expect(focused()).toBe('alpha');
   });
 
-  it('wraps around at both ends', () => {
+  it('stays on the last row on Ctrl+Tab and on the first row on Ctrl+Shift+Tab', () => {
     useNavStore.setState({ focusedSessionId: 'gamma' });
     renderPane([alpha, beta, gamma]);
 
-    pressCtrlTab();
-    expect(focused()).toBe('alpha');
-    pressCtrlTab(document.body, true);
+    const forward = pressCtrlTab();
     expect(focused()).toBe('gamma');
+    expect(forward.defaultPrevented).toBe(true);
+
+    act(() => useNavStore.setState({ focusedSessionId: 'alpha' }));
+    const backward = pressCtrlTab(document.body, true);
+    expect(focused()).toBe('alpha');
+    expect(backward.defaultPrevented).toBe(true);
   });
 
   it('consumes the key with nothing to move to in an empty list', () => {
@@ -139,9 +143,11 @@ describe('NavigatorPane session switch order', () => {
     expect(focused()).toBe('failed');
     pressCtrlTab();
     expect(focused()).toBe('alpha');
-    pressCtrlTab(document.body, true);
-    pressCtrlTab(document.body, true);
+    pressCtrlTab();
     expect(focused()).toBe('beta');
+    pressCtrlTab(document.body, true);
+    pressCtrlTab(document.body, true);
+    expect(focused()).toBe('failed');
   });
 
   it('takes the key before an element inside the page sees it', () => {
