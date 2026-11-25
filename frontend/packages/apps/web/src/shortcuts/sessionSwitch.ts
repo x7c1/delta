@@ -34,10 +34,12 @@ export function sessionSwitchDirection(
  * The session a switch moves to, given the focused one and the list's ids in
  * the order it is shown, or `null` when the list is empty.
  *
- * The ends wrap around: past the last id is the first, before the first is the
- * last. With no focused session — `null`, or an id not in the list, such as the
- * new-session screen's marker or a session no longer listed — `next` moves to
- * the first id and `previous` to the last.
+ * The ends are where a switch stops: `next` on the last id and `previous` on
+ * the first return that same id, so the focus stays put. The list shows the
+ * newest session first, and a jump from one end to the other would land on a
+ * long idle one. With no focused session — `null`, or an id not in the list,
+ * such as the new-session screen's marker or a session no longer listed — both
+ * directions move to the first id.
  */
 export function sessionSwitchTarget<Id extends string>(
   current: string | null,
@@ -50,8 +52,8 @@ export function sessionSwitchTarget<Id extends string>(
   }
   const index = current === null ? -1 : orderedIds.indexOf(current as Id);
   if (index === -1) {
-    return direction === 'next' ? orderedIds[0] : orderedIds[count - 1];
+    return orderedIds[0];
   }
   const step = direction === 'next' ? 1 : -1;
-  return orderedIds[(index + step + count) % count];
+  return orderedIds[Math.min(Math.max(index + step, 0), count - 1)];
 }

@@ -18,7 +18,7 @@ import {
  * The listener is on `window` in the capture phase, so it sees the key before
  * the terminal, the composer or any other input does, and stops it there: the
  * key moves between sessions wherever the focus is. Each keydown, a repeat
- * included, moves one row.
+ * included, moves one row; at either end of the list it does nothing.
  *
  * @param orderedIds The loaded sessions' ids in the order the list shows them.
  *   Only these count: the shortcut never fetches another page.
@@ -55,7 +55,8 @@ export function useSessionSwitchShortcut(
         ids,
         direction,
       );
-      if (target === null) {
+      // Nothing to do in an empty list or at the end the key points past.
+      if (target === null || target === nav.focusedSessionId) {
         return;
       }
       // The same focus change a click on the card makes.

@@ -9,19 +9,19 @@ describe('sessionSwitchTarget', () => {
     expect(sessionSwitchTarget('b', ids, 'previous')).toBe('a');
   });
 
-  it('wraps from the last id to the first, and from the first to the last', () => {
-    expect(sessionSwitchTarget('c', ids, 'next')).toBe('a');
-    expect(sessionSwitchTarget('a', ids, 'previous')).toBe('c');
+  it('stays on the last id moving forward and on the first moving backward', () => {
+    expect(sessionSwitchTarget('c', ids, 'next')).toBe('c');
+    expect(sessionSwitchTarget('a', ids, 'previous')).toBe('a');
   });
 
-  it('moves to the first id forward and the last backward with no focused session', () => {
+  it('moves to the first id in both directions with no focused session', () => {
     expect(sessionSwitchTarget(null, ids, 'next')).toBe('a');
-    expect(sessionSwitchTarget(null, ids, 'previous')).toBe('c');
+    expect(sessionSwitchTarget(null, ids, 'previous')).toBe('a');
   });
 
   it('treats a focused id missing from the list as no focus', () => {
     expect(sessionSwitchTarget('gone', ids, 'next')).toBe('a');
-    expect(sessionSwitchTarget('gone', ids, 'previous')).toBe('c');
+    expect(sessionSwitchTarget('gone', ids, 'previous')).toBe('a');
   });
 
   it('stays on the only id of a one-row list', () => {
