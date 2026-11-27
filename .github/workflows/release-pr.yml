@@ -1,0 +1,38 @@
+name: Release PR
+
+# Opens or refreshes the one rolling release PR, as a draft, through colophon's
+# reusable workflow. colophon's job decides which of these events to act on:
+# pushes to main other than a release landing, title edits of the open release
+# PR, and manual runs on main. See docs/guides/release.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [edited]
+  # Opens the release PR without waiting for the next push to main, e.g. right
+  # after the GitHub App has been set up.
+  workflow_dispatch:
+
+# Every job states what it needs.
+permissions: {}
+
+jobs:
+  release-pr:
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: x7c1/colophon/.github/workflows/release-pr.yml@a4d0af8d30a36d9978d393e28b540bdb3c641c6f # v0.3.0
+    with:
+      version-scheme: semver
+      # The release PR's one commit sets the workspace version in
+      # backend/Cargo.toml and backend/Cargo.lock; the script's header says how
+      # it does that on colophon's bare runner.
+      version-writer: command
+      version-command: scripts/set-workspace-version.sh "$COLOPHON_VERSION"
+      # Opened as the GitHub App, so that CI and the validate check run on
+      # every refresh of the release PR (docs/guides/release.md, "Release
+      # automation setup").
+      app-client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+    secrets:
+      app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

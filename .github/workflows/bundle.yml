@@ -5,8 +5,8 @@ name: Bundle
 # workflow artifact (delta-<matrix name>). It never touches a Release: the
 # jobs hold read-only access, so nothing they run (an action, a build script,
 # a dependency's install-time code) can change the Release the desktop app
-# updates from. The Release workflow calls it and attaches the artifacts to
-# its draft Release from a separate job. See docs/guides/release.md
+# updates from. The Release workflow calls it, then signs the artifacts and
+# hands them to the Release from separate jobs. See docs/guides/release.md
 # ("Desktop bundles").
 
 on:
@@ -23,6 +23,9 @@ on:
         type: boolean
         default: false
   pull_request:
+    # The default types, plus ready_for_review: marking the draft release PR
+    # ready builds the bundles on it (see the `bundle` job).
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, 'feat/**']
     paths:
       - backend/crates/apps/delta-desktop/**
@@ -47,6 +50,11 @@ on:
 jobs:
   bundle:
     name: bundle (${{ matrix.name }})
+    # The release PR opens as a draft on a `release/...` branch, and is not
+    # built until someone marks it ready for review (docs/guides/release.md).
+    # Only a pull_request event matches: when release.yml calls this workflow,
+    # the event is the caller's (workflow_run or workflow_dispatch).
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft && startsWith(github.head_ref, 'release/')) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     env:
@@ -109,8 +117,9 @@ jobs:
       - name: Install system packages
         if: runner.os == 'Linux'
         run: |
+          read -ra packages <<< "$APT_PACKAGES"
           sudo apt-get update
-          sudo apt-get install -y -o APT::Keep-Downloaded-Packages=true $APT_PACKAGES
+          sudo apt-get install -y -o APT::Keep-Downloaded-Packages=true "${packages[@]}"
           sudo apt-get autoclean
           sudo find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec chmod a+r {} +
 
@@ -256,7 +265,7 @@ jobs:
             echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
 
-      # release.yml's publish job downloads these by name (delta-*).
+      # release.yml's sign and assets jobs download these by name (delta-*).
       - name: Upload the bundles
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

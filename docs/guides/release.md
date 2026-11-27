@@ -1,121 +1,93 @@
 # Release
 
-How to cut a Delta release. Releases are driven by a single rolling pull
-request that the bot keeps in sync with `main`; cutting a release is just
-merging that PR.
+How a Delta release is cut. Releases are driven by a single rolling pull
+request kept in sync with `main`; marking it ready for review is the decision
+to release, and merging it cuts the release.
 
 ## Overview
 
-Delta uses a "merge the PR" release model. A bot opens and updates one
-rolling release PR against `main`; merging it triggers the `Release`
-workflow, which creates a draft GitHub Release for the commit CI tested,
-builds the desktop bundles, signs them with a key only a dedicated job can
-read, attaches them with their signatures, and only then publishes the
-Release, which creates the matching `vX.Y.Z` tag. The Release body is a
-summary written by hand in the release PR; the generated per-commit changelog
-stays on the PR. The jobs that build hold no write access and never see the
-signing key; see [Desktop bundles](#desktop-bundles) and
-[Signing](#signing).
+The mechanics of the release PR and of tagging and publishing are not in this
+repository: they are the reusable workflows of
+[colophon](https://github.com/x7c1/colophon), pinned to v0.3.0, which this
+repository calls from three small workflows of its own (see
+[Workflows involved](#workflows-involved)). colophon's
+[usage guide](https://github.com/x7c1/colophon/blob/v0.3.0/docs/usage.md)
+describes the flow those workflows run — the release PR's title and version,
+its body with the summary above the `<!-- changelog:auto -->` marker, the
+allowed title transitions, the draft, and what a merge does — and this guide
+does not repeat it. What follows is what is particular to Delta.
 
-## Normal flow (patch bump)
+The version lives in one place: `[workspace.package].version` in
+`backend/Cargo.toml`, which every crate of the backend workspace inherits.
+Versions are semver (`Release vX.Y.Z`, tag `vX.Y.Z`). Between colophon
+deciding that a commit is a release and colophon publishing it, the `Release`
+workflow builds the desktop bundles, signs them with a key only a dedicated
+job can read, and attests their build provenance; the Release is published
+with every bundle and its signature already attached. The jobs that build
+hold no write access and never see the signing key; see
+[Desktop bundles](#desktop-bundles) and [Signing](#signing).
 
-1. The `Create Release PR` workflow opens or refreshes a single open PR
-   titled `Release vX.Y.Z` on every push to `main`. By default `X.Y.Z` is
-   the last tag patch-bumped (e.g. `v0.1.0` → `Release v0.1.1`).
-2. The PR body has two parts: a summary region you write by hand, and the
-   changelog since the previous tag below it (auto-generated from `git log`
-   via `generate-changelog.sh`). See [Release summary](#release-summary).
-3. Write the summary. The PR cannot be merged while it is unwritten.
-4. Merge the PR when you want to cut the release. The `Release` workflow
-   then runs after CI completes on `main` and publishes a GitHub Release
-   carrying that summary plus links back to the release PR and the compare
-   view, with the desktop bundles attached; publishing creates the `vX.Y.Z`
-   tag.
+## Normal flow
 
-## Release summary
+1. Every push to `main` opens or refreshes one PR titled `Release vX.Y.Z` on a
+   `release/...` branch, labelled `release`. By default `X.Y.Z` is the last
+   tag patch-bumped; to cut a minor or major release, edit the PR title
+   (`Release v0.1.1` → `Release v0.2.0`), and the refresh that edit starts
+   keeps it. The PR's one commit sets the workspace version to `X.Y.Z` in
+   `backend/Cargo.toml` and `backend/Cargo.lock` (see
+   [Setting the version](#setting-the-version)).
+2. **The PR opens as a draft.** An open release PR does not mean anyone has
+   decided to release it. While it is a draft, `validate / release-pr` passes
+   without judging it, and CI and the bundles skip it (see
+   [CI on the draft](#ci-on-the-draft)).
+3. Write the release summary in the PR body, above the
+   `<!-- changelog:auto -->` marker, and delete the
+   `<!-- release-summary:todo -->` comment. The summary becomes the body of
+   the GitHub Release; the per-commit changelog below the marker is
+   regenerated on every refresh.
+4. **When you decide to release, mark the PR ready for review.** That runs CI,
+   the bundles and `validate / release-pr` on it; the last fails while the
+   title is not an allowed next version or the summary is unwritten.
+5. **Any refresh turns the PR back into a draft** — a push to `main`, a title
+   edit, or a manual run — because the content you decided on has changed.
+   Review the new content and mark it ready again.
+6. Squash-merge the PR. When CI passes on the merge commit, the `Release`
+   workflow builds, signs and attests the desktop bundles, then tags the
+   commit `vX.Y.Z` and publishes the GitHub Release with the bundles and
+   their signatures attached.
 
-The release PR body is split in two by a marker line:
+## Setting the version
 
-```markdown
-## Summary
+colophon writes the version with its `command` writer, which runs
+`scripts/set-workspace-version.sh` with the version the title names. The
+script sets `[workspace.package].version` in `backend/Cargo.toml` and runs
+`cargo update --workspace`, so that `backend/Cargo.lock` records every
+workspace crate at the new version and a `--locked` build accepts it. It runs
+on colophon's runner, which carries nothing beyond the runner image, so it
+installs the toolchain `rust-toolchain.toml` names itself and does not use
+cargo-edit; its header says how and why. `make set-workspace-version-test`
+runs it against throwaway workspaces, in `make check` and in CI's backend
+job.
 
-<!-- release-summary:todo -->
-_Write the release summary here. It becomes the body of the GitHub Release.
-Delete the marker comment above once written._
+The title is the single source of truth for the next version; you never edit
+`Cargo.toml` by hand.
 
-<!-- changelog:auto -->
+## CI on the draft
 
-## Features
+colophon cannot keep this repository's own CI off the draft release PR, so the
+workflows here skip it themselves. In `ci.yml` and `bundle.yml`, every job but
+`all-green` carries the condition
 
-- feat: ...
+```yaml
+if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft && startsWith(github.head_ref, 'release/')) }}
 ```
 
-- Everything **above** `<!-- changelog:auto -->` is yours. The bot carries it
-  through verbatim every time it regenerates the body, so it survives the
-  force-pushes that rebuild the release branch on each push to `main`.
-- Everything from the marker down is regenerated from `git log` on every push
-  to `main`; edits made there are overwritten.
-
-Because the summary is the body of the GitHub Release, the release is gated on
-it: `Validate Release PR` fails while the summary is empty or still carries the
-`<!-- release-summary:todo -->` sentinel. That workflow also runs on body
-edits, so saving the summary re-runs the check and turns it green without any
-further push. If a release nonetheless reaches the `Release` workflow without
-a summary, that workflow fails before creating the draft rather than
-publishing a Release without one.
-
-## Promoting to minor or major
-
-To cut a minor or major release, **edit the PR title only**:
-
-- `Release v0.1.1` → `Release v0.2.0` (minor)
-- `Release v0.1.1` → `Release v1.0.0` (major)
-
-Saving the title edit triggers the bot immediately — you no longer have
-to wait for the next push to `main`. (The next push works too, so either
-path gets you there.) Body-only edits and no-op title saves are ignored,
-so re-opening the edit dialog without changing the title does not
-retrigger the bot. When the bot does run, it:
-
-1. Reads the new title and extracts the target version.
-2. Runs `cargo set-version --workspace <version>` to update
-   `backend/Cargo.toml` and `Cargo.lock`.
-3. Force-pushes the result to the existing release branch.
-4. Updates the PR body's compare link.
-
-The title is the single source of truth for the next version; you never
-edit `Cargo.toml` by hand.
-
-## Allowed title transitions
-
-`validate-release-pr-title.sh` runs as a required check on every release PR
-edit and enforces a strict semver progression against `last_tag`. Only
-single-step bumps with the lower components reset are allowed:
-
-| Last tag | PR title | Result |
-|---|---|---|
-| v0.3.10 | `Release v0.3.11` | ✅ patch |
-| v0.3.10 | `Release v0.4.0` | ✅ minor |
-| v0.3.10 | `Release v1.0.0` | ✅ major |
-| v0.3.10 | `Release v0.3.9` | ❌ downgrade |
-| v0.3.10 | `Release v0.4.1` | ❌ minor bump with non-zero patch |
-| v0.3.10 | `Release v0.5.0` | ❌ minor skip |
-| v0.3.10 | `Release v2.0.0` | ❌ major skip |
-
-The PR cannot be merged until the title satisfies this validator (branch
-protection requires the check).
-
-## Branch naming
-
-The release branch is named `release/since-<UTC %Y-%m-%d-%H%M>` (e.g.
-`release/since-2026-06-23-1431`). The `since-` prefix labels it as the time
-the branch was opened, not the release time.
-
-The branch name is intentionally decoupled from the version it carries —
-the version lives in the PR title and `Cargo.toml`, while the branch name
-is fixed for the lifetime of the PR. Promoting the title from patch to
-minor or major keeps reusing the same branch, so the PR's head pointer
-stays in sync with every force-push.
+and both workflows run on `ready_for_review` besides the default
+`pull_request` types, so marking the PR ready runs everything on it. When
+`release.yml` calls `bundle.yml`, the event is `release.yml`'s own
+(`workflow_run` or `workflow_dispatch`), so the condition never stops a
+release build. `all-green` accepts skipped jobs, so the required checks pass
+on the draft. Other draft PRs still run CI.
 
 ## Desktop bundles
 
@@ -130,20 +102,25 @@ each with its minisign signature, `<file>.minisig`, beside it
 | `delta-desktop_<version>_amd64.deb` | Linux (Debian/Ubuntu), x86_64 |
 
 The version in each file name is the workspace version Tauri reads from the
-shell crate, so it matches the tag by construction. The bundles are not
+shell crate. The tag comes from the release PR's title instead, so `target`
+refuses a release whose commit carries another version (see
+[Recovery](#recovery)). The bundles are not
 code-signed by Apple's or a distribution's scheme, nor notarized; what that
 means for someone installing them is in [the install guide](install/README.md).
 
 The `Release` workflow (`.github/workflows/release.yml`) runs as a chain of
 jobs, each holding only the access its step needs:
 
-1. **`plan`** (read-only) checks out the commit CI tested
-   (`workflow_run.head_sha`, not whatever `main` points at by then), decides
-   whether the version changed and reads the summary.
-2. **`draft`** (`contents: write`) creates the Release as a **draft** whose
-   tag will point at that commit (`target_commitish`). It runs only the `gh`
-   CLI: no checkout, no project code. A draft is not visible to the desktop
-   app's update check, and its tag does not exist yet.
+1. **`plan`** (colophon's `release-plan.yml`; read-only) considers only a
+   green CI run started by a push to `main`, and decides whether the commit
+   that run tested (`workflow_run.head_sha`, not whatever `main` points at by
+   then) is the squash of a merged PR labelled `release`; if so, it reads the
+   version from the PR's title. It fails, before anything is built, when the
+   PR carries no summary.
+2. **`target`** (read-only) names the commit to build, its version and the
+   bundle file names in the table above. On a release it fails, before
+   anything is built, unless the workspace version at that commit is the
+   version `plan` read from the title.
 3. **`bundles`** (read-only) calls `bundle.yml`, which builds each platform
    from that commit and uploads the bundle as a workflow artifact. The build
    jobs get no write token and keep no git credentials, so nothing they run —
@@ -153,41 +130,46 @@ jobs, each holding only the access its step needs:
 4. **`sign`** (no token; the `release-signing` environment) signs each file
    in the table above with the release key and uploads the signatures as a
    workflow artifact ([Signing](#signing)).
-5. **`publish`** (`contents: write`, plus `id-token: write` and
-   `attestations: write` for the attestations) downloads the bundles and the
-   signatures, checks that every bundle has its signature, attaches them all
-   to the draft, checks that every file in the table above and its
-   `.minisig` is attached, records a GitHub artifact attestation of each
-   bundle's build provenance, and publishes the draft, which creates the tag.
-   It runs no project code and no third-party action besides
-   `actions/download-artifact` and `actions/attest-build-provenance`.
-6. **`rewrite-links`** (`pull-requests: write`) points the release PR's
-   compare link at the tag, which now exists.
+5. **`assets`** (`id-token: write` and `attestations: write` for the
+   attestations, and no write access to the repository) downloads the
+   bundles and the signatures, fails unless every file in the table above and
+   its `.minisig` is there and nothing else is, records a GitHub artifact
+   attestation of each bundle's build provenance, and uploads them all as the
+   one artifact `release-assets`. It runs no project code and no third-party
+   action besides `actions/download-artifact`,
+   `actions/attest-build-provenance` and `actions/upload-artifact`.
+6. **`publish`** (colophon's `release-publish.yml`; `contents: write`,
+   `pull-requests: write`) tags the commit and creates the Release with every
+   file of `release-assets` attached in one `gh release create`, so the
+   Release is published only once every bundle and signature is on it; the
+   desktop app's update check never sees one without them. It then points
+   the release PR's compare link at the tag.
 
-- **A failed build** leaves the draft unpublished: no tag exists and the desktop
-  app sees no new Release. Open the failed `Release` run in the Actions tab
-  and use "Re-run failed jobs": the failed platforms build again, `sign`
-  signs them, and `publish` then attaches them and publishes the same draft. Re-running
-  the whole run is safe too: `draft` updates the draft it created rather than
-  making a second one, and `publish` replaces any bundle already attached.
-  To rebuild a ref without any Release, run the `Bundle` workflow by hand
-  (`workflow_dispatch`) with that ref; it uploads workflow artifacts only.
+- **A failed build** stops the run before `publish`: no tag exists and the
+  desktop app sees no new Release. Open the failed `Release` run in the
+  Actions tab and use "Re-run failed jobs": the failed platforms build again,
+  `sign` signs them, `assets` gathers and attests them, and `publish`
+  publishes the Release. If a run fails after the Release was created, a
+  re-run keeps the Release and replaces its assets. To rebuild a ref without
+  any Release, run the `Bundle` workflow by hand (`workflow_dispatch`) with
+  that ref; it uploads workflow artifacts only.
 - **Dry run.** Run the `Release` workflow by hand (`workflow_dispatch`, with
-  `dry_run` checked, which is the only accepted value) to exercise the whole
-  chain from the dispatched ref without releasing anything. It builds that
-  ref, creates a draft under the tag name `v0.0.0-dryrun.<run id>` — a name no
-  release uses, never created as a tag because the draft is never published —
-  signs the bundles with the release key (so `sign` is exercised end to end;
-  dispatch it from a protected branch such as `main`, since only those may
-  use the `release-signing` environment), attaches and checks the bundles and
-  their signatures, and stops before the attestation, before publishing and
-  before the link rewrite. Inspect the draft on the Releases page, then delete
-  it.
+  `dry_run` checked, which is the only accepted value) to exercise the build
+  and signing from the dispatched ref without releasing anything. It builds
+  that ref, signs the bundles with the release key under the dry run's own
+  version (so `sign` is exercised end to end; dispatch it from a protected
+  branch such as `main`, since only those may use the `release-signing`
+  environment), and runs the check in `assets`. It skips the attestation and
+  ends at workflow artifacts: the bundles (`delta-*`), their signatures
+  (`bundle-signatures`) and both together (`release-assets`). It creates no
+  Release, draft or otherwise, and never calls colophon.
 - **Pull requests.** A pull request that touches the shell or its build
   inputs (the `paths` filter in `bundle.yml`) runs the same builds and uploads
   each platform's bundles as a workflow artifact (`delta-macos-aarch64`,
-  `delta-linux-x86_64`), so a broken bundle is caught
-  before a release depends on it and reviewers can download and try it.
+  `delta-linux-x86_64`), so a broken bundle is caught before a release
+  depends on it and reviewers can download and try it. A draft release PR
+  runs none of them until it is marked ready for review (see
+  [CI on the draft](#ci-on-the-draft)).
 
 ## Signing
 
@@ -208,7 +190,7 @@ must be out of reach of everything that builds.
   `permissions: {}`, checks nothing out and runs no project code; it
   downloads the bundle artifacts, installs minisign from a pinned release
   archive whose sha256 is written in the workflow, and signs exactly the
-  bundle names `plan` lists, with the trusted comment
+  bundle names `target` lists, with the trusted comment
   `file:<bundle> version:<version>` (the app refuses a signature naming
   another file or version). On a dry run `<version>` is the dry run's own,
   `0.0.0-dryrun.<run id>`, not the version the bundles are built as: a
@@ -217,18 +199,20 @@ must be out of reach of everything that builds.
   public key written in the workflow — the one the app compiles in — so a
   secret that does not match the app's key fails the run instead of every
   user's update, and uploads the signatures as the `bundle-signatures`
-  artifact. `publish` refuses to attach a bundle without its signature.
+  artifact. `assets` fails when a bundle lacks its signature, so none reaches
+  the Release without one.
 - **The public key** is `PUBLIC_KEY` in `backend/crates/libs/release-signature`
   (key id `C2B89994B1AA8DAF`), the only place the code holds it; the app and
   the helper both read it from there, and a test fails if it is written
   anywhere else under `backend/crates/`. The workflow and the install guide
   print it too.
-- **Attestations.** `publish` also records a GitHub artifact attestation of
+- **Attestations.** `assets` records a GitHub artifact attestation of
   each bundle (`actions/attest-build-provenance`), which ties it to the
   workflow run and commit that built it; users can check it with
   `gh attestation verify <file> -R x7c1/delta`
-  ([install guide](install/README.md#checking-a-download)). Only `publish`
-  holds `id-token: write` and `attestations: write`. A dry run skips it.
+  ([install guide](install/README.md#checking-a-download)). Only `assets`
+  holds `id-token: write` and `attestations: write`, and it neither checks out
+  nor runs project code. A dry run skips it.
 - **The first signed release.** Releases published before signing began
   carry no `.minisig`. An app that checks signatures updates only to releases
   published after the change, all of which carry them; the release it would
@@ -266,90 +250,101 @@ so in the release notes.
 
 ## Workflows involved
 
-- `.github/workflows/create-release-pr.yml` — opens or updates the
-  release PR on every push to `main` (skipped when the push is itself
-  the merge of a release PR, to avoid looping). It also runs when a
-  release-labelled PR's title is edited, so promoting the title is
-  picked up immediately rather than waiting for the next main push.
-- `.github/workflows/validate-release-pr.yml` — on every release PR edit,
-  enforces the allowed title transitions above and fails while the release
-  summary is unwritten.
-- `.github/workflows/release.yml` — when CI completes successfully on
-  `main`, checks whether the workspace version changed; if it did, reads the
-  summary from the merged release PR, creates a draft Release, has
-  `bundle.yml` build the desktop bundles, signs them, attaches them with
-  their signatures, attests them and publishes the Release (which creates the
-  tag). Run by hand, it performs a dry run. See
+- `.github/workflows/release-pr.yml` — calls colophon's `release-pr.yml`,
+  which opens or refreshes the release PR as a draft on every push to `main`
+  (but not the one that lands a release), when the release PR's title is
+  edited, and on a manual run on `main`. It writes the version with
+  `scripts/set-workspace-version.sh`.
+- `.github/workflows/validate-release-pr.yml` — calls colophon's
+  `validate-release-pr.yml` from its job `validate`, so the check reads
+  `validate / release-pr`. It passes on every PR that is not a release PR and
+  on a draft one; on a release PR marked ready for review it enforces the
+  allowed title transitions and fails while the summary is unwritten.
+- `.github/workflows/release.yml` — when CI completes on `main`, colophon's
+  `release-plan.yml` (job `plan`) decides whether the commit CI tested is a
+  release; if it is, the bundles are built, signed and attested, and
+  colophon's `release-publish.yml` (job `publish`) tags the commit and
+  publishes the Release with them. Run by hand, it performs a dry run. See
   [Desktop bundles](#desktop-bundles) and [Signing](#signing).
 - `.github/workflows/bundle.yml` — builds the desktop bundles on macOS
   (Apple silicon only) and Linux with read-only access and uploads them as
   workflow artifacts, on pull requests, manual runs and for `release.yml`.
 
-For the underlying setup (the `RELEASE_PAT` secret, why a user PAT is
-required instead of `GITHUB_TOKEN`), see "Release automation setup" below.
+Every colophon call is pinned to the commit of colophon v0.3.0, as the other
+actions here are pinned (`make check-workflow-pins`); Dependabot proposes
+updates to it with the other GitHub Actions.
 
 ## Recovery
 
-- A failed `Create Release PR` run can be re-run from the Actions tab; the
-  script is idempotent (it rebuilds the release branch from `origin/main`
-  on every invocation).
-- If you need to abandon the current release PR for any reason, close it
-  and delete the branch — the next push to `main` opens a fresh PR with
-  the default patch-bumped title.
-- The `Release` workflow gates on a green CI: a red `main` will never tag
-  a release. Fix CI first and the next successful CI run cuts the
-  release automatically.
-- If `Release` failed because the summary was missing, no draft and no tag
-  were created.
-  Write the summary into the merged release PR's body (a merged PR's
-  description is still editable) and re-run the failed run from the Actions
-  tab. The re-run checks out the same commit CI tested
-  (`workflow_run.head_sha`), so it still sees the version change after other
-  commits have landed on `main`. Nothing else will cut that release: the
-  version-change check compares each commit against its parent, so the `Release`
-  runs for later commits see no version change.
+- **`Release PR` failed.** Re-run it from the Actions tab, or run the workflow
+  by hand on `main`. Each run rebuilds the release branch from `main`.
+- **Abandoning a release PR.** Close it and delete its branch; the next push
+  to `main` opens a fresh one with the default patch-bumped title.
+- **`Release` failed because the summary was missing.** `plan` fails before
+  anything is built or tagged. Write the summary into the merged release PR's
+  body (a merged PR's description is still editable) and re-run the failed
+  run from the Actions tab. A re-run judges the same commit as the original
+  run (`workflow_run.head_sha`), even after other commits have landed on
+  `main`.
+- **`Release` failed because the versions differ.** `target` fails when the
+  merged commit's workspace version is not the one the release PR's title
+  names, which happens when the refresh after a title edit failed and the PR
+  was merged on its old commit. Nothing was built or tagged, and re-running
+  does not help. Run `Release PR` by hand on `main` to open a new release PR,
+  give it the version you meant, and merge it once the refresh that title
+  edit starts has succeeded.
+- **`Release` failed later.** Use "Re-run failed jobs" (see
+  [Desktop bundles](#desktop-bundles)). colophon keeps a Release that already
+  exists and replaces its assets.
+- **CI was red on `main`.** The `Release` workflow considers only a green CI
+  run, so nothing was tagged. CI runs again on the commit that fixes it, but
+  that commit is not the squash of the release PR; re-run the failed CI run
+  of the release commit instead. When that re-run turns green, its
+  completion starts a new `Release` run. Re-running the `Release` run the red
+  CI started does not help: a re-run replays the original event, which still
+  says CI failed.
 
 ## Release automation setup
 
-The flow above is developer-facing; this section covers the supporting
-setup: how the release PR is opened under a user PAT and why that is
-required.
+The release PR is opened as a **GitHub App**, so that CI and
+`validate / release-pr` run on its refreshes too: GitHub starts no workflows
+for events caused by the default `GITHUB_TOKEN`. The App's private key is
+turned into a token for this repository only, valid for an hour, so there is
+no long-lived token to rotate.
 
-The `Create Release PR` workflow (`.github/workflows/create-release-pr.yml`)
-opens and updates the rolling release PR. It runs on two triggers: every push
-to `main`, and `pull_request: types: [edited]` so that promoting a release
-PR's title (e.g. `Release v0.1.1` → `Release v0.2.0`) is picked up immediately
-rather than waiting for the next main push. The `pull_request` branch is
-gated on an **open** PR carrying the `release` label whose **title actually
-changed** (`changes.title.from != null`), so body-only edits, no-op title
-saves, and bot self-edits do not retrigger the workflow. It pushes a
-`release/since-<UTC date+time>` branch (chosen once when the PR is opened and
-reused for the lifetime of that PR) and calls `gh pr create` under a
-**user-scoped personal access token**, exposed to the workflow as the
-repository secret **`RELEASE_PAT`**.
+**One-time setup, by a person with admin access to the repository:**
 
-A user-scoped token is required because GitHub's recursion-prevention rule
-suppresses `pull_request` workflow runs on PRs authored by `github-actions[bot]`.
-With the default `GITHUB_TOKEN` the release PR would be bot-authored, so `CI`
-and `Validate Release PR` would sit in `action_required` and never go green.
-Pushing and opening the PR under a user PAT makes the PR user-authored, which
-lets the existing checks trigger normally.
+1. Create the GitHub App and install it on this repository, as colophon's
+   [usage guide](https://github.com/x7c1/colophon/blob/v0.3.0/docs/usage.md#tokens)
+   describes (Contents and Pull requests: Read and write).
+2. Add the App's Client ID as the Actions variable `RELEASE_APP_CLIENT_ID`,
+   and its private key as the Actions secret `RELEASE_APP_PRIVATE_KEY`.
+3. Allow squash merge, which the release relies on: the squash's default
+   title (the PR title) is how a release landing is recognized.
+4. Require the checks below in the ruleset of `main`.
 
-**Required setup (one-time, per repo).** A maintainer must register
-`RELEASE_PAT` in the repository's Actions secrets with these scopes:
+Set both the variable and the secret: with the variable but no secret,
+`Release PR` fails because colophon cannot create the App's token; with
+neither, colophon falls back to `GITHUB_TOKEN`, which can open the release PR
+only if the repository's Actions settings allow GitHub Actions to create pull
+requests, and CI does not run on the PR's refreshes. Once the App is set up,
+run the `Release PR` workflow by hand on `main` to open the release PR without
+waiting for the next push.
 
-- `contents: write` — push the `release/since-<UTC date+time>` branch.
-- `pull-requests: write` — create and edit the release PR.
+The `Release` and `Bundle` workflows use the default `GITHUB_TOKEN`: they run
+after a merge a person made, and no workflow here listens to tag pushes or
+Release events, so nothing has to be triggered by what they create. Only
+`publish` gets write access to the repository's contents (see
+[Desktop bundles](#desktop-bundles)), and only `sign` may read the
+`release-signing` environment's `MINISIGN_SECRET_KEY` ([Signing](#signing)).
 
-Without the secret, the workflow fails loudly at the `git push` step. There is
-no fallback to `GITHUB_TOKEN` by design: a silent fallback would mask exactly
-the misconfiguration the PAT is solving.
+## Required checks
 
-The `Release` workflow (`.github/workflows/release.yml`) that tags and publishes
-after the release PR is merged keeps using the default `GITHUB_TOKEN` — it runs
-under a human-triggered merge event, so recursion is not a concern, and no
-workflow in this repo listens to tag pushes. Only its `draft` and `publish`
-jobs get write access to the repository's contents (see
-[Desktop bundles](#desktop-bundles)), and only its `sign` job may read the
-`release-signing` environment's `MINISIGN_SECRET_KEY` ([Signing](#signing)). The `Create Release PR` job's own token
-is read-only: everything it writes goes through `RELEASE_PAT`.
+| Check | Workflow | Passes when |
+|---|---|---|
+| `all-green` | `ci.yml` | every CI job passed or was skipped (all are skipped on a draft release PR) |
+| `validate / release-pr` | `validate-release-pr.yml` | the title and summary are valid, or the pull request is not a release PR, or it is a draft |
+
+A new CI job goes into the `needs` of `all-green` and carries the draft
+release PR condition (see [CI on the draft](#ci-on-the-draft)); the required
+checks stay as they are.
