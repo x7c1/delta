@@ -2,6 +2,9 @@ name: CI
 
 on:
   pull_request:
+    # The default types, plus ready_for_review: marking the draft release PR
+    # ready runs every job on it (see `workflow-pins`).
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, 'feat/**']
   push:
     branches: [main]
@@ -14,6 +17,11 @@ jobs:
   # Every action is pinned to a commit SHA (scripts/check-workflow-pins.sh);
   # `make check` runs both steps too.
   workflow-pins:
+    # The release PR opens as a draft on a `release/...` branch, and is not
+    # judged until someone marks it ready for review: that is the decision to
+    # release (docs/guides/release.md). Every job but `all-green` carries this
+    # condition; `all-green` accepts the skips, so it still passes on the draft.
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft && startsWith(github.head_ref, 'release/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -32,6 +40,8 @@ jobs:
   # frontend's production dependencies. Both fetch advisory data over the
   # network, so this runs here and as `make audit`, not in `make check`.
   audit:
+    # See `workflow-pins`: a draft release PR is not judged.
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft && startsWith(github.head_ref, 'release/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -60,6 +70,8 @@ jobs:
         run: make audit
 
   backend:
+    # See `workflow-pins`: a draft release PR is not judged.
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft && startsWith(github.head_ref, 'release/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -130,16 +142,18 @@ jobs:
       - name: Check the vendored codex schema is key-sorted
         run: ../scripts/vendor-codex-schema.sh --check
 
-      # The Release workflow decides whether to cut a release with
-      # scripts/check-version-change.sh, and runs only after this workflow
-      # passes on main. Testing the script here catches a break before it
-      # reaches main. It builds scratch git repositories with a minimal
-      # workspace and needs only git, cargo and jq — all on the runner.
-      - name: Test the release version check
+      # The release PR's commit sets the workspace version in Cargo.toml and
+      # Cargo.lock with scripts/set-workspace-version.sh. colophon's job runs
+      # the script without testing it, so testing it here catches a break
+      # before a release PR depends on it. It writes throwaway workspaces and
+      # needs only cargo and jq, both on the runner.
+      - name: Test the release version writer
         working-directory: .
-        run: make check-version-change-test
+        run: make set-workspace-version-test
 
   frontend:
+    # See `workflow-pins`: a draft release PR is not judged.
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft && startsWith(github.head_ref, 'release/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -244,6 +258,8 @@ jobs:
   # replaces) the mock-mode e2e job above: that one isolates the frontend, this
   # one proves the full loop (REST → spawn → tmux → hooks → transcript → tail → WS).
   e2e-fake:
+    # See `workflow-pins`: a draft release PR is not judged.
+    if: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft && startsWith(github.head_ref, 'release/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
@@ -295,8 +311,9 @@ jobs:
 
       - name: Install system packages
         run: |
+          read -ra packages <<< "$APT_PACKAGES"
           sudo apt-get update
-          sudo apt-get install -y -o APT::Keep-Downloaded-Packages=true $APT_PACKAGES
+          sudo apt-get install -y -o APT::Keep-Downloaded-Packages=true "${packages[@]}"
           # Drop archives the current index no longer offers, so a cache saved
           # from a restored older set does not keep growing, and let the cache
           # action read what apt (as root) downloaded.
@@ -403,7 +420,9 @@ jobs:
           if-no-files-found: ignore
 
   # Aggregates every job's result. This is the required check in the default branch's ruleset.
-  # When adding a job, add it to needs as well.
+  # When adding a job, add it to needs as well, with the draft release PR
+  # condition of `workflow-pins`. A skipped job passes here, so this check
+  # passes on a draft release PR, whose jobs are all skipped.
   all-green:
     if: always()
     needs: [workflow-pins, audit, backend, frontend, e2e-fake]

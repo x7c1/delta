@@ -194,7 +194,7 @@ lint:
 	cd backend && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — everything CI runs except the network-bound dependency audit (`make audit`): backend fmt/build/test/clippy/rustdoc/file length + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint/file length + the embedded-server build/test (`embed-web`) + the desktop-shell build/test/clippy + both Playwright suites (needs tmux) + the release version check's scratch-repo test + the workflow pin check and its test — plus the canary gate's, the re-vendor script's, gen-check's, the test-residue sweep's and the system setup script's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
+## check: full pre-PR gate — everything CI runs except the network-bound dependency audit (`make audit`): backend fmt/build/test/clippy/rustdoc/file length + generated-bindings freshness + vendored-schema form + frontend build/typecheck/test/lint/file length + the embedded-server build/test (`embed-web`) + the desktop-shell build/test/clippy + both Playwright suites (needs tmux) + the release version writer's test + the workflow pin check and its test — plus the canary gate's, the re-vendor script's, gen-check's, the test-residue sweep's and the system setup script's own stubbed tests, which CI does not run. A dependency graph: `make -j4 check` runs independent steps concurrently (add `-O` to keep each step's output together)
 # The point of this target is that passing it means CI will pass, so it has to
 # stay a superset of what the workflow runs — including BOTH Playwright suites.
 # The one exception is CI's `audit` job (`make audit`): it fetches advisory
@@ -215,7 +215,7 @@ lint:
 #   { check-backend-build, check-frontend-build } → { check-backend-doc, check-e2e-fake, check-embedded, check-desktop-build }
 #   check-backend-file-length, check-frontend-file-length, vendor-codex-schema-check,
 #   vendor-codex-schema-test, e2e-real-gate-test, sweep-test-residue-test, gen-check-test,
-#   setup-system-test, check-version-change-test, check-workflow-pins, check-workflow-pins-test (no prerequisites)
+#   setup-system-test, set-workspace-version-test, check-workflow-pins, check-workflow-pins-test (no prerequisites)
 #
 # Without -j, make walks the same graph left to right, which is the serial
 # order the gate always had. The cargo steps share backend/target and take
@@ -229,7 +229,7 @@ lint:
 CHECK_STEPS := \
 	check-backend-test check-backend-clippy check-backend-doc check-backend-file-length check-gen \
 	vendor-codex-schema-check vendor-codex-schema-test e2e-real-gate-test sweep-test-residue-test \
-	gen-check-test setup-system-test check-version-change-test check-workflow-pins check-workflow-pins-test \
+	gen-check-test setup-system-test set-workspace-version-test check-workflow-pins check-workflow-pins-test \
 	check-frontend-typecheck check-frontend-test check-frontend-lint check-frontend-file-length \
 	check-e2e check-e2e-fake check-embedded check-desktop-build
 
@@ -372,10 +372,10 @@ sweep-test-residue-test:
 setup-system-test:
 	bash scripts/tests/setup-system.test.sh
 
-## check-version-change-test: exercise the Release workflow's version check (scripts/check-version-change.sh) against scratch git repos with a minimal backend workspace (needs cargo and jq, no network; part of `make check` and of CI's backend job)
-.PHONY: check-version-change-test
-check-version-change-test:
-	bash scripts/tests/check-version-change.test.sh
+## set-workspace-version-test: exercise the release PR's version writer (scripts/set-workspace-version.sh) against throwaway cargo workspaces (needs cargo and jq, no network; part of `make check` and of CI's backend job)
+.PHONY: set-workspace-version-test
+set-workspace-version-test:
+	bash scripts/tests/set-workspace-version.test.sh
 
 ## e2e-real-codex: run the real-codex canaries against the real `codex app-server` — one safe turn end-to-end + the thread-metadata wire fields + the worktree sandbox git grant + schema drift detection (local only; only the turn consumes Codex quota; never in CI). DELTA_CODEX_BIN overrides the binary.
 .PHONY: e2e-real-codex
